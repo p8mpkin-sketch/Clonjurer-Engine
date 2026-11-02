@@ -373,7 +373,7 @@ class LayoutFixCss(unittest.TestCase):
             css, n = layout_fix_css(orig, pg.evaluate(js))
             self.assertEqual(n, 1)
             pg.set_content(page_html.format(h=200).replace("</body>", f"<style>{css}</style></body>"))
-            fixed = {k: (y, h) for k, y, h, _x, _w in pg.evaluate(js)}
-            want = {k: (y, h) for k, y, h, _x, _w in orig}
+            fixed = {e[0]: (e[1], e[2]) for e in pg.evaluate(js)}
+            want = {e[0]: (e[1], e[2]) for e in orig}
             self.assertEqual(fixed, want)
             b.close()
