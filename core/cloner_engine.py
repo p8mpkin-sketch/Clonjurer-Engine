@@ -2551,7 +2551,7 @@ class ClonerEngine:
         self._page_frag = ("#" + parts.fragment) if parts.fragment else ""
         return parts
 
-    def _full_shot(self, page, path, label="截图"):
+    def _full_shot(self, page, path, label="截图", _fresh=False):
         """整页截图, 三级退化:
         1) 整页截图(SHOT_TIMEOUT);
         2) 限高裁剪截图: 高度取评分覆盖区(SCORE_MAX_HEIGHT 等比换算)与 GPU 纹理上限的较小值;
@@ -2584,7 +2584,39 @@ class ClonerEngine:
             with suppress(Exception):
                 diag = page.evaluate(SHOT_DIAG_JS)
                 self.log("WARN", f"{label}截图全部失败, 页面形态: {json.dumps(diag, ensure_ascii=False)[:600]}")
-            raise
+            # 本地页(沙盒/MHTML)可在独立的禁 GPU 浏览器里重开重截: 同一浏览器的 GPU 进程
+            # 被前面的重 WebGL 页拖垮后, 该浏览器内所有截图都会 Unable to capture
+            url = page.url or ""
+            if _fresh or not url.startswith(("http://127.0.0.1", "file://")):
+                raise
+            self._fresh_browser_shot(page, url, path, label)
+
+    def _fresh_browser_shot(self, page, url, path, label):
+        browser = page.context.browser.browser_type.launch(
+            headless=True, args=["--disable-gpu", "--disable-dev-shm-usage"])
+        try:
+            fresh = browser.new_page(viewport=page.viewport_size)
+            fresh.set_default_timeout(30000)
+            # 与沙盒评分同口径: 只放行本地源与内联协议, 外联一律中止(不回源)
+            parts = urlsplit(url)
+            local = (f"{parts.scheme}://{parts.netloc}" if parts.netloc else "file:",
+                     "data:", "blob:", "cid:", "file:")
+
+            def _guard(route):
+                with suppress(Exception):
+                    if route.request.url.startswith(local):
+                        route.continue_()
+                    else:
+                        route.abort()
+            fresh.route("**/*", _guard)
+            fresh.goto(url, wait_until="load", timeout=30000)
+            with suppress(Exception):
+                self._settle(fresh)
+            self._full_shot(fresh, path, label, _fresh=True)
+            self.log("RENDER", f"{label}截图改在独立浏览器(禁 GPU)完成")
+        finally:
+            with suppress(Exception):
+                browser.close()
 
     @staticmethod
     def _tiled_shot(page, path, width, height, view_h):
