@@ -2801,6 +2801,7 @@ class ClonerEngine:
 
             repair_started = time.time()
             prev_sig, prev_score = None, None   # 收敛判定: 上一轮缺失数与分数
+            best = None                          # 最优轮快照(修复轮回退时恢复)
             for round_i in range(max(1, config.RENDER_REPAIR_ROUNDS)
                                  if want_score else 1):
                 # P0-A 时间预算: 快站快修, 慢站限时收敛 —— 速度是引擎一等公民
@@ -2828,6 +2829,8 @@ class ClonerEngine:
                              f"边缘 {detail['edge']:.0%} / 文本 {detail['text']:.0%})")
                     for warning in detail.get("warnings", []):
                         self.log("WARN", f"[评分告警] {warning}")
+                    if best is None or score > best["detail"]["score"]:
+                        best = self._snapshot_round(round_i, detail, results)
                 if not failed_local and not remote_missing:
                     break
                 # 无进展即停: 上一轮回补之后缺失数没减少、分数也没涨 —— 回补已无能为力
@@ -2855,6 +2858,16 @@ class ClonerEngine:
                 if not new and not shadows:
                     break
                 results.update(new)
+
+            # 修复轮不保证单调(回补进来的埋点/广告资源可能让克隆页更偏离原站):
+            # 末轮低于最优轮时恢复最优轮产物(页面/新增文件/截图/校准样式), 交付与分数一致
+            if best is not None and detail is not None and \
+                    detail["score"] < best["detail"]["score"] - 0.05:
+                self._restore_round(best, results)
+                self.log("RENDER", f"修复轮回退({detail['score']}→最优 {best['detail']['score']}), "
+                                   f"已恢复第 {best['round'] + 1} 轮产物")
+                detail = best["detail"]
+                score = detail["score"]
 
             if want_score and detail is not None:
                 self._write_final_diff()
@@ -4063,6 +4076,29 @@ class ClonerEngine:
         if self._page_dir != "/":
             return self.ws / self._page_dir.lstrip("/") / "index.html"
         return self.ws / "index.html"
+
+    def _round_files(self):
+        return {f for f in self.ws.rglob("*")
+                if f.is_file() and "flask_app" not in f.relative_to(self.ws).parts}
+
+    def _snapshot_round(self, round_i, detail, results):
+        """修复轮快照: 工作区文件清单 + 全部 HTML 字节 + 截图/文本 + 校准样式 + 资源表。"""
+        files = self._round_files()
+        keep = {f: f.read_bytes() for f in files
+                if f.suffix == ".html" or f.name in ("cloned_preview.png", "cloned_text.txt")}
+        return {"round": round_i, "detail": dict(detail), "files": files, "bytes": keep,
+                "calib": self._calib_css, "results": dict(results)}
+
+    def _restore_round(self, snap, results):
+        for f in self._round_files() - snap["files"]:
+            with suppress(OSError):
+                f.unlink()
+        for f, data in snap["bytes"].items():
+            with suppress(OSError):
+                f.write_bytes(data)
+        self._calib_css = snap["calib"]
+        results.clear()
+        results.update(snap["results"])
 
     def _layout_calibrate(self, page, base, original, cloned, detail, clone_text,
                           orig_text, diff_path):

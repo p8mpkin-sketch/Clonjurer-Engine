@@ -377,3 +377,32 @@ class LayoutFixCss(unittest.TestCase):
             want = {e[0]: (e[1], e[2]) for e in orig}
             self.assertEqual(fixed, want)
             b.close()
+
+
+class RepairRoundRestore(unittest.TestCase):
+    """修复轮回退: 恢复最优轮的页面字节、删除其后新增的文件、复原资源表与校准样式。"""
+
+    def test_snapshot_restore(self):
+        import tempfile
+        from pathlib import Path
+        from core.cloner_engine import ClonerEngine
+        eng = ClonerEngine.__new__(ClonerEngine)
+        with tempfile.TemporaryDirectory() as d:
+            ws = Path(d)
+            eng.ws, eng._calib_css = ws, "a{}"
+            (ws / "index.html").write_text("v1")
+            (ws / "engine.log").write_text("log")
+            (ws / "static").mkdir()
+            results = {"u1": 1}
+            snap = eng._snapshot_round(0, {"score": 80.0}, results)
+            (ws / "index.html").write_text("v2")
+            (ws / "static" / "ad.js").write_text("x")
+            (ws / "engine.log").write_text("log more")
+            eng._calib_css = "a{}\nb{}"
+            results["u2"] = 2
+            eng._restore_round(snap, results)
+            self.assertEqual((ws / "index.html").read_text(), "v1")
+            self.assertFalse((ws / "static" / "ad.js").exists())
+            self.assertEqual((ws / "engine.log").read_text(), "log more")   # 日志不回滚
+            self.assertEqual(eng._calib_css, "a{}")
+            self.assertEqual(results, {"u1": 1})
