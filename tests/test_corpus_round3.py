@@ -406,3 +406,28 @@ class RepairRoundRestore(unittest.TestCase):
             self.assertEqual((ws / "engine.log").read_text(), "log more")   # 日志不回滚
             self.assertEqual(eng._calib_css, "a{}")
             self.assertEqual(results, {"u1": 1})
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class BlobUrlInline(unittest.TestCase):
+    """运行时 blob: 背景图在采集时内联为 data:, 离线可解析。"""
+
+    def test_inline(self):
+        from playwright.sync_api import sync_playwright
+        from core.cloner_engine import ClonerEngine, OUTER_HTML_JS
+        eng = ClonerEngine.__new__(ClonerEngine)
+        eng.log = lambda *a: None
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            pg = b.new_page()
+            pg.set_content("""<div id=d style="width:50px;height:50px"></div><script>
+              const c = document.createElement('canvas'); c.width = c.height = 4;
+              const g = c.getContext('2d'); g.fillStyle = 'red'; g.fillRect(0, 0, 4, 4);
+              c.toBlob(bl => { document.getElementById('d').style.backgroundImage =
+                'url(' + URL.createObjectURL(bl) + ')'; document.body.dataset.ok = 1; });
+            </script>""")
+            pg.wait_for_selector("body[data-ok]")
+            html = eng._inline_blob_urls(pg, pg.evaluate(OUTER_HTML_JS))
+            b.close()
+        self.assertNotIn("blob:", html)
+        self.assertIn("data:image/png;base64,", html)

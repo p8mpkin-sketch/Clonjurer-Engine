@@ -927,6 +927,28 @@ LAYOUT_MAP_JS = r"""
 }
 """
 
+# 运行时 blob: URL(会话内有效) → data: URL; 单个上限 5MB
+BLOB_URL_RE = re.compile(r"blob:(?:https?://[^/\s\"'<>()]+|null)/[0-9a-fA-F-]{36}")
+BLOB_INLINE_MAX = 60
+BLOB_FETCH_JS = r"""
+async (urls) => {
+  const out = {};
+  for (const u of urls) {
+    try {
+      const b = await (await fetch(u)).blob();
+      if (b.size > 5e6) continue;
+      out[u] = await new Promise((res, rej) => {
+        const fr = new FileReader();
+        fr.onload = () => res(fr.result);
+        fr.onerror = rej;
+        fr.readAsDataURL(b);
+      });
+    } catch (e) {}
+  }
+  return out;
+}
+"""
+
 # 截图全部失败时的页面形态诊断: 文档尺寸 + 面积最大的 5 个元素(含变换)
 SHOT_DIAG_JS = r"""
 () => {
@@ -2591,6 +2613,23 @@ class ClonerEngine:
                 raise
             self._fresh_browser_shot(page, url, path, label)
 
+    def _inline_blob_urls(self, page, html: str) -> str:
+        """blob: URL 只在原页面会话内有效(运行时生成的纹理/图片/字体, 常见于 JS 生成的
+        点阵、渐变贴图), 离线回放与 MHTML 都解析不了 → 采集时在原页取字节内联为 data:。"""
+        blobs = list(dict.fromkeys(BLOB_URL_RE.findall(html)))[:BLOB_INLINE_MAX]
+        if not blobs:
+            return html
+        try:
+            data = page.evaluate(BLOB_FETCH_JS, blobs) or {}
+        except Exception as exc:
+            self.log("WARN", f"blob: 资源内联失败: {exc}")
+            return html
+        for u, d in data.items():
+            if d:
+                html = html.replace(u, d)
+        self.log("RENDER", f"blob: 资源内联 {len(data)}/{len(blobs)} 个(运行时生成, 离线不可解析)")
+        return html
+
     def _fresh_browser_shot(self, page, url, path, label):
         browser = page.context.browser.browser_type.launch(
             headless=True, args=["--disable-gpu", "--disable-dev-shm-usage"])
@@ -3292,6 +3331,7 @@ class ClonerEngine:
             self.log("WARN", f"Shadow DOM 序列化失败, 回退 outerHTML: {exc}")
         if html is None:
             html = _safe_eval(OUTER_HTML_JS)
+        html = self._inline_blob_urls(page, html)
         # N1.1 采集退化守卫: 序列化过薄(<5KB)说明页面在采集窗口内被
         # 重定向/挂载失败清空(ibm 类 React 壳) —— 重新导航再序列化一次
         if len(html) < 5000:
