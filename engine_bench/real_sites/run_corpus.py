@@ -144,6 +144,14 @@ def run(args):
         now = time.time()
         for t in tasks:
             tl = timelines.setdefault(t["id"], [])
+            if tl and tl[-1][0] == "_end":
+                continue
+            if t.get("status") in ("completed", "failed"):
+                if tl:
+                    tl.append(("_end", now))   # 封口: 最后一个阶段不再累计到出报告那一刻
+                continue
+            if t.get("status") != "running":
+                continue                       # 排队时间不算进任何阶段
             if not tl or tl[-1][0] != t.get("stage"):
                 tl.append((t.get("stage"), now))
         done = [t for t in tasks if t.get("status") in ("completed", "failed")]
@@ -176,12 +184,17 @@ def run(args):
         if not stage_times and tl:
             for i, (stage, t0) in enumerate(tl):
                 t1 = tl[i + 1][1] if i + 1 < len(tl) else time.time()
-                if stage:
+                if stage and stage != "_end":
                     stage_times[stage] = round(stage_times.get(stage, 0) + (t1 - t0), 1)
             stage_times["_source"] = "poll"
         status = task.get("status")
         if status not in ("completed", "failed"):
             status = "timeout"
+        failure = stats.get("failure") if status == "failed" else None
+        if status == "failed" and not failure:   # 老引擎没有 failure 字段: 按错误文本粗分
+            failure = "unreachable" if any(m in (task.get("error_msg") or "") for m in (
+                "目标不可达", "ERR_NAME_NOT_RESOLVED", "ERR_TIMED_OUT", "ERR_CONNECTION",
+                "ERR_ADDRESS_UNREACHABLE", "Page.goto: Timeout")) else "engine"
         results.append({
             "task_id": t["id"], "url": task.get("target_url"), "status": status,
             "expect": meta.get("expect", ""), "detected": detected,
@@ -200,6 +213,7 @@ def run(args):
             "elapsed_s": stats.get("elapsed_s") or _elapsed_from_ts(task),
             "stage_times": stage_times,
             "has_ai_report": bool(task.get("has_ai_report")),
+            "failure": failure,
             "error": (task.get("error_msg") or "")[:300],
         })
 
@@ -214,8 +228,10 @@ def run(args):
     md_path.write_text(_report(out, prev_name, prev), encoding="utf-8")
     print(f"报告: {md_path}\n明细: {json_path}")
     s = out["summary"]
-    print(f"均分 {_fmt(s['mean'])}  中位 {_fmt(s['median'])}  完成 {s['completed']}/{s['total']}"
-          f"  识别命中 {s['pattern_hits']}/{s['pattern_checked']}  平均耗时 {_fmt(s['mean_elapsed'])}s")
+    print(f"均分 {_fmt(s['mean'])}  交互轨均分 {_fmt(s['interactive_mean'])}  中位 {_fmt(s['median'])}"
+          f"  完成 {s['completed']}/{s['total']}(不可达 {s['unreachable']})"
+          f"  识别命中 {s['pattern_hits']}/{s['pattern_checked']}"
+          f"  耗时 p50 {_fmt(s['p50_elapsed'])}s / p90 {_fmt(s['p90_elapsed'])}s")
     return 0 if s["completed"] == s["total"] else 2
 
 
@@ -223,6 +239,11 @@ def _summary(results):
     scores = [r["score"] for r in results if isinstance(r["score"], (int, float))]
     elapsed = [r["elapsed_s"] for r in results if isinstance(r["elapsed_s"], (int, float))]
     checked = [r for r in results if r["expect"]]
+    inter = [r["interactive"] for r in results if isinstance(r.get("interactive"), (int, float))]
+
+    def pct(xs, q):
+        xs = sorted(xs)
+        return round(xs[min(len(xs) - 1, int(q * len(xs)))], 1) if xs else None
     return {
         "total": len(results),
         "completed": sum(1 for r in results if r["status"] == "completed"),
@@ -235,6 +256,14 @@ def _summary(results):
         "pattern_hits": sum(1 for r in checked if r["pattern_hit"]),
         "mean_elapsed": round(statistics.mean(elapsed), 1) if elapsed else None,
         "fidelity_dominant": sum(1 for r in results if r["track"] == "fidelity"),
+        # 诚实口径: 头条分取双轨最优, 交互轨(可交互交付物)单独看均分;
+        # 网络不可达与引擎失败分开计数, 前者不是引擎缺陷
+        "interactive_mean": round(statistics.mean(inter), 1) if inter else None,
+        "ge90": sum(1 for x in scores if x >= 90),
+        "unreachable": sum(1 for r in results if r.get("failure") == "unreachable"),
+        "engine_failed": sum(1 for r in results if r.get("failure") == "engine"),
+        "p50_elapsed": pct(elapsed, 0.5),
+        "p90_elapsed": pct(elapsed, 0.9),
     }
 
 
@@ -243,10 +272,13 @@ def _report(out, prev_name, prev):
     lines = [f"# 真实语料跑分 {out['stamp']}", "",
              f"实例 {out['base']} · 批次 #{out['batch_id']} · 视口 {out['viewport']}"
              + (f" · 标签 {out['tag']}" if out['tag'] else ""), "",
-             f"- 站点 {s['total']}: 完成 {s['completed']} / 失败 {s['failed']} / 超时 {s['timeout']}",
-             f"- 还原度: 均分 **{_fmt(s['mean'])}**, 中位 {_fmt(s['median'])}, 最低 {_fmt(s['min'])}",
+             f"- 站点 {s['total']}: 完成 {s['completed']} / 失败 {s['failed']}"
+             f"(网络不可达 {s.get('unreachable', 0)}, 引擎 {s.get('engine_failed', 0)}) / 超时 {s['timeout']}",
+             f"- 还原度: 均分 **{_fmt(s['mean'])}**, 中位 {_fmt(s['median'])}, 最低 {_fmt(s['min'])};"
+             f" ≥90 分 {s.get('ge90')} 站; 交互轨均分 {_fmt(s.get('interactive_mean'))}",
              f"- 识别命中: {s['pattern_hits']}/{s['pattern_checked']}",
-             f"- 平均耗时: {_fmt(s['mean_elapsed'])}s; 保真轨胜出 {s['fidelity_dominant']} 站", ""]
+             f"- 耗时: 平均 {_fmt(s['mean_elapsed'])}s, p50 {_fmt(s.get('p50_elapsed'))}s,"
+             f" p90 {_fmt(s.get('p90_elapsed'))}s; 保真轨胜出 {s['fidelity_dominant']} 站", ""]
     if prev_name:
         lines.append(f"对比上一轮 `{prev_name}`: Δ 列为分数增减。")
         lines.append("")

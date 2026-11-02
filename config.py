@@ -39,6 +39,7 @@ MAX_URLS_PER_BATCH = 50            # 单批次最多提交站点数
 MAX_PAGES_LIMIT = 20               # 同域名爬虫模式下最大子页面数
 REQUEST_TIMEOUT = 20               # 单个上游资源请求超时(秒)
 PAGELOAD_TIMEOUT = 45_000          # Playwright 页面导航超时(毫秒)
+REACHABILITY_PROBE_TIMEOUT = 12_000  # 首导航失败后的网络层可达性探测上限(毫秒)
 NETWORK_IDLE_TIMEOUT = 9_000       # networkidle 等待上限(毫秒)
 MAX_ASSET_BYTES = 64 * 1024 * 1024     # 单个静态资源体积上限(64MB)
 MAX_ASSETS_PER_TASK = 400          # 单任务最大静态资源条目数
@@ -101,6 +102,7 @@ STAT_BUCKETS = ("css", "js", "img", "font", "api")
 MAX_FRAME_PAGES = 6            # 单任务最多递归克隆的跨域 iframe 子页面数
 MAX_FRAME_DEPTH = 2            # iframe 递归深度上限(主页面为第 0 层)
 RENDER_REPAIR_ROUNDS = 6       # 视觉修复迭代轮数上限
+REPAIR_MIN_GAIN = 0.5          # 修复循环收敛判定: 缺失集合不变且分数涨幅低于此值即停
 REPAIR_TIME_BUDGET = 300       # 修复循环时间预算(秒): 快站快修, 慢站限时收敛(P0-A 速度调度)
 AI_TIME_BUDGET = 900           # 含 AI 修复的任务时间预算(秒): 超预算跳过 AI 轮       # 渲染驱动回补循环轮数(本地渲染->收集404->回源补抓);
                                # Vite/webpack 动态 chunk 是"entry->视图chunk->懒路由->

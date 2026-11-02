@@ -15,12 +15,12 @@ _INJECT_RE = re.compile(r'<script data-clone-preview[^>]*>.*?</script>', re.S)
 
 # JS 字节级指纹(库标识字符串藏在 chunk 里, 本地化不影响)
 _JS_FP = {
-    "Vue":        [rb'Vue\.js v\d', rb'@vue/', rb'__vue__'],
-    "VueMaterial": [rb'vue-material'],
+    "Vue":        [rb'Vue\.js v\d', rb'__vue__'],   # @vue/ 是包名, 依赖清单/在线沙箱模板里随处可见
+    "VueMaterial": [rb'md-theme-default'],   # 包名 vue-material 会被生态链接/赞助列表命中
     "React":      [rb'react-dom', rb'react\.production', rb'ReactDOM'],
     "Next":       [rb'__NEXT_DATA__', rb'next/dist'],
-    "Nuxt":       [rb'__NUXT__', rb'/_nuxt/', rb'__nuxt'],   # 裸词 nuxt 会被任何文档站的正文命中
-    "Angular":    [rb'zone\.js', rb'ng-version', rb'@angular/core'],
+    "Nuxt":       [rb'__NUXT__', rb'/_nuxt/', rb'__nuxt__', rb'\$nuxt'],   # 裸 __nuxt 会被"#__nuxt"选择器清单命中
+    "Angular":    [rb'ngDevMode', rb'\xc9\xb5cmp', rb'\xc9\xb5fac'],   # 运行时专有(ɵcmp/ɵfac); 包名/选择器串不算
     "jQuery":     [rb'jQuery JavaScript Library v', rb'jquery\.(?:min\.)?js', rb'jQuery\.fn\.'],
     "Webpack":    [rb'webpackJsonp', rb'__webpack_require__'],
     "Vite":       [rb'__vite__', rb'vite/preload'],
@@ -29,10 +29,11 @@ _JS_FP = {
     "Svelte":     [rb'svelte/internal', rb'__svelte', rb'svelte-h[a-z0-9]{4,}'],
     "Astro":      [rb'astro-island', rb'/_astro/', rb'astro:page-load'],
     "Remix":      [rb'__remixContext', rb'__remixManifest', rb'@remix-run/'],
-    "Solid":      [rb'solid-js/web', rb'_\$HY'],
+    "Solid":      [rb'_\$HY'],   # solid-js/web 是 import 路径, 沙箱模板里也有
     "Qwik":       [rb'@builder\.io/qwik', rb'qwikloader'],
     "Ember":      [rb'ember-source', rb'Ember\.VERSION', rb'@ember/'],
-    "WordPress":  [rb'/wp-content/', rb'/wp-includes/'],
+    # 只认主题/插件/核心脚本路径: uploads 图片常被别站外链, 选择器串 "/wp-content/" 也不算
+    "WordPress":  [rb'/wp-(?:content|includes)/(?:themes|plugins|js|css)/'],
     "Shopify":    [rb'cdn\.shopify\.com/s/files/', rb'Shopify\.theme', rb'Shopify\.shop'],
     "Wix":        [rb'parastorage\.com', rb'wixstatic\.com'],
 }
@@ -57,7 +58,7 @@ _DOM_FP = {
     "Solid":      [r'data-hk="'],
     "Qwik":       [r'q:container', r'type="qwik/json"'],
     "Ember":      [r'class="ember-application', r'id="ember\d+"'],
-    "WordPress":  [r'/wp-content/', r'/wp-includes/', r'content="WordPress'],
+    "WordPress":  [r'/wp-(?:content|includes)/(?:themes|plugins|js|css)/', r'content="WordPress'],
     "Shopify":    [r'cdn\.shopify\.com/s/files/', r'Shopify\.theme'],
     "Wix":        [r'parastorage\.com', r'wixstatic\.com'],
 }

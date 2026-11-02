@@ -1048,6 +1048,10 @@ HTML_INTERCEPT_TYPES = ("text/html", "application/xhtml+xml")
 ASSET_RESOURCE_TYPES = {"stylesheet", "script", "image", "font", "media", "other"}
 
 # 瞬时 Playwright 会话错误特征: 与稳定克隆失败不同源, 值得换会话重跑一次
+class TargetUnreachable(RuntimeError):
+    """目标站网络层不可达(DNS/连接/超时): 不是引擎缺陷, 不重试、单独计数。"""
+
+
 _TRANSIENT_ERROR_MARKS = (
     "Execution context was destroyed",
     "Target closed",
@@ -1722,6 +1726,11 @@ class _SandboxHandler(SimpleHTTPRequestHandler):
         return loose
 
     def _serve_mock(self, method: str) -> bool:
+        # 文档导航(Accept 以 text/html 开头)永不走 Mock —— 与磁带同一条边界。
+        # 根路径带查询串的接口(api.example.com/?functionId=...)录成 path="/" 的
+        # Mock 后, 会把入口页本身抢答成 JSON(真实语料: 交互轨整页渲染成接口响应)
+        if (self.headers.get("Accept") or "").startswith("text/html"):
+            return False
         entry = self._mock_for(method)
         if entry is None:
             return False
@@ -2117,6 +2126,22 @@ def _replacement_matcher(pairs):
     return hit
 
 
+def _html_escaped_pairs(pairs: list) -> list:
+    """HTML 用替换表: 原表 + 键中 & 换成 &amp; 的变体, 仍按长度降序。
+
+    浏览器序列化 DOM 时属性值里的 & 一律写成 &amp;(src/srcset/href 的查询串、
+    CDN 图片处理参数 `@base@tag=imgScale&F=webp&w=..`), 原表只有字面 URL,
+    这类引用整体漏改写、离线沙箱里外链被拦成空白。JS/CSS 文本不经序列化, 不用此表。"""
+    extra = [(k.replace("&", "&amp;"), v) for k, v in pairs
+             if "&" in k and "&amp;" not in k]
+    if not extra:
+        return pairs
+    merged = dict(pairs)
+    for k, v in extra:
+        merged.setdefault(k, v)
+    return [(k, merged[k]) for k in sorted(merged, key=len, reverse=True)]
+
+
 def apply_replacements(text: str, pairs) -> str:
     """单趟正则替换全部 URL 变体(pairs 需按长度降序)。"""
     if not pairs:
@@ -2219,7 +2244,8 @@ class ClonerEngine:
         except Exception as exc:
             # 瞬时 Playwright 会话崩溃(页面重导航/浏览器回收/网络瞬断)
             # 与稳定失败不同源: 换新会话整链重跑一次, 偶发不判死
-            if not getattr(self, "_transient_retried", False) and any(
+            if not isinstance(exc, TargetUnreachable) \
+                    and not getattr(self, "_transient_retried", False) and any(
                     m in f"{type(exc).__name__}: {exc}" for m in _TRANSIENT_ERROR_MARKS):
                 self.log("WARN", f"瞬时会话崩溃, 自动重试: {type(exc).__name__}: {exc}")
                 # 整链重跑前重置运行态(磁带/引用表/校准/保真轨/统计累加器),
@@ -2229,7 +2255,13 @@ class ClonerEngine:
                 self._set(status="running", stage="重试渲染", progress=4, error_msg="")
                 return self.run()
             self.log("ERROR", f"任务失败: {type(exc).__name__}: {exc}")
-            self._set(status="failed", error_msg=f"{type(exc).__name__}: {exc}"[:1500])
+            # 失败任务同样落阶段耗时与失败类别: 语料跑分区分"网络不可达"与"引擎失败"
+            fail_stats = {"stage_times": self._stage_times(),
+                          "failure": "unreachable" if isinstance(exc, TargetUnreachable)
+                          else "engine"}
+            fail_stats["elapsed_s"] = round(sum(fail_stats["stage_times"].values()), 1)
+            self._set(status="failed", error_msg=f"{type(exc).__name__}: {exc}"[:1500],
+                      stats_json=json.dumps(fail_stats, ensure_ascii=False))
             return
         elapsed = time.time() - started
         self.log("INFO", f"任务 #{self.task_id} 完成, 耗时 {elapsed:.1f}s")
@@ -2443,6 +2475,7 @@ class ClonerEngine:
             render_and_score = self._make_render_and_score(ctx, defer_diff=True)
 
             repair_started = time.time()
+            prev_sig, prev_score = None, None   # 收敛判定: 上一轮缺失集合与分数
             for round_i in range(max(1, config.RENDER_REPAIR_ROUNDS)
                                  if want_score else 1):
                 # P0-A 时间预算: 快站快修, 慢站限时收敛 —— 速度是引擎一等公民
@@ -2470,6 +2503,17 @@ class ClonerEngine:
                         self.log("WARN", f"[评分告警] {warning}")
                 if not failed_local and not remote_missing:
                     break
+                # 无进展即停: 缺失集合与上一轮相同且分数没涨 —— 回补已无能为力
+                # (缺失资源上游本就 404/鉴权), 再跑只是重复本地化+渲染(真实语料
+                # 里 wordpress/runoob/wix 都是 6 轮分数一动不动)
+                sig = (frozenset(failed_local), frozenset(remote_missing))
+                cur = detail["score"] if detail is not None else None
+                if sig == prev_sig and (cur is None or prev_score is None
+                                        or cur - prev_score < config.REPAIR_MIN_GAIN):
+                    self.log("RENDER", f"修复循环无进展(缺失集合未变, 分数 {prev_score}→{cur}), "
+                                       f"第 {round_i + 1} 轮收敛")
+                    break
+                prev_sig, prev_score = sig, cur
                 if round_i >= config.RENDER_REPAIR_ROUNDS - 1:
                     self.log("SMART-DL",
                              f"仍有 {len(failed_local) + len(remote_missing)} 个本地缺失资源"
@@ -2654,6 +2698,21 @@ class ClonerEngine:
             return None
 
     # ------------------------------------------------------------------
+    @staticmethod
+    def _probe_unreachable(ctx, url: str):
+        """网络层可达性探测: 返回不可达原因, 可达(任何 HTTP 状态)返回 None。"""
+        try:
+            resp = ctx.request.get(url, timeout=config.REACHABILITY_PROBE_TIMEOUT,
+                                   max_redirects=5, fail_on_status_code=False)
+            with suppress(Exception):
+                resp.dispose()
+            return None
+        except Exception as exc:
+            msg = str(exc)
+            m = re.search(r"(net::ERR_[A-Z_]+|ERR_[A-Z_]+|Timeout \d+ms exceeded|"
+                          r"getaddrinfo \w+|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH)", msg)
+            return m.group(1) if m else f"{type(exc).__name__}: {msg[:80]}"
+
     def _render_page(self, ctx, url: str, screenshot: bool, collect_links: bool):
         page = ctx.new_page()
         rt = self.cfg.get("render_timeout")  # 批次级页面加载超时(秒), 0/缺省 = 平台默认
@@ -2668,9 +2727,16 @@ class ClonerEngine:
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=config.PAGELOAD_TIMEOUT)
         except Exception as exc:
-            # 首导航瞬时失败(超时/连接抖动): 重试一次, 防慢站一票判死
+            # 首导航瞬时失败(超时/连接抖动): 先用轻量请求探测网络层可达性 ——
+            # 不可达(DNS/连接/超时)直接判失败, 不再白等第二个 45s 导航;
+            # 可达才重试导航, 防慢站一票判死
             if any(m in str(exc) for m in ("Timeout", "ERR_", "net::")):
-                self.log("RENDER", f"首导航失败({type(exc).__name__}), 重试一次")
+                reason = self._probe_unreachable(ctx, url)
+                if reason:
+                    self.log("RENDER", f"首导航失败且目标网络层不可达({reason}), 快速失败")
+                    raise TargetUnreachable(f"目标不可达(网络层): {reason}; 首导航: "
+                                            f"{type(exc).__name__}: {str(exc)[:200]}") from exc
+                self.log("RENDER", f"首导航失败({type(exc).__name__}), 目标可达, 重试一次")
                 page.goto(url, wait_until="domcontentloaded", timeout=config.PAGELOAD_TIMEOUT)
             else:
                 raise
@@ -3642,9 +3708,10 @@ class ClonerEngine:
             localized = self._inject_after_head(localized, sim_script)
             return _inject_responsive(localized)
 
+        html_pairs = _html_escaped_pairs(pairs)
         for route, html in pages:
             fname = "index.html" if route == "/" else f"p__{slugify(route)}.html"
-            localized = finalize(apply_replacements(html, pairs), route)
+            localized = finalize(apply_replacements(html, html_pairs), route)
             (self.ws / fname).write_text(localized, encoding="utf-8")
             pages_map[route] = fname
             if strip_pack and stripped_total and route == "/":
@@ -3672,7 +3739,7 @@ class ClonerEngine:
                 (self.ws / "index.html").write_text(stub, encoding="utf-8")
         for i, (_src, html) in enumerate(iframe_pages):
             localized = _BASE_TAG_RE.sub(
-                "", rewrite_js_navigation(apply_replacements(html, pairs)))
+                "", rewrite_js_navigation(apply_replacements(html, html_pairs)))
             localized = self._inject_after_head(localized, sim_script)
             localized = _inject_responsive(localized)
             (self.ws / f"iframe_{i + 1}.html").write_text(
@@ -3680,7 +3747,7 @@ class ClonerEngine:
             pages_map[f"/iframe_{i + 1}.html"] = f"iframe_{i + 1}.html"
         for i, (_src, html, _text) in enumerate(frame_records):
             localized = _BASE_TAG_RE.sub(
-                "", rewrite_js_navigation(apply_replacements(html, pairs)))
+                "", rewrite_js_navigation(apply_replacements(html, html_pairs)))
             localized = self._inject_after_head(localized, sim_script)
             localized = _inject_responsive(localized)
             (self.ws / "frames" / f"frame_{i + 1}.html").write_text(
