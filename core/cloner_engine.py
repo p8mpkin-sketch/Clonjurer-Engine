@@ -2423,6 +2423,7 @@ class ClonerEngine:
         self._fidelity_score = None           # N1 保真轨评分(双轨取优用)
         self._fidelity_rendered = False      # 保真轨 MHTML 已渲染(每任务一次)
         self._layout_calibrated = False      # 布局校准已尝试(每任务一次)
+        self._backfill_dead = set()          # 修复回补回源失败的 URL(跨轮负缓存)
         self._calibrations = 0               # A1 像素校准执行次数
         self._phase_acc = {}                 # 子阶段累计耗时(秒): 提速定位用
         self._calib_css = ""                 # A1 校准覆盖(跨修复轮持久, _localize 注入)
@@ -3820,6 +3821,19 @@ class ClonerEngine:
         page_netloc = urlsplit(self._target).netloc
         new = {}
         shadows = 0
+        # 时限 + 跨轮负缓存: 埋点/广告类外联 URL 动辄几十个, 逐个 20s 超时串行回源曾让
+        # 单站修复回补耗时 180s(techcrunch); 回源失败的 URL 后续轮次不再重试
+        deadline = time.monotonic() + config.BACKFILL_BUDGET
+        dead = self._backfill_dead
+
+        def _fetch(url):
+            if url in dead or time.monotonic() > deadline:
+                return None
+            out = self._normalize_out(self.downloader.fetch_via_browser(
+                url, ctx.request, referer=self._target))
+            if not out["ok"]:
+                dead.add(url)
+            return out
 
         def write_shadow(url: str, content: bytes) -> bool:
             nonlocal shadows
@@ -3844,10 +3858,8 @@ class ClonerEngine:
                 continue
             if len(results) + len(new) >= config.MAX_ASSETS_PER_TASK:
                 break
-            out = self.downloader.fetch_via_browser(url, ctx.request,
-                                                    referer=self._target)
-            out = self._normalize_out(out)
-            if out["ok"]:
+            out = _fetch(url)
+            if out is not None and out["ok"]:
                 new[out["url"]] = self._store(out)
                 self.log("SMART-DL", f"渲染缺失回补: {new[out['url']]['cat']}"
                                      f"/{new[out['url']]['name']} <- {out['url'][:110]}")
@@ -3926,9 +3938,9 @@ class ClonerEngine:
                     break
                 if len(results) + len(new) >= config.MAX_ASSETS_PER_TASK:
                     break
-                out = self.downloader.fetch_via_browser(url, ctx.request,
-                                                        referer=self._target)
-                out = self._normalize_out(out)
+                out = _fetch(url)
+                if out is None:
+                    continue
                 # SPA fallback 防毒: 未知路径常返回 200 的 HTML 壳,
                 # 存成 .js/.css 会让运行时解析崩溃且污染资源池
                 head = (out.get("content") or b"")[:512].lstrip()
@@ -3954,6 +3966,8 @@ class ClonerEngine:
                 break
         if shadows:
             self.log("SMART-DL", f"影子落盘 {shadows} 个运行时相对路径资源")
+        if time.monotonic() > deadline:
+            self.log("SMART-DL", f"修复回补达到时限({config.BACKFILL_BUDGET}s), 余下缺失本轮跳过")
         return new, shadows
 
     # ------------------------------------------------------------------
@@ -4424,6 +4438,54 @@ class ClonerEngine:
                 except Exception:
                     return
 
+            def _render_fidelity():
+                """N1 保真轨: MHTML 确定性渲染(Chromium 对 MHTML 默认禁脚本), 与交互轨
+                分开评分 —— 回放保真由构造保证。MHTML 不随修复循环变化 → 每任务一次。"""
+                if self._fidelity_rendered or not (self.ws / 'capture.mhtml').is_file():
+                    return
+                self._fidelity_rendered = True
+                with suppress(OSError):   # 防上一轮/重建残留截图被误评
+                    (self.ws / 'fidelity_preview.png').unlink()
+                t_fid = time.monotonic()
+                fpage = ctx.new_page()
+                try:
+                    # 离线守卫: 归档内资源由 Chromium 直接供给(不经网络层),
+                    # 归档外的引用一律中止 —— 保真轨必须确定且不回源
+                    fpage.route("**/*", _fidelity_guard)
+                    fpage.goto('file://' + str(self.ws / 'capture.mhtml'),
+                               wait_until='load', timeout=30000)
+                    with suppress(Exception):
+                        self._settle(fpage, cap_ms=2000)
+                    self._full_shot(fpage, self.ws / 'fidelity_preview.png', "保真轨")
+                    f_text = fpage.evaluate(TEXT_EXTRACT_JS)
+                    (self.ws / 'fidelity_text.txt').write_text(
+                        f_text or '', encoding='utf-8')
+                except Exception as exc:
+                    self.log('WARN', f'保真轨渲染失败: {exc}')
+                finally:
+                    with suppress(Exception):
+                        fpage.close()
+                    self._phase("评分-保真轨渲染", t_fid)
+
+            def _score_fidelity(original, orig_text, inter_score):
+                """N1 保真轨评分: MHTML 确定性渲染 vs 原站(独立于交互轨, 每任务一次)。"""
+                fid_png = self.ws / 'fidelity_preview.png'
+                fid_txt = self.ws / 'fidelity_text.txt'
+                if not fid_png.is_file() or self._fidelity_score is not None:
+                    return
+                t_sc = time.monotonic()
+                try:
+                    f_detail = compute_visual_similarity(
+                        original, fid_png,
+                        diff_path=self.ws / 'fidelity_diff.png',
+                        orig_text=orig_text,
+                        clone_text=fid_txt.read_text(errors='replace') if fid_txt.is_file() else '')
+                    self._fidelity_score = f_detail.get('score')
+                    self.log("RENDER", f"保真轨评分: {self._fidelity_score} (交互轨: {inter_score})")
+                except Exception as exc:
+                    self.log("WARN", f"保真轨评分失败: {exc}")
+                self._phase("评分-计算", t_sc)
+
             try:
                 page.route("**/*", _route_guard)
                 page.on("response", _on_resp)
@@ -4465,33 +4527,6 @@ class ClonerEngine:
                 (self.ws / "cloned_text.txt").write_text(clone_text or "",
                                                          encoding="utf-8")
                 tp = self._phase("评分-克隆截图", tp)
-                # N1 保真轨: MHTML 确定性渲染(Chromium 对 MHTML 默认禁脚本),
-                # 与交互轨分开评分 —— 回放保真由构造保证。
-                # MHTML 不随修复循环变化 → 每任务只渲染/评分一次(速度)
-                if (self.ws / 'capture.mhtml').is_file() and not self._fidelity_rendered:
-                    self._fidelity_rendered = True
-                    with suppress(OSError):   # 防上一轮/重建残留截图被误评
-                        (self.ws / 'fidelity_preview.png').unlink()
-                    t_fid = time.monotonic()
-                    fpage = ctx.new_page()
-                    try:
-                        # 离线守卫: 归档内资源由 Chromium 直接供给(不经网络层),
-                        # 归档外的引用一律中止 —— 保真轨必须确定且不回源
-                        fpage.route("**/*", _fidelity_guard)
-                        fpage.goto('file://' + str(self.ws / 'capture.mhtml'),
-                                   wait_until='load', timeout=30000)
-                        with suppress(Exception):
-                            self._settle(fpage, cap_ms=2000)
-                        self._full_shot(fpage, self.ws / 'fidelity_preview.png', "保真轨")
-                        f_text = fpage.evaluate(TEXT_EXTRACT_JS)
-                        (self.ws / 'fidelity_text.txt').write_text(
-                            f_text or '', encoding='utf-8')
-                    except Exception as exc:
-                        self.log('WARN', f'保真轨渲染失败: {exc}')
-                    finally:
-                        with suppress(Exception):
-                            fpage.close()
-                        self._phase("评分-保真轨渲染", t_fid)
             except Exception as exc:
                 self.log("WARN", f"克隆页渲染失败: {exc}")
                 with suppress(Exception):
@@ -4503,7 +4538,15 @@ class ClonerEngine:
             try:
                 original = self.ws / "original_preview.png"
                 cloned = self.ws / "cloned_preview.png"
-                if not (original.is_file() and cloned.is_file()):
+                if not original.is_file():
+                    return None, failed_local, remote_missing
+                if not cloned.is_file():
+                    # 交互轨截图失败: 保真轨仍可独立出分(头条分数双轨取优)
+                    _render_fidelity()
+                    with suppress(Exception):
+                        _score_fidelity(original, (self.ws / "original_text.txt").read_text(
+                            encoding="utf-8", errors="replace")
+                            if (self.ws / "original_text.txt").is_file() else "", None)
                     return None, failed_local, remote_missing
                 try:
                     orig_text = (self.ws / "original_text.txt").read_text(
@@ -4598,23 +4641,11 @@ class ClonerEngine:
                         except Exception as exc:
                             self.log('WARN', f'布局校准失败: {exc}')
                         tp = self._phase("评分-布局校准", tp)
-                    # N1 保真轨评分: MHTML 确定性渲染 vs 原站(独立于交互轨)
-                    fid_png = self.ws / 'fidelity_preview.png'
-                    fid_txt = self.ws / 'fidelity_text.txt'
-                    if fid_png.is_file() and self._fidelity_score is None:
-                        try:
-                            f_detail = compute_visual_similarity(
-                                original, fid_png,
-                                diff_path=self.ws / 'fidelity_diff.png',
-                                orig_text=orig_text,
-                                clone_text=fid_txt.read_text(errors='replace'))
-                            self._fidelity_score = f_detail.get('score')
-                            tp = self._phase("评分-计算", tp)
-                            self.log("RENDER",
-                                     f"保真轨评分: {self._fidelity_score} "
-                                     f"(交互轨: {detail.get('score')})")
-                        except Exception as exc:
-                            self.log("WARN", f"保真轨评分失败: {exc}")
+                    # N1 保真轨: 交互轨已近满分时保真轨无法改变头条分数(双轨取优), 跳过其渲染
+                    if detail is None or (detail.get('score') or 0) < config.FIDELITY_SKIP_ABOVE:
+                        _render_fidelity()
+                        _score_fidelity(original, orig_text,
+                                        detail.get('score') if detail is not None else None)
                     return detail, failed_local, remote_missing
                 except Exception as exc:
                     self.log("WARN", f"评分计算失败: {exc}")
