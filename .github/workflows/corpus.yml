@@ -4,7 +4,7 @@ name: real-site-corpus
 # engine_bench/real_sites/run_corpus.py, 报告写进本次运行的摘要并上传明细。
 # 引擎改动的 PR 与每晚默认只跑 global 标签: runner 在美国, 国内站会拿到地区版/风控页
 # (实测 aliyun/jd/mi 与国内直连差异巨大), 国内站在 cz 本机实例上跑 --tag cn。
-# 手动触发可填 tag(填 all 以外的任意标签)或 sites。
+# 手动触发可填 tag(留空=global, 可填 cn 等)或 sites(覆盖语料)。
 # 不作门槛(真实站点会变), 只做度量留档; 跟上一轮的对比看报告 Δ 列(本地 runs/)或下载两次产物比。
 on:
   pull_request:
@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "只跑带此标签的站(留空=全语料; global=国际站; cn=国内站)"
+        description: "只跑带此标签的站(留空=global; cn=国内站)"
         required: false
         default: ""
       sites:
