@@ -319,13 +319,44 @@ MEDIA_SHOT_APPLY_JS = r"""
 """
 
 FORM_ACTIVATE_JS = r"""
-() => {
-  let n = 0;
+async () => {
+  // focus 打开的浮层(搜索下拉/联想面板)靠 blur 后的定时器收起, 而基准截图前的时间冻结
+  // 已清空定时器 —— 浮层会被固化进克隆(基准里却是收起的)。激活期间的 DOM 变动
+  // 在框架异步提交后整体回滚: 基准截图早于激活, 回滚只会更贴近基准。
+  let n = 0, reverted = 0;
+  const recs = [];
+  let mo = null;
+  try {
+    mo = new MutationObserver(l => { for (const r of l) recs.push(r); });
+    mo.observe(document.documentElement, {subtree: true, childList: true, attributes: true,
+      attributeOldValue: true, characterData: true, characterDataOldValue: true});
+  } catch (e) { mo = null; }
   document.querySelectorAll('input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=file]), textarea, select').forEach(el => {
     if (n >= 60) return;
     try { el.focus(); el.blur(); n++; } catch (e) {}
   });
-  return n;
+  if (mo) {
+    await new Promise(r => setTimeout(r, 300));
+    for (const r of mo.takeRecords()) recs.push(r);
+    mo.disconnect();
+    for (let i = recs.length - 1; i >= 0; i--) {
+      const r = recs[i];
+      try {
+        if (r.type === 'attributes') {
+          if (r.oldValue === null) r.target.removeAttribute(r.attributeName);
+          else r.target.setAttribute(r.attributeName, r.oldValue);
+        } else if (r.type === 'characterData') {
+          r.target.data = r.oldValue;
+        } else {
+          r.addedNodes.forEach(x => { if (x.parentNode === r.target) r.target.removeChild(x); });
+          const ref = r.nextSibling && r.nextSibling.parentNode === r.target ? r.nextSibling : null;
+          r.removedNodes.forEach(x => r.target.insertBefore(x, ref));
+        }
+        reverted++;
+      } catch (e) {}
+    }
+  }
+  return {n, reverted};
 }
 """
 
@@ -3542,9 +3573,10 @@ class ClonerEngine:
         tp = self._phase("采集-基准截图", tp)
         if screenshot and (self.ws / "original_preview.png").is_file():
             self._freeze_media_from_baseline(page)
-        activated = _safe_eval(FORM_ACTIVATE_JS)
-        if activated:
-            self.log("RENDER", f"表单激活: focus/blur {activated} 个输入控件")
+        act = _safe_eval(FORM_ACTIVATE_JS) or {}
+        if act.get("n"):
+            self.log("RENDER", f"表单激活: focus/blur {act['n']} 个输入控件"
+                               + (f", 回滚激活期 DOM 变动 {act['reverted']} 处" if act.get("reverted") else ""))
         counts = _safe_eval(DEEP_FREEZE_JS)
         self.log("CSSOM",
                  f"固化 {counts.get('css', 0)} 组运行时样式 / "
