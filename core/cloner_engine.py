@@ -3927,6 +3927,9 @@ class ClonerEngine:
         + CSS 深度递归。results 可跨调用累积(回补循环复用)。"""
         results = results if results is not None else {}
         jobs = deque()
+        # 样式表独立队列、永远先发: 样式内引用(活体字体切片可达数百个)插队时只能排在
+        # 剩余样式表之后 —— mi 曾被首个 CSS 的 300+ 字体切片吃光名额, 主样式表没进队列
+        css_jobs = deque()
         page_netloc = urlsplit(self._target).netloc
         seeded = set()
         for url in results:
@@ -3936,11 +3939,12 @@ class ClonerEngine:
         live = getattr(self, "_live_seen", None) or {}
         for url in sorted(assets, key=lambda u: _asset_priority(u, live)):
             if url.startswith(("http://", "https://")) and url not in seeded:
-                jobs.append({"url": url, "referer": origin + "/"})
+                (css_jobs if _asset_priority(url)[1] == 0 else jobs).append(
+                    {"url": url, "referer": origin + "/"})
         seen = set(seeded)
         css_sources, css_refs = {}, {}
         failed_for_browser = []
-        total, downloaded = len(jobs), 0
+        total, downloaded = len(jobs) + len(css_jobs), 0
         executor = ThreadPoolExecutor(max_workers=config.DOWNLOAD_WORKERS)
         in_flight = {}   # future -> job
         max_inflight = config.DOWNLOAD_WORKERS * 2
@@ -3951,8 +3955,8 @@ class ClonerEngine:
 
         def _pump():
             # 流式调度: 队列里有活、在飞的不满就提交; 不再按 32 个一批等最慢者
-            while jobs and len(in_flight) < max_inflight:
-                job = jobs.popleft()
+            while (css_jobs or jobs) and len(in_flight) < max_inflight:
+                job = (css_jobs or jobs).popleft()
                 if job["url"] in seen:
                     continue
                 if (urlsplit(job["url"]).hostname or "") in tripped:
@@ -4000,7 +4004,7 @@ class ClonerEngine:
                     info = self._store(out)
                     results[out["url"]] = info
                     downloaded += 1
-                    if downloaded % 8 == 0 or not jobs:
+                    if downloaded % 8 == 0 or not (jobs or css_jobs):
                         done_ratio = downloaded / max(total, 1)
                         self._set(progress=min(58, 30 + int(24 * done_ratio)))
                     tag = "CAS-HIT" if info["hit"] else "CAS-MISS"
@@ -4016,7 +4020,9 @@ class ClonerEngine:
                                 # 样式内引用: 活体加载过的或图片插队; 未用到的字体切片排队尾
                                 job2 = {"url": absolute, "referer": out["url"]}
                                 pr = _asset_priority(absolute, live)
-                                if pr[0] == 0 or pr[1] <= 1:
+                                if pr[1] == 0:
+                                    css_jobs.append(job2)   # @import
+                                elif pr[0] == 0 or pr[1] <= 1:
                                     jobs.appendleft(job2)
                                 else:
                                     jobs.append(job2)
@@ -4601,6 +4607,10 @@ class ClonerEngine:
                                    polling=100)
         with suppress(Exception):
             page.evaluate(ANIM_ALIGN_JS)
+        # 克隆里 autofocus 的输入框会撑开 :focus-within 浮层(原站基准时焦点不在其上)
+        with suppress(Exception):
+            page.evaluate("() => { const a = document.activeElement;"
+                          " if (a && a !== document.body && a.blur) a.blur(); }")
         if phases:
             self._phase("评分-克隆静置", tp)
 
