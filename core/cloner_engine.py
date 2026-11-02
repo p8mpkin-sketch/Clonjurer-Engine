@@ -1407,8 +1407,10 @@ def layout_fix_css(orig_map, clone_map, min_dh=3, max_rules=LAYOUT_FIX_MAX):
     """两侧版面块图按结构路径对齐, 对高度不一致的"最深"块生成尺寸覆盖。
 
     同一路径且横向位置/宽度一致(容差 4px 或 2%)才视作同一块; 只取没有更深的
-    失配后代的块(根因所在, 祖先的失配是被它撑出来的)。克隆偏矮补 min-height,
-    偏高用 max-height + overflow:hidden 收回原站尺寸。返回 (css, 失配块数)。"""
+    失配后代的块(根因所在, 祖先的失配是被它撑出来的)。只处理克隆偏矮(补 min-height):
+    偏高块若用 max-height+overflow:hidden 收回, 会把块内真实内容裁掉而分数反升
+    (CI vitejs: 框架图标行整行被裁空、评分 +1.6) —— 以藏内容换对齐不可接受。
+    返回 (css, 失配块数)。"""
     orig = {e[0]: tuple(e[1:5]) for e in orig_map or []}
     bad = {}
     for e in clone_map or []:
@@ -1421,7 +1423,7 @@ def layout_fix_css(orig_map, clone_map, min_dh=3, max_rules=LAYOUT_FIX_MAX):
         tol = max(4, 0.02 * ow)
         if abs(x - ox) > tol or abs(w - ow) > tol:
             continue
-        if abs(h - oh) >= min_dh:
+        if oh - h >= min_dh:
             bad[k] = (oh, h, pb)
     keys = sorted(bad)
     leaves = [k for i, k in enumerate(keys)
@@ -1429,11 +1431,7 @@ def layout_fix_css(orig_map, clone_map, min_dh=3, max_rules=LAYOUT_FIX_MAX):
     rules = []
     for k in leaves[:max_rules]:
         oh, ch, pb = bad[k]
-        v = max(0, oh - pb)
-        if ch < oh:
-            rules.append(f"{k}{{min-height:{v}px!important}}")
-        else:
-            rules.append(f"{k}{{max-height:{v}px!important;overflow:hidden!important}}")
+        rules.append(f"{k}{{min-height:{max(0, oh - pb)}px!important}}")
     return "\n".join(rules), len(leaves)
 FIRST_SEGMENT_WEIGHT = 2.0   # 首段(首屏区域)权重
 

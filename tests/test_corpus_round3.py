@@ -349,10 +349,11 @@ class LayoutFixCss(unittest.TestCase):
                  ["body>main:nth-of-type(1)>div:nth-of-type(10)", 290, 120, 0, 1000],
                  ["body>main:nth-of-type(1)>div:nth-of-type(2)", 190, 100, 0, 600]]
         css, n = layout_fix_css(orig, clone)
-        self.assertEqual(n, 2)
+        self.assertEqual(n, 1)
         self.assertIn("body>main:nth-of-type(1)>div:nth-of-type(1)>p:nth-of-type(1)"
                       "{min-height:100px!important}", css)
-        self.assertIn("div:nth-of-type(10){max-height:100px!important;overflow:hidden!important}", css)
+        self.assertNotIn("max-height", css)          # 偏高块不收回(裁内容换对齐不可接受)
+        self.assertNotIn("div:nth-of-type(10)", css)
         self.assertNotIn("div:nth-of-type(2)", css)
         self.assertEqual(layout_fix_css(orig, orig), ("", 0))
 
