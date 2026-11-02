@@ -2576,16 +2576,35 @@ class ClonerEngine:
         1) 整页截图(SHOT_TIMEOUT);
         2) 限高裁剪截图: 高度取评分覆盖区(SCORE_MAX_HEIGHT 等比换算)与 GPU 纹理上限的较小值;
         3) 视口分块拼接: 逐屏滚动截视口再拼(超高/滚动驱动页 captureScreenshot 整体失败时)。
-        评分只取等比缩放后前 SCORE_MAX_HEIGHT 像素, 2/3 覆盖评分全部区域, 口径不变。"""
+        评分只取等比缩放后前 SCORE_MAX_HEIGHT 像素, 2/3 覆盖评分全部区域, 口径不变。
+        超出评分覆盖区的超长页直接走限高截图: 尾部不计分, 整页截图在超长页上慢一个
+        数量级(41000px 合成页 4.6s → 0.6s), 且超大 PNG 拖慢后续评分/校准解码。"""
+        dims_js = ("() => [document.documentElement.clientWidth || innerWidth, "
+                   "Math.max(document.documentElement.scrollHeight, "
+                   "document.body ? document.body.scrollHeight : 0, innerHeight), "
+                   "innerHeight]")
+        dims = None
+        with suppress(Exception):
+            dims = page.evaluate(dims_js)
+        if dims:
+            w = max(1, int(dims[0]))
+            cap = min(int(SCORE_MAX_HEIGHT * w / SCORE_WIDTH), SHOT_MAX_TEXTURE)
+            if int(dims[1]) > cap:
+                try:
+                    page.screenshot(path=str(path), full_page=True,
+                                    clip={"x": 0, "y": 0, "width": w, "height": cap},
+                                    timeout=config.SHOT_TIMEOUT)
+                    self.log("RENDER", f"{label}超长({int(dims[1])}px > 评分区 {cap}px), "
+                                       f"限高截图")
+                    return
+                except Exception as exc:
+                    self.log("WARN", f"{label}限高截图失败, 改走整页截图: {str(exc)[:160]}")
         try:
             page.screenshot(path=str(path), full_page=True, timeout=config.SHOT_TIMEOUT)
             return
         except Exception as exc:
             self.log("WARN", f"{label}整页截图失败, 退化为限高截图: {str(exc)[:160]}")
-        dims = page.evaluate("() => [document.documentElement.clientWidth || innerWidth, "
-                             "Math.max(document.documentElement.scrollHeight, "
-                             "document.body ? document.body.scrollHeight : 0, innerHeight), "
-                             "innerHeight]")
+        dims = page.evaluate(dims_js)
         w = max(1, int(dims[0]))
         cap = min(int(SCORE_MAX_HEIGHT * w / SCORE_WIDTH), SHOT_MAX_TEXTURE)
         h = max(1, min(int(dims[1]), cap))
@@ -3423,9 +3442,11 @@ class ClonerEngine:
             position = 0
             for _ in range(60):
                 position += step
-                page.evaluate(f"window.scrollTo(0, {position})")
-                page.wait_for_timeout(320)
-                height = page.evaluate("document.documentElement.scrollHeight")
+                # 滚动 + 等待 + 取高合并为一次往返(重页上每次 evaluate 都要排主线程)
+                height = page.evaluate(
+                    "async p => { window.scrollTo(0, p); "
+                    "await new Promise(r => setTimeout(r, 320)); "
+                    "return document.documentElement.scrollHeight; }", position)
                 if position >= height:
                     break
                 if time.monotonic() > deadline:

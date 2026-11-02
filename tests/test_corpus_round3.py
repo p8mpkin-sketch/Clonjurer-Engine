@@ -224,15 +224,35 @@ class FullShotFallback(unittest.TestCase):
                 return [1280, self.doc_h]
 
         eng = self._engine()
+        cap = int(SCORE_MAX_HEIGHT * 1280 / SCORE_WIDTH)
+        # 超长页: 先限高(失败) → 整页(成功)
         tall = _Page(90000)
         eng._full_shot(tall, "/tmp/x.png", "原站")
-        clip = tall.calls[1]["clip"]
-        self.assertEqual(clip["width"], 1280)
-        self.assertEqual(clip["height"], int(SCORE_MAX_HEIGHT * 1280 / SCORE_WIDTH))
-        self.assertTrue(eng.logs and "退化" in eng.logs[0][1])
+        self.assertEqual(tall.calls[0]["clip"], {"x": 0, "y": 0, "width": 1280, "height": cap})
+        self.assertNotIn("clip", tall.calls[1])
         short = _Page(3000)
         eng._full_shot(short, "/tmp/x.png")
         self.assertEqual(short.calls[1]["clip"]["height"], 3000)
+
+    def test_overtall_clips_directly(self):
+        from core.cloner_engine import SCORE_MAX_HEIGHT, SCORE_WIDTH
+
+        class _Page:
+            def __init__(self):
+                self.calls = []
+
+            def screenshot(self, **kw):
+                self.calls.append(kw)
+
+            def evaluate(self, _js):
+                return [1280, 41000, 800]
+
+        eng = self._engine()
+        pg = _Page()
+        eng._full_shot(pg, "/tmp/x.png", "原站")
+        self.assertEqual(len(pg.calls), 1)
+        self.assertEqual(pg.calls[0]["clip"]["height"], int(SCORE_MAX_HEIGHT * 1280 / SCORE_WIDTH))
+        self.assertNotIn("animations", pg.calls[0])
 
     def test_success_no_fallback(self):
         class _Page:
