@@ -205,6 +205,24 @@ class FrameBounce(unittest.TestCase):
         self.assertIsNone(m("https://other.com/uc/newPopupLogin", live))
 
 
+class Utf8CharsetMeta(unittest.TestCase):
+    """落盘 UTF-8 时 charset 声明一并改为 utf-8(jd 登录 frame 保留 GBK 声明致乱码)。"""
+
+    def test_rewrite(self):
+        h = ('<meta http-equiv="Content-Type" content="text/html; charset=GBK">'
+             '<meta charset=gb2312><title>登录</title>')
+        out = ce._utf8_charset(h)
+        self.assertNotIn("GBK", out)
+        self.assertNotIn("gb2312", out)
+        self.assertEqual(out.count("utf-8"), 2)
+        self.assertIn("登录", out)
+
+    def test_fragment_refs_skipped(self):
+        refs = ce.parse_css_refs("a{fill:url(%23SVGabc)} b{background:url(x.png)}",
+                                 "https://cn.vuejs.org/assets/s.css")
+        self.assertEqual([r for r, _ in refs], ["x.png"])
+
+
 class EngineLogPersisted(unittest.TestCase):
     """任务日志落盘到工作区 engine.log, 且只追加不抛错。"""
 

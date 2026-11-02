@@ -1272,7 +1272,7 @@ CSS_IMPORT_RE = re.compile(
 # image-set("a.png" 1x, url("b.png") 2x) 候选提取
 CSS_IMAGE_SET_RE = re.compile(r"image-set\(\s*([^)]*?)\s*\)", re.I)
 
-ASSET_SKIP_PREFIXES = ("data:", "blob:", "#", "javascript:", "mailto:", "tel:")
+ASSET_SKIP_PREFIXES = ("data:", "blob:", "#", "%23", "javascript:", "mailto:", "tel:")  # %23: 编码后的片段引用(SVG url(#id))
 
 # CAS 防污染: 这些类别的资源若返回 HTML 拦截页则拒绝入库
 PROTECTED_CATEGORIES = {"css", "js", "img", "fonts", "media"}
@@ -1443,6 +1443,16 @@ _PRIO_EXT = {
     ".woff2": 3, ".woff": 3, ".ttf": 3, ".otf": 3, ".eot": 3,
     ".js": 4, ".mjs": 4, ".cjs": 4, ".map": 5,
 }
+
+
+_META_CHARSET_RE = re.compile(
+    r"""(<meta\b[^>]*?\bcharset\s*=\s*["']?)([\w.:-]+)""", re.I)
+
+
+def _utf8_charset(html: str) -> str:
+    """落盘一律 UTF-8, 页内 charset 声明随之改为 utf-8(含 http-equiv 形式)。
+    DOM 序列化已是 Unicode, 保留原站 GBK 声明会让浏览器按 GBK 解码出乱码。"""
+    return _META_CHARSET_RE.sub(lambda m: m.group(1) + "utf-8", html)
 
 
 def _frame_bounced(src: str, final: str, target: str) -> bool:
@@ -3699,12 +3709,19 @@ class ClonerEngine:
         in_flight = {}   # future -> job
         max_inflight = config.DOWNLOAD_WORKERS * 2
 
+        # 主机 -> 网络层失败次数(无 HTTP 状态: SSL/超时/连接错误); 任务级, 跨回补调用累积
+        host_fail = self.__dict__.setdefault("_host_fail", {})
+        tripped = self.__dict__.setdefault("_host_tripped", set())
+
         def _pump():
             # 流式调度: 队列里有活、在飞的不满就提交; 不再按 32 个一批等最慢者
             while jobs and len(in_flight) < max_inflight:
                 job = jobs.popleft()
                 if job["url"] in seen:
                     continue
+                if (urlsplit(job["url"]).hostname or "") in tripped:
+                    seen.add(job["url"])
+                    continue   # 熔断: 该主机网络层已连续失败, 余下请求不再空等超时
                 seen.add(job["url"])
                 in_flight[executor.submit(self._fetch_asset, job)] = job
 
@@ -3725,6 +3742,14 @@ class ClonerEngine:
                         self.log("WARN", f"跳过 {job['url']}: {out['error']}")
                         if out.get("status") and ctx is not None:
                             failed_for_browser.append(job)
+                        elif not out.get("status") and str(out.get("error") or "").endswith(
+                                ("Error", "Timeout", "TimeoutError")):
+                            h = urlsplit(job["url"]).hostname or ""
+                            host_fail[h] = host_fail.get(h, 0) + 1
+                            if host_fail[h] >= config.HOST_FAIL_TRIP and h not in tripped:
+                                tripped.add(h)
+                                self.log("SMART-DL", f"主机熔断: {h} 网络层连续失败 "
+                                                     f"{host_fail[h]} 次, 余下请求跳过")
                         continue
                     info = self._store(out)
                     results[out["url"]] = info
@@ -3952,13 +3977,22 @@ class ClonerEngine:
                 continue
             missing.append(url)
         added = 0
+        # 浏览器会话自有熔断(requests 被拒的主机浏览器可能仍可达, 不沿用下载阶段熔断):
+        # 串行回补里同一主机网络层连续失败即跳过余下, 免逐个空等超时
+        b_fail = {}
         for url in missing[:config.LIVE_HARVEST_MAX]:
             if len(results) >= config.MAX_ASSETS_PER_TASK:
                 break
+            host = urlsplit(url).hostname or ""
+            if b_fail.get(host, 0) >= config.HOST_FAIL_TRIP:
+                continue
             out = self.downloader.fetch_via_browser(url, ctx.request,
                                                     referer=self._target)
             out = self._normalize_out(out)
             if not out["ok"]:
+                if not str(out.get("error") or "").startswith(("HTTP", "空响应体", "oversize",
+                                                               "content-type")):
+                    b_fail[host] = b_fail.get(host, 0) + 1
                 continue
             info = self._store(out)
             results[out["url"]] = info
@@ -4423,7 +4457,7 @@ class ClonerEngine:
             if bg_css:
                 localized = self._inject_after_head(localized, bg_css)
             localized = self._inject_after_head(localized, sim_script)
-            return _inject_responsive(localized)
+            return _utf8_charset(_inject_responsive(localized))
 
         html_pairs = _html_escaped_pairs(pairs)
         for route, html in pages:
@@ -4458,7 +4492,7 @@ class ClonerEngine:
             localized = _BASE_TAG_RE.sub(
                 "", rewrite_js_navigation(apply_replacements(html, html_pairs)))
             localized = self._inject_after_head(localized, sim_script)
-            localized = _inject_responsive(localized)
+            localized = _utf8_charset(_inject_responsive(localized))
             (self.ws / f"iframe_{i + 1}.html").write_text(
                 localized, encoding="utf-8")
             pages_map[f"/iframe_{i + 1}.html"] = f"iframe_{i + 1}.html"
@@ -4466,7 +4500,7 @@ class ClonerEngine:
             localized = _BASE_TAG_RE.sub(
                 "", rewrite_js_navigation(apply_replacements(html, html_pairs)))
             localized = self._inject_after_head(localized, sim_script)
-            localized = _inject_responsive(localized)
+            localized = _utf8_charset(_inject_responsive(localized))
             (self.ws / "frames" / f"frame_{i + 1}.html").write_text(
                 localized, encoding="utf-8")
             pages_map[f"/frames/frame_{i + 1}.html"] = f"frames/frame_{i + 1}.html"
