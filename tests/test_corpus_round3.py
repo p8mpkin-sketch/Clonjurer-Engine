@@ -279,3 +279,55 @@ class TiledShotFallback(unittest.TestCase):
             self.assertEqual(page.full_fail, 2)
             self.assertEqual(im.getpixel((5, 5))[0], 0)          # 第一屏
             self.assertEqual(im.getpixel((5, 1999))[0], 120)     # 末屏按实际滚动位置 1200 对齐
+
+
+def _chromium_available():
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            p.chromium.launch().close()
+        return True
+    except Exception:
+        return False
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class ShadowDomSerialization(unittest.TestCase):
+    """开放影子根(含嵌套与构造样式表)序列化为声明式模板, 无脚本也能还原。"""
+
+    PAGE = """<!doctype html><html lang="en" data-x="a&quot;b"><body><x-card>slotted</x-card><script>
+    const sh = new CSSStyleSheet(); sh.replaceSync('h2{color:rgb(1, 2, 3)}');
+    customElements.define('x-card', class extends HTMLElement { connectedCallback() {
+      const r = this.attachShadow({mode: 'open'}); r.adoptedStyleSheets = [sh];
+      r.innerHTML = '<h2>Title</h2><slot></slot><x-in></x-in>'; }});
+    customElements.define('x-in', class extends HTMLElement { connectedCallback() {
+      this.attachShadow({mode: 'open'}).innerHTML = '<b>inner</b>'; }});
+    </script></body></html>"""
+
+    def test_roundtrip_without_scripts(self):
+        import re
+        from playwright.sync_api import sync_playwright
+        from core.cloner_engine import SHADOW_SERIALIZE_JS, OUTER_HTML_JS
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            pg = b.new_page()
+            pg.set_content(self.PAGE)
+            out = pg.evaluate(SHADOW_SERIALIZE_JS)
+            self.assertEqual(out["roots"], 2)
+            self.assertEqual(out["adopted"], 1)
+            html = re.sub(r"<script\b.*?</script>", "", out["html"], flags=re.S)
+            self.assertIn('lang="en"', html)
+            pg2 = b.new_page()
+            pg2.set_content(html)
+            got = pg2.evaluate("""() => {
+              const r = document.querySelector('x-card').shadowRoot;
+              return [getComputedStyle(r.querySelector('h2')).color,
+                      r.querySelector('x-in').shadowRoot.textContent,
+                      document.documentElement.getAttribute('data-x')]; }""")
+            self.assertEqual(got, ["rgb(1, 2, 3)", "inner", 'a"b'])
+            # 无影子根: 返回 null, 调用方沿用 outerHTML
+            pg3 = b.new_page()
+            pg3.set_content("<p>plain</p>")
+            self.assertIsNone(pg3.evaluate(SHADOW_SERIALIZE_JS)["html"])
+            self.assertIn("<p>plain</p>", pg3.evaluate(OUTER_HTML_JS))
+            b.close()

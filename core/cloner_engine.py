@@ -845,6 +845,72 @@ OUTER_HTML_JS = r"""
 () => ('<!DOCTYPE html>\n' + document.documentElement.outerHTML)
 """
 
+# Shadow DOM 声明式序列化: outerHTML 不含影子树(Web Components/Lit/Stencil 组件内容整块丢失)。
+# 有开放影子根时改用 getHTML({serializableShadowRoots, shadowRoots}) 输出
+# <template shadowrootmode="open"> —— HTML 解析器原生还原, 克隆页无需组件脚本。
+# 影子根的 adoptedStyleSheets 不会被序列化, 先物化为根内 <style data-clone-adopted>。
+# 无影子根时返回 html=null, 调用方沿用 OUTER_HTML_JS(行为不变)。
+SHADOW_SERIALIZE_JS = r"""
+() => {
+  const roots = [];
+  const walk = (root) => {
+    const els = root.querySelectorAll ? root.querySelectorAll('*') : [];
+    for (const el of els) {
+      const sr = el.shadowRoot;
+      if (sr) { roots.push(sr); walk(sr); }
+    }
+  };
+  try { walk(document); } catch (e) {}
+  const de = document.documentElement;
+  if (!roots.length || typeof de.getHTML !== 'function') return {html: null, roots: roots.length, adopted: 0};
+  let adopted = 0;
+  for (const r of roots) {
+    try {
+      const sheets = r.adoptedStyleSheets || [];
+      if (!sheets.length || r.querySelector(':scope > style[data-clone-adopted]')) continue;
+      const css = sheets.map(sh => {
+        try { return Array.from(sh.cssRules).map(x => x.cssText).join('\n'); } catch (e) { return ''; }
+      }).join('\n');
+      const st = document.createElement('style');
+      st.setAttribute('data-clone-adopted', '');
+      st.textContent = css;
+      r.prepend(st);
+      adopted++;
+    } catch (e) {}
+  }
+  const esc = v => v.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  const attrs = Array.from(de.attributes).map(a => ' ' + a.name + '="' + esc(a.value) + '"').join('');
+  const inner = de.getHTML({serializableShadowRoots: true, shadowRoots: roots});
+  return {html: '<!DOCTYPE html>\n<html' + attrs + '>' + inner + '</html>', roots: roots.length, adopted: adopted};
+}
+"""
+
+# 原站版面特征探针(一行日志, 远程归因用): 影子根/画布/SVG/渐变与遮罩背景/iframe 计数
+PAGE_PROBE_JS = r"""
+() => {
+  const out = {shadow: 0, canvas: 0, svg: 0, gradientBg: 0, maskImg: 0, iframe: 0, fixed: 0};
+  const visit = (root) => {
+    for (const el of root.querySelectorAll('*')) {
+      const tag = el.tagName;
+      if (tag === 'CANVAS') out.canvas++;
+      else if (tag === 'svg' || tag === 'SVG') out.svg++;
+      else if (tag === 'IFRAME') out.iframe++;
+      try {
+        const cs = getComputedStyle(el);
+        if (cs.backgroundImage && cs.backgroundImage.indexOf('gradient') >= 0) out.gradientBg++;
+        const m = cs.maskImage || cs.webkitMaskImage;
+        if (m && m !== 'none') out.maskImg++;
+        if (cs.position === 'fixed' || cs.position === 'sticky') out.fixed++;
+      } catch (e) {}
+      if (el.shadowRoot) { out.shadow++; visit(el.shadowRoot); }
+    }
+  };
+  try { visit(document); } catch (e) {}
+  out.docH = Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0);
+  return out;
+}
+"""
+
 # 可见文本采集(含同源 iframe 内容, 保证克隆/原站两侧口径一致)
 # 自适应缓释(三段式, 全部为同步脚本 + 受时限的 wait_for_function):
 # 不能用"evaluate 一个 async Promise"实现 —— MHTML 保真轨页面脚本被禁用, 其
@@ -3039,7 +3105,21 @@ class ClonerEngine:
                 with suppress(Exception):
                     cdp.detach()
         self.db.touch_task(self.task_id)   # 采集心跳: 长下载阶段防误收割
-        html = _safe_eval(OUTER_HTML_JS)
+        if screenshot:
+            with suppress(Exception):
+                probe = _safe_eval(PAGE_PROBE_JS)
+                self.log("RENDER", "版面特征: " + ", ".join(f"{k}={v}" for k, v in probe.items()))
+        html = None
+        try:
+            shadow = _safe_eval(SHADOW_SERIALIZE_JS)
+            if shadow and shadow.get("html"):
+                html = shadow["html"]
+                self.log("RENDER", f"Shadow DOM 声明式序列化: {shadow['roots']} 个开放影子根"
+                                   f"(物化 {shadow['adopted']} 组构造样式表)")
+        except Exception as exc:
+            self.log("WARN", f"Shadow DOM 序列化失败, 回退 outerHTML: {exc}")
+        if html is None:
+            html = _safe_eval(OUTER_HTML_JS)
         # N1.1 采集退化守卫: 序列化过薄(<5KB)说明页面在采集窗口内被
         # 重定向/挂载失败清空(ibm 类 React 壳) —— 重新导航再序列化一次
         if len(html) < 5000:
