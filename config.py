@@ -1,0 +1,153 @@
+"""
+Enterprise Web Cloner & Flask App Generator - 全局配置中心.
+
+集中管理路径、并发参数、视口预设、资源分类与各类上限值,
+所有模块统一从此处导入配置, 保证全平台行为一致。
+"""
+import os
+import pathlib
+
+# ---------------------------------------------------------------------------
+# 路径布局
+# ---------------------------------------------------------------------------
+BASE_DIR = pathlib.Path(__file__).resolve().parent
+WORKSPACE_ROOT = BASE_DIR / "workspaces"       # 每个任务一个独立工作空间
+CACHE_ROOT = BASE_DIR / "cache_cas"            # 全局 CAS(内容寻址)静态资源池
+EXPORTS_DIR = BASE_DIR / "exports"             # 生成的 Flask 工程 ZIP 输出目录
+DB_PATH = BASE_DIR / "cloner.db"               # SQLite 主数据库(WAL 模式)
+
+
+def ensure_dirs():
+    """创建运行期所需的全部目录(幂等)。"""
+    for directory in (WORKSPACE_ROOT, CACHE_ROOT, EXPORTS_DIR):
+        directory.mkdir(parents=True, exist_ok=True)
+
+
+ensure_dirs()
+
+# ---------------------------------------------------------------------------
+# 并发与调度
+# ---------------------------------------------------------------------------
+MAX_CONCURRENT_CONTEXTS = 4        # 常驻 Chromium 最大并发 BrowserContext 槽位
+DOWNLOAD_WORKERS = 16              # CAS 并发下载线程数
+LOG_RING_SIZE = 5000               # SSE 日志环形队列容量
+
+# ---------------------------------------------------------------------------
+# 任务约束
+# ---------------------------------------------------------------------------
+MAX_URLS_PER_BATCH = 50            # 单批次最多提交站点数
+MAX_PAGES_LIMIT = 20               # 同域名爬虫模式下最大子页面数
+REQUEST_TIMEOUT = 20               # 单个上游资源请求超时(秒)
+PAGELOAD_TIMEOUT = 45_000          # Playwright 页面导航超时(毫秒)
+NETWORK_IDLE_TIMEOUT = 9_000       # networkidle 等待上限(毫秒)
+MAX_ASSET_BYTES = 64 * 1024 * 1024     # 单个静态资源体积上限(64MB)
+MAX_ASSETS_PER_TASK = 400          # 单任务最大静态资源条目数
+MAX_MOCK_ENTRIES = 300             # 单任务最大录制 API 条目数
+MAX_MOCK_BODY_BYTES = 2 * 1024 * 1024  # 单个录制响应体上限(2MB)
+MAX_TAPE_BODY_BYTES = 512 * 1024       # VCR 磁带单条响应体上限(512KB)
+MAX_TAPE_TOTAL_BYTES = 16 * 1024 * 1024  # VCR 磁带总体积上限(16MB)
+TAPE_RECORD = True                      # 采集期磁带录制开关(A/B 实验用)
+PROXY_CACHE_MAX_BYTES = 8 * 1024 * 1024   # 反向代理兜底单响应缓存上限(8MB)
+
+# ---------------------------------------------------------------------------
+# 设备视口预设
+# ---------------------------------------------------------------------------
+VIEWPORTS = {
+    "desktop": {"width": 1920, "height": 1080, "device_scale_factor": 1},
+    "laptop": {"width": 1440, "height": 900, "device_scale_factor": 1},
+    "mobile": {"width": 390, "height": 844, "device_scale_factor": 2},
+}
+
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+)
+
+# ---------------------------------------------------------------------------
+# 静态资源分类映射(扩展名 -> 工作空间子目录)
+# ---------------------------------------------------------------------------
+EXT_CATEGORIES = {
+    ".css": "css",
+    ".js": "js", ".mjs": "js", ".cjs": "js",
+    ".woff": "fonts", ".woff2": "fonts", ".ttf": "fonts",
+    ".otf": "fonts", ".eot": "fonts",
+    ".png": "img", ".jpg": "img", ".jpeg": "img", ".gif": "img",
+    ".webp": "img", ".svg": "img", ".ico": "img", ".avif": "img", ".bmp": "img",
+    ".mp4": "media", ".webm": "media", ".mov": "media",
+    ".mp3": "media", ".wav": "media", ".ogg": "media", ".m4a": "media",
+}
+
+CONTENT_TYPE_FALLBACK = {
+    "text/css": ".css",
+    "application/javascript": ".js",
+    "text/javascript": ".js",
+    "font/woff2": ".woff2",
+    "font/woff": ".woff",
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/svg+xml": ".svg",
+    "image/webp": ".webp",
+    "image/x-icon": ".ico",
+    "video/mp4": ".mp4",
+    "audio/mpeg": ".mp3",
+}
+
+# 前端用于展示统计的四类资源桶
+STAT_BUCKETS = ("css", "js", "img", "font", "api")
+
+# ---------------------------------------------------------------------------
+# V4 工程修复参数(Tier 0, 无 AI 参与)
+# ---------------------------------------------------------------------------
+MAX_FRAME_PAGES = 6            # 单任务最多递归克隆的跨域 iframe 子页面数
+MAX_FRAME_DEPTH = 2            # iframe 递归深度上限(主页面为第 0 层)
+RENDER_REPAIR_ROUNDS = 6       # 视觉修复迭代轮数上限
+REPAIR_TIME_BUDGET = 300       # 修复循环时间预算(秒): 快站快修, 慢站限时收敛(P0-A 速度调度)
+AI_TIME_BUDGET = 900           # 含 AI 修复的任务时间预算(秒): 超预算跳过 AI 轮       # 渲染驱动回补循环轮数(本地渲染->收集404->回源补抓);
+                               # Vite/webpack 动态 chunk 是"entry->视图chunk->懒路由->
+                               # 图片"多层依赖链, 每轮只能剥一层, 浅轮数补不到深层资源
+LIVE_HARVEST_MAX = 60          # 活体会话请求差集回补的单轮最大补抓数
+JS_REWRITE_MAX_BYTES = 8 * 1024 * 1024  # 参与本地化重写的单个 JS 文件体积上限
+
+# ---------------------------------------------------------------------------
+# V4 大模型(OpenAI 兼容)配置
+#
+# 优先级: 任务级(UI 提交的 ai_api_key/ai_model/ai_base_url)
+#         > 环境变量(CLONER_AI_KEY / CLONER_AI_MODEL / CLONER_AI_BASE_URL)
+#         > 此处默认值。
+# 视觉闭环修复要求模型具备多模态(图像理解)能力; 未配置 Key 时相关功能
+# 自动跳过, 不影响确定性克隆管线。
+# ---------------------------------------------------------------------------
+AI_API_BASE_URL = os.environ.get("CLONER_AI_BASE_URL", "https://api.deepseek.com/v1")
+AI_API_KEY = os.environ.get("CLONER_AI_KEY", "")
+AI_MODEL = os.environ.get("CLONER_AI_MODEL", "deepseek-v4.1")
+AI_REQUEST_TIMEOUT = 90        # 单次大模型请求超时(秒)
+AI_PATCH_MAX_TOKENS = 8192     # AI 补丁补全预算基档(推理模型的思考 token 计入, 耗尽时自动×2 重试)
+AI_REPAIR_TRIGGER_SCORE = 85.0  # 视觉闭环触发门限: 诚实评分低于此值才调用大模型
+AI_REPAIR_TARGET_SCORE = 90.0   # 修复循环的目标分: 达标即停
+AI_REPAIR_MAX_ROUNDS = 2       # 视觉闭环最大迭代轮数
+AI_VISION_MAX_IMAGE_EDGE = 1280  # 送入大模型前截图最长边压缩上限(像素)
+AI_MOCK_MAX_FORMS = 10         # 智能 Mock 最多生成的表单路由数
+
+# ---------------------------------------------------------------------------
+# V4 仿真交互层(克隆页前端行为模拟)
+# ---------------------------------------------------------------------------
+INTERACTION_SIM = True             # 默认启用: 登录点击提示繁忙 / 验证码 60s 倒计时
+SIM_LOGIN_FAIL_MESSAGES = (        # 登录类点击随机提示池
+    "网络繁忙，请稍后重试",
+    "系统繁忙，请稍后再试",
+    "网络异常，请稍后重试",
+)
+SIM_SMS_SENT_MESSAGE = "验证码已发送，请注意查收"
+SIM_SMS_COUNTDOWN_SECONDS = 60     # 验证码按钮倒计时秒数
+
+# 主服务监听(可用环境变量覆盖, 便于同机并行起多个独立实例, 如 CLONER_PORT=8898)
+HOST = os.environ.get("CLONER_HOST", "127.0.0.1")
+PORT = int(os.environ.get("CLONER_PORT", "8899"))
+
+# 平台对外可达地址(导出工程内埋点引擎的上报回传地址;
+# 留空则用导出时的宿主机局域网推断, 建议部署时显式配置)
+PLATFORM_PUBLIC_URL = os.environ.get("CLONER_PUBLIC_URL", f"http://127.0.0.1:{PORT}")
+
+# 审计日志保留天数(超过自动清理; 0 = 永久保留)
+AUDIT_RETENTION_DAYS = int(os.environ.get("CLONER_AUDIT_RETENTION_DAYS", "90"))
+

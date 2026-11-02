@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+*.db
+*.db-shm
+*.db-wal
+.secret_key
+workspaces/
+exports/
+cache_cas/
+frames/
+logs/
+engine_bench/perf/last_run.json
+engine_bench/perf/history.jsonl
+engine_bench/perf/.fixtures/

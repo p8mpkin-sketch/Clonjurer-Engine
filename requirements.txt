@@ -1,0 +1,7 @@
+flask>=3.0.0
+playwright>=1.44.0
+requests>=2.31.0
+pillow~=13.0.0  # 钉版: 逐值等价闸门依赖 PIL 重采样的字节级稳定(见 engine_bench/perf/REVIEW_2026-11-02.md P1)
+paramiko>=3.4.0
+cryptography>=42.0.0
+numpy~=2.5.0    # 钉版: 同上, 与冻结基线逐值一致需稳定的 numpy
