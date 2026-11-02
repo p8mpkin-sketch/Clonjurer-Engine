@@ -169,11 +169,14 @@ DEEP_FREEZE_JS = r"""
       for (let i = 0; i < rules.length; i++) text += rules[i].cssText + '\n';
       if (!text.trim()) return;
       const base = sheet.href || document.baseURI;
-      text = text.replace(/url\((\s*['"]?)([^'")]+?)(['"]?\s*)\)/g,
-        function (m, q1, u, q2) {
-          u = u.trim();
-          if (/^(data:|blob:|about:|#|https?:)/i.test(u)) return m;
-          try { return 'url(' + q1 + new URL(u, base).href + q2 + ')'; }
+      //    引号内整体匹配: url("data:image/svg+xml,...fill='url(%23id)'...") 外层含单引号时,
+      //    旧正则会钻进 data: 内部把 url(%23id) 改写成远程地址(SVG 渐变失填充 + 无效下载)
+      text = text.replace(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^'")\s]+))\s*\)/g,
+        function (m, d, s1, b) {
+          const q = d !== undefined ? '"' : (s1 !== undefined ? "'" : '');
+          const u = (d !== undefined ? d : (s1 !== undefined ? s1 : b)).trim();
+          if (/^(data:|blob:|about:|#|%23|https?:)/i.test(u)) return m;
+          try { return 'url(' + q + new URL(u, base).href + q + ')'; }
           catch (e) { return m; }
         });
       let media = '';
@@ -1089,7 +1092,7 @@ COLLECT_ASSETS_JS = r"""
   const add = (u) => {
     if (!u) return;
     u = String(u).trim();
-    if (!u || u.startsWith('data:') || u.startsWith('blob:') || u.startsWith('#')
+    if (!u || u.startsWith('data:') || u.startsWith('blob:') || u.startsWith('#') || u.startsWith('%23')
         || u.startsWith('javascript:') || u.startsWith('mailto:') || u.startsWith('tel:')) return;
     try {
       const abs = new URL(u, document.baseURI).href;
@@ -1161,7 +1164,7 @@ IFRAME_EXTRACT_JS = r"""
       const add = (u) => {
         if (!u) return;
         u = String(u).trim();
-        if (!u || u.startsWith('data:') || u.startsWith('blob:') || u.startsWith('#')) return;
+        if (!u || u.startsWith('data:') || u.startsWith('blob:') || u.startsWith('#') || u.startsWith('%23')) return;
         try {
           const a = new URL(u, doc.baseURI || abs.href).href;
           if (a.startsWith('http') && !seen.has(a)) { seen.add(a); urls.push(a); rawRefs.push([u, a]); }

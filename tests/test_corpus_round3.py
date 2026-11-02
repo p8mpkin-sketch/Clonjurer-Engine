@@ -217,6 +217,11 @@ class Utf8CharsetMeta(unittest.TestCase):
         self.assertEqual(out.count("utf-8"), 2)
         self.assertIn("登录", out)
 
+    def test_cssom_rewrite_keeps_data_uri(self):
+        # CSSOM 序列化: 引号内整体匹配, data: SVG 内的 url(%23id) 不被改写(合成页 96.0 -> 100)
+        self.assertIn("%23|https?:", ce.DEEP_FREEZE_JS)
+        self.assertIn("(?:\"([^\"]*)\"|'([^']*)'|", ce.DEEP_FREEZE_JS)
+
     def test_fragment_refs_skipped(self):
         refs = ce.parse_css_refs("a{fill:url(%23SVGabc)} b{background:url(x.png)}",
                                  "https://cn.vuejs.org/assets/s.css")
