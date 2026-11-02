@@ -37,7 +37,8 @@ LOG_RING_SIZE = 5000               # SSE 日志环形队列容量
 # ---------------------------------------------------------------------------
 MAX_URLS_PER_BATCH = 50            # 单批次最多提交站点数
 MAX_PAGES_LIMIT = 20               # 同域名爬虫模式下最大子页面数
-REQUEST_TIMEOUT = 20               # 单个上游资源请求超时(秒)
+REQUEST_TIMEOUT = 20               # 单个上游资源请求超时(秒, 浏览器会话降级为总时长)
+REQUEST_CONNECT_READ = (6, 10)     # requests 直连: (连接, 读空闲) 超时; 读超时按无数据间隔计, 不限大文件总时长
 PAGELOAD_TIMEOUT = 45_000          # Playwright 页面导航超时(毫秒)
 REACHABILITY_PROBE_TIMEOUT = 12_000  # 首导航失败后的网络层可达性探测上限(毫秒)
 AUTO_SCROLL_BUDGET = 25          # 采集期自动滚动总时限(秒)
