@@ -4170,6 +4170,45 @@ class ClonerEngine:
         results.clear()
         results.update(snap["results"])
 
+    CLONE_SCROLL_JS = """async () => {
+        await new Promise(res => {
+            let y = 0;
+            const step = () => {
+                y += 800;
+                window.scrollTo(0, y);
+                if (y < document.body.scrollHeight) setTimeout(step, 60);
+                else { window.scrollTo(0, 0); setTimeout(res, 250); }
+            };
+            step();
+        });
+    }"""
+
+    def _load_clone(self, page, base, phases: bool = False):
+        """克隆页统一加载序列: dcl 锚定 → 短 load → 网络静置封顶 → 滚动 → 缓释。
+
+        首评与像素/布局校准重渲染共用, 保证重评分看到同样被懒加载/IntersectionObserver
+        揭示的内容(此前校准重渲染不滚动, 懒挂载区块在重截图里缺失却仍可能"提分")。
+        """
+        tp = time.monotonic()
+        page.goto(base + self._page_dir + self._page_frag,
+                  wait_until="domcontentloaded", timeout=30000)
+        with suppress(Exception):
+            page.wait_for_load_state("load", timeout=self._strategy_pack.wait_load_timeout)
+        with suppress(Exception):
+            page.wait_for_load_state(
+                "networkidle", timeout=self._strategy_pack.wait_networkidle_timeout)
+        if phases:
+            tp = self._phase("评分-克隆加载", tp)
+        if self._strategy_pack.scroll_pass:
+            # 懒加载触发: 分段滚动到底再回顶, 派发 IntersectionObserver
+            with suppress(Exception):
+                page.evaluate(self.CLONE_SCROLL_JS)
+        if phases:
+            tp = self._phase("评分-克隆滚动", tp)
+        self._settle(page)
+        if phases:
+            self._phase("评分-克隆静置", tp)
+
     def _layout_calibrate(self, page, base, original, cloned, detail, clone_text,
                           orig_text, diff_path):
         """版面块图对齐 → 尺寸覆盖并入校准样式 → 重渲染重评分; 未净提升则整体回滚。"""
@@ -4194,11 +4233,7 @@ class ClonerEngine:
         else:
             doc = self._inject_calib(prev_doc, self._calib_css)
         idx_html.write_text(doc, encoding="utf-8")
-        page.goto(base + self._page_dir + self._page_frag,
-                  wait_until="domcontentloaded", timeout=30000)
-        with suppress(Exception):
-            page.wait_for_load_state("load", timeout=self._strategy_pack.wait_load_timeout)
-        self._settle(page)
+        self._load_clone(page, base)
         self._full_shot(page, cloned, "克隆页")
         clone_text = page.evaluate(TEXT_EXTRACT_JS)
         detail = compute_visual_similarity(
@@ -4599,35 +4634,8 @@ class ClonerEngine:
                 # 混合等待: dcl 锚定(重型站 load 可能超时) → 短 load 等待
                 # (重水合 SPA 需要资源齐) → 网络静置封顶 → 滚动 → 缓释
                 # (W1 起参数由模式策略包供给, 值=现行全局行为)
+                self._load_clone(page, base, phases=True)
                 tp = time.monotonic()
-                page.goto(base + self._page_dir + self._page_frag,
-                          wait_until="domcontentloaded", timeout=30000)
-                with suppress(Exception):
-                    page.wait_for_load_state(
-                        "load", timeout=self._strategy_pack.wait_load_timeout)
-                with suppress(Exception):
-                    page.wait_for_load_state(
-                        "networkidle", timeout=self._strategy_pack.wait_networkidle_timeout)
-                tp = self._phase("评分-克隆加载", tp)
-                if self._strategy_pack.scroll_pass:
-                    # 懒加载触发: 分段滚动到底再回顶, 派发 IntersectionObserver
-                    # (现代站首屏外内容/图片全部懒挂载, 不滚动则永远空白)
-                    with suppress(Exception):
-                        page.evaluate("""async () => {
-                            await new Promise(res => {
-                                let y = 0;
-                                const step = () => {
-                                    y += 800;
-                                    window.scrollTo(0, y);
-                                    if (y < document.body.scrollHeight) setTimeout(step, 60);
-                                    else { window.scrollTo(0, 0); setTimeout(res, 250); }
-                                };
-                                step();
-                            });
-                        }""")
-                tp = self._phase("评分-克隆滚动", tp)
-                self._settle(page)
-                tp = self._phase("评分-克隆静置", tp)
                 self._full_shot(page, self.ws / "cloned_preview.png", "克隆页")
                 clone_text = page.evaluate(TEXT_EXTRACT_JS)
                 (self.ws / "cloned_text.txt").write_text(clone_text or "",
@@ -4706,12 +4714,7 @@ class ClonerEngine:
                                         self._calibrations += 1
                                         self.log("RENDER", f"像素校准: {len(cal_cells)} "
                                                  f"格差 → {len(cal_css.splitlines())} 条覆盖, 重评分")
-                                        page.goto(base + self._page_dir + self._page_frag,
-                                                  wait_until='domcontentloaded', timeout=30000)
-                                        with suppress(Exception):
-                                            page.wait_for_load_state(
-                                                'load', timeout=self._strategy_pack.wait_load_timeout)
-                                        self._settle(page)
+                                        self._load_clone(page, base)
                                         self._full_shot(page, cloned, "克隆页")
                                         clone_text = page.evaluate(TEXT_EXTRACT_JS)
                                         (self.ws / 'cloned_text.txt').write_text(

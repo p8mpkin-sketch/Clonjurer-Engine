@@ -156,6 +156,21 @@ class MediaShotContract(unittest.TestCase):
         self.assertLess(i_media, i_freeze)
 
 
+class CloneLoadShared(unittest.TestCase):
+    """首评与像素/布局校准重渲染共用同一加载序列(含滚动揭示懒加载);
+    此前校准重渲染不滚动, vitejs 框架图标行/头像在重截图里缺失却仍"提分"。"""
+
+    def test_all_renders_use_helper(self):
+        src = Path(ce.__file__).read_text(encoding="utf-8")
+        body = src[src.index("    def _load_clone("):]
+        body = body[:body.index("\n    def ", 10)]
+        self.assertIn("CLONE_SCROLL_JS", body)
+        self.assertIn("networkidle", body)
+        self.assertGreaterEqual(src.count("self._load_clone(page, base"), 3)
+        # 克隆页 goto 只剩 helper 内一处
+        self.assertEqual(src.count("page.goto(base + self._page_dir + self._page_frag"), 1)
+
+
 class EngineLogPersisted(unittest.TestCase):
     """任务日志落盘到工作区 engine.log, 且只追加不抛错。"""
 
