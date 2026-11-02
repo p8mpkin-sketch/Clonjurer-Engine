@@ -63,13 +63,13 @@ jobs:
           j=$(ls -t engine_bench/real_sites/runs/run_*.json 2>/dev/null | head -1)
           # 明细也进日志: 产物存储域名在部分环境不可达, 日志总能读到
           if [ -n "$j" ]; then echo "::group::run json"; cat "$j"; echo "::endgroup::"; fi
-          # 未出分/失败/低于 80 分站点的任务日志(engine.log)尾部进日志, 供远程归因
+          # 未出分/失败/低于 90 分站点的任务日志(engine.log)尾部进日志, 供远程归因
           if [ -n "$j" ]; then
             python - "$j" <<'PY'
           import json, sys, pathlib
           run = json.load(open(sys.argv[1], encoding="utf-8"))
           for r in run.get("results", []):
-              if r.get("status") == "completed" and isinstance(r.get("score"), (int, float)) and r["score"] >= 80:
+              if r.get("status") == "completed" and isinstance(r.get("score"), (int, float)) and r["score"] >= 90:
                   continue
               log = pathlib.Path("workspaces") / str(r.get("task_id")) / "engine.log"
               print(f"::group::engine.log {r.get('url')} ({r.get('status')})")
@@ -77,6 +77,25 @@ jobs:
                       if not any(k in l for k in ("[CAS-", "跳过 http", "] 录制 "))]
               print("\n".join(keep[-250:]) if keep else "(无 engine.log)")
               print("::endgroup::")
+              # 预览缩略图(base64 JPEG)进日志: 产物下载在部分环境不可达, 远程看图归因
+              try:
+                  from PIL import Image
+                  import base64, io
+                  for name in ("original_preview.png", "cloned_preview.png", "fidelity_preview.png"):
+                      f = log.parent / name
+                      if not f.is_file():
+                          continue
+                      im = Image.open(f).convert("RGB")
+                      im = im.resize((480, max(1, round(im.height * 480 / im.width))))
+                      im = im.crop((0, 0, 480, min(im.height, 2400)))
+                      buf = io.BytesIO(); im.save(buf, "JPEG", quality=60)
+                      print(f"::group::shot {r.get('task_id')} {name}")
+                      b64 = base64.b64encode(buf.getvalue()).decode()
+                      for k in range(0, len(b64), 4000):
+                          print("SHOT64:" + b64[k:k + 4000])
+                      print("::endgroup::")
+              except Exception as exc:
+                  print(f"(缩略图失败: {exc})")
           PY
           fi
       - name: 上传报告与实例日志
