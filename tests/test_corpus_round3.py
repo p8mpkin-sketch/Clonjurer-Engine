@@ -228,6 +228,23 @@ class Utf8CharsetMeta(unittest.TestCase):
         self.assertEqual([r for r, _ in refs], ["x.png"])
 
 
+class TimeFreezeOrder(unittest.TestCase):
+    """时间冻结在基准截图之前、相位固化在其后且早于 DEEP_FREEZE; 评分加载序列做相位对齐。"""
+
+    def test_order(self):
+        src = Path(ce.__file__).read_text(encoding="utf-8")
+        i_frz = src.index("frz = _safe_eval(TIME_FREEZE_JS)")
+        i_shot = src.index('self._full_shot(page, self.ws / "original_preview.png"')
+        i_ph = src.index("n_ph = _safe_eval(ANIM_PHASE_JS)")
+        i_deep = src.index("counts = _safe_eval(DEEP_FREEZE_JS)")
+        self.assertLess(i_frz, i_shot)
+        self.assertLess(i_shot, i_ph)
+        self.assertLess(i_ph, i_deep)
+        body = src[src.index("    def _load_clone("):]
+        body = body[:body.index("\n    def ", 10)]
+        self.assertIn("ANIM_ALIGN_JS", body)
+
+
 class EngineLogPersisted(unittest.TestCase):
     """任务日志落盘到工作区 engine.log, 且只追加不抛错。"""
 

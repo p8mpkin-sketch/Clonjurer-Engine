@@ -1018,6 +1018,77 @@ PAGE_PROBE_JS = r"""
 }
 """
 
+# 时间冻结(基准截图前): 暂停全部 CSS/WAAPI 动画并清空页面定时器、停掉 rAF。
+# 不改变当前画面, 只让"截图那一刻"一直保持到 DOM 序列化 —— 否则轮播/跑马灯在
+# 截图与序列化之间继续前进, 克隆从另一个时刻起步(nuxt 案例墙错一屏、logo 带错相位)。
+TIME_FREEZE_JS = r"""
+() => {
+  const out = {anims: 0, timers: 0};
+  try {
+    for (const a of document.getAnimations()) {
+      if (a.playState === 'running') { a.pause(); out.anims++; }
+    }
+  } catch (e) {}
+  try {
+    const maxId = setTimeout(function () {}, 0);
+    for (let i = 1; i <= maxId; i++) { clearTimeout(i); clearInterval(i); }
+    out.timers = maxId;
+  } catch (e) {}
+  try { window.requestAnimationFrame = function () { return 0; }; } catch (e) {}
+  return out;
+}
+"""
+
+# 动画相位固化(基准截图后、DEEP_FREEZE 前): 把每个元素 CSS 动画的当前进度写成
+# 负 animation-delay, 克隆页加载即从截图那一刻的相位起播; 并打 data-clone-anim
+# 标记, 评分侧据此把相位对齐到同一时刻再截图(见 ANIM_ALIGN_JS)。
+ANIM_PHASE_JS = r"""
+() => {
+  let n = 0;
+  const toMs = (v) => { v = (v || '0s').trim(); const f = parseFloat(v) || 0;
+                        return v.endsWith('ms') ? f : f * 1000; };
+  for (const el of document.querySelectorAll('*')) {
+    let anims;
+    try {
+      anims = el.getAnimations().filter(a => a.animationName && a.effect &&
+                                             !a.effect.pseudoElement && a.currentTime != null);
+    } catch (e) { continue; }
+    if (!anims.length) continue;
+    try {
+      const cs = getComputedStyle(el);
+      const names = cs.animationName.split(',').map(x => x.trim());
+      const delays = cs.animationDelay.split(',');
+      const vals = names.map((nm, i) => {
+        const d0 = toMs(delays[i % delays.length]);
+        const a = anims.find(x => x.animationName === nm);
+        return a ? Math.round(d0 - a.currentTime) + 'ms' : d0 + 'ms';
+      });
+      el.style.setProperty('animation-delay', vals.join(', '), 'important');
+      el.setAttribute('data-clone-anim', '1');
+      n++;
+    } catch (e) {}
+  }
+  return n;
+}
+"""
+
+# 评分侧相位对齐: 带 data-clone-anim 的动画回到起播相位(= 原站截图时刻)并暂停,
+# 比较的是同一时刻的两张图; 交付的克隆页本身照常播放。
+ANIM_ALIGN_JS = r"""
+() => {
+  let n = 0;
+  for (const el of document.querySelectorAll('[data-clone-anim]')) {
+    try {
+      for (const a of el.getAnimations()) {
+        if (!a.animationName) continue;
+        a.currentTime = 0; a.pause(); n++;
+      }
+    } catch (e) {}
+  }
+  return n;
+}
+"""
+
 # 可见文本采集(含同源 iframe 内容, 保证克隆/原站两侧口径一致)
 # 自适应缓释(三段式, 全部为同步脚本 + 受时限的 wait_for_function):
 # 不能用"evaluate 一个 async Promise"实现 —— MHTML 保真轨页面脚本被禁用, 其
@@ -3347,12 +3418,21 @@ class ClonerEngine:
             layout_pre = None
             with suppress(Exception):
                 layout_pre = _safe_eval(f"() => ({LAYOUT_MAP_JS})({LAYOUT_MAP_MAX})")
+            with suppress(Exception):
+                frz = _safe_eval(TIME_FREEZE_JS)
+                if frz.get("anims"):
+                    self.log("RENDER", f"时间冻结: 暂停 {frz['anims']} 个动画, "
+                                       f"清空定时器 {frz.get('timers', 0)} 个")
             try:
                 self._full_shot(page, self.ws / "original_preview.png", "原站")
                 baseline_text = _safe_eval(TEXT_EXTRACT_JS)
                 self.log("RENDER", "原站纯净基准快照已保存(DOM 改动前)")
             except Exception as exc:
                 self.log("WARN", f"原站截图失败: {exc}")
+            with suppress(Exception):
+                n_ph = _safe_eval(ANIM_PHASE_JS)
+                if n_ph:
+                    self.log("RENDER", f"动画相位固化: {n_ph} 个元素按截图时刻起播")
         if screenshot and layout_pre and (self.ws / "original_preview.png").is_file():
             # 截图前后各采一次, 只留尺寸未变的块: 动画/逐帧增长的块真实基准高度不可知,
             # 拿它校准只会把克隆拉向另一个时刻
@@ -4366,6 +4446,8 @@ class ClonerEngine:
         if phases:
             tp = self._phase("评分-克隆滚动", tp)
         self._settle(page)
+        with suppress(Exception):
+            page.evaluate(ANIM_ALIGN_JS)
         if phases:
             self._phase("评分-克隆静置", tp)
 
