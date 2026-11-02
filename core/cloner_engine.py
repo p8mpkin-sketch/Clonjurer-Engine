@@ -2364,6 +2364,23 @@ class ClonerEngine:
         self._page_frag = ("#" + parts.fragment) if parts.fragment else ""
         return parts
 
+    def _full_shot(self, page, path, label="截图"):
+        """整页截图; 失败(超高页/滚动动画导致超时)时退化为限高裁剪截图。
+        评分只取等比缩放后前 SCORE_MAX_HEIGHT 像素, 限高覆盖评分全部区域, 口径不变。"""
+        try:
+            page.screenshot(path=str(path), full_page=True, timeout=config.SHOT_TIMEOUT)
+            return
+        except Exception as exc:
+            self.log("WARN", f"{label}整页截图失败, 退化为限高截图: {str(exc)[:160]}")
+        dims = page.evaluate("() => [document.documentElement.clientWidth || innerWidth, "
+                             "Math.max(document.documentElement.scrollHeight, "
+                             "document.body ? document.body.scrollHeight : 0, innerHeight)]")
+        w = max(1, int(dims[0]))
+        cap = int(SCORE_MAX_HEIGHT * w / SCORE_WIDTH)
+        page.screenshot(path=str(path), full_page=True, animations="disabled",
+                        clip={"x": 0, "y": 0, "width": w, "height": max(1, min(int(dims[1]), cap))},
+                        timeout=config.SHOT_TIMEOUT)
+
     def _settle(self, page, cap_ms: int = None, quiet_ms: int = None):
         """截图前缓释: DOM 静置即走(MutationObserver), settle_ms 只是上限。
         旧实现固定睡满 settle_ms(2.5s), 每轮渲染/校准/保真轨都付一次。"""
@@ -2912,7 +2929,7 @@ class ClonerEngine:
             with suppress(OSError):   # 重建/重试: 清掉上一轮基准, 防口径混用
                 (self.ws / "original_preview.png").unlink()
             try:
-                page.screenshot(path=str(self.ws / "original_preview.png"), full_page=True)
+                self._full_shot(page, self.ws / "original_preview.png", "原站")
                 baseline_text = _safe_eval(TEXT_EXTRACT_JS)
                 self.log("RENDER", "原站纯净基准快照已保存(DOM 改动前)")
             except Exception as exc:
@@ -2991,7 +3008,7 @@ class ClonerEngine:
         if screenshot and not (self.ws / "original_preview.png").is_file():
             # 基准截图失败时的兜底(改动后截图, 记日志以便账本区分口径)
             try:
-                page.screenshot(path=str(self.ws / "original_preview.png"), full_page=True)
+                self._full_shot(page, self.ws / "original_preview.png", "原站")
                 self.log("WARN", "原站基准快照回退为改动后截图(口径偏乐观)")
             except Exception as exc:
                 self.log("WARN", f"原站截图失败: {exc}")
@@ -4123,7 +4140,7 @@ class ClonerEngine:
                             });
                         }""")
                 self._settle(page)
-                page.screenshot(path=str(self.ws / "cloned_preview.png"), full_page=True)
+                self._full_shot(page, self.ws / "cloned_preview.png", "克隆页")
                 clone_text = page.evaluate(TEXT_EXTRACT_JS)
                 (self.ws / "cloned_text.txt").write_text(clone_text or "",
                                                          encoding="utf-8")
@@ -4143,8 +4160,7 @@ class ClonerEngine:
                                    wait_until='load', timeout=30000)
                         with suppress(Exception):
                             self._settle(fpage, cap_ms=2000)
-                        fpage.screenshot(path=str(self.ws / 'fidelity_preview.png'),
-                                         full_page=True)
+                        self._full_shot(fpage, self.ws / 'fidelity_preview.png', "保真轨")
                         f_text = fpage.evaluate(TEXT_EXTRACT_JS)
                         (self.ws / 'fidelity_text.txt').write_text(
                             f_text or '', encoding='utf-8')
@@ -4156,8 +4172,7 @@ class ClonerEngine:
             except Exception as exc:
                 self.log("WARN", f"克隆页渲染失败: {exc}")
                 with suppress(Exception):
-                    page.screenshot(path=str(self.ws / "cloned_preview.png"),
-                                    full_page=True)
+                    self._full_shot(page, self.ws / "cloned_preview.png", "克隆页")
                 clone_text = ""
             remote_missing.discard("")
             # 页面/沙盒在评分与 A1 校准全程保持存活(校准需在活页上 elementFromPoint
@@ -4223,7 +4238,7 @@ class ClonerEngine:
                                             page.wait_for_load_state(
                                                 'load', timeout=self._strategy_pack.wait_load_timeout)
                                         self._settle(page)
-                                        page.screenshot(path=str(cloned), full_page=True)
+                                        self._full_shot(page, cloned, "克隆页")
                                         clone_text = page.evaluate(TEXT_EXTRACT_JS)
                                         (self.ws / 'cloned_text.txt').write_text(
                                             clone_text or '', encoding='utf-8')

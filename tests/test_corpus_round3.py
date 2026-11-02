@@ -149,7 +149,7 @@ class MediaShotContract(unittest.TestCase):
         self.assertIn("poster", ce.MEDIA_SHOT_APPLY_JS)
         src = Path(ce.__file__).read_text(encoding="utf-8")
         # 必须在纯净基准截图之后、DEEP_FREEZE 之前
-        i_shot = src.index('page.screenshot(path=str(self.ws / "original_preview.png")')
+        i_shot = src.index('self._full_shot(page, self.ws / "original_preview.png"')
         i_media = src.index("self._freeze_media_from_baseline(page)")
         i_freeze = src.index("counts = _safe_eval(DEEP_FREEZE_JS)")
         self.assertLess(i_shot, i_media)
@@ -181,3 +181,52 @@ class EngineLogPersisted(unittest.TestCase):
         self.assertIn("[采集] 第一行", text)
         self.assertIn("[评分] 第二行", text)
         self.assertEqual(len(eng.bus.items), 2)
+
+
+class FullShotFallback(unittest.TestCase):
+    """整页截图失败时退化为限高截图, 高度覆盖评分区域且不超过页面实际高度。"""
+
+    def _engine(self):
+        from core.cloner_engine import ClonerEngine
+        eng = ClonerEngine.__new__(ClonerEngine)
+        eng.logs = []
+        eng.log = lambda stage, msg: eng.logs.append((stage, msg))
+        return eng
+
+    def test_fallback_clip(self):
+        from core.cloner_engine import SCORE_MAX_HEIGHT, SCORE_WIDTH
+
+        class _Page:
+            def __init__(self, doc_h):
+                self.calls, self.doc_h = [], doc_h
+
+            def screenshot(self, **kw):
+                self.calls.append(kw)
+                if len(self.calls) == 1:
+                    raise TimeoutError("Timeout 30000ms exceeded")
+
+            def evaluate(self, _js):
+                return [1280, self.doc_h]
+
+        eng = self._engine()
+        tall = _Page(90000)
+        eng._full_shot(tall, "/tmp/x.png", "原站")
+        clip = tall.calls[1]["clip"]
+        self.assertEqual(clip["width"], 1280)
+        self.assertEqual(clip["height"], int(SCORE_MAX_HEIGHT * 1280 / SCORE_WIDTH))
+        self.assertTrue(eng.logs and "退化" in eng.logs[0][1])
+        short = _Page(3000)
+        eng._full_shot(short, "/tmp/x.png")
+        self.assertEqual(short.calls[1]["clip"]["height"], 3000)
+
+    def test_success_no_fallback(self):
+        class _Page:
+            calls = 0
+
+            def screenshot(self, **kw):
+                _Page.calls += 1
+
+        eng = self._engine()
+        eng._full_shot(_Page(), "/tmp/x.png")
+        self.assertEqual(_Page.calls, 1)
+        self.assertEqual(eng.logs, [])
