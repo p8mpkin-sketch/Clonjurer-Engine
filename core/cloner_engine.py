@@ -1050,8 +1050,11 @@ ANIM_PHASE_JS = r"""
   for (const el of document.querySelectorAll('*')) {
     let anims;
     try {
+      // 只处理文档时间线上的动画: 滚动驱动(scroll()/view() 时间线)的进度由滚动位置决定,
+      // currentTime 是百分比, 写成 delay 或对齐都会错
       anims = el.getAnimations().filter(a => a.animationName && a.effect &&
-                                             !a.effect.pseudoElement && a.currentTime != null);
+                                             a.timeline === document.timeline &&
+                                             !a.effect.pseudoElement && typeof a.currentTime === 'number');
     } catch (e) { continue; }
     if (!anims.length) continue;
     try {
@@ -1080,7 +1083,7 @@ ANIM_ALIGN_JS = r"""
   for (const el of document.querySelectorAll('[data-clone-anim]')) {
     try {
       for (const a of el.getAnimations()) {
-        if (!a.animationName) continue;
+        if (!a.animationName || a.timeline !== document.timeline) continue;
         a.currentTime = 0; a.pause(); n++;
       }
     } catch (e) {}
