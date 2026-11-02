@@ -1438,9 +1438,9 @@ FIRST_SEGMENT_WEIGHT = 2.0   # 首段(首屏区域)权重
 
 _PRIO_EXT = {
     ".css": 0,
-    ".woff2": 1, ".woff": 1, ".ttf": 1, ".otf": 1, ".eot": 1,
-    ".png": 2, ".jpg": 2, ".jpeg": 2, ".gif": 2, ".webp": 2, ".avif": 2, ".svg": 2,
-    ".ico": 2, ".bmp": 2, ".mp4": 2, ".webm": 2, ".mp3": 2, ".ogg": 2,
+    ".png": 1, ".jpg": 1, ".jpeg": 1, ".gif": 1, ".webp": 1, ".avif": 1, ".svg": 1,
+    ".ico": 1, ".bmp": 1, ".mp4": 1, ".webm": 1, ".mp3": 1, ".ogg": 1,
+    ".woff2": 3, ".woff": 3, ".ttf": 3, ".otf": 3, ".eot": 3,
     ".js": 4, ".mjs": 4, ".cjs": 4, ".map": 5,
 }
 
@@ -1456,12 +1456,29 @@ def _frame_bounced(src: str, final: str, target: str) -> bool:
     return norm(b) == norm(t) and norm(a) != norm(t)
 
 
-def _asset_priority(url: str):
-    """下载排队键: (类型优先级, URL)。无扩展名/未知类型(图片 CDN 常见)排在脚本之前。"""
+def _match_live_frame(src: str, live_frames: dict):
+    """按 src 找宿主活体页里的子 frame DOM: 先全等, 再按主机+路径(frame 内可能改了查询串)。"""
+    if src in live_frames:
+        return live_frames[src]
+    a = urlsplit(src)
+    for u, html in live_frames.items():
+        b = urlsplit(u)
+        if (a.hostname or "").lower() == (b.hostname or "").lower() and \
+                a.path.rstrip("/") == b.path.rstrip("/"):
+            return html
+    return None
+
+
+def _asset_priority(url: str, live=()):
+    """下载排队键: (未被活体加载, 类型优先级, URL)。
+
+    活体渲染期浏览器真实加载过的资源最先; 其次 样式→图片/媒体→未知(图片 CDN 常见)
+    →字体→脚本。字体排在图片后: 中文站单个 CSS 可声明数百个 @font-face 切片
+    (多格式兜底), 若先于图片会吃光条目上限、首屏大图全空。"""
     path = urlsplit(url).path.lower()
     dot = path.rfind(".")
     ext = path[dot:] if dot > path.rfind("/") else ""
-    return (_PRIO_EXT.get(ext, 3), url)
+    return (0 if url in live else 1, _PRIO_EXT.get(ext, 2), url)
 
 
 def _fit_width(im, width=SCORE_WIDTH, max_h=SCORE_MAX_HEIGHT):
@@ -3413,6 +3430,14 @@ class ClonerEngine:
         collected = _safe_eval(COLLECT_ASSETS_JS)
         iframes = _safe_eval(IFRAME_EXTRACT_JS)
         iframe_srcs = _safe_eval(IFRAME_SRCS_JS)
+        # 活体子 frame 的 DOM(含跨域 OOPIF, Playwright 不受同源限制): 供顶级导航被
+        # 弹回宿主时兜底固化 —— 登录/SSO 组件只有嵌在宿主里才渲染自身
+        live_frames = {}
+        if iframe_srcs:
+            for fr in page.frames[1:1 + config.MAX_FRAME_PAGES * 2]:
+                with suppress(Exception):
+                    if fr.url.startswith(("http://", "https://")):
+                        live_frames[fr.url] = fr.content()
         links = _safe_eval(COLLECT_LINKS_JS) if collect_links else []
         if collect_links:
             self.log("CRAWL", f"发现 {len(links)} 个同域候选链接")
@@ -3434,6 +3459,7 @@ class ClonerEngine:
                 "html": html, "text": text, "urls": collected["urls"],
                 "srcsets": collected["srcsets"], "rawRefs": collected["rawRefs"],
                 "links": links, "iframes": iframes, "iframe_srcs": iframe_srcs,
+                "live_frames": live_frames,
                 "state": state}
 
     def _auto_settle_update_prompt(self, page, max_rounds: int = 2):
@@ -3521,9 +3547,16 @@ class ClonerEngine:
                 continue
             if _frame_bounced(src, sub.get("final_url") or src, target_url):
                 # 登录/SSO 组件发现自己不在 iframe 里会按 ReturnUrl 跳回宿主页: 固化下来的
-                # 是宿主首页而非组件(jd 登录弹层里塞进了一个缩小的京东首页)。保留原 src。
-                self.log("WARN", f"iframe 顶级导航被重定向({src[:80]} → "
-                                 f"{(sub.get('final_url') or '')[:80]}), 不固化")
+                # 是宿主首页而非组件(jd 登录弹层里塞进了一个缩小的京东首页)。
+                # 改取宿主活体页里该 frame 的 DOM; 取不到则保留原 src 不固化。
+                live_html = _match_live_frame(src, page_result.get("live_frames") or {})
+                if live_html:
+                    out_frames.append((src, live_html, ""))
+                    self.log("RENDER", f"iframe 顶级导航被重定向, 改用宿主内活体 frame DOM "
+                                       f"固化: {src[:100]}")
+                else:
+                    self.log("WARN", f"iframe 顶级导航被重定向({src[:80]} → "
+                                     f"{(sub.get('final_url') or '')[:80]}), 不固化")
                 continue
             merge_assets(sub)
             out_frames.append((src, sub["html"], sub.get("text") or ""))
@@ -3654,7 +3687,8 @@ class ClonerEngine:
             seeded.update(self._variants(url, page_netloc))
         # 名额优先级: 样式/字体/图片/媒体先排, 脚本最后(单任务条目上限下, 字母序曾让
         # 数百个同源 JS 分包吃光名额而图片 0 张; 且应用脚本多半会被水合剥离)
-        for url in sorted(assets, key=_asset_priority):
+        live = getattr(self, "_live_seen", None) or {}
+        for url in sorted(assets, key=lambda u: _asset_priority(u, live)):
             if url.startswith(("http://", "https://")) and url not in seeded:
                 jobs.append({"url": url, "referer": origin + "/"})
         seen = set(seeded)
@@ -3708,9 +3742,10 @@ class ClonerEngine:
                         css_refs[out["url"]] = refs
                         for raw, absolute in refs:
                             if absolute not in seen:
-                                # 样式内引用(字体/背景图)插队到脚本之前
+                                # 样式内引用: 活体加载过的或图片插队; 未用到的字体切片排队尾
                                 job2 = {"url": absolute, "referer": out["url"]}
-                                if _asset_priority(absolute)[0] < 4:
+                                pr = _asset_priority(absolute, live)
+                                if pr[0] == 0 or pr[1] <= 1:
                                     jobs.appendleft(job2)
                                 else:
                                     jobs.append(job2)
