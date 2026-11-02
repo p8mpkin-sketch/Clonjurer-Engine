@@ -2250,6 +2250,7 @@ class ClonerEngine:
         self._fidelity_score = None           # N1 保真轨评分(双轨取优用)
         self._fidelity_rendered = False      # 保真轨 MHTML 已渲染(每任务一次)
         self._calibrations = 0               # A1 像素校准执行次数
+        self._phase_acc = {}                 # 子阶段累计耗时(秒): 提速定位用
         self._calib_css = ""                 # A1 校准覆盖(跨修复轮持久, _localize 注入)
         self._captured_at = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
         self._net_tape = []              # VCR 网络磁带(W2): XHR/fetch 全量文本响应
@@ -2279,6 +2280,17 @@ class ClonerEngine:
             if not self._timeline or self._timeline[-1][0] != stage:
                 self._timeline.append((stage, time.monotonic()))
         self.db.update_task(self.task_id, **fields)
+
+    def _phase(self, name: str, t0: float) -> float:
+        """子阶段计时: 把 t0 起的耗时累加到 name, 返回当前时刻供下一段接力。"""
+        now = time.monotonic()
+        acc = getattr(self, "_phase_acc", None)
+        if acc is not None:
+            acc[name] = acc.get(name, 0.0) + (now - t0)
+        return now
+
+    def _phase_times(self) -> dict:
+        return {k: round(v, 1) for k, v in getattr(self, "_phase_acc", {}).items()}
 
     def _stage_times(self) -> dict:
         """阶段耗时(秒, 1 位小数), 按出现顺序; 真实语料跑分用它定位时间去哪了。"""
@@ -2585,11 +2597,13 @@ class ClonerEngine:
                     break
                 self._set(progress=62 + round_i * 6,
                           stage="资源重写" if round_i == 0 else f"修复循环第{round_i + 1}轮")
+                tp = time.monotonic()
                 pairs = self._compose_pairs(results, routes, origin, srcset_map,
                                             iframe_pages, frame_records)
                 self._localize(pages, iframe_pages, frame_records, pairs, pages_map)
                 self._rewrite_js_files(results, pairs)
                 self._rewrite_mock_bodies(mock_entries, pairs)
+                self._phase("本地化重写", tp)
                 if not want_score:
                     break
                 detail, failed_local, remote_missing = render_and_score()
@@ -2621,8 +2635,10 @@ class ClonerEngine:
                              f"仍有 {len(failed_local) + len(remote_missing)} 个本地缺失资源"
                              f"(回补轮数已用尽): {sorted(failed_local | {urlsplit(u).path for u in remote_missing})[:6]}")
                     break
+                tp = time.monotonic()
                 new, shadows = self._failed_backfill(ctx, failed_local,
                                                     remote_missing, results, origin)
+                self._phase("修复回补下载", tp)
                 if not new and not shadows:
                     break
                 results.update(new)
@@ -2745,6 +2761,7 @@ class ClonerEngine:
         stats["pattern_features"] = list(self._pattern_info.get("features", []) or [])
         stats["calibrations"] = self._calibrations
         stats["stage_times"] = self._stage_times()
+        stats["phase_times"] = self._phase_times()
         stats["elapsed_s"] = round(sum(stats["stage_times"].values()), 1)
         # 双轨取优: 引擎能力 = max(交互轨重演, 保真轨 MHTML 确定性渲染)。
         # 两轨是同一采集的两个交付物, 取更能保真者作为任务还原度。
@@ -2862,7 +2879,7 @@ class ClonerEngine:
             page.on("response", self._on_response)
         page.on("response", self._on_asset_response)  # 活体资源采集(恒开)
         self.log("RENDER", f"导航 {url}")
-        t_nav = time.time()
+        t_nav, t_nav_m = time.time(), time.monotonic()
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=config.PAGELOAD_TIMEOUT)
         except Exception as exc:
@@ -2884,6 +2901,7 @@ class ClonerEngine:
         except Exception:
             self.log("RENDER", "networkidle 等待超时, 继续后续固化流程")
         self.log("RENDER", f"页面就绪 {time.time() - t_nav:.1f}s")
+        tp = self._phase("采集-导航", t_nav_m)
         self._auto_settle_update_prompt(page)
         # 采集期主框架导航冻结: wikipedia 等站在固化序列中途自导航
         # (重定向/落地切换)会撕裂 evaluate 会话("Execution context
@@ -2924,6 +2942,7 @@ class ClonerEngine:
             self.log("RENDER", f"触发 {lazy_count} 个懒加载资源")
         self._auto_scroll(page)
         self.log("RENDER", f"懒加载与滚动完成 {time.time() - t_nav:.1f}s")
+        tp = self._phase("采集-懒加载滚动", tp)
         # 评分基准(纯净原站): 必须在任何引擎 DOM 改动(表单激活/DEEP_FREEZE/
         # 水合剥离/字体烘焙)之前截取 —— 否则评分比较的是"克隆 vs 引擎改过的
         # 原站", 引擎自身引入的失真被基准同步吸收, 分数系统性偏乐观。
@@ -2937,6 +2956,7 @@ class ClonerEngine:
                 self.log("RENDER", "原站纯净基准快照已保存(DOM 改动前)")
             except Exception as exc:
                 self.log("WARN", f"原站截图失败: {exc}")
+        tp = self._phase("采集-基准截图", tp)
         if screenshot and (self.ws / "original_preview.png").is_file():
             self._freeze_media_from_baseline(page)
         activated = _safe_eval(FORM_ACTIVATE_JS)
@@ -3015,6 +3035,7 @@ class ClonerEngine:
                 self.log("WARN", "原站基准快照回退为改动后截图(口径偏乐观)")
             except Exception as exc:
                 self.log("WARN", f"原站截图失败: {exc}")
+        tp = self._phase("采集-固化", tp)
         collected = _safe_eval(COLLECT_ASSETS_JS)
         iframes = _safe_eval(IFRAME_EXTRACT_JS)
         iframe_srcs = _safe_eval(IFRAME_SRCS_JS)
@@ -3029,6 +3050,7 @@ class ClonerEngine:
                          "session": storage.get("session", {})}
             except Exception as exc:
                 self.log("WARN", f"状态快照失败: {exc}")
+        self._phase("采集-收尾", tp)
         with suppress(Exception):
             page.close()
         return {"html": html, "text": text, "urls": collected["urls"],
@@ -4118,6 +4140,7 @@ class ClonerEngine:
                 # 混合等待: dcl 锚定(重型站 load 可能超时) → 短 load 等待
                 # (重水合 SPA 需要资源齐) → 网络静置封顶 → 滚动 → 缓释
                 # (W1 起参数由模式策略包供给, 值=现行全局行为)
+                tp = time.monotonic()
                 page.goto(base + self._page_dir + self._page_frag,
                           wait_until="domcontentloaded", timeout=30000)
                 with suppress(Exception):
@@ -4126,6 +4149,7 @@ class ClonerEngine:
                 with suppress(Exception):
                     page.wait_for_load_state(
                         "networkidle", timeout=self._strategy_pack.wait_networkidle_timeout)
+                tp = self._phase("评分-克隆加载", tp)
                 if self._strategy_pack.scroll_pass:
                     # 懒加载触发: 分段滚动到底再回顶, 派发 IntersectionObserver
                     # (现代站首屏外内容/图片全部懒挂载, 不滚动则永远空白)
@@ -4142,11 +4166,14 @@ class ClonerEngine:
                                 step();
                             });
                         }""")
+                tp = self._phase("评分-克隆滚动", tp)
                 self._settle(page)
+                tp = self._phase("评分-克隆静置", tp)
                 self._full_shot(page, self.ws / "cloned_preview.png", "克隆页")
                 clone_text = page.evaluate(TEXT_EXTRACT_JS)
                 (self.ws / "cloned_text.txt").write_text(clone_text or "",
                                                          encoding="utf-8")
+                tp = self._phase("评分-克隆截图", tp)
                 # N1 保真轨: MHTML 确定性渲染(Chromium 对 MHTML 默认禁脚本),
                 # 与交互轨分开评分 —— 回放保真由构造保证。
                 # MHTML 不随修复循环变化 → 每任务只渲染/评分一次(速度)
@@ -4154,6 +4181,7 @@ class ClonerEngine:
                     self._fidelity_rendered = True
                     with suppress(OSError):   # 防上一轮/重建残留截图被误评
                         (self.ws / 'fidelity_preview.png').unlink()
+                    t_fid = time.monotonic()
                     fpage = ctx.new_page()
                     try:
                         # 离线守卫: 归档内资源由 Chromium 直接供给(不经网络层),
@@ -4172,6 +4200,7 @@ class ClonerEngine:
                     finally:
                         with suppress(Exception):
                             fpage.close()
+                        self._phase("评分-保真轨渲染", t_fid)
             except Exception as exc:
                 self.log("WARN", f"克隆页渲染失败: {exc}")
                 with suppress(Exception):
@@ -4188,10 +4217,12 @@ class ClonerEngine:
                 try:
                     orig_text = (self.ws / "original_text.txt").read_text(
                         encoding="utf-8", errors="replace") if (self.ws / "original_text.txt").is_file() else ""
+                    tp = time.monotonic()
                     detail = compute_visual_similarity(
                         original, cloned, diff_path=diff_path,
                         orig_text=orig_text, clone_text=clone_text or "",
                         prime_calibration=self._calibrations < 2)
+                    tp = self._phase("评分-计算", tp)
                     # A1 完整版: 像素差分 → 元素映射 → CSS 覆盖合成(确定性校准闭环)。
                     # 网格差分定位色差格(原站侧纯色格才取), elementFromPoint 映射到
                     # 克隆 DOM 元素, 以原站格色生成覆盖 —— 注入后重渲染重评分一轮。
@@ -4264,6 +4295,7 @@ class ClonerEngine:
                                             self._calibrations = 2   # 不再尝试
                         except Exception as exc:
                             self.log('WARN', f'像素校准失败: {exc}')
+                        tp = self._phase("评分-像素校准", tp)
                     # N1 保真轨评分: MHTML 确定性渲染 vs 原站(独立于交互轨)
                     fid_png = self.ws / 'fidelity_preview.png'
                     fid_txt = self.ws / 'fidelity_text.txt'
@@ -4275,6 +4307,7 @@ class ClonerEngine:
                                 orig_text=orig_text,
                                 clone_text=fid_txt.read_text(errors='replace'))
                             self._fidelity_score = f_detail.get('score')
+                            tp = self._phase("评分-计算", tp)
                             self.log("RENDER",
                                      f"保真轨评分: {self._fidelity_score} "
                                      f"(交互轨: {detail.get('score')})")

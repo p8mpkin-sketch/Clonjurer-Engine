@@ -212,6 +212,7 @@ def run(args):
             "api": stats.get("api"),
             "elapsed_s": stats.get("elapsed_s") or _elapsed_from_ts(task),
             "stage_times": stage_times,
+            "phase_times": stats.get("phase_times") or {},
             "has_ai_report": bool(task.get("has_ai_report")),
             "failure": failure,
             "error": (task.get("error_msg") or "")[:300],
@@ -312,6 +313,19 @@ def _report(out, prev_name, prev):
         for r in out["results"]:
             st = r["stage_times"] or {}
             lines.append(f"| {r['url']} | " + " | ".join(_fmt(st.get(k)) for k in stages) + " |")
+    phases = []
+    for r in out["results"]:
+        for k in (r.get("phase_times") or {}):
+            if k not in phases:
+                phases.append(k)
+    if phases:
+        lines += ["", "## 子阶段耗时(秒)", "",
+                  "| 站点 | " + " | ".join(phases) + " |", "|---|" + "---|" * len(phases)]
+        for r in out["results"]:
+            pt = r.get("phase_times") or {}
+            lines.append(f"| {r['url']} | " + " | ".join(_fmt(pt.get(k)) for k in phases) + " |")
+        sums = {k: sum((r.get("phase_times") or {}).get(k) or 0 for r in out["results"]) for k in phases}
+        lines.append("| **合计** | " + " | ".join(f"{sums[k]:.0f}" for k in phases) + " |")
     lines += ["", "## 识别明细", ""]
     for r in out["results"]:
         lines.append(f"- {r['url']}: {r['detected'] or '-'} (置信 {_fmt(r['confidence'], 2)}; "
