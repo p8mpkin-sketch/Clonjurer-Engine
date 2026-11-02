@@ -1182,13 +1182,48 @@ IFRAME_SRCS_JS = r"""
     try {
       const r = f.getBoundingClientRect();
       const cs = getComputedStyle(f);
-      if (r.width <= 2 || r.height <= 2 || cs.display === 'none' || cs.visibility === 'hidden') return;
+      if (r.width <= 2 || r.height <= 2 || f.clientWidth <= 2 || f.clientHeight <= 2 || cs.display === 'none' || cs.visibility === 'hidden') return;
     } catch (e) {}
     try { out.push(new URL(raw, location.href).href); } catch (e) {}
   });
   return out.slice(0, 10);
 }
 """
+
+# 不可见 iframe(与 IFRAME_SRCS_JS 同口径)打标: 它们不固化, 若保留活体 src, 克隆每次渲染
+# 都会经反代/直连加载埋点沙盒(Shopify web-pixels 等), 同源进程内跑脚本拖垮评分渲染
+MARK_HIDDEN_FRAMES_JS = r"""
+() => {
+  let n = 0;
+  document.querySelectorAll('iframe[src]').forEach(f => {
+    const raw = f.getAttribute('src') || '';
+    if (!raw || /^(about:|javascript:|data:)/i.test(raw)) return;
+    try {
+      const r = f.getBoundingClientRect();
+      const cs = getComputedStyle(f);
+      if (r.width <= 2 || r.height <= 2 || f.clientWidth <= 2 || f.clientHeight <= 2 || cs.display === 'none' || cs.visibility === 'hidden') {
+        f.setAttribute('data-clone-hidden-frame', '1'); n++;
+      }
+    } catch (e) {}
+  });
+  return n;
+}
+"""
+
+_HIDDEN_FRAME_TAG_RE = re.compile(r'<iframe\b[^>]*\bdata-clone-hidden-frame\b[^>]*>', re.I)
+_TAG_SRC_RE = re.compile(r'(\ssrc\s*=\s*)(?:"[^"]*"|\'[^\']*\'|[^\s>]+)', re.I)
+
+
+def _blank_hidden_frames(html: str):
+    """打标的不可见 iframe 的 src 置为 about:blank, 返回 (html, 个数)。"""
+    n = 0
+
+    def _fix(m):
+        nonlocal n
+        n += 1
+        return _TAG_SRC_RE.sub(lambda s: s.group(1) + '"about:blank"', m.group(0), count=1)
+    return _HIDDEN_FRAME_TAG_RE.sub(_fix, html or ""), n
+
 
 COLLECT_ASSETS_JS = r"""
 () => {
@@ -3559,6 +3594,9 @@ class ClonerEngine:
             with suppress(Exception):
                 probe = _safe_eval(PAGE_PROBE_JS)
                 self.log("RENDER", "版面特征: " + ", ".join(f"{k}={v}" for k, v in probe.items()))
+        hidden_frames = 0
+        with suppress(Exception):
+            hidden_frames = int(_safe_eval(MARK_HIDDEN_FRAMES_JS) or 0)
         html = None
         try:
             shadow = _safe_eval(SHADOW_SERIALIZE_JS)
@@ -3587,6 +3625,10 @@ class ClonerEngine:
                     html = retried
             except Exception as exc:
                 self.log("WARN", f"退化重试失败: {exc}")
+        if hidden_frames:
+            html, n_blank = _blank_hidden_frames(html)
+            if n_blank:
+                self.log("RENDER", f"不可见 iframe 置空: {n_blank} 个(埋点/像素沙盒, 克隆里不再加载活体)")
         text = _safe_eval(TEXT_EXTRACT_JS)
         if screenshot and baseline_text is not None:
             # 原站文本指纹与基准截图同口径(改动前), 采集期显形内容不计入

@@ -205,6 +205,17 @@ class FrameBounce(unittest.TestCase):
         self.assertIsNone(m("https://other.com/uc/newPopupLogin", live))
 
 
+class HiddenFrameBlank(unittest.TestCase):
+    def test_only_marked_frames_blanked(self):
+        html = ('<iframe data-clone-hidden-frame="1" width=0 src=\'https://s.example/wpm/sandbox/\'></iframe>'
+                '<iframe src="https://v.example/embed" data-src="x"></iframe>')
+        out, n = ce._blank_hidden_frames(html)
+        self.assertEqual(n, 1)
+        self.assertIn('src="about:blank"', out)
+        self.assertIn('src="https://v.example/embed"', out)
+        self.assertNotIn("wpm/sandbox", out)
+
+
 class Utf8CharsetMeta(unittest.TestCase):
     """落盘 UTF-8 时 charset 声明一并改为 utf-8(jd 登录 frame 保留 GBK 声明致乱码)。"""
 
