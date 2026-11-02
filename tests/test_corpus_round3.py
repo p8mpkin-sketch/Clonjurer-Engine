@@ -171,6 +171,30 @@ class CloneLoadShared(unittest.TestCase):
         self.assertEqual(src.count("page.goto(base + self._page_dir + self._page_frag"), 1)
 
 
+class AssetQueuePriority(unittest.TestCase):
+    """条目上限下样式/字体/图片先于脚本排队(ant.design 曾 398 个 JS 分包吃光名额, 图片 0 张)。"""
+
+    def test_order(self):
+        urls = ["https://ant.design/a.js", "https://z.cdn/logo.png", "https://y.cdn/s.css",
+                "https://x.cdn/img?id=1", "https://w.cdn/f.woff2", "https://ant.design/b.js.map"]
+        got = sorted(urls, key=ce._asset_priority)
+        self.assertEqual(got, ["https://y.cdn/s.css", "https://w.cdn/f.woff2", "https://z.cdn/logo.png",
+                               "https://x.cdn/img?id=1", "https://ant.design/a.js",
+                               "https://ant.design/b.js.map"])
+
+
+class FrameBounce(unittest.TestCase):
+    """跨域 iframe 顶级导航被弹回宿主页时不固化(jd 登录弹层固化成了首页)。"""
+
+    def test_bounce(self):
+        f = ce._frame_bounced
+        self.assertTrue(f("https://passport.jd.com/uc/newPopupLogin?ReturnUrl=x",
+                          "https://www.jd.com/", "https://www.jd.com/"))
+        self.assertFalse(f("https://example.com/w", "https://www.example.com/w?y=1", "https://b.com/"))
+        self.assertFalse(f("https://a.com/widget", "https://a.com/login", "https://b.com/"))
+        self.assertTrue(f("https://b.com/embed", "https://b.com/", "https://b.com/"))
+
+
 class EngineLogPersisted(unittest.TestCase):
     """任务日志落盘到工作区 engine.log, 且只追加不抛错。"""
 

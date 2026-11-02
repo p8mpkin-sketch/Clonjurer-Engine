@@ -1436,6 +1436,34 @@ def layout_fix_css(orig_map, clone_map, min_dh=3, max_rules=LAYOUT_FIX_MAX):
 FIRST_SEGMENT_WEIGHT = 2.0   # 首段(首屏区域)权重
 
 
+_PRIO_EXT = {
+    ".css": 0,
+    ".woff2": 1, ".woff": 1, ".ttf": 1, ".otf": 1, ".eot": 1,
+    ".png": 2, ".jpg": 2, ".jpeg": 2, ".gif": 2, ".webp": 2, ".avif": 2, ".svg": 2,
+    ".ico": 2, ".bmp": 2, ".mp4": 2, ".webm": 2, ".mp3": 2, ".ogg": 2,
+    ".js": 4, ".mjs": 4, ".cjs": 4, ".map": 5,
+}
+
+
+def _frame_bounced(src: str, final: str, target: str) -> bool:
+    """iframe 以顶级页面导航后是否被弹走: 换了主机, 或落回宿主目标页。"""
+    a, b = urlsplit(src), urlsplit(final)
+    host = lambda u: (u.hostname or "").lower().removeprefix("www.")
+    if host(a) != host(b):
+        return True
+    t = urlsplit(target)
+    norm = lambda u: (u.netloc.lower(), u.path.rstrip("/") or "/")
+    return norm(b) == norm(t) and norm(a) != norm(t)
+
+
+def _asset_priority(url: str):
+    """下载排队键: (类型优先级, URL)。无扩展名/未知类型(图片 CDN 常见)排在脚本之前。"""
+    path = urlsplit(url).path.lower()
+    dot = path.rfind(".")
+    ext = path[dot:] if dot > path.rfind("/") else ""
+    return (_PRIO_EXT.get(ext, 3), url)
+
+
 def _fit_width(im, width=SCORE_WIDTH, max_h=SCORE_MAX_HEIGHT):
     w, h = im.size
     nh = max(1, round(h * width / max(w, 1)))
@@ -3397,9 +3425,13 @@ class ClonerEngine:
             except Exception as exc:
                 self.log("WARN", f"状态快照失败: {exc}")
         self._phase("采集-收尾", tp)
+        final_url = url
+        with suppress(Exception):
+            final_url = page.url or url
         with suppress(Exception):
             page.close()
-        return {"html": html, "text": text, "urls": collected["urls"],
+        return {"final_url": final_url,
+                "html": html, "text": text, "urls": collected["urls"],
                 "srcsets": collected["srcsets"], "rawRefs": collected["rawRefs"],
                 "links": links, "iframes": iframes, "iframe_srcs": iframe_srcs,
                 "state": state}
@@ -3486,6 +3518,12 @@ class ClonerEngine:
                                         collect_links=False)
             except Exception as exc:
                 self.log("WARN", f"iframe 固化失败 {src[:100]}: {exc}")
+                continue
+            if _frame_bounced(src, sub.get("final_url") or src, target_url):
+                # 登录/SSO 组件发现自己不在 iframe 里会按 ReturnUrl 跳回宿主页: 固化下来的
+                # 是宿主首页而非组件(jd 登录弹层里塞进了一个缩小的京东首页)。保留原 src。
+                self.log("WARN", f"iframe 顶级导航被重定向({src[:80]} → "
+                                 f"{(sub.get('final_url') or '')[:80]}), 不固化")
                 continue
             merge_assets(sub)
             out_frames.append((src, sub["html"], sub.get("text") or ""))
@@ -3614,7 +3652,9 @@ class ClonerEngine:
         seeded = set()
         for url in results:
             seeded.update(self._variants(url, page_netloc))
-        for url in sorted(assets):
+        # 名额优先级: 样式/字体/图片/媒体先排, 脚本最后(单任务条目上限下, 字母序曾让
+        # 数百个同源 JS 分包吃光名额而图片 0 张; 且应用脚本多半会被水合剥离)
+        for url in sorted(assets, key=_asset_priority):
             if url.startswith(("http://", "https://")) and url not in seeded:
                 jobs.append({"url": url, "referer": origin + "/"})
         seen = set(seeded)
@@ -3668,7 +3708,12 @@ class ClonerEngine:
                         css_refs[out["url"]] = refs
                         for raw, absolute in refs:
                             if absolute not in seen:
-                                jobs.append({"url": absolute, "referer": out["url"]})
+                                # 样式内引用(字体/背景图)插队到脚本之前
+                                job2 = {"url": absolute, "referer": out["url"]}
+                                if _asset_priority(absolute)[0] < 4:
+                                    jobs.appendleft(job2)
+                                else:
+                                    jobs.append(job2)
                                 total += 1
                 _pump()
 
