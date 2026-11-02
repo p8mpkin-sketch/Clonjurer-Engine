@@ -2862,6 +2862,7 @@ class ClonerEngine:
             page.on("response", self._on_response)
         page.on("response", self._on_asset_response)  # 活体资源采集(恒开)
         self.log("RENDER", f"导航 {url}")
+        t_nav = time.time()
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=config.PAGELOAD_TIMEOUT)
         except Exception as exc:
@@ -2882,6 +2883,7 @@ class ClonerEngine:
             page.wait_for_load_state("networkidle", timeout=config.NETWORK_IDLE_TIMEOUT)
         except Exception:
             self.log("RENDER", "networkidle 等待超时, 继续后续固化流程")
+        self.log("RENDER", f"页面就绪 {time.time() - t_nav:.1f}s")
         self._auto_settle_update_prompt(page)
         # 采集期主框架导航冻结: wikipedia 等站在固化序列中途自导航
         # (重定向/落地切换)会撕裂 evaluate 会话("Execution context
@@ -2921,6 +2923,7 @@ class ClonerEngine:
         if lazy_count:
             self.log("RENDER", f"触发 {lazy_count} 个懒加载资源")
         self._auto_scroll(page)
+        self.log("RENDER", f"懒加载与滚动完成 {time.time() - t_nav:.1f}s")
         # 评分基准(纯净原站): 必须在任何引擎 DOM 改动(表单激活/DEEP_FREEZE/
         # 水合剥离/字体烘焙)之前截取 —— 否则评分比较的是"克隆 vs 引擎改过的
         # 原站", 引擎自身引入的失真被基准同步吸收, 分数系统性偏乐观。

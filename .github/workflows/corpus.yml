@@ -73,7 +73,9 @@ jobs:
                   continue
               log = pathlib.Path("workspaces") / str(r.get("task_id")) / "engine.log"
               print(f"::group::engine.log {r.get('url')} ({r.get('status')})")
-              print("\n".join(log.read_text(encoding="utf-8").splitlines()[-200:]) if log.is_file() else "(无 engine.log)")
+              keep = [l for l in (log.read_text(encoding="utf-8").splitlines() if log.is_file() else [])
+                      if not any(k in l for k in ("[CAS-", "跳过 http", "] 录制 "))]
+              print("\n".join(keep[-250:]) if keep else "(无 engine.log)")
               print("::endgroup::")
           PY
           fi
