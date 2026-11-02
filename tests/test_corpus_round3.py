@@ -165,7 +165,7 @@ class CloneLoadShared(unittest.TestCase):
         body = src[src.index("    def _load_clone("):]
         body = body[:body.index("\n    def ", 10)]
         self.assertIn("CLONE_SCROLL_JS", body)
-        self.assertIn("networkidle", body)
+        self.assertIn("networkidle", body)   # 首评等网络静置; 校准重渲染只滚动+缓释
         self.assertGreaterEqual(src.count("self._load_clone(page, base"), 3)
         # 克隆页 goto 只剩 helper 内一处
         self.assertEqual(src.count("page.goto(base + self._page_dir + self._page_frag"), 1)

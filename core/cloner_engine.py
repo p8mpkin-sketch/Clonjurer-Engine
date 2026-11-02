@@ -4448,10 +4448,12 @@ class ClonerEngine:
                   wait_until="domcontentloaded", timeout=30000)
         with suppress(Exception):
             page.wait_for_load_state("load", timeout=self._strategy_pack.wait_load_timeout)
-        with suppress(Exception):
-            page.wait_for_load_state(
-                "networkidle", timeout=self._strategy_pack.wait_networkidle_timeout)
         if phases:
+            # 网络静置只在首评等: 校准重渲染时资源已在浏览器缓存/本地, 轮询类页面
+            # 每次都会白等满上限(滚动 + 缓释仍保留, 懒加载照样揭示)
+            with suppress(Exception):
+                page.wait_for_load_state(
+                    "networkidle", timeout=self._strategy_pack.wait_networkidle_timeout)
             tp = self._phase("评分-克隆加载", tp)
         if self._strategy_pack.scroll_pass:
             # 懒加载触发: 分段滚动到底再回顶, 派发 IntersectionObserver
