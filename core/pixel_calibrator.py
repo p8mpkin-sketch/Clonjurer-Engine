@@ -101,6 +101,40 @@ def _image_size(data):
         return im.size   # 只读文件头, 不解码像素
 
 
+def image_size_of(data) -> tuple:
+    """图片文件字节 → (w, h), 只读头部。"""
+    return _image_size(data)
+
+
+def prime_grid(key: bytes, im, ref_size) -> bool:
+    """用评分阶段已解码的克隆图(RGB)预热网格统计缓存, 省掉校准阶段的二次解码。
+
+    key: 克隆图文件字节的 sha1 digest(与 _cached_grid 同键); ref_size: 原站尺寸
+    (校准网格以原站为基准, 克隆图尺寸不同时同样 resize 对齐)。计算路径与
+    _cached_grid 完全相同(同一 RGB 图 → 同一 resize → _grid_stats_np), 逐值一致。
+    返回是否写入(原站过小时校准不会运行, 不预热)。"""
+    if _np is None:
+        return False
+    w, h = ref_size
+    if w < GRID_X * 20 or h < GRID_Y * 20:
+        return False
+    cw, ch = w // GRID_X, h // GRID_Y
+    cache_key = (key, (w, h), cw, ch)
+    with _STATS_LOCK:
+        if cache_key in _STATS_CACHE:
+            return True
+    if im.mode != 'RGB':
+        im = im.convert('RGB')
+    if im.size != (w, h):
+        im = im.resize((w, h))
+    stats = _grid_stats_np(im, cw, ch)
+    with _STATS_LOCK:
+        _STATS_CACHE[cache_key] = stats
+        while len(_STATS_CACHE) > _STATS_CACHE_MAX:
+            _STATS_CACHE.pop(next(iter(_STATS_CACHE)))
+    return True
+
+
 def divergent_cells(orig_path, clone_path):
     """网格差分: 返回 [(cx_ratio, cy_ratio, orig_rgb, dist)], 差异降序。
 

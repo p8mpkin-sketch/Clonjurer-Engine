@@ -818,7 +818,7 @@ def trigger_ai_repair(task_id):
                 detail = json.loads(detail_file.read_text(encoding="utf-8"))
         engine = cloner_engine.ClonerEngine(task_id, db, bus, pool)
         engine.cfg = cfg
-        engine._target = batch["target_url"]
+        engine.bind_target(batch["target_url"])   # 目录型 URL: 补丁要落到影子页
 
         def log(stage, message):
             bus.publish(task_id, stage, message)
@@ -828,7 +828,9 @@ def trigger_ai_repair(task_id):
             with pool.context(viewport={"width": 1920, "height": 1080}) as ctx:
                 render_and_score = engine._make_render_and_score(ctx)
                 report = ai_vision_repair.run_vision_repair(
-                    ws, ai_cfg, detail, log, render_and_score)
+                    ws, ai_cfg, detail, log, render_and_score,
+                    page_file=engine._main_page_file(),
+                    region_cells=engine._region_cells())
             final = report.get("final_score")
             if final is not None:
                 db.update_task(task_id, similarity_score=final)
@@ -860,7 +862,7 @@ def _run_ai_repair_once(task_row: dict, ai_cfg: dict) -> dict:
             detail = json.loads(detail_file.read_text(encoding="utf-8"))
     engine = cloner_engine.ClonerEngine(task_id, db, bus, pool)
     engine.cfg = cfg
-    engine._target = task_row["target_url"]
+    engine.bind_target(task_row["target_url"])
 
     def log(stage, message):
         bus.publish(task_id, stage, message)
@@ -869,7 +871,8 @@ def _run_ai_repair_once(task_row: dict, ai_cfg: dict) -> dict:
     with pool.context(viewport={"width": 1920, "height": 1080}) as ctx:
         render_and_score = engine._make_render_and_score(ctx)
         report = ai_vision_repair.run_vision_repair(
-            ws, ai_cfg, detail, log, render_and_score)
+            ws, ai_cfg, detail, log, render_and_score,
+            page_file=engine._main_page_file(), region_cells=engine._region_cells())
     final = report.get("final_score")
     if final is not None:
         db.update_task(task_id, similarity_score=final)
@@ -1002,13 +1005,16 @@ def v4_ai_playground_repair():
                 with suppress(ValueError, OSError):
                     detail = json.loads(detail_file.read_text(encoding="utf-8"))
             engine = cloner_engine.ClonerEngine(task_id, db, bus, pool)
+            engine.bind_target(task["target_url"])
             ai_cfg = {"base_url": config.AI_API_BASE_URL, "api_key": key,
                       "model": config.AI_MODEL, "user_prompt": prompt}
             with pool.context(viewport={"width": 1920, "height": 1080}) as ctx:
                 report = ai_vision_repair.run_vision_repair(
                     ws, ai_cfg, detail,
                     lambda stage, msg: bus.publish(task_id, stage, msg),
-                    engine._make_render_and_score(ctx))
+                    engine._make_render_and_score(ctx),
+                    page_file=engine._main_page_file(),
+                    region_cells=engine._region_cells())
             final = report.get("final_score")
             if final is not None:
                 db.update_task(task_id, similarity_score=final)

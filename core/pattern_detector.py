@@ -1,7 +1,7 @@
 """
 框架模式识别器(W1): JS 字节 + 渲染 DOM 双指纹 → 模式判定。
 
-- 指纹规则与 103 站普查(engine_bench/pattern_census.json)同源, 保证口径一致;
+- 指纹规则来自站点普查经验(普查原始数据不随仓库分发), 一类一策;
 - 采集期在静态资源落盘后调用, 识别结果写入 site.json 并路由到
   core/strategy_packs 的模式策略包 —— 一类一策, 严禁 per-site 特判;
 - 证据只取源站真实内容: 剔除引擎注入的 interaction-sim 脚本,
@@ -24,6 +24,17 @@ _JS_FP = {
     "jQuery":     [rb'jQuery JavaScript Library v', rb'jquery'],
     "Webpack":    [rb'webpackJsonp', rb'__webpack_require__'],
     "Vite":       [rb'__vite__', rb'vite/preload'],
+    # 第二批框架/CMS(W1.1): 字面量均取框架运行时/构建产物的专有标识, 避免单词级误触
+    "SvelteKit":  [rb'__sveltekit', rb'@sveltejs/kit', rb'/_app/immutable/'],
+    "Svelte":     [rb'svelte/internal', rb'__svelte', rb'svelte-'],
+    "Astro":      [rb'astro-island', rb'/_astro/', rb'astro:'],
+    "Remix":      [rb'__remixContext', rb'__remixManifest', rb'@remix-run/'],
+    "Solid":      [rb'solid-js', rb'_\$HY'],
+    "Qwik":       [rb'@builder\.io/qwik', rb'qwikloader'],
+    "Ember":      [rb'ember-source', rb'Ember\.VERSION', rb'@ember/'],
+    "WordPress":  [rb'/wp-content/', rb'/wp-includes/'],
+    "Shopify":    [rb'cdn\.shopify\.com', rb'Shopify\.theme'],
+    "Wix":        [rb'parastorage\.com', rb'wixstatic\.com'],
 }
 
 # 渲染 DOM 指纹(框架运行时留在 DOM 上的痕迹, 本地化后依然存在)
@@ -39,8 +50,17 @@ _DOM_FP = {
     "iframe门户":  [r'<iframe[ >]'],
     "视频":        [r'<video[ >]'],
     "Geetest":    [r'static\.geetest\.com|initGeetest'],
+    "SvelteKit":  [r'data-sveltekit-', r'/_app/immutable/'],
+    "Svelte":     [r'class="[^"]*\bsvelte-[a-z0-9]{4,}'],
+    "Astro":      [r'<astro-island', r'data-astro-cid-', r'/_astro/'],
+    "Remix":      [r'__remixContext', r'data-remix-'],
+    "Solid":      [r'data-hk="'],
+    "Qwik":       [r'q:container', r'type="qwik/json"'],
+    "Ember":      [r'class="ember-application', r'id="ember\d+"'],
+    "WordPress":  [r'/wp-content/', r'/wp-includes/', r'content="WordPress'],
+    "Shopify":    [r'cdn\.shopify\.com', r'Shopify\.theme'],
+    "Wix":        [r'parastorage\.com', r'wixstatic\.com'],
 }
-
 # ---- 快速匹配器(与 re.search(p, data, re.I) 逐值等价) ----------------------
 # 旧实现对每个文件 × 每条指纹做 re.I 全量扫描: IGNORECASE 使 sre 无法用字面前缀
 # 快速查找, 2MB × 20 条 ≈ 130ms/文件。新实现先把数据转小写一次, 纯字面指纹用
@@ -148,21 +168,48 @@ _DOM_TABLE = _build(_DOM_FP)
 
 
 def classify(hits) -> str:
-    """指纹集合 → 模式名(与普查口径一致)。"""
+    """指纹集合 → 模式名(与普查口径一致)。
+
+    判定次序 = 证据的专有性: SSR/元框架(Next/Nuxt/Remix/SvelteKit/Astro/Qwik)
+    先于其宿主 UI 库, UI 库(Vue/React/Solid/Angular/Ember)先于打包器(Vite/
+    Webpack), 打包器先于 CMS/jQuery。Vite 只是构建器证据: 有 React 时判 React,
+    仅在没有任何 UI 库证据时才按 Vue 生态先验回落到 Vue/Vite。"""
     s = set(hits)
     # SPA 字节证据优先于极验(现代登录页也常挂 Geetest)
     if "Next" in s:
         return "M-Next SSR"
     if "Nuxt" in s:
         return "M-Nuxt SSR"
+    if "Remix" in s:
+        return "M-Remix SSR"
+    if "SvelteKit" in s:
+        return "M-SvelteKit SSR"
+    if "Astro" in s:
+        return "M-Astro 静态岛"
+    if "Qwik" in s:
+        return "M-Qwik 可恢复"
     if "VueMaterial" in s:
         return "M-Vue SPA(Material)"
-    if "Vue" in s or "Vite" in s:
+    if "Vue" in s:
         return "M-Vue/Vite SPA"
     if "React" in s:
         return "M-React SPA"
+    if "Svelte" in s:
+        return "M-Svelte SPA"
+    if "Solid" in s:
+        return "M-Solid SPA"
     if "Angular" in s:
         return "M-Angular SPA"
+    if "Ember" in s:
+        return "M-Ember SPA"
+    if "Vite" in s:
+        return "M-Vue/Vite SPA"
+    if "WordPress" in s:
+        return "M-WordPress CMS"
+    if "Shopify" in s:
+        return "M-Shopify CMS"
+    if "Wix" in s:
+        return "M-Wix CMS"
     if "Webpack" in s or "SSR水合" in s:
         return "M-Webpack水合MPA"
     if "Geetest" in s:
@@ -172,16 +219,40 @@ def classify(hits) -> str:
     return "M-STATIC 纯静态"
 
 
-_FRAMEWORKS = {"Vue", "VueMaterial", "React", "Next", "Nuxt", "Angular", "Vite", "Webpack"}
+_FRAMEWORKS = {"Vue", "VueMaterial", "React", "Next", "Nuxt", "Angular", "Vite", "Webpack",
+               "SvelteKit", "Svelte", "Astro", "Remix", "Solid", "Qwik", "Ember"}
+_CMS = {"WordPress", "Shopify", "Wix"}
 
 # 模式 → 决定它的关键证据(用于置信度: 关键证据被 JS+DOM 双源印证则更可信)
 _KEY_EVIDENCE = {
     "M-Next SSR": {"Next"}, "M-Nuxt SSR": {"Nuxt"},
+    "M-Remix SSR": {"Remix"}, "M-SvelteKit SSR": {"SvelteKit"},
+    "M-Astro 静态岛": {"Astro"}, "M-Qwik 可恢复": {"Qwik"},
     "M-Vue SPA(Material)": {"VueMaterial"}, "M-Vue/Vite SPA": {"Vue", "Vite"},
-    "M-React SPA": {"React"}, "M-Angular SPA": {"Angular"},
+    "M-React SPA": {"React"}, "M-Svelte SPA": {"Svelte"}, "M-Solid SPA": {"Solid"},
+    "M-Angular SPA": {"Angular"}, "M-Ember SPA": {"Ember"},
+    "M-WordPress CMS": {"WordPress"}, "M-Shopify CMS": {"Shopify"}, "M-Wix CMS": {"Wix"},
     "M-Webpack水合MPA": {"Webpack", "SSR水合"},
     "M-AUTH 传统登录页(jQuery+极验)": {"Geetest"},
 }
+
+
+def _confidence(pattern: str, hits: set, js_hits: set, dom_hits: set) -> float:
+    """置信度随证据数量与来源数单调上升, 而非四档常量。
+
+    - 关键证据 JS 字节 + 渲染 DOM 双源印证: 0.97;
+    - 框架/CMS 单源: 0.85 起, 每多一条旁证 +0.02, 封顶 0.93;
+    - jQuery: 0.75; 纯静态: 0.6(无 JS 证据、仅凭 DOM 判静态时 0.5——
+      很可能只是指纹未覆盖)。"""
+    key = _KEY_EVIDENCE.get(pattern, set())
+    if key & js_hits and key & dom_hits:
+        return 0.97
+    if hits & _FRAMEWORKS or hits & _CMS:
+        extra = max(0, len(hits & (_FRAMEWORKS | _CMS)) - 1)
+        return round(min(0.93, 0.85 + 0.02 * extra), 2)
+    if "jQuery" in hits:
+        return 0.75
+    return 0.6 if js_hits or dom_hits else 0.5
 
 
 def detect(workspace: Path, html: str = None) -> dict:
@@ -190,14 +261,6 @@ def detect(workspace: Path, html: str = None) -> dict:
     html 传入采集期渲染 DOM 时以其为 DOM 证据(推荐); 缺省回落工作区 index.html。"""
     hits, js_hits, dom_hits = _scan(workspace, html)
     pattern = classify(hits)
-    key = _KEY_EVIDENCE.get(pattern, set())
-    if key & js_hits and key & dom_hits:
-        confidence = 0.97          # 关键证据 JS 字节 + 渲染 DOM 双源印证
-    elif hits & _FRAMEWORKS:
-        confidence = 0.9
-    elif "jQuery" in hits:
-        confidence = 0.75
-    else:
-        confidence = 0.6   # 纯静态判定的置信度最低(可能是指纹未覆盖)
+    confidence = _confidence(pattern, hits, js_hits, dom_hits)
     return {"pattern": pattern, "features": sorted(hits), "confidence": confidence,
             "evidence": {"js": sorted(js_hits), "dom": sorted(dom_hits)}}

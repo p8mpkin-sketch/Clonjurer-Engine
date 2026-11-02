@@ -41,7 +41,7 @@ import threading
 import time
 import zlib
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait as _wait_futures
 from contextlib import suppress
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -728,6 +728,36 @@ OUTER_HTML_JS = r"""
 """
 
 # 可见文本采集(含同源 iframe 内容, 保证克隆/原站两侧口径一致)
+# 自适应缓释(三段式, 全部为同步脚本 + 受时限的 wait_for_function):
+# 不能用"evaluate 一个 async Promise"实现 —— MHTML 保真轨页面脚本被禁用, 其
+# setTimeout 永不触发, Promise 永不 resolve, 而 evaluate 没有超时 → 整个任务挂死。
+SETTLE_INSTALL_JS = r"""({quiet}) => {
+  try {
+    const w = window;
+    w.__cloneSettle = {last: performance.now(), quiet: quiet, mo: null};
+    const mo = new MutationObserver(() => { w.__cloneSettle.last = performance.now(); });
+    mo.observe(document.documentElement, {subtree: true, childList: true,
+                                          attributes: true, characterData: true});
+    w.__cloneSettle.mo = mo;
+    return true;
+  } catch (e) { return false; }
+}"""
+
+SETTLE_READY_JS = r"""() => {
+  const s = window.__cloneSettle;
+  if (!s) return true;
+  try { if (document.fonts && document.fonts.status === 'loading') return false; } catch (e) {}
+  const imgs = document.images;
+  for (let i = 0; i < imgs.length; i++) { if (!imgs[i].complete) return false; }
+  return performance.now() - s.last >= s.quiet;
+}"""
+
+SETTLE_CLEANUP_JS = r"""() => {
+  const s = window.__cloneSettle;
+  try { if (s && s.mo) s.mo.disconnect(); } catch (e) {}
+  try { delete window.__cloneSettle; } catch (e) {}
+}"""
+
 TEXT_EXTRACT_JS = r"""
 () => {
   let out = '';
@@ -1322,9 +1352,14 @@ def _stat_hint(path, size):
         return None
 
 
-def _load_fit_pair(path_a, path_b):
-    """两图 → ([512 宽缩放结果 ×2], 参考图内容 sha1); 缩放结果与
-    _fit_width(Image.open(p).convert("RGB")) 逐像素一致。
+def _load_fit_pair(path_a, path_b, prime_calibration=False):
+    """两图 → ([512 宽缩放结果 ×2], 参考图内容 sha1, 校准预热任务或 None); 缩放
+    结果与 _fit_width(Image.open(p).convert("RGB")) 逐像素一致。
+
+    prime_calibration: 克隆图(path_b)未命中缓存而被整页解码时, 顺带用同一份解码
+    结果算出像素校准的网格统计写入 pixel_calibrator 的内容缓存(同一 sha1 键),
+    紧随其后的 divergent_cells 直接命中, 省掉对同一张图的二次整页 PNG 解码。
+    预热是叶子任务, 结果与校准模块自行解码逐值一致(同一 RGB 图、同一函数)。
 
     - 内容寻址缓存: 以文件字节 sha1 为键缓存缩放结果。修复循环里原站参考图
       在每轮评分/校准后重评分/保真轨评分中反复出现(每任务 4~8 次), 命中后
@@ -1365,15 +1400,26 @@ def _load_fit_pair(path_a, path_b):
     # 等价闸门(见 tests/test_perf_equivalence)。不同 Pillow 版本的内部次序与并列
     # 判定各异, 无法稳定复刻, 故这一步保持单次 resize; 跨图解码并行、参考图缓存、
     # 评分/边缘/热力图三路并行等优化均不受影响。
-    staged = [(i, key, pool.submit(_fit_width, fut.result())) for i, key, fut in pending]
-    for i, key, job in staged:
+    def _stage(i, key, fut):
+        # 整页 RGB 解码结果只在此处经手(不留局部引用, 任务完成即释放几十 MB 缓冲)
+        im = fut.result()
+        prime = None
+        if prime_calibration and i == 1:
+            # 原站尺寸只读 PNG 头(校准以原站尺寸为网格基准, 克隆图不同尺寸时缩放对齐)
+            prime = pool.submit(pixel_calibrator.prime_grid, key, im,
+                                pixel_calibrator.image_size_of(entries[0][2]))
+        return i, key, pool.submit(_fit_width, im), prime
+
+    staged = [_stage(i, key, fut) for i, key, fut in pending]
+    prime_job = next((prime for _i, _k, _j, prime in staged if prime is not None), None)
+    for i, key, job, _prime in staged:
         slots[i] = job.result()
         with _FIT_CACHE_LOCK:
             _FIT_CACHE.pop(key, None)
             _FIT_CACHE[key] = slots[i]
             while len(_FIT_CACHE) > _FIT_CACHE_MAX:
                 _FIT_CACHE.pop(next(iter(_FIT_CACHE)))
-    return slots, keys[0]
+    return slots, keys[0], prime_job
 
 
 def _diff_image(ra, rb, y0, y1):
@@ -1453,7 +1499,8 @@ _DIFF_DIM_LUT = [int(p * 0.45) for p in range(256)]
 
 
 def compute_visual_similarity(image_a: Path, image_b: Path, diff_path: Path = None,
-                              orig_text: str = "", clone_text: str = "") -> dict:
+                              orig_text: str = "", clone_text: str = "",
+                              prime_calibration: bool = False) -> dict:
     """诚实相似度 v3。返回 {score, structure, edge, text, ..., warnings[]}。
 
     v3 相对 v2 的口径修正:
@@ -1462,11 +1509,13 @@ def compute_visual_similarity(image_a: Path, image_b: Path, diff_path: Path = No
     - 高度不一致时短图以底色补齐, 缺失/多余区域在结构与边缘通道真实失分;
     - 文本通道由召回改为 F2(多余错误文案也扣分)。
     score = 0.5*分段块级NCC + 0.3*分段边缘IoU + 0.2*文本F2(原站无文本时重分配)。
+    prime_calibration: 评分解码克隆图时顺带预热像素校准网格缓存(见 _load_fit_pair),
+    不改变任何返回值。
     """
     pool = _score_pool()
     text_job = pool.submit(_token_counts, orig_text, clone_text)   # 与解码重叠
     # 两图解码 + 缩放互不依赖: PIL 的 PNG 解码/重采样在 C 层释放 GIL, 并行执行
-    (ra, rb), key_a = _load_fit_pair(image_a, image_b)
+    (ra, rb), key_a, prime_job = _load_fit_pair(image_a, image_b, prime_calibration)
     h_a, h_b = ra.size[1], rb.size[1]
     height = max(h_a, h_b)
     seg_count = max(1, -(-height // SCORE_SEGMENT))
@@ -1515,6 +1564,9 @@ def compute_visual_similarity(image_a: Path, image_b: Path, diff_path: Path = No
         diff_job.result()   # 传播热力图写盘异常(与旧版同步写入语义一致)
     if diff_bands is not None:
         _assemble_diff(diff_bands, view_h, diff_path)
+    if prime_job is not None:
+        with suppress(Exception):   # 预热失败只影响速度, 校准会自行解码
+            prime_job.result()
     structure = s_sum / w_sum
     edge = e_sum / w_sum
     n_a, n_b, inter = text_job.result()   # 原站指纹只算一次
@@ -1554,6 +1606,26 @@ def compute_visual_similarity(image_a: Path, image_b: Path, diff_path: Path = No
         "scoring": "v3-segmented",
         "warnings": warnings,
     }
+
+
+def write_diff_preview(image_a: Path, image_b: Path, diff_path: Path) -> None:
+    """只生成差异热力图(不评分)。修复循环的中间轮不写热力图, 收敛后调用一次:
+    两张图的 512 宽缩放结果都在内容缓存里(刚评过分), 这里不触发任何 PNG 解码。
+    像素与 compute_visual_similarity(diff_path=...) 产出的热力图逐值一致。"""
+    pool = _score_pool()
+    (ra, rb), _key_a, _job = _load_fit_pair(image_a, image_b)
+    height = max(ra.size[1], rb.size[1])
+    seg_count = max(1, -(-height // SCORE_SEGMENT))
+    canvas_h = seg_count * SCORE_SEGMENT
+    ra, rb = _pad_to(ra, canvas_h), _pad_to(rb, canvas_h)
+    view_h = min(height, canvas_h)
+    if _np is not None and view_h >= _DIFF_BAND_MIN_ROWS:
+        cuts = [view_h * k // 3 for k in range(4)]
+        bands = [pool.submit(_diff_band_deflate, ra, rb, cuts[k], cuts[k + 1], k == 2)
+                 for k in range(3)]
+        _assemble_diff(bands, view_h, diff_path)
+    else:
+        _write_diff(ra, rb, view_h, diff_path)
 
 
 class _SandboxHandler(SimpleHTTPRequestHandler):
@@ -2065,18 +2137,9 @@ class ClonerEngine:
             self.cfg = json.loads(batch.get("config_json") or "{}")
         except ValueError:
             self.cfg = {}
-        self._target = self.task["target_url"]
-        parts = urlsplit(self._target)
+        parts = self.bind_target(self.task["target_url"])
         origin = f"{parts.scheme}://{parts.netloc}"
         domain = self.task["domain"] or parts.netloc
-        # 目录型 URL(/apps_resource_supplier/#/login)页面真实位置在目录下,
-        # 相对路径(webpack publicPath='' 懒加载 chunk)以此为基准; 记录之,
-        # 本地化时按原路径落位, 避免页面挪到根路径后相对引用全体漂移。
-        target_path = parts.path or "/"
-        if target_path.endswith("/") or "." not in target_path.rsplit("/", 1)[-1]:
-            # 归一化: 目标路径是不可信输入, `..` 段会让影子页落盘逃出工作区
-            self._page_dir = _normalize_page_dir(target_path)
-        self._page_frag = ("#" + parts.fragment) if parts.fragment else ""
 
         for sub in ("css", "js", "img", "fonts", "media", "misc"):
             (self.ws / "static" / sub).mkdir(parents=True, exist_ok=True)
@@ -2116,6 +2179,50 @@ class ClonerEngine:
             return
         elapsed = time.time() - started
         self.log("INFO", f"任务 #{self.task_id} 完成, 耗时 {elapsed:.1f}s")
+
+    def bind_target(self, target_url: str):
+        """绑定目标 URL: 目录型 URL(/apps/#/login)页面真实位置在目录下, 相对路径
+        (webpack publicPath='' 懒加载 chunk)以此为基准; 记录 page_dir, 本地化时按
+        原路径落位, 避免页面挪到根路径后相对引用全体漂移。返回 urlsplit 结果。
+        手动 AI 修复等离线入口也要先绑定, 否则 _main_page_file 落错文件。"""
+        self._target = target_url
+        parts = urlsplit(target_url)
+        target_path = parts.path or "/"
+        self._page_dir = "/"
+        if target_path.endswith("/") or "." not in target_path.rsplit("/", 1)[-1]:
+            # 归一化: 目标路径是不可信输入, `..` 段会让影子页落盘逃出工作区
+            self._page_dir = _normalize_page_dir(target_path)
+        self._page_frag = ("#" + parts.fragment) if parts.fragment else ""
+        return parts
+
+    def _settle(self, page, cap_ms: int = None, quiet_ms: int = None):
+        """截图前缓释: DOM 静置即走(MutationObserver), settle_ms 只是上限。
+        旧实现固定睡满 settle_ms(2.5s), 每轮渲染/校准/保真轨都付一次。"""
+        cap = int(self._strategy_pack.settle_ms if cap_ms is None else cap_ms)
+        quiet = int(self._strategy_pack.settle_quiet_ms if quiet_ms is None else quiet_ms)
+        if quiet <= 0 or quiet >= cap:
+            page.wait_for_timeout(cap)
+            return
+        started = time.time()
+        try:
+            installed = bool(page.evaluate(SETTLE_INSTALL_JS, {"quiet": quiet}))
+        except Exception:
+            installed = False
+        if not installed:
+            page.wait_for_timeout(cap)
+            return
+        try:
+            # DOM 连续 quiet ms 无变动且图片/字体就绪即返回; 超时 = 等满上限(旧行为)。
+            # 脚本被禁用的页面(MHTML)定时器不触发, 谓词只评估一次 → 走超时, 等满上限。
+            page.wait_for_function(SETTLE_READY_JS, timeout=cap, polling=50)
+        except Exception as exc:
+            if type(exc).__name__ != "TimeoutError":
+                remain = cap - int((time.time() - started) * 1000)
+                if remain > 0:
+                    page.wait_for_timeout(remain)
+        finally:
+            with suppress(Exception):
+                page.evaluate(SETTLE_CLEANUP_JS)
 
     # ------------------------------------------------------------------
     def _ai_config(self):
@@ -2278,7 +2385,8 @@ class ClonerEngine:
             except Exception as exc:
                 self._strategy_pack = strategy_packs.for_pattern("DEFAULT")
                 self.log("WARN", f"模式识别失败, 使用默认策略包: {exc}")
-            render_and_score = self._make_render_and_score(ctx)
+            # 热力图延迟: 中间修复轮不写 diff_preview.png, 收敛后统一生成一次
+            render_and_score = self._make_render_and_score(ctx, defer_diff=True)
 
             repair_started = time.time()
             for round_i in range(max(1, config.RENDER_REPAIR_ROUNDS)
@@ -2318,6 +2426,9 @@ class ClonerEngine:
                 if not new and not shadows:
                     break
                 results.update(new)
+
+            if want_score and detail is not None:
+                self._write_final_diff()
 
             # ---- 智能 Mock(表单解析, 可选 LLM 润色) ----
             html_sources = []
@@ -2362,11 +2473,16 @@ class ClonerEngine:
                              f"启动大模型视觉闭环 (模型: {ai_cfg['model']})")
                     try:
                         ai_report = ai_vision_repair.run_vision_repair(
-                            self.ws, ai_cfg, detail, self.log, render_and_score)
+                            self.ws, ai_cfg, detail, self.log, render_and_score,
+                            page_file=self._main_page_file(),
+                            region_cells=self._region_cells())
                         if ai_report.get("final_score") is not None:
                             score = ai_report["final_score"]
                             detail = dict(detail or {})
                             detail["score"] = score
+                        if any(r.get("score_after") is not None and not r.get("rolled_back")
+                               for r in ai_report.get("rounds", [])):
+                            self._write_final_diff()   # 产物被 AI 补丁改过, 热力图随之更新
                     except Exception as exc:
                         self.log("AI-VISION", f"视觉闭环异常: {type(exc).__name__}: {exc}")
                         ai_report = {"error": f"{type(exc).__name__}: {exc}"}
@@ -2859,18 +2975,30 @@ class ClonerEngine:
         failed_for_browser = []
         total, downloaded = len(jobs), 0
         executor = ThreadPoolExecutor(max_workers=config.DOWNLOAD_WORKERS)
+        in_flight = {}   # future -> job
+        max_inflight = config.DOWNLOAD_WORKERS * 2
+
+        def _pump():
+            # 流式调度: 队列里有活、在飞的不满就提交; 不再按 32 个一批等最慢者
+            while jobs and len(in_flight) < max_inflight:
+                job = jobs.popleft()
+                if job["url"] in seen:
+                    continue
+                seen.add(job["url"])
+                in_flight[executor.submit(self._fetch_asset, job)] = job
+
         try:
-            while jobs and len(results) < config.MAX_ASSETS_PER_TASK:
-                chunk = []
-                while jobs and len(chunk) < 32:
-                    job = jobs.popleft()
-                    if job["url"] in seen:
+            _pump()
+            while in_flight and len(results) < config.MAX_ASSETS_PER_TASK:
+                done, _pending = _wait_futures(list(in_flight), return_when=FIRST_COMPLETED)
+                for fut in done:
+                    job = in_flight.pop(fut)
+                    if len(results) >= config.MAX_ASSETS_PER_TASK:
                         continue
-                    seen.add(job["url"])
-                    chunk.append(job)
-                if not chunk:
-                    break
-                for job, out in zip(chunk, executor.map(self._fetch_asset, chunk)):
+                    try:
+                        out = fut.result()
+                    except Exception as exc:   # noqa: BLE001 下载线程兜底
+                        out = {"url": job["url"], "ok": False, "error": type(exc).__name__}
                     out = self._normalize_out(out)
                     if not out["ok"]:
                         self.log("WARN", f"跳过 {job['url']}: {out['error']}")
@@ -2895,6 +3023,7 @@ class ClonerEngine:
                             if absolute not in seen:
                                 jobs.append({"url": absolute, "referer": out["url"]})
                                 total += 1
+                _pump()
 
             # L2: requests 被拒的资源用浏览器会话逐个降级重试(同线程, Playwright 线程亲和)
             if ctx is not None and failed_for_browser:
@@ -2915,7 +3044,7 @@ class ClonerEngine:
                         css_sources[out["url"]] = text
                         css_refs[out["url"]] = parse_css_refs(text, out["url"])
         finally:
-            executor.shutdown(wait=True)
+            executor.shutdown(wait=True, cancel_futures=True)
 
         # CSS 内部引用本地化(@import 与 url()/mask/image-set 引用改写为本地路径)
         for css_url, text in css_sources.items():
@@ -3582,8 +3711,30 @@ class ClonerEngine:
                 if c and len(c) > 5 and c.startswith(("http", "//", "/"))}
 
     # ------------------------------------------------------------------
-    def _make_render_and_score(self, ctx):
-        """构造"本地离线渲染 + 三通道评分"闭包(AI 修复循环复用)。"""
+    def _write_final_diff(self):
+        """收敛后生成一次差异热力图(两图缩放结果已在缓存, 不再解码)。"""
+        original, cloned = self.ws / "original_preview.png", self.ws / "cloned_preview.png"
+        if original.is_file() and cloned.is_file():
+            try:
+                write_diff_preview(original, cloned, self.ws / "diff_preview.png")
+            except Exception as exc:
+                self.log("WARN", f"差异热力图生成失败: {exc}")
+
+    def _region_cells(self):
+        """AI 修复的区域线索: 像素差分定位的纯色区域色差格(失败返回 None)。"""
+        original, cloned = self.ws / "original_preview.png", self.ws / "cloned_preview.png"
+        try:
+            return pixel_calibrator.divergent_cells(original, cloned)
+        except Exception:
+            return None
+
+    def _make_render_and_score(self, ctx, defer_diff: bool = False):
+        """构造"本地离线渲染 + 三通道评分"闭包(AI 修复循环复用)。
+
+        defer_diff: 不写交互轨热力图(由 _write_final_diff 在收敛后统一生成);
+        手动 AI 修复等入口保持每次评分即写热力图。"""
+        diff_path = None if defer_diff else self.ws / "diff_preview.png"
+
         def render_and_score():
             server = _LocalPreviewServer(
                 self.ws, use_tape=self._strategy_pack.net_tape)
@@ -3708,7 +3859,7 @@ class ClonerEngine:
                                 step();
                             });
                         }""")
-                page.wait_for_timeout(self._strategy_pack.settle_ms)
+                self._settle(page)
                 page.screenshot(path=str(self.ws / "cloned_preview.png"), full_page=True)
                 clone_text = page.evaluate(TEXT_EXTRACT_JS)
                 (self.ws / "cloned_text.txt").write_text(clone_text or "",
@@ -3728,7 +3879,7 @@ class ClonerEngine:
                         fpage.goto('file://' + str(self.ws / 'capture.mhtml'),
                                    wait_until='load', timeout=30000)
                         with suppress(Exception):
-                            fpage.wait_for_timeout(2000)
+                            self._settle(fpage, cap_ms=2000)
                         fpage.screenshot(path=str(self.ws / 'fidelity_preview.png'),
                                          full_page=True)
                         f_text = fpage.evaluate(TEXT_EXTRACT_JS)
@@ -3757,8 +3908,9 @@ class ClonerEngine:
                     orig_text = (self.ws / "original_text.txt").read_text(
                         encoding="utf-8", errors="replace") if (self.ws / "original_text.txt").is_file() else ""
                     detail = compute_visual_similarity(
-                        original, cloned, diff_path=self.ws / "diff_preview.png",
-                        orig_text=orig_text, clone_text=clone_text or "")
+                        original, cloned, diff_path=diff_path,
+                        orig_text=orig_text, clone_text=clone_text or "",
+                        prime_calibration=self._calibrations < 2)
                     # A1 完整版: 像素差分 → 元素映射 → CSS 覆盖合成(确定性校准闭环)。
                     # 网格差分定位色差格(原站侧纯色格才取), elementFromPoint 映射到
                     # 克隆 DOM 元素, 以原站格色生成覆盖 —— 注入后重渲染重评分一轮。
@@ -3807,15 +3959,15 @@ class ClonerEngine:
                                         with suppress(Exception):
                                             page.wait_for_load_state(
                                                 'load', timeout=self._strategy_pack.wait_load_timeout)
-                                        page.wait_for_timeout(self._strategy_pack.settle_ms)
+                                        self._settle(page)
                                         page.screenshot(path=str(cloned), full_page=True)
                                         clone_text = page.evaluate(TEXT_EXTRACT_JS)
                                         (self.ws / 'cloned_text.txt').write_text(
                                             clone_text or '', encoding='utf-8')
                                         detail = compute_visual_similarity(
-                                            original, cloned,
-                                            diff_path=self.ws / 'diff_preview.png',
-                                            orig_text=orig_text, clone_text=clone_text or '')
+                                            original, cloned, diff_path=diff_path,
+                                            orig_text=orig_text, clone_text=clone_text or '',
+                                            prime_calibration=self._calibrations < 2)
                                         # 回滚守卫: 校准必须净提升, 否则撤销覆盖并恢复上一版
                                         # 截图/文本/明细(色块覆盖误伤内容时不允许拉低分数)
                                         if (detail.get('score') or 0) < (prev_detail.get('score') or 0):
