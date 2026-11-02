@@ -927,10 +927,32 @@ LAYOUT_MAP_JS = r"""
 }
 """
 
+# 截图全部失败时的页面形态诊断: 文档尺寸 + 面积最大的 5 个元素(含变换)
+SHOT_DIAG_JS = r"""
+() => {
+  const de = document.documentElement;
+  const big = [];
+  for (const el of document.querySelectorAll('body *')) {
+    const r = el.getBoundingClientRect();
+    const a = r.width * r.height;
+    if (a > 4e6) {
+      const cs = getComputedStyle(el);
+      big.push([a, el.tagName.toLowerCase() + (el.id ? '#' + el.id : ''),
+                Math.round(r.width), Math.round(r.height), cs.transform.slice(0, 60),
+                cs.position, cs.willChange]);
+    }
+  }
+  big.sort((x, y) => y[0] - x[0]);
+  return {ready: document.readyState, href: location.href.slice(0, 80),
+          docW: de.scrollWidth, docH: de.scrollHeight, vw: innerWidth, vh: innerHeight,
+          dpr: devicePixelRatio, big: big.slice(0, 5).map(b => b.slice(1))};
+}
+"""
+
 # 原站版面特征探针(一行日志, 远程归因用): 影子根/画布/SVG/渐变与遮罩背景/iframe 计数
 PAGE_PROBE_JS = r"""
 () => {
-  const out = {shadow: 0, canvas: 0, svg: 0, gradientBg: 0, maskImg: 0, iframe: 0, fixed: 0};
+  const out = {shadow: 0, canvas: 0, svg: 0, gradientBg: 0, maskImg: 0, paint: 0, iframe: 0, fixed: 0};
   const visit = (root) => {
     for (const el of root.querySelectorAll('*')) {
       const tag = el.tagName;
@@ -942,6 +964,7 @@ PAGE_PROBE_JS = r"""
         if (cs.backgroundImage && cs.backgroundImage.indexOf('gradient') >= 0) out.gradientBg++;
         const m = cs.maskImage || cs.webkitMaskImage;
         if (m && m !== 'none') out.maskImg++;
+        if ((cs.backgroundImage + (m || '') + cs.borderImageSource).indexOf('paint(') >= 0) out.paint++;
         if (cs.position === 'fixed' || cs.position === 'sticky') out.fixed++;
       } catch (e) {}
       if (el.shadowRoot) { out.shadow++; visit(el.shadowRoot); }
@@ -990,6 +1013,11 @@ TEXT_EXTRACT_JS = r"""
   try { out += document.body ? document.body.innerText : ''; } catch (e) {}
   document.querySelectorAll('iframe').forEach(f => {
     try {
+      // 只计可见 iframe: 隐藏/零尺寸 iframe(预加载沙箱、以 text/plain 打开的样式表等)
+      // 的文字不在画面上, 计入会让文本通道按不可见内容扣分
+      const r = f.getBoundingClientRect();
+      const cs = getComputedStyle(f);
+      if (r.width < 2 || r.height < 2 || cs.visibility === 'hidden' || cs.display === 'none') return;
       const d = f.contentDocument;
       if (d && d.body) out += '\n' + d.body.innerText;
     } catch (e) {}
@@ -2548,7 +2576,14 @@ class ClonerEngine:
         except Exception as exc:
             self.log("WARN", f"{label}限高截图失败, 退化为视口分块拼接: {str(exc)[:160]}")
         view_h = int(dims[2]) if len(dims) > 2 and dims[2] else 0
-        self._tiled_shot(page, path, w, h, max(1, view_h))
+        try:
+            self._tiled_shot(page, path, w, h, max(1, view_h))
+        except Exception:
+            # 连视口截图都失败: 记录页面形态(超大元素/超大变换常致 GPU 回读失败)供归因
+            with suppress(Exception):
+                diag = page.evaluate(SHOT_DIAG_JS)
+                self.log("WARN", f"{label}截图全部失败, 页面形态: {json.dumps(diag, ensure_ascii=False)[:600]}")
+            raise
 
     @staticmethod
     def _tiled_shot(page, path, width, height, view_h):
@@ -3295,7 +3330,10 @@ class ClonerEngine:
             page.wait_for_timeout(1500)
 
     def _auto_scroll(self, page):
-        """分步滚动到底再回顶, 触发 IntersectionObserver / 无限加载。"""
+        """分步滚动到底再回顶, 触发 IntersectionObserver / 无限加载。
+        总时长受 AUTO_SCROLL_BUDGET 约束 —— 主线程被
+        WebGL/滚动动画占满的重页(CI 软件渲染下单次 evaluate 可达数秒)不再拖满 60 步。"""
+        deadline = time.monotonic() + config.AUTO_SCROLL_BUDGET
         try:
             step = 900
             position = 0
@@ -3305,6 +3343,10 @@ class ClonerEngine:
                 page.wait_for_timeout(320)
                 height = page.evaluate("document.documentElement.scrollHeight")
                 if position >= height:
+                    break
+                if time.monotonic() > deadline:
+                    self.log("RENDER", f"自动滚动达到时限({config.AUTO_SCROLL_BUDGET}s), "
+                                       f"停在 {position}/{height}px")
                     break
             page.wait_for_timeout(600)
             page.evaluate("window.scrollTo(0, 0)")
