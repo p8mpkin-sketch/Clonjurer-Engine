@@ -230,3 +230,52 @@ class FullShotFallback(unittest.TestCase):
         eng._full_shot(_Page(), "/tmp/x.png")
         self.assertEqual(_Page.calls, 1)
         self.assertEqual(eng.logs, [])
+
+
+class TiledShotFallback(unittest.TestCase):
+    """整页与限高截图都失败时按视口分块拼接, 拼出的高度覆盖页面(不超评分上限)。"""
+
+    def test_tiles_stitched(self):
+        import io as _io
+        import tempfile
+        from pathlib import Path
+        from PIL import Image
+        from core.cloner_engine import ClonerEngine
+
+        class _Page:
+            def __init__(self):
+                self.scroll, self.full_fail = 0, 0
+
+            def screenshot(self, **kw):
+                if kw.get("full_page"):
+                    self.full_fail += 1
+                    raise RuntimeError("Unable to capture screenshot")
+                shade = min(255, self.scroll // 10)
+                buf = _io.BytesIO()
+                Image.new("RGB", (1000, 800), (shade, 0, 0)).save(buf, "PNG")
+                return buf.getvalue()
+
+            def evaluate(self, js):
+                if "clientWidth" in js:
+                    return [1000, 2000, 800]
+                if "scrollTo(0, 0)" in js:
+                    self.scroll = 0
+                    return None
+                y = int(js.split("scrollTo(0, ")[1].split(")")[0])
+                self.scroll = min(y, 2000 - 800)
+                return self.scroll
+
+            def wait_for_timeout(self, _ms):
+                pass
+
+        eng = ClonerEngine.__new__(ClonerEngine)
+        eng.log = lambda *a: None
+        page = _Page()
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "shot.png"
+            eng._full_shot(page, out, "克隆页")
+            im = Image.open(out)
+            self.assertEqual(im.size, (1000, 2000))
+            self.assertEqual(page.full_fail, 2)
+            self.assertEqual(im.getpixel((5, 5))[0], 0)          # 第一屏
+            self.assertEqual(im.getpixel((5, 1999))[0], 120)     # 末屏按实际滚动位置 1200 对齐

@@ -1240,6 +1240,7 @@ def _f_from_counts(n_a: int, n_b: int, inter: int, beta: float = 2.0) -> tuple:
 SCORE_WIDTH = 512            # 评分画布宽度(等比缩放)
 SCORE_SEGMENT = 512          # 纵向分段高度(每段一个 512×512 方块)
 SCORE_MAX_HEIGHT = 512 * 12  # 评分覆盖的最大缩放后高度(超长页尾部不计)
+SHOT_MAX_TEXTURE = 16000      # 单次 captureScreenshot 高度上限(Chromium GPU 纹理 16384)
 FIRST_SEGMENT_WEIGHT = 2.0   # 首段(首屏区域)权重
 
 
@@ -2377,8 +2378,11 @@ class ClonerEngine:
         return parts
 
     def _full_shot(self, page, path, label="截图"):
-        """整页截图; 失败(超高页/滚动动画导致超时)时退化为限高裁剪截图。
-        评分只取等比缩放后前 SCORE_MAX_HEIGHT 像素, 限高覆盖评分全部区域, 口径不变。"""
+        """整页截图, 三级退化:
+        1) 整页截图(SHOT_TIMEOUT);
+        2) 限高裁剪截图: 高度取评分覆盖区(SCORE_MAX_HEIGHT 等比换算)与 GPU 纹理上限的较小值;
+        3) 视口分块拼接: 逐屏滚动截视口再拼(超高/滚动驱动页 captureScreenshot 整体失败时)。
+        评分只取等比缩放后前 SCORE_MAX_HEIGHT 像素, 2/3 覆盖评分全部区域, 口径不变。"""
         try:
             page.screenshot(path=str(path), full_page=True, timeout=config.SHOT_TIMEOUT)
             return
@@ -2386,12 +2390,40 @@ class ClonerEngine:
             self.log("WARN", f"{label}整页截图失败, 退化为限高截图: {str(exc)[:160]}")
         dims = page.evaluate("() => [document.documentElement.clientWidth || innerWidth, "
                              "Math.max(document.documentElement.scrollHeight, "
-                             "document.body ? document.body.scrollHeight : 0, innerHeight)]")
+                             "document.body ? document.body.scrollHeight : 0, innerHeight), "
+                             "innerHeight]")
         w = max(1, int(dims[0]))
-        cap = int(SCORE_MAX_HEIGHT * w / SCORE_WIDTH)
-        page.screenshot(path=str(path), full_page=True, animations="disabled",
-                        clip={"x": 0, "y": 0, "width": w, "height": max(1, min(int(dims[1]), cap))},
-                        timeout=config.SHOT_TIMEOUT)
+        cap = min(int(SCORE_MAX_HEIGHT * w / SCORE_WIDTH), SHOT_MAX_TEXTURE)
+        h = max(1, min(int(dims[1]), cap))
+        try:
+            page.screenshot(path=str(path), full_page=True, animations="disabled",
+                            clip={"x": 0, "y": 0, "width": w, "height": h},
+                            timeout=config.SHOT_TIMEOUT)
+            return
+        except Exception as exc:
+            self.log("WARN", f"{label}限高截图失败, 退化为视口分块拼接: {str(exc)[:160]}")
+        view_h = int(dims[2]) if len(dims) > 2 and dims[2] else 0
+        self._tiled_shot(page, path, w, h, max(1, view_h))
+
+    @staticmethod
+    def _tiled_shot(page, path, width, height, view_h):
+        """逐屏滚动截视口并按实际滚动位置拼接(滚不动即到底)。"""
+        canvas = Image.new("RGB", (width, height), "white")
+        y = 0
+        while y < height:
+            actual = page.evaluate(f"() => {{ window.scrollTo(0, {y}); return window.scrollY; }}")
+            page.wait_for_timeout(120)
+            tile = Image.open(io.BytesIO(page.screenshot(full_page=False,
+                                                          timeout=config.SHOT_TIMEOUT)))
+            tile = tile.convert("RGB")
+            top = int(actual) if isinstance(actual, (int, float)) else y
+            canvas.paste(tile, (0, top))
+            if top + tile.height >= height or top < y:
+                break
+            y = top + view_h
+        with suppress(Exception):
+            page.evaluate("() => window.scrollTo(0, 0)")
+        canvas.save(str(path))
 
     def _settle(self, page, cap_ms: int = None, quiet_ms: int = None):
         """截图前缓释: DOM 静置即走(MutationObserver), settle_ms 只是上限。
