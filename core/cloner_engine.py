@@ -4945,7 +4945,14 @@ class ClonerEngine:
                                     self.log("RENDER", f"像素校准诊断: {len(big_gaps)} 格差距>200"
                                              f" = 大面积区域缺失(回放数据缺口, 归 W2/W3), "
                                              f"校准仅能补色不能补区域")
-                                cal_css = pixel_calibrator.element_css(page, cal_cells)
+                                    if len(big_gaps) * 2 >= len(cal_cells):
+                                        # 差异以区域缺失为主: 补色覆盖无从提分(语料里此情形
+                                        # 全部持平或回滚), 省掉一整次克隆重渲染
+                                        self.log("RENDER", "像素校准跳过: 差异以区域缺失为主")
+                                        self._calibrations = 2
+                                        cal_cells = []
+                                cal_css = pixel_calibrator.element_css(page, cal_cells) \
+                                    if cal_cells else ""
                                 if cal_css:
                                     # 累积(第二轮在已校准页上测得的是新增差异格)并持久化,
                                     # 后续修复轮 _localize 重写页面时重新注入, 不被覆盖
