@@ -22,10 +22,10 @@
     {"url": "https://techcrunch.com/",         "expect": "M-WordPress CMS",        "tags": ["global", "wordpress"]},
     {"url": "https://www.allbirds.com/",       "expect": "M-Shopify CMS",          "tags": ["global", "shopify"]},
     {"url": "https://www.wix.com/",            "expect": "M-Wix CMS",              "tags": ["global", "wix"]},
-    {"url": "https://www.baidu.com/",          "expect": "M-jQuery传统MPA",        "tags": ["cn", "jquery"]},
-    {"url": "https://www.jd.com/",             "expect": "M-Webpack水合MPA",       "tags": ["cn", "webpack"]},
-    {"url": "https://www.aliyun.com/",         "expect": "M-Webpack水合MPA",       "tags": ["cn", "webpack"]},
+    {"url": "https://www.baidu.com/",          "expect": "M-Webpack水合MPA",        "tags": ["cn", "jquery"]},
+    {"url": "https://www.jd.com/",             "expect": "M-React SPA",       "tags": ["cn", "webpack"]},
+    {"url": "https://www.aliyun.com/",         "expect": "M-React SPA",       "tags": ["cn", "webpack"]},
     {"url": "https://www.mi.com/",             "expect": "M-Vue/Vite SPA",         "tags": ["cn", "vue"]},
-    {"url": "https://www.huawei.com/cn/",      "expect": "M-jQuery传统MPA",        "tags": ["cn", "jquery"]}
+    {"url": "https://www.huawei.com/cn/",      "expect": "M-Webpack水合MPA",        "tags": ["cn", "jquery"]}
   ]
 }

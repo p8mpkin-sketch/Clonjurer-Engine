@@ -19,21 +19,21 @@ _JS_FP = {
     "VueMaterial": [rb'vue-material'],
     "React":      [rb'react-dom', rb'react\.production', rb'ReactDOM'],
     "Next":       [rb'__NEXT_DATA__', rb'next/dist'],
-    "Nuxt":       [rb'__NUXT__', rb'nuxt'],
-    "Angular":    [rb'zone\.js', rb'ng-version', rb'@angular'],
-    "jQuery":     [rb'jQuery JavaScript Library v', rb'jquery'],
+    "Nuxt":       [rb'__NUXT__', rb'/_nuxt/', rb'__nuxt'],   # 裸词 nuxt 会被任何文档站的正文命中
+    "Angular":    [rb'zone\.js', rb'ng-version', rb'@angular/core'],
+    "jQuery":     [rb'jQuery JavaScript Library v', rb'jquery\.(?:min\.)?js', rb'jQuery\.fn\.'],
     "Webpack":    [rb'webpackJsonp', rb'__webpack_require__'],
     "Vite":       [rb'__vite__', rb'vite/preload'],
     # 第二批框架/CMS(W1.1): 字面量均取框架运行时/构建产物的专有标识, 避免单词级误触
     "SvelteKit":  [rb'__sveltekit', rb'@sveltejs/kit', rb'/_app/immutable/'],
-    "Svelte":     [rb'svelte/internal', rb'__svelte', rb'svelte-'],
-    "Astro":      [rb'astro-island', rb'/_astro/', rb'astro:'],
+    "Svelte":     [rb'svelte/internal', rb'__svelte', rb'svelte-h[a-z0-9]{4,}'],
+    "Astro":      [rb'astro-island', rb'/_astro/', rb'astro:page-load'],
     "Remix":      [rb'__remixContext', rb'__remixManifest', rb'@remix-run/'],
-    "Solid":      [rb'solid-js', rb'_\$HY'],
+    "Solid":      [rb'solid-js/web', rb'_\$HY'],
     "Qwik":       [rb'@builder\.io/qwik', rb'qwikloader'],
     "Ember":      [rb'ember-source', rb'Ember\.VERSION', rb'@ember/'],
     "WordPress":  [rb'/wp-content/', rb'/wp-includes/'],
-    "Shopify":    [rb'cdn\.shopify\.com', rb'Shopify\.theme'],
+    "Shopify":    [rb'cdn\.shopify\.com/s/files/', rb'Shopify\.theme', rb'Shopify\.shop'],
     "Wix":        [rb'parastorage\.com', rb'wixstatic\.com'],
 }
 
@@ -58,7 +58,7 @@ _DOM_FP = {
     "Qwik":       [r'q:container', r'type="qwik/json"'],
     "Ember":      [r'class="ember-application', r'id="ember\d+"'],
     "WordPress":  [r'/wp-content/', r'/wp-includes/', r'content="WordPress'],
-    "Shopify":    [r'cdn\.shopify\.com', r'Shopify\.theme'],
+    "Shopify":    [r'cdn\.shopify\.com/s/files/', r'Shopify\.theme'],
     "Wix":        [r'parastorage\.com', r'wixstatic\.com'],
 }
 # ---- 快速匹配器(与 re.search(p, data, re.I) 逐值等价) ----------------------
@@ -171,8 +171,8 @@ def classify(hits) -> str:
     """指纹集合 → 模式名(与普查口径一致)。
 
     判定次序 = 证据的专有性: SSR/元框架(Next/Nuxt/Remix/SvelteKit/Astro/Qwik)
-    先于其宿主 UI 库, UI 库(Vue/React/Solid/Angular/Ember)先于打包器(Vite/
-    Webpack), 打包器先于 CMS/jQuery。Vite 只是构建器证据: 有 React 时判 React,
+    先于 CMS/建站平台(WordPress/Shopify/Wix), 平台先于其上的 UI 库(Vue/React/
+    Solid/Angular/Ember), UI 库先于打包器(Vite/Webpack), 打包器先于 jQuery。Vite 只是构建器证据: 有 React 时判 React,
     仅在没有任何 UI 库证据时才按 Vue 生态先验回落到 Vue/Vite。"""
     s = set(hits)
     # SPA 字节证据优先于极验(现代登录页也常挂 Geetest)
@@ -188,6 +188,15 @@ def classify(hits) -> str:
         return "M-Astro 静态岛"
     if "Qwik" in s:
         return "M-Qwik 可恢复"
+    # CMS/建站平台先于 UI 库: 证据是页面自身资源路径(wp-content、shopify 文件 CDN、
+    # parastorage), 决定资源布局与渲染方式; 平台之上用什么 UI 库是次要的
+    # (Shopify 主题带 Vue、Wix 自家站是 React, 真实语料里都曾被 UI 库抢先判错)。
+    if "WordPress" in s:
+        return "M-WordPress CMS"
+    if "Shopify" in s:
+        return "M-Shopify CMS"
+    if "Wix" in s:
+        return "M-Wix CMS"
     if "VueMaterial" in s:
         return "M-Vue SPA(Material)"
     if "Vue" in s:
@@ -204,12 +213,6 @@ def classify(hits) -> str:
         return "M-Ember SPA"
     if "Vite" in s:
         return "M-Vue/Vite SPA"
-    if "WordPress" in s:
-        return "M-WordPress CMS"
-    if "Shopify" in s:
-        return "M-Shopify CMS"
-    if "Wix" in s:
-        return "M-Wix CMS"
     if "Webpack" in s or "SSR水合" in s:
         return "M-Webpack水合MPA"
     if "Geetest" in s:

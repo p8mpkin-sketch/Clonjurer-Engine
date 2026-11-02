@@ -58,9 +58,11 @@ _STATE_ON = {"M-React SPA", "M-Webpack水合MPA", "M-Next SSR", "M-Nuxt SSR",
 # W6 扩展: 运行时 JS 重挂载清空 DOM 是 3-16 分空白站的共性根因(vivo 实证)。
 # W1.1: Remix/SvelteKit 与 Next 同属"服务端已渲染完整 DOM + 客户端水合"; Astro 岛/
 # Qwik 可恢复则以静态 DOM 为交付本体, 离线重执行只会把岛/容器重置为空。
+# 真实语料(2026-11-02): solidjs.com / emberjs.com 离线水合把整页再渲染一遍(高度比
+# 47%/50%), 与 Next marquee 退化同根 —— SSR 水合型 UI 库一并纳入。
 _HYDRATION_STRIP = {"M-Next SSR", "M-React SPA", "M-Nuxt SSR", "M-Webpack水合MPA",
                     "M-Remix SSR", "M-SvelteKit SSR", "M-Astro 静态岛", "M-Qwik 可恢复",
-                    "M-Wix CMS"}
+                    "M-Wix CMS", "M-Solid SPA", "M-Ember SPA", "M-Svelte SPA"}
 # W5: 时间冻结点亮 —— 时变内容(倒计时/日期组件/限时横幅)回放对齐采集时刻。
 _FREEZE_TIME = {"M-React SPA", "M-Webpack水合MPA", "M-Next SSR", "M-Nuxt SSR",
                 "M-Vue/Vite SPA", "M-Vue SPA(Material)", "M-jQuery传统MPA",

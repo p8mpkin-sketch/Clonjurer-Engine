@@ -21,6 +21,12 @@
 
 真实端到端耗时的大头是浏览器渲染/滚动/稳定等待、全页截图、资产下载与（启用时的）AI 修复；纯计算算法（评分/改写/识别/校准）只占一小片。因此「训练效率」既要看微基准，也要看端到端。
 
+### 1.1 采集期固化的三条不变量（真实语料 2026-11-02 归因）
+
+- **样式表的媒体条件随内联保留**：CSSOM 序列化把每张 `document.styleSheets` 内联成 `<style data-cssom>` 时，`media` 非 `all` 的表包进 `@media … {}`，`disabled` 的表跳过。否则打印样式（常见 `.header,.footer{display:none!important}`）在屏幕生效，页眉页脚整块消失（wordpress.org 实证 28 分，两轨同病）。
+- **构造样式表要单独序列化**：`document.adoptedStyleSheets`（CSS-in-JS 运行时 / Vite 注入）不在 `document.styleSheets`，outerHTML 与 MHTML 都带不走；按序追加为 `<style data-cssom="adopted">`（文档级采纳表级联在普通表之后）。remix.run 实证：两轨整页无样式 34 分。
+- **水合剥离在落盘前兜底**：活体阶段只能早识别 Next/Nuxt；模式识别发生在资源落盘之后，策略包 `disable_hydration` 由 `_localize` 的 `finalize` 用 `_strip_hydration_html` 落地（JSON 数据脚本与 `data-clone-*` 注入物保留）。solidjs.com / emberjs.com 实证：离线水合把整页再渲染一遍，克隆页长度翻倍。
+
 ## 2. 还原度评分（诚实相似度 v3）
 
 对「原站参考图」与「克隆截图」两张图打分，分三条通道，可解释、可复算。
@@ -56,7 +62,8 @@
 ## 4. 框架模式识别（`pattern_detector.py`）
 
 - 指纹两批：第一批 Vue/React/Next/Nuxt/Angular/jQuery/Webpack/Vite；第二批（W1.1）SvelteKit/Svelte/Astro/Remix/Solid/Qwik/Ember 与 WordPress/Shopify/Wix，每个模式在 `strategy_packs` 里有对应策略包。
-- 判定次序 = 证据的专有性：SSR/元框架 → UI 库 → 打包器 → CMS → jQuery。Vite 只是打包器证据：有 React 时判 React，仅在没有任何 UI 库证据时才按 Vue 生态先验回落。
+- 判定次序 = 证据的专有性：SSR/元框架 → CMS/建站平台 → UI 库 → 打包器 → jQuery。CMS 的证据是页面自身资源路径（`/wp-content/`、Shopify 文件 CDN、parastorage），决定资源布局，先于其上的 UI 库（Shopify 主题带 Vue、Wix 自家站是 React，真实语料里都曾被 UI 库抢先判错）。Vite 只是打包器证据：有 React 时判 React，仅在没有任何 UI 库证据时才按 Vue 生态先验回落。
+- 指纹只取运行时/构建产物的专有标识，**不用裸词**：`nuxt`、`svelte-`、`solid-js`、`astro:`、`jquery`、`@angular` 这类会被任何文档站正文命中（真实语料里 vitejs.dev / cn.vuejs.org / emberjs.com / techcrunch 全被判成 Nuxt，识别命中 10/26）；改为 `/_nuxt/`、`svelte-h[a-z0-9]{4,}`、`solid-js/web`、`astro:page-load`、`jquery.min.js`、`@angular/core`。
 - 置信度随证据数量与来源数单调上升：关键证据 JS+DOM 双源 0.97；框架/CMS 单源 0.85 起每多一条旁证 +0.02（封顶 0.93）；jQuery 0.75；纯静态 0.6（完全无证据 0.5）。
 - JS 字节与渲染 DOM 各转一次小写；纯字面量指纹用 `in`（C 层子串查找），其余走小写化后的正则，避免 `re.I` 全量扫描。
 - 边界：Unicode 下 `re.I` 会让 İ、ı、ſ、K 与 ASCII 字母互配，DOM 含这些字符时整体回落旧路径（`_UNICODE_FOLD_TRAPS`）。

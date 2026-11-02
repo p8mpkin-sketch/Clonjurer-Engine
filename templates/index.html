@@ -2700,7 +2700,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         </div>
       </div>
     </div>
-    <div v-show="consoleState > 0" ref="consoleBody" class="flex-1 overflow-y-auto custom-scroll px-3 py-2 font-mono text-[10.5px] leading-5">
+    <div v-if="consoleState > 0" ref="consoleBody" class="flex-1 overflow-y-auto custom-scroll px-3 py-2 font-mono text-[10.5px] leading-5">
       <div v-if="!filteredLogs.length" class="text-slate-600 text-[11px] font-sans py-2">等待构建日志流入(支持级别筛选: 全部 / 仅错误 / 仅 API / 仅构建)</div>
       <div v-for="l in filteredLogs" :key="l.seq" class="whitespace-pre-wrap break-all">
         <span class="text-slate-600 tnums">[[ l.time ]]</span>
@@ -5517,14 +5517,21 @@ const __vueApp = createApp({
       this._es = es;
       const bump = () => { this._sseLastMsg = Date.now(); };
       es.onopen = bump;
+      // 日志按帧批量合入: 逐条 push 会让整棵根组件逐条重渲染(高负载时每秒上百次, 页面卡死)
+      this._logBuf = [];
+      const flush = () => {
+        this._logFlush = 0;
+        const buf = this._logBuf; this._logBuf = [];
+        if (!buf.length) return;
+        const merged = this.logs.concat(buf);
+        this.logs = merged.length > 300 ? merged.slice(-300) : merged;
+        if (this.logAutoScroll && this.consoleState > 0) this.scrollConsole();
+      };
       es.onmessage = (ev) => {
-        this.sseOk = true; bump();
-        try {
-          const entry = JSON.parse(ev.data);
-          this.logs.push(entry);
-          if (this.logs.length > 300) this.logs.splice(0, this.logs.length - 300);
-          if (this.logAutoScroll) this.scrollConsole();
-        } catch (e) { return; }
+        bump();
+        if (!this.sseOk) this.sseOk = true;
+        try { this._logBuf.push(JSON.parse(ev.data)); } catch (e) { return; }
+        if (!this._logFlush) this._logFlush = setTimeout(flush, 250);
       };
       es.onerror = () => { this.sseOk = false; es.close(); this._es = null; setTimeout(() => this.connectSSE(), 3000); };
       // 空闲自动断开(无任务时无需长连接): 有新任务运行时 Telemetry 轮询会唤醒重连

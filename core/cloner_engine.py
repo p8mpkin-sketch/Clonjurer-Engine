@@ -156,31 +156,47 @@ DEEP_FREEZE_JS = r"""
   //    否则内联固化后解析基准从 CSS 文件目录漂移到页面目录,
   //    ../images/x.png 之类引用会 404 且级联覆盖正确的外部 CSS 规则。
   const head = document.head || document.documentElement;
-  Array.from(document.styleSheets).forEach(sheet => {
+  //    样式表的媒体条件必须随内联保留: 旧实现把 media="print" 的表当普通
+  //    表内联, 打印样式(常见 .header,.footer{display:none!important})在屏幕
+  //    上生效, 克隆页整块页眉页脚消失(wordpress.org 实证 28 分)。
+  const serializeSheet = (sheet, kind) => {
     try {
+      if (sheet.disabled) return;
       const rules = sheet.cssRules;
       if (!rules || !rules.length) return;
       let text = '';
       for (let i = 0; i < rules.length; i++) text += rules[i].cssText + '\n';
-      if (text.trim()) {
-        const base = sheet.href || document.baseURI;
-        text = text.replace(/url\((\s*['"]?)([^'")]+?)(['"]?\s*)\)/g,
-          function (m, q1, u, q2) {
-            u = u.trim();
-            if (/^(data:|blob:|about:|#|https?:)/i.test(u)) return m;
-            try { return 'url(' + q1 + new URL(u, base).href + q2 + ')'; }
-            catch (e) { return m; }
-          });
-        const style = document.createElement('style');
-        style.setAttribute('data-cssom', 'true');
-        style.textContent = text;
-        head.appendChild(style);
-        result.css++;
-      }
+      if (!text.trim()) return;
+      const base = sheet.href || document.baseURI;
+      text = text.replace(/url\((\s*['"]?)([^'")]+?)(['"]?\s*)\)/g,
+        function (m, q1, u, q2) {
+          u = u.trim();
+          if (/^(data:|blob:|about:|#|https?:)/i.test(u)) return m;
+          try { return 'url(' + q1 + new URL(u, base).href + q2 + ')'; }
+          catch (e) { return m; }
+        });
+      let media = '';
+      try { media = (sheet.media && sheet.media.mediaText || '').trim(); } catch (e) { media = ''; }
+      if (!media && sheet.ownerNode && sheet.ownerNode.getAttribute) media = (sheet.ownerNode.getAttribute('media') || '').trim();
+      if (media && media.toLowerCase() !== 'all') text = '@media ' + media + ' {\n' + text + '}\n';
+      const style = document.createElement('style');
+      style.setAttribute('data-cssom', kind);
+      style.textContent = text;
+      head.appendChild(style);
+      result.css++;
     } catch (err) {
       result.crossOriginSheets++;
     }
-  });
+  };
+  Array.from(document.styleSheets).forEach(sheet => serializeSheet(sheet, 'true'));
+  //    构造样式表(CSSStyleSheet + adoptedStyleSheets): CSS-in-JS 运行时/Vite 注入的
+  //    样式不在 document.styleSheets, outerHTML 与 MHTML 都带不走(remix.run 实证:
+  //    两轨整页无样式 34 分); 文档级采纳表级联在普通表之后, 按序追加到 head 末尾。
+  try {
+    (document.adoptedStyleSheets || []).forEach(sheet => serializeSheet(sheet, 'adopted'));
+  } catch (err) {
+    result.crossOriginSheets++;
+  }
 
   // 5) Canvas 固化为位图
   document.querySelectorAll('canvas').forEach(cv => {
@@ -669,6 +685,32 @@ FONT_BAKE_JS = r"""
   } catch (e) { return 0; }
 }
 """
+
+_SCRIPT_TAG_RE = re.compile(r"<script\b([^>]*)>.*?</script\s*>", re.I | re.S)
+
+
+def _strip_hydration_html(html: str) -> tuple:
+    """序列化后的 HTML 上剥离水合/应用脚本(与活体 REMOVE_SCRIPTS_JS 同语义):
+    JSON 数据脚本与引擎注入物(data-clone-*)保留。返回 (html, 剥离数)。
+
+    模式策略包的 disable_hydration 以前只在活体探测到 Next/Nuxt 时生效, 识别
+    发生在采集之后, 其它水合类(Remix/SvelteKit/Solid/Ember/Astro/Qwik...)的
+    开关从未落地 —— solidjs.com/emberjs.com 实证: 离线水合把整页再渲染一遍,
+    克隆页长度翻倍(高度比 47%/50%)。"""
+    n = 0
+
+    def repl(m):
+        nonlocal n
+        attrs = m.group(1)
+        if re.search(r'type\s*=\s*["\']?[^"\'>\s]*json', attrs, re.I):
+            return m.group(0)
+        if re.search(r'\bdata-clone-', attrs, re.I):
+            return m.group(0)
+        n += 1
+        return ""
+
+    return _SCRIPT_TAG_RE.sub(repl, html), n
+
 
 REMOVE_SCRIPTS_JS = r"""
 () => {
@@ -3577,7 +3619,16 @@ class ClonerEngine:
 
         bg_css = self._bg_freeze_css()
 
+        strip_pack = bool(self._strategy_pack.disable_hydration)
+        stripped_total = 0
+
         def finalize(html: str, route: str) -> str:
+            nonlocal stripped_total
+            # 模式策略包: 水合类站点以采集期静态 DOM 为权威, 落盘前剥离应用脚本
+            # (活体阶段只对 Next/Nuxt 早识别剥离; 这里补齐识别后的整类开关)
+            if strip_pack:
+                html, n = _strip_hydration_html(html)
+                stripped_total += n
             # <base href> 会让克隆页所有未改写的相对引用按原站指定的基准解析
             # (指向 CDN/原站即整类漂移); 剥离后恢复"按克隆页自身路径解析"
             # 的统一不变量 —— 与 page_dir 影子落盘机制配套
@@ -3596,6 +3647,9 @@ class ClonerEngine:
             localized = finalize(apply_replacements(html, pairs), route)
             (self.ws / fname).write_text(localized, encoding="utf-8")
             pages_map[route] = fname
+            if strip_pack and stripped_total and route == "/":
+                self.log("RENDER", f"策略包水合剥离({self._strategy_pack.pattern}): "
+                                   f"落盘前剥离 {stripped_total} 个应用脚本, 静态 DOM 权威")
             # 目录型目标页: 在原路径落一份副本(index.html), 使页面相对路径
             # (运行时拼接的懒加载 chunk 等)与原站解析一致
             if route == "/" and self._page_dir != "/":
