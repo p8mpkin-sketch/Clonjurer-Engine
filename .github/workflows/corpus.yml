@@ -57,7 +57,10 @@ jobs:
         if: always()
         run: |
           f=$(ls -t engine_bench/real_sites/runs/REPORT_*.md 2>/dev/null | head -1)
-          if [ -n "$f" ]; then cat "$f" >> "$GITHUB_STEP_SUMMARY"; fi
+          if [ -n "$f" ]; then cat "$f" >> "$GITHUB_STEP_SUMMARY"; cat "$f"; fi
+          j=$(ls -t engine_bench/real_sites/runs/run_*.json 2>/dev/null | head -1)
+          # 明细也进日志: 产物存储域名在部分环境不可达, 日志总能读到
+          if [ -n "$j" ]; then echo "::group::run json"; cat "$j"; echo "::endgroup::"; fi
       - name: 上传报告与实例日志
         if: always()
         uses: actions/upload-artifact@v4

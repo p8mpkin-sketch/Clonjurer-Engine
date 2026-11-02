@@ -2475,7 +2475,7 @@ class ClonerEngine:
             render_and_score = self._make_render_and_score(ctx, defer_diff=True)
 
             repair_started = time.time()
-            prev_sig, prev_score = None, None   # 收敛判定: 上一轮缺失集合与分数
+            prev_sig, prev_score = None, None   # 收敛判定: 上一轮缺失数与分数
             for round_i in range(max(1, config.RENDER_REPAIR_ROUNDS)
                                  if want_score else 1):
                 # P0-A 时间预算: 快站快修, 慢站限时收敛 —— 速度是引擎一等公民
@@ -2503,17 +2503,19 @@ class ClonerEngine:
                         self.log("WARN", f"[评分告警] {warning}")
                 if not failed_local and not remote_missing:
                     break
-                # 无进展即停: 缺失集合与上一轮相同且分数没涨 —— 回补已无能为力
-                # (缺失资源上游本就 404/鉴权), 再跑只是重复本地化+渲染(真实语料
-                # 里 wordpress/runoob/wix 都是 6 轮分数一动不动)
-                sig = (frozenset(failed_local), frozenset(remote_missing))
+                # 无进展即停: 上一轮回补之后缺失数没减少、分数也没涨 —— 回补已无能为力
+                # (缺失资源上游本就 404/鉴权, 或带时间戳/随机参数每轮都"不同"),
+                # 再跑只是重复本地化+渲染(真实语料里 wordpress/runoob/wix 都是 6 轮
+                # 分数一动不动)。比较缺失数而非集合: 埋点 URL 的随机参数让集合每轮都变
+                missing_n = len(failed_local) + len(remote_missing)
                 cur = detail["score"] if detail is not None else None
-                if sig == prev_sig and (cur is None or prev_score is None
-                                        or cur - prev_score < config.REPAIR_MIN_GAIN):
-                    self.log("RENDER", f"修复循环无进展(缺失集合未变, 分数 {prev_score}→{cur}), "
-                                       f"第 {round_i + 1} 轮收敛")
+                if prev_sig is not None and missing_n >= prev_sig and (
+                        cur is None or prev_score is None
+                        or cur - prev_score < config.REPAIR_MIN_GAIN):
+                    self.log("RENDER", f"修复循环无进展(缺失 {prev_sig}→{missing_n}, "
+                                       f"分数 {prev_score}→{cur}), 第 {round_i + 1} 轮收敛")
                     break
-                prev_sig, prev_score = sig, cur
+                prev_sig, prev_score = missing_n, cur
                 if round_i >= config.RENDER_REPAIR_ROUNDS - 1:
                     self.log("SMART-DL",
                              f"仍有 {len(failed_local) + len(remote_missing)} 个本地缺失资源"
