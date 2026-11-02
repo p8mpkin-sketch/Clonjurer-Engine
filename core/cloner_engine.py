@@ -974,7 +974,7 @@ SHOT_DIAG_JS = r"""
 # 原站版面特征探针(一行日志, 远程归因用): 影子根/画布/SVG/渐变与遮罩背景/iframe 计数
 PAGE_PROBE_JS = r"""
 () => {
-  const out = {shadow: 0, canvas: 0, svg: 0, gradientBg: 0, maskImg: 0, paint: 0, iframe: 0, fixed: 0};
+  const out = {shadow: 0, canvas: 0, svg: 0, gradientBg: 0, maskImg: 0, paint: 0, iframe: 0, fixed: 0, samples: []};
   const visit = (root) => {
     for (const el of root.querySelectorAll('*')) {
       const tag = el.tagName;
@@ -988,6 +988,23 @@ PAGE_PROBE_JS = r"""
         if (m && m !== 'none') out.maskImg++;
         if ((cs.backgroundImage + (m || '') + cs.borderImageSource).indexOf('paint(') >= 0) out.paint++;
         if (cs.position === 'fixed' || cs.position === 'sticky') out.fixed++;
+        // 大面积渐变/遮罩样本(含伪元素): 归因"背景点阵/光晕"类装饰在克隆侧消失
+        if (out.samples.length < 4) {
+          const r = el.getBoundingClientRect();
+          if (r.width * r.height > 60000) {
+            for (const ps of [null, '::before', '::after']) {
+              const c = ps ? getComputedStyle(el, ps) : cs;
+              if (ps && (!c.content || c.content === 'none')) continue;
+              const bg = c.backgroundImage || '';
+              const mk = c.maskImage || c.webkitMaskImage || 'none';
+              if (bg.indexOf('radial-gradient') >= 0 || (mk !== 'none' && mk.indexOf('gradient') >= 0)) {
+                out.samples.push([(el.tagName + '.' + (el.className && el.className.baseVal === undefined ? String(el.className) : '')).slice(0, 48) + (ps || ''),
+                  bg.slice(0, 120), c.backgroundSize, mk.slice(0, 60), c.animationName, c.opacity]);
+                break;
+              }
+            }
+          }
+        }
       } catch (e) {}
       if (el.shadowRoot) { out.shadow++; visit(el.shadowRoot); }
     }
@@ -4775,6 +4792,13 @@ class ClonerEngine:
                 # (重水合 SPA 需要资源齐) → 网络静置封顶 → 滚动 → 缓释
                 # (W1 起参数由模式策略包供给, 值=现行全局行为)
                 self._load_clone(page, base, phases=True)
+                if not getattr(self, "_clone_probed", False):
+                    # 与原站同一探针: 两侧样本对照即可归因装饰层在克隆侧丢失
+                    self._clone_probed = True
+                    with suppress(Exception):
+                        cp = page.evaluate(PAGE_PROBE_JS)
+                        self.log("RENDER", "克隆版面特征: " + ", ".join(
+                            f"{k}={v}" for k, v in cp.items()))
                 tp = time.monotonic()
                 self._full_shot(page, self.ws / "cloned_preview.png", "克隆页")
                 clone_text = page.evaluate(TEXT_EXTRACT_JS)
