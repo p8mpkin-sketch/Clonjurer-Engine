@@ -1,0 +1,42 @@
+name: engine-gate
+
+# 引擎正确性闸门: 逐值等价测试 + 基准正确性(输出与冻结基线一致)。
+# 速度分在共享 runner 上噪声大, 只作记录不作门槛; 任一输出不一致或测试失败即红。
+on:
+  pull_request:
+    paths:
+      - "core/**"
+      - "tests/**"
+      - "engine_bench/perf/**"
+      - "requirements.txt"
+      - ".github/workflows/engine-gate.yml"
+  push:
+    branches: [main]
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 安装钉版依赖(评分路径只依赖 pillow/numpy)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "pillow~=13.0.0" "numpy~=2.5.0" "requests>=2.31.0"
+      - name: 逐值等价测试
+        run: python -m unittest discover -s tests -t . -v
+      - name: 基准正确性闸门(输出与冻结基线逐值一致)
+        run: python engine_bench/perf/loop.py --label "ci ${{ github.sha }}"
+      - name: 上传本轮基准记录
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-last-run
+          path: |
+            engine_bench/perf/last_run.json
+            engine_bench/perf/history.jsonl
+          if-no-files-found: ignore

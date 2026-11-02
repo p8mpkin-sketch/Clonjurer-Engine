@@ -2114,6 +2114,7 @@ class ClonerEngine:
         self._tape_bytes = 0
         self._stat_accum = {"css": 0, "js": 0, "img": 0, "fonts": 0,
                             "media": 0, "misc": 0, "bytes": 0}
+        self._timeline = []              # [(stage, 单调时钟)] 阶段切换记录(端到端度量)
 
     # ------------------------------------------------------------------
     def log(self, stage: str, message: str):
@@ -2125,7 +2126,18 @@ class ClonerEngine:
             fields["progress"] = int(progress)
         if stage is not None:
             fields["stage"] = stage
+            if not self._timeline or self._timeline[-1][0] != stage:
+                self._timeline.append((stage, time.monotonic()))
         self.db.update_task(self.task_id, **fields)
+
+    def _stage_times(self) -> dict:
+        """阶段耗时(秒, 1 位小数), 按出现顺序; 真实语料跑分用它定位时间去哪了。"""
+        out = {}
+        now = time.monotonic()
+        for i, (stage, t0) in enumerate(self._timeline):
+            t1 = self._timeline[i + 1][1] if i + 1 < len(self._timeline) else now
+            out[stage] = round(out.get(stage, 0.0) + (t1 - t0), 1)
+        return out
 
     # ------------------------------------------------------------------
     def run(self):
@@ -2539,6 +2551,13 @@ class ClonerEngine:
         stats["api"] = len(mock_entries)
         if detail is not None:
             stats["similarity_detail"] = detail
+        # 端到端度量: 识别结果与阶段耗时随任务落库, 真实语料跑分直接读取, 不翻日志
+        stats["pattern"] = self._pattern_info.get("pattern", "DEFAULT")
+        stats["pattern_confidence"] = round(float(self._pattern_info.get("confidence", 0.0) or 0.0), 2)
+        stats["pattern_features"] = list(self._pattern_info.get("features", []) or [])
+        stats["calibrations"] = self._calibrations
+        stats["stage_times"] = self._stage_times()
+        stats["elapsed_s"] = round(sum(stats["stage_times"].values()), 1)
         # 双轨取优: 引擎能力 = max(交互轨重演, 保真轨 MHTML 确定性渲染)。
         # 两轨是同一采集的两个交付物, 取更能保真者作为任务还原度。
         fidelity = getattr(self, "_fidelity_score", None)

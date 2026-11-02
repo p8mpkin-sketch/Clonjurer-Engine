@@ -13,3 +13,6 @@ logs/
 engine_bench/perf/last_run.json
 engine_bench/perf/history.jsonl
 engine_bench/perf/.fixtures/
+
+# 真实语料跑分产物(本机)
+engine_bench/real_sites/runs/

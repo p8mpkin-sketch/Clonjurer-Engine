@@ -1,0 +1,31 @@
+{
+  "_doc": "真实站点语料: 一类一策的回归面。expect 是对框架模式的先验假设(以 core/pattern_detector.py 的模式名为准), 跑分后用检出结果校正; tags 用于 --tag 过滤(cn=国内直连可达, global=需国际网络)。严禁为单个站点加特判, 低分站只能归因到模式类并泛化修复。",
+  "sites": [
+    {"url": "https://example.com/",            "expect": "M-STATIC 纯静态",        "tags": ["global", "static"]},
+    {"url": "https://www.runoob.com/",         "expect": "M-jQuery传统MPA",        "tags": ["cn", "jquery"]},
+    {"url": "https://getbootstrap.com/",       "expect": "M-STATIC 纯静态",        "tags": ["global", "static"]},
+    {"url": "https://element-plus.org/zh-CN/", "expect": "M-Vue/Vite SPA",         "tags": ["cn", "vue"]},
+    {"url": "https://cn.vuejs.org/",           "expect": "M-Vue/Vite SPA",         "tags": ["cn", "vue"]},
+    {"url": "https://vitejs.dev/",             "expect": "M-Vue/Vite SPA",         "tags": ["global", "vue"]},
+    {"url": "https://nextjs.org/",             "expect": "M-Next SSR",             "tags": ["global", "next"]},
+    {"url": "https://nuxt.com/",               "expect": "M-Nuxt SSR",             "tags": ["global", "nuxt"]},
+    {"url": "https://remix.run/",              "expect": "M-Remix SSR",            "tags": ["global", "remix"]},
+    {"url": "https://svelte.dev/",             "expect": "M-SvelteKit SSR",        "tags": ["global", "svelte"]},
+    {"url": "https://astro.build/",            "expect": "M-Astro 静态岛",         "tags": ["global", "astro"]},
+    {"url": "https://qwik.dev/",               "expect": "M-Qwik 可恢复",          "tags": ["global", "qwik"]},
+    {"url": "https://www.solidjs.com/",        "expect": "M-Solid SPA",            "tags": ["global", "solid"]},
+    {"url": "https://angular.dev/",            "expect": "M-Angular SPA",          "tags": ["global", "angular"]},
+    {"url": "https://emberjs.com/",            "expect": "M-Ember SPA",            "tags": ["global", "ember"]},
+    {"url": "https://react.dev/",              "expect": "M-Next SSR",             "tags": ["global", "react"]},
+    {"url": "https://ant.design/index-cn",     "expect": "M-React SPA",            "tags": ["cn", "react"]},
+    {"url": "https://wordpress.org/",          "expect": "M-WordPress CMS",        "tags": ["global", "wordpress"]},
+    {"url": "https://techcrunch.com/",         "expect": "M-WordPress CMS",        "tags": ["global", "wordpress"]},
+    {"url": "https://www.allbirds.com/",       "expect": "M-Shopify CMS",          "tags": ["global", "shopify"]},
+    {"url": "https://www.wix.com/",            "expect": "M-Wix CMS",              "tags": ["global", "wix"]},
+    {"url": "https://www.baidu.com/",          "expect": "M-jQuery传统MPA",        "tags": ["cn", "jquery"]},
+    {"url": "https://www.jd.com/",             "expect": "M-Webpack水合MPA",       "tags": ["cn", "webpack"]},
+    {"url": "https://www.aliyun.com/",         "expect": "M-Webpack水合MPA",       "tags": ["cn", "webpack"]},
+    {"url": "https://www.mi.com/",             "expect": "M-Vue/Vite SPA",         "tags": ["cn", "vue"]},
+    {"url": "https://www.huawei.com/cn/",      "expect": "M-jQuery传统MPA",        "tags": ["cn", "jquery"]}
+  ]
+}
