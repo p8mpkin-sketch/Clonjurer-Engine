@@ -1020,11 +1020,18 @@ PAGE_PROBE_JS = r"""
 
 # 可见但仍在加载的 <img> 数(已失败的 complete=true 不计: 不会再到)
 IMG_PENDING_JS = r"""() => {
+  // 只计真正可见、确实在加载的图: 隐藏/透明祖先(轮播非当前页)与视口外 lazy 图不会在截图窗口内到齐
   let n = 0;
+  const vh = innerHeight;
   for (const im of document.images) {
     if (im.complete) continue;
     const r = im.getBoundingClientRect();
-    if (r.width > 1 && r.height > 1) n++;
+    if (r.width <= 1 || r.height <= 1) continue;
+    if (im.loading === 'lazy' && (r.bottom < -vh || r.top > 2 * vh)) continue;
+    try {
+      if (im.checkVisibility && !im.checkVisibility({opacityProperty: true, visibilityProperty: true})) continue;
+    } catch (e) {}
+    n++;
   }
   return n;
 }"""
@@ -3445,9 +3452,22 @@ class ClonerEngine:
                 pending = page.evaluate(IMG_PENDING_JS)
                 if pending:
                     t_img = time.monotonic()
-                    with suppress(Exception):
-                        page.wait_for_function(IMG_PENDING_JS.replace("return n;", "return n === 0;"),
-                                               timeout=config.BASELINE_IMG_WAIT_MS)
+                    # 有进展才继续等: 连续 STALL 内一张都没到齐即放行(坏图床/永不加载的图不空等到上限)
+                    deadline = t_img + config.BASELINE_IMG_WAIT_MS / 1000
+                    last_n, last_t = pending, t_img
+                    while time.monotonic() < deadline:
+                        page.wait_for_timeout(250)
+                        try:
+                            n = page.evaluate(IMG_PENDING_JS)
+                        except Exception:
+                            break
+                        now = time.monotonic()
+                        if not n:
+                            break
+                        if n < last_n:
+                            last_n, last_t = n, now
+                        elif now - last_t >= config.BASELINE_IMG_STALL_MS / 1000:
+                            break
                     self.log("RENDER", f"基准截图前等待 {pending} 张加载中的图片 "
                                        f"{time.monotonic() - t_img:.1f}s")
             with suppress(Exception):

@@ -46,6 +46,7 @@ SHOT_TIMEOUT = 30_000             # 单次截图上限(毫秒), 超时走限高�
 NETWORK_IDLE_TIMEOUT = 9_000       # networkidle 等待上限(毫秒)
 MAX_ASSET_BYTES = 64 * 1024 * 1024     # 单个静态资源体积上限(64MB)
 BASELINE_IMG_WAIT_MS = 8000       # 基准截图前等待加载中可见图片的上限
+BASELINE_IMG_STALL_MS = 4000      # 等待期间连续这么久无一张到齐即放行
 HOST_FAIL_TRIP = 3                # 单主机网络层失败(SSL/超时/连接)达此次数即熔断
 MAX_ASSETS_PER_TASK = 400          # 单任务最大静态资源条目数
 MAX_MOCK_ENTRIES = 300             # 单任务最大录制 API 条目数
