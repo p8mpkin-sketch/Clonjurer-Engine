@@ -1036,6 +1036,16 @@ IMG_PENDING_JS = r"""() => {
   return n;
 }"""
 
+# 视口内可见的 autoplay 视频都已有当前帧(readyState>=2); 出错/无源的不等
+VIDEO_FRAME_READY_JS = r"""() => {
+  for (const v of document.querySelectorAll('video[autoplay]')) {
+    if (v.error || v.readyState >= 2 || v.networkState === 0 || v.networkState === 3) continue;
+    const r = v.getBoundingClientRect();
+    if (r.width > 1 && r.height > 1 && r.top < innerHeight && r.bottom > 0) return false;
+  }
+  return true;
+}"""
+
 # 时间冻结(基准截图前): 暂停全部 CSS/WAAPI 动画并清空页面定时器、停掉 rAF。
 # 不改变当前画面, 只让"截图那一刻"一直保持到 DOM 序列化 —— 否则轮播/跑马灯在
 # 截图与序列化之间继续前进, 克隆从另一个时刻起步(nuxt 案例墙错一屏、logo 带错相位)。
@@ -4511,6 +4521,10 @@ class ClonerEngine:
         if phases:
             tp = self._phase("评分-克隆滚动", tp)
         self._settle(page)
+        # 首屏 autoplay 视频解出第一帧前只显示 poster(常为低清占位), 原站基准里是真帧
+        with suppress(Exception):
+            page.wait_for_function(VIDEO_FRAME_READY_JS, timeout=config.CLONE_VIDEO_WAIT_MS,
+                                   polling=100)
         with suppress(Exception):
             page.evaluate(ANIM_ALIGN_JS)
         if phases:
@@ -5046,7 +5060,8 @@ class ClonerEngine:
                                             prime_calibration=self._calibrations < 2)
                                         # 回滚守卫: 校准必须净提升, 否则撤销覆盖并恢复上一版
                                         # 截图/文本/明细(色块覆盖误伤内容时不允许拉低分数)
-                                        if (detail.get('score') or 0) < (prev_detail.get('score') or 0):
+                                        # 持平同样回滚并停手: 无增益的覆盖只是风险, 后续修复轮再试也只白付一次重渲染
+                                        if (detail.get('score') or 0) <= (prev_detail.get('score') or 0):
                                             self.log("RENDER", f"像素校准未提升"
                                                      f"({prev_detail.get('score')}→{detail.get('score')}), 已回滚")
                                             self._calib_css = prev_css
