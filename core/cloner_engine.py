@@ -1149,6 +1149,13 @@ IFRAME_SRCS_JS = r"""
   document.querySelectorAll('iframe[src]').forEach(f => {
     const raw = f.getAttribute('src') || '';
     if (!raw || raw.startsWith('about:') || raw.startsWith('javascript:') || raw.startsWith('data:')) return;
+    // 不可见 iframe(埋点/转化像素, 0x0 或隐藏)不固化: 每个都要整页导航 + 退化重试,
+    // 视觉上毫无贡献(wix 两个 doubleclick 像素白耗约 11s)
+    try {
+      const r = f.getBoundingClientRect();
+      const cs = getComputedStyle(f);
+      if (r.width <= 2 || r.height <= 2 || cs.display === 'none' || cs.visibility === 'hidden') return;
+    } catch (e) {}
     try { out.push(new URL(raw, location.href).href); } catch (e) {}
   });
   return out.slice(0, 10);
