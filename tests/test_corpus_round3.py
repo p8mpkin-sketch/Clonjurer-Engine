@@ -331,3 +331,49 @@ class ShadowDomSerialization(unittest.TestCase):
             self.assertIsNone(pg3.evaluate(SHADOW_SERIALIZE_JS)["html"])
             self.assertIn("<p>plain</p>", pg3.evaluate(OUTER_HTML_JS))
             b.close()
+
+
+class LayoutFixCss(unittest.TestCase):
+    """布局校准: 只对最深的失配块出规则; 横向不一致的不算同一块。"""
+
+    def test_leaf_rules(self):
+        from core.cloner_engine import layout_fix_css
+        orig = [["body>main:nth-of-type(1)", 0, 500, 0, 1000],
+                ["body>main:nth-of-type(1)>div:nth-of-type(1)", 0, 200, 0, 1000],
+                ["body>main:nth-of-type(1)>div:nth-of-type(1)>p:nth-of-type(1)", 10, 100, 0, 1000],
+                ["body>main:nth-of-type(1)>div:nth-of-type(10)", 300, 100, 0, 1000],
+                ["body>main:nth-of-type(1)>div:nth-of-type(2)", 200, 100, 0, 1000]]
+        clone = [["body>main:nth-of-type(1)", 0, 490, 0, 1000],
+                 ["body>main:nth-of-type(1)>div:nth-of-type(1)", 0, 190, 0, 1000],
+                 ["body>main:nth-of-type(1)>div:nth-of-type(1)>p:nth-of-type(1)", 10, 90, 0, 1000],
+                 ["body>main:nth-of-type(1)>div:nth-of-type(10)", 290, 120, 0, 1000],
+                 ["body>main:nth-of-type(1)>div:nth-of-type(2)", 190, 100, 0, 600]]
+        css, n = layout_fix_css(orig, clone)
+        self.assertEqual(n, 2)
+        self.assertIn("body>main:nth-of-type(1)>div:nth-of-type(1)>p:nth-of-type(1)"
+                      "{min-height:100px!important}", css)
+        self.assertIn("div:nth-of-type(10){max-height:100px!important;overflow:hidden!important}", css)
+        self.assertNotIn("div:nth-of-type(2)", css)
+        self.assertEqual(layout_fix_css(orig, orig), ("", 0))
+
+    @unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+    def test_browser_roundtrip(self):
+        from playwright.sync_api import sync_playwright
+        from core.cloner_engine import LAYOUT_MAP_JS, layout_fix_css
+        page_html = ('<body style="margin:0"><header style="height:80px">h</header><main>'
+                     '<section><div style="height:{h}px;width:500px">x</div></section>'
+                     '<section style="height:300px">tail</section></main></body>')
+        js = f"() => ({LAYOUT_MAP_JS})(4000)"
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            pg = b.new_page()
+            pg.set_content(page_html.format(h=240))
+            orig = pg.evaluate(js)
+            pg.set_content(page_html.format(h=200))
+            css, n = layout_fix_css(orig, pg.evaluate(js))
+            self.assertEqual(n, 1)
+            pg.set_content(page_html.format(h=200).replace("</body>", f"<style>{css}</style></body>"))
+            fixed = {k: (y, h) for k, y, h, _x, _w in pg.evaluate(js)}
+            want = {k: (y, h) for k, y, h, _x, _w in orig}
+            self.assertEqual(fixed, want)
+            b.close()

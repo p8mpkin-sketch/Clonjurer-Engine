@@ -885,6 +885,48 @@ SHADOW_SERIALIZE_JS = r"""
 }
 """
 
+# 版面块图: 可见块级元素的结构路径(tag:nth-of-type 链) → 文档坐标矩形。
+# 原站侧在纯净基准截图后采集, 克隆侧在克隆截图后采集; 两侧按路径对齐,
+# 找出高度不一致的"最深"块, 生成确定性尺寸覆盖(布局校准, 消除累积错位)。
+LAYOUT_MAP_JS = r"""
+(maxN) => {
+  const out = [];
+  const HTML_NS = 'http://www.w3.org/1999/xhtml';
+  const SKIP = {SCRIPT: 1, STYLE: 1, LINK: 1, META: 1, NOSCRIPT: 1, TEMPLATE: 1, BR: 1};
+  const keyOf = (el) => {
+    const parts = [];
+    let e = el;
+    while (e && e !== document.body && e.parentElement) {
+      let i = 1;
+      for (let s = e.previousElementSibling; s; s = s.previousElementSibling)
+        if (s.tagName === e.tagName) i++;
+      parts.push(e.tagName.toLowerCase() + ':nth-of-type(' + i + ')');
+      e = e.parentElement;
+    }
+    return e === document.body ? 'body>' + parts.reverse().join('>') : null;
+  };
+  if (!document.body) return out;
+  const sy = window.scrollY || 0, sx = window.scrollX || 0;
+  const all = document.body.getElementsByTagName('*');
+  for (let n = 0; n < all.length && out.length < maxN; n++) {
+    const el = all[n];
+    if (el.namespaceURI !== HTML_NS || SKIP[el.tagName]) continue;
+    const r = el.getBoundingClientRect();
+    if (r.height < 24 || r.width < 60) continue;
+    const cs = getComputedStyle(el);
+    if (cs.position === 'fixed' || cs.position === 'sticky' || cs.display === 'inline') continue;
+    const k = keyOf(el);
+    // 第 6 项: content-box 时 min/max-height 不含内边距与边框, 生成规则时要扣掉
+    const pb = cs.boxSizing === 'border-box' ? 0 :
+      (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0) +
+      (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
+    if (k) out.push([k, Math.round(r.top + sy), Math.round(r.height),
+                     Math.round(r.left + sx), Math.round(r.width), Math.round(pb)]);
+  }
+  return out;
+}
+"""
+
 # 原站版面特征探针(一行日志, 远程归因用): 影子根/画布/SVG/渐变与遮罩背景/iframe 计数
 PAGE_PROBE_JS = r"""
 () => {
@@ -1307,6 +1349,42 @@ SCORE_WIDTH = 512            # 评分画布宽度(等比缩放)
 SCORE_SEGMENT = 512          # 纵向分段高度(每段一个 512×512 方块)
 SCORE_MAX_HEIGHT = 512 * 12  # 评分覆盖的最大缩放后高度(超长页尾部不计)
 SHOT_MAX_TEXTURE = 16000      # 单次 captureScreenshot 高度上限(Chromium GPU 纹理 16384)
+LAYOUT_MAP_MAX = 4000         # 版面块图最多采集的块数
+LAYOUT_FIX_MAX = 150          # 布局校准单次最多覆盖规则数
+
+
+def layout_fix_css(orig_map, clone_map, min_dh=3, max_rules=LAYOUT_FIX_MAX):
+    """两侧版面块图按结构路径对齐, 对高度不一致的"最深"块生成尺寸覆盖。
+
+    同一路径且横向位置/宽度一致(容差 4px 或 2%)才视作同一块; 只取没有更深的
+    失配后代的块(根因所在, 祖先的失配是被它撑出来的)。克隆偏矮补 min-height,
+    偏高用 max-height + overflow:hidden 收回原站尺寸。返回 (css, 失配块数)。"""
+    orig = {e[0]: tuple(e[1:5]) for e in orig_map or []}
+    bad = {}
+    for e in clone_map or []:
+        k, y, h, x, w = e[:5]
+        pb = e[5] if len(e) > 5 else 0
+        o = orig.get(k)
+        if o is None:
+            continue
+        oy, oh, ox, ow = o
+        tol = max(4, 0.02 * ow)
+        if abs(x - ox) > tol or abs(w - ow) > tol:
+            continue
+        if abs(h - oh) >= min_dh:
+            bad[k] = (oh, h, pb)
+    keys = sorted(bad)
+    leaves = [k for i, k in enumerate(keys)
+              if not (i + 1 < len(keys) and keys[i + 1].startswith(k + ">"))]
+    rules = []
+    for k in leaves[:max_rules]:
+        oh, ch, pb = bad[k]
+        v = max(0, oh - pb)
+        if ch < oh:
+            rules.append(f"{k}{{min-height:{v}px!important}}")
+        else:
+            rules.append(f"{k}{{max-height:{v}px!important;overflow:hidden!important}}")
+    return "\n".join(rules), len(leaves)
 FIRST_SEGMENT_WEIGHT = 2.0   # 首段(首屏区域)权重
 
 
@@ -2316,6 +2394,7 @@ class ClonerEngine:
         self._strategy_pack = strategy_packs.for_pattern("DEFAULT")
         self._fidelity_score = None           # N1 保真轨评分(双轨取优用)
         self._fidelity_rendered = False      # 保真轨 MHTML 已渲染(每任务一次)
+        self._layout_calibrated = False      # 布局校准已尝试(每任务一次)
         self._calibrations = 0               # A1 像素校准执行次数
         self._phase_acc = {}                 # 子阶段累计耗时(秒): 提速定位用
         self._calib_css = ""                 # A1 校准覆盖(跨修复轮持久, _localize 注入)
@@ -3048,12 +3127,24 @@ class ClonerEngine:
         if screenshot:
             with suppress(OSError):   # 重建/重试: 清掉上一轮基准, 防口径混用
                 (self.ws / "original_preview.png").unlink()
+            layout_pre = None
+            with suppress(Exception):
+                layout_pre = _safe_eval(f"() => ({LAYOUT_MAP_JS})({LAYOUT_MAP_MAX})")
             try:
                 self._full_shot(page, self.ws / "original_preview.png", "原站")
                 baseline_text = _safe_eval(TEXT_EXTRACT_JS)
                 self.log("RENDER", "原站纯净基准快照已保存(DOM 改动前)")
             except Exception as exc:
                 self.log("WARN", f"原站截图失败: {exc}")
+        if screenshot and layout_pre and (self.ws / "original_preview.png").is_file():
+            # 截图前后各采一次, 只留尺寸未变的块: 动画/逐帧增长的块真实基准高度不可知,
+            # 拿它校准只会把克隆拉向另一个时刻
+            with suppress(Exception):
+                post = {e[0]: e[2] for e in _safe_eval(
+                    f"() => ({LAYOUT_MAP_JS})({LAYOUT_MAP_MAX})")}
+                stable = [e for e in layout_pre if abs(post.get(e[0], -99) - e[2]) <= 1]
+                (self.ws / "layout_map.json").write_text(
+                    json.dumps(stable, ensure_ascii=False), encoding="utf-8")
         tp = self._phase("采集-基准截图", tp)
         if screenshot and (self.ws / "original_preview.png").is_file():
             self._freeze_media_from_baseline(page)
@@ -3917,6 +4008,52 @@ class ClonerEngine:
             return self.ws / self._page_dir.lstrip("/") / "index.html"
         return self.ws / "index.html"
 
+    def _layout_calibrate(self, page, base, original, cloned, detail, clone_text,
+                          orig_text, diff_path):
+        """版面块图对齐 → 尺寸覆盖并入校准样式 → 重渲染重评分; 未净提升则整体回滚。"""
+        layout_file = self.ws / "layout_map.json"
+        idx_html = self._main_page_file()
+        if not (layout_file.is_file() and idx_html.is_file()):
+            return detail, clone_text
+        orig_map = json.loads(layout_file.read_text(encoding="utf-8"))
+        clone_map = page.evaluate(f"() => ({LAYOUT_MAP_JS})({LAYOUT_MAP_MAX})")
+        css, n_bad = layout_fix_css(orig_map, clone_map)
+        if not css:
+            return detail, clone_text
+        prev_css, prev_detail, prev_text = self._calib_css, detail, clone_text
+        prev_doc = idx_html.read_text(encoding="utf-8", errors="replace")
+        prev_shot = cloned.read_bytes()
+        merged = list(dict.fromkeys((self._calib_css + "\n" + css).split("\n")))
+        self._calib_css = "\n".join(r for r in merged if r)
+        style = f"<style data-clone-calib>{self._calib_css}</style>"
+        if "data-clone-calib" in prev_doc:
+            doc = re.sub(r"<style data-clone-calib>.*?</style>", lambda _m: style,
+                         prev_doc, count=1, flags=re.S)
+        else:
+            doc = self._inject_calib(prev_doc, self._calib_css)
+        idx_html.write_text(doc, encoding="utf-8")
+        page.goto(base + self._page_dir + self._page_frag,
+                  wait_until="domcontentloaded", timeout=30000)
+        with suppress(Exception):
+            page.wait_for_load_state("load", timeout=self._strategy_pack.wait_load_timeout)
+        self._settle(page)
+        self._full_shot(page, cloned, "克隆页")
+        clone_text = page.evaluate(TEXT_EXTRACT_JS)
+        detail = compute_visual_similarity(
+            original, cloned, diff_path=diff_path, orig_text=orig_text,
+            clone_text=clone_text or "", prime_calibration=False)
+        before, after = prev_detail.get("score") or 0, detail.get("score") or 0
+        if after <= before:
+            self.log("RENDER", f"布局校准未提升({before}→{after}, {n_bad} 块失配), 已回滚")
+            self._calib_css = prev_css
+            idx_html.write_text(prev_doc, encoding="utf-8")
+            cloned.write_bytes(prev_shot)
+            return prev_detail, prev_text
+        (self.ws / "cloned_text.txt").write_text(clone_text or "", encoding="utf-8")
+        self.log("RENDER", f"布局校准: {n_bad} 块高度失配 → {len(css.splitlines())} 条尺寸覆盖, "
+                           f"评分 {before}→{after}")
+        return detail, clone_text
+
     @staticmethod
     def _inject_calib(html: str, css: str) -> str:
         """校准覆盖置于 </head> 前(晚于站点样式, 层叠优先)。"""
@@ -4408,6 +4545,17 @@ class ClonerEngine:
                         except Exception as exc:
                             self.log('WARN', f'像素校准失败: {exc}')
                         tp = self._phase("评分-像素校准", tp)
+                    # 布局校准: 版面块高度对齐原站, 消除累积错位(每任务一次, 不提升即回滚)
+                    if detail is not None and (detail.get('score') or 0) < 99 \
+                            and not self._layout_calibrated:
+                        self._layout_calibrated = True
+                        try:
+                            detail, clone_text = self._layout_calibrate(
+                                page, base, original, cloned, detail, clone_text,
+                                orig_text, diff_path)
+                        except Exception as exc:
+                            self.log('WARN', f'布局校准失败: {exc}')
+                        tp = self._phase("评分-布局校准", tp)
                     # N1 保真轨评分: MHTML 确定性渲染 vs 原站(独立于交互轨)
                     fid_png = self.ws / 'fidelity_preview.png'
                     fid_txt = self.ws / 'fidelity_text.txt'
