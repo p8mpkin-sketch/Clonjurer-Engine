@@ -137,3 +137,20 @@ class UnreachableIsNotTransient(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MediaShotContract(unittest.TestCase):
+    """空白 Canvas(WebGL)/无帧视频从纯净基准截图回填(wix 首屏视频、WebGL 插画整块空白)。
+    浏览器级验证: 合成站 WebGL + 脚本播放的 webm, 交互轨 90.1 -> 99.4、保真轨 79.7 -> 97.4。"""
+
+    def test_scripts_and_hook(self):
+        self.assertIn("getImageData", ce.MEDIA_SHOT_JS)
+        self.assertIn("data-clone-shot", ce.MEDIA_SHOT_JS)
+        self.assertIn("poster", ce.MEDIA_SHOT_APPLY_JS)
+        src = Path(ce.__file__).read_text(encoding="utf-8")
+        # 必须在纯净基准截图之后、DEEP_FREEZE 之前
+        i_shot = src.index('page.screenshot(path=str(self.ws / "original_preview.png")')
+        i_media = src.index("self._freeze_media_from_baseline(page)")
+        i_freeze = src.index("counts = _safe_eval(DEEP_FREEZE_JS)")
+        self.assertLess(i_shot, i_media)
+        self.assertLess(i_media, i_freeze)

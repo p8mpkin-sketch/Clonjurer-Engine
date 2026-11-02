@@ -29,6 +29,7 @@ V4 强化(工程修复优先, AI 兜底):
   -> 渲染驱动修复循环(404 回补) -> 诚实相似度三通道评分 + 差异热力图
   -> 智能 Mock 合并 -> [门控] AI 视觉闭环修复 -> Flask 工程生成打包
 """
+import base64
 import hashlib
 import html as _html
 import io
@@ -239,6 +240,81 @@ DEEP_FREEZE_JS = r"""
 """
 
 # 表单激活: focus/blur 触发懒加载样式与占位符逻辑(不点击, 防止误提交/误导航)
+# 视觉媒体快照(纯净基准截图之后、DOM 改动之前执行):
+# - 空白/跨域污染的 Canvas(WebGL 未开 preserveDrawingBuffer 时 toDataURL 恒为空白,
+#   跨域贴图会让读像素直接抛错): DEEP_FREEZE 的 toDataURL 固化只能得到透明图;
+# - 无 poster 的 <video>: 离线回放时剥了脚本不会播放, 编解码不支持时整块空白。
+# 能直接读到当前帧的视频就地写 poster; 其余打 data-clone-shot 标记并返回文档坐标,
+# 由引擎从纯净基准截图裁出对应区域回填(MEDIA_SHOT_APPLY_JS)。
+MEDIA_SHOT_JS = r"""
+() => {
+  const out = [];
+  const sx = window.scrollX || 0, sy = window.scrollY || 0;
+  const rectOf = el => { const r = el.getBoundingClientRect();
+                         return {x: r.left + sx, y: r.top + sy, w: r.width, h: r.height}; };
+  const blank = cv => {
+    try {
+      const w = Math.min(cv.width, 64), h = Math.min(cv.height, 64);
+      if (!w || !h) return true;
+      const t = document.createElement('canvas'); t.width = w; t.height = h;
+      const c = t.getContext('2d'); c.drawImage(cv, 0, 0, w, h);
+      const d = c.getImageData(0, 0, w, h).data;
+      for (let i = 3; i < d.length; i += 4) { if (d[i] !== 0) return false; }
+      return true;
+    } catch (err) { return true; }   // 跨域污染: 读不到像素, 只能走截图
+  };
+  let n = 0, posters = 0;
+  document.querySelectorAll('canvas').forEach(cv => {
+    const r = rectOf(cv);
+    if (r.w < 8 || r.h < 8 || !blank(cv)) return;
+    cv.setAttribute('data-clone-shot', String(n));
+    out.push(Object.assign({n: n++, kind: 'canvas'}, r));
+  });
+  document.querySelectorAll('video').forEach(v => {
+    if (v.getAttribute('poster')) return;
+    const r = rectOf(v);
+    if (r.w < 8 || r.h < 8) return;
+    try {
+      if (v.readyState >= 2 && v.videoWidth) {
+        const t = document.createElement('canvas');
+        t.width = v.videoWidth; t.height = v.videoHeight;
+        t.getContext('2d').drawImage(v, 0, 0);
+        const data = t.toDataURL('image/jpeg', 0.85);
+        if (data && data.length > 2000) { v.setAttribute('poster', data); posters++; return; }
+      }
+    } catch (err) { /* 跨域视频帧不可读 → 截图 */ }
+    v.setAttribute('data-clone-shot', String(n));
+    out.push(Object.assign({n: n++, kind: 'video'}, r));
+  });
+  return {shots: out, posters: posters,
+          docW: Math.max(document.documentElement.scrollWidth, window.innerWidth || 0)};
+}
+"""
+
+MEDIA_SHOT_APPLY_JS = r"""
+(shots) => {
+  let applied = 0;
+  document.querySelectorAll('[data-clone-shot]').forEach(el => {
+    const src = shots[el.getAttribute('data-clone-shot')];
+    el.removeAttribute('data-clone-shot');
+    if (!src) return;
+    if (el.tagName === 'VIDEO') { el.setAttribute('poster', src); applied++; return; }
+    const img = document.createElement('img');
+    for (const a of Array.from(el.attributes)) {
+      if (a.name === 'width' || a.name === 'height') continue;
+      img.setAttribute(a.name, a.value);
+    }
+    img.src = src;
+    img.setAttribute('data-canvas-frozen', 'shot');
+    img.style.width = (el.clientWidth || el.getBoundingClientRect().width) + 'px';
+    img.style.height = (el.clientHeight || el.getBoundingClientRect().height) + 'px';
+    el.replaceWith(img);
+    applied++;
+  });
+  return applied;
+}
+"""
+
 FORM_ACTIVATE_JS = r"""
 () => {
   let n = 0;
@@ -2700,6 +2776,42 @@ class ClonerEngine:
             return None
 
     # ------------------------------------------------------------------
+    def _freeze_media_from_baseline(self, page):
+        """空白 Canvas / 无帧视频: 从纯净基准截图裁出所在区域回填(见 MEDIA_SHOT_JS)。"""
+        try:
+            info = page.evaluate(MEDIA_SHOT_JS)
+        except Exception as exc:
+            self.log("WARN", f"媒体快照探测失败: {exc}")
+            return
+        shots = info.get("shots") or []
+        crops = {}
+        if shots:
+            try:
+                with Image.open(self.ws / "original_preview.png") as im:
+                    im = im.convert("RGB")
+                    scale = im.width / float(info.get("docW") or im.width)
+                    for sh in shots[:config.MEDIA_SHOT_MAX]:
+                        box = (int(sh["x"] * scale), int(sh["y"] * scale),
+                               int((sh["x"] + sh["w"]) * scale), int((sh["y"] + sh["h"]) * scale))
+                        box = (max(0, box[0]), max(0, box[1]),
+                               min(im.width, box[2]), min(im.height, box[3]))
+                        if box[2] - box[0] < 8 or box[3] - box[1] < 8:
+                            continue
+                        buf = io.BytesIO()
+                        im.crop(box).save(buf, format="JPEG", quality=85)
+                        crops[str(sh["n"])] = ("data:image/jpeg;base64,"
+                                               + base64.b64encode(buf.getvalue()).decode("ascii"))
+            except Exception as exc:
+                self.log("WARN", f"媒体快照裁图失败: {exc}")
+        try:
+            applied = page.evaluate(MEDIA_SHOT_APPLY_JS, crops)
+        except Exception as exc:
+            self.log("WARN", f"媒体快照回填失败: {exc}")
+            applied = 0
+        if applied or info.get("posters"):
+            self.log("RENDER", f"媒体快照: {info.get('posters', 0)} 个视频取当前帧作封面, "
+                               f"{applied} 个空白 Canvas/无帧视频从基准截图回填")
+
     @staticmethod
     def _probe_unreachable(ctx, url: str):
         """网络层可达性探测: 返回不可达原因, 可达(任何 HTTP 状态)返回 None。"""
@@ -2798,6 +2910,8 @@ class ClonerEngine:
                 self.log("RENDER", "原站纯净基准快照已保存(DOM 改动前)")
             except Exception as exc:
                 self.log("WARN", f"原站截图失败: {exc}")
+        if screenshot and (self.ws / "original_preview.png").is_file():
+            self._freeze_media_from_baseline(page)
         activated = _safe_eval(FORM_ACTIVATE_JS)
         if activated:
             self.log("RENDER", f"表单激活: focus/blur {activated} 个输入控件")
