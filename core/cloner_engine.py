@@ -3830,7 +3830,9 @@ class ClonerEngine:
             while in_flight and len(results) < config.MAX_ASSETS_PER_TASK:
                 done, _pending = _wait_futures(list(in_flight), return_when=FIRST_COMPLETED)
                 for fut in done:
-                    job = in_flight.pop(fut)
+                    job = in_flight.pop(fut, None)
+                    if job is None:
+                        continue   # 已被主机熔断放弃
                     if len(results) >= config.MAX_ASSETS_PER_TASK:
                         continue
                     try:
@@ -3848,8 +3850,16 @@ class ClonerEngine:
                             host_fail[h] = host_fail.get(h, 0) + 1
                             if host_fail[h] >= config.HOST_FAIL_TRIP and h not in tripped:
                                 tripped.add(h)
+                                # 已在飞的同主机请求也不再等(否则仍要逐个等满读超时)
+                                dropped = 0
+                                for f2, j2 in list(in_flight.items()):
+                                    if (urlsplit(j2["url"]).hostname or "") == h:
+                                        f2.cancel()
+                                        in_flight.pop(f2, None)
+                                        dropped += 1
                                 self.log("SMART-DL", f"主机熔断: {h} 网络层连续失败 "
-                                                     f"{host_fail[h]} 次, 余下请求跳过")
+                                                     f"{host_fail[h]} 次, 余下请求跳过"
+                                                     f"(放弃在飞 {dropped} 个)")
                         continue
                     info = self._store(out)
                     results[out["url"]] = info
@@ -3896,7 +3906,8 @@ class ClonerEngine:
                         css_sources[out["url"]] = text
                         css_refs[out["url"]] = parse_css_refs(text, out["url"])
         finally:
-            executor.shutdown(wait=True, cancel_futures=True)
+            # 熔断放弃的在飞请求不阻塞收尾(工作线程超时后自行结束, 结果丢弃)
+            executor.shutdown(wait=not tripped, cancel_futures=True)
 
         # CSS 内部引用本地化(@import 与 url()/mask/image-set 引用改写为本地路径)
         for css_url, text in css_sources.items():
