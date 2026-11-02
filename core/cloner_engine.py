@@ -2889,6 +2889,7 @@ class ClonerEngine:
 
             repair_started = time.time()
             prev_sig, prev_score = None, None   # 收敛判定: 上一轮缺失数与分数
+            stale_prev = False                   # 上一轮回补是否也未涨分
             best = None                          # 最优轮快照(修复轮回退时恢复)
             for round_i in range(max(1, config.RENDER_REPAIR_ROUNDS)
                                  if want_score else 1):
@@ -2927,13 +2928,17 @@ class ClonerEngine:
                 # 分数一动不动)。比较缺失数而非集合: 埋点 URL 的随机参数让集合每轮都变
                 missing_n = len(failed_local) + len(remote_missing)
                 cur = detail["score"] if detail is not None else None
-                if prev_sig is not None and missing_n >= prev_sig and (
-                        cur is None or prev_score is None
-                        or cur - prev_score < config.REPAIR_MIN_GAIN):
+                no_gain = (prev_score is not None and cur is not None
+                           and cur - prev_score < config.REPAIR_MIN_GAIN)
+                # 连续两轮回补都不涨分: 缺失数虽在下降, 回补的是登录/埋点/接口这类
+                # 不可见请求(真实语料 jd 三轮 77.0 不动, 缺失 17→11 仍在跑)
+                stale = no_gain and stale_prev
+                if prev_sig is not None and (stale or (missing_n >= prev_sig and (
+                        cur is None or prev_score is None or no_gain))):
                     self.log("RENDER", f"修复循环无进展(缺失 {prev_sig}→{missing_n}, "
                                        f"分数 {prev_score}→{cur}), 第 {round_i + 1} 轮收敛")
                     break
-                prev_sig, prev_score = missing_n, cur
+                prev_sig, prev_score, stale_prev = missing_n, cur, no_gain
                 if round_i >= config.RENDER_REPAIR_ROUNDS - 1:
                     self.log("SMART-DL",
                              f"仍有 {len(failed_local) + len(remote_missing)} 个本地缺失资源"
