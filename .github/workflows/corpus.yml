@@ -2,7 +2,9 @@ name: real-site-corpus
 
 # 真实站点语料跑分: 在 GitHub 托管 runner 上起一个平台实例(有国际网络), 跑
 # engine_bench/real_sites/run_corpus.py, 报告写进本次运行的摘要并上传明细。
-# 引擎改动的 PR 自动跑全量; 手动触发可选标签/站点; 每晚全量跑一次。
+# 引擎改动的 PR 与每晚默认只跑 global 标签: runner 在美国, 国内站会拿到地区版/风控页
+# (实测 aliyun/jd/mi 与国内直连差异巨大), 国内站在 cz 本机实例上跑 --tag cn。
+# 手动触发可填 tag(填 all 以外的任意标签)或 sites。
 # 不作门槛(真实站点会变), 只做度量留档; 跟上一轮的对比看报告 Δ 列(本地 runs/)或下载两次产物比。
 on:
   pull_request:
@@ -51,7 +53,7 @@ jobs:
       - name: 跑语料
         run: |
           python engine_bench/real_sites/run_corpus.py --base http://127.0.0.1:8897 \
-            --timeout 3600 --tag "${{ github.event.inputs.tag }}" \
+            --timeout 3600 --tag "${{ github.event.inputs.tag || 'global' }}" \
             --sites "${{ github.event.inputs.sites }}" || echo "有站点未完成(报告照常产出)"
       - name: 报告写入运行摘要
         if: always()
