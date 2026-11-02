@@ -44,6 +44,7 @@ AUTO_SCROLL_BUDGET = 25          # 采集期自动滚动总时限(秒)
 SHOT_TIMEOUT = 30_000             # 单次截图上限(毫秒), 超时走限高退化
 NETWORK_IDLE_TIMEOUT = 9_000       # networkidle 等待上限(毫秒)
 MAX_ASSET_BYTES = 64 * 1024 * 1024     # 单个静态资源体积上限(64MB)
+BASELINE_IMG_WAIT_MS = 8000       # 基准截图前等待加载中可见图片的上限
 HOST_FAIL_TRIP = 3                # 单主机网络层失败(SSL/超时/连接)达此次数即熔断
 MAX_ASSETS_PER_TASK = 400          # 单任务最大静态资源条目数
 MAX_MOCK_ENTRIES = 300             # 单任务最大录制 API 条目数

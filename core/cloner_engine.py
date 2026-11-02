@@ -1018,6 +1018,17 @@ PAGE_PROBE_JS = r"""
 }
 """
 
+# 可见但仍在加载的 <img> 数(已失败的 complete=true 不计: 不会再到)
+IMG_PENDING_JS = r"""() => {
+  let n = 0;
+  for (const im of document.images) {
+    if (im.complete) continue;
+    const r = im.getBoundingClientRect();
+    if (r.width > 1 && r.height > 1) n++;
+  }
+  return n;
+}"""
+
 # 时间冻结(基准截图前): 暂停全部 CSS/WAAPI 动画并清空页面定时器、停掉 rAF。
 # 不改变当前画面, 只让"截图那一刻"一直保持到 DOM 序列化 —— 否则轮播/跑马灯在
 # 截图与序列化之间继续前进, 克隆从另一个时刻起步(nuxt 案例墙错一屏、logo 带错相位)。
@@ -3428,6 +3439,17 @@ class ClonerEngine:
             layout_pre = None
             with suppress(Exception):
                 layout_pre = _safe_eval(f"() => ({LAYOUT_MAP_JS})({LAYOUT_MAP_MAX})")
+            # 图片未到齐就截基准, 克隆(资源池更全)反被扣分: cn.vuejs 赞助商图床慢时
+            # 基准里整区空白格子而克隆是满的(-15 分)。可见图仍在加载就再等一会(封顶)
+            with suppress(Exception):
+                pending = page.evaluate(IMG_PENDING_JS)
+                if pending:
+                    t_img = time.monotonic()
+                    with suppress(Exception):
+                        page.wait_for_function(IMG_PENDING_JS.replace("return n;", "return n === 0;"),
+                                               timeout=config.BASELINE_IMG_WAIT_MS)
+                    self.log("RENDER", f"基准截图前等待 {pending} 张加载中的图片 "
+                                       f"{time.monotonic() - t_img:.1f}s")
             with suppress(Exception):
                 frz = _safe_eval(TIME_FREEZE_JS)
                 if frz.get("anims"):
