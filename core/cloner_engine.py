@@ -2262,6 +2262,13 @@ class ClonerEngine:
     # ------------------------------------------------------------------
     def log(self, stage: str, message: str):
         self.bus.publish(self.task_id, stage, message)
+        # 任务日志落盘(工作区 engine.log): 内存环形队列只留最近几百条, 事后归因
+        # (语料跑分的低分站)要能翻到采集期的每一步
+        ws = getattr(self, "ws", None)
+        if ws is not None:
+            with suppress(OSError):
+                with open(ws / "engine.log", "a", encoding="utf-8") as fh:
+                    fh.write(f"{time.strftime('%H:%M:%S')} [{stage}] {message}\n")
 
     def _set(self, progress=None, stage=None, **extra):
         fields = dict(extra)

@@ -154,3 +154,30 @@ class MediaShotContract(unittest.TestCase):
         i_freeze = src.index("counts = _safe_eval(DEEP_FREEZE_JS)")
         self.assertLess(i_shot, i_media)
         self.assertLess(i_media, i_freeze)
+
+
+class EngineLogPersisted(unittest.TestCase):
+    """任务日志落盘到工作区 engine.log, 且只追加不抛错。"""
+
+    def test_log_appends_to_workspace(self):
+        import tempfile
+        from pathlib import Path
+        from core.cloner_engine import ClonerEngine
+
+        class _Bus:
+            def __init__(self):
+                self.items = []
+
+            def publish(self, *a):
+                self.items.append(a)
+
+        eng = ClonerEngine.__new__(ClonerEngine)
+        eng.bus, eng.task_id = _Bus(), "t"
+        with tempfile.TemporaryDirectory() as d:
+            eng.ws = Path(d)
+            eng.log("采集", "第一行")
+            eng.log("评分", "第二行")
+            text = (Path(d) / "engine.log").read_text(encoding="utf-8")
+        self.assertIn("[采集] 第一行", text)
+        self.assertIn("[评分] 第二行", text)
+        self.assertEqual(len(eng.bus.items), 2)
