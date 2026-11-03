@@ -1545,6 +1545,7 @@ HTML_INTERCEPT_TYPES = ("text/html", "application/xhtml+xml")
 
 # 视为静态资产的 Playwright resource_type 集合(活体采集/离线评分共用)
 ASSET_RESOURCE_TYPES = {"stylesheet", "script", "image", "font", "media", "other"}
+_LIVE_BODY_TYPES = {"stylesheet", "script", "image", "font"}   # media 多为分段流(206), 不复用
 
 # 瞬时 Playwright 会话错误特征: 与稳定克隆失败不同源, 值得换会话重跑一次
 class TargetUnreachable(RuntimeError):
@@ -2803,6 +2804,9 @@ class ClonerEngine:
         self._dl_headers = {}
         self.downloader = None           # SmartDownloader, run() 中构造
         self._live_seen = {}             # 活体渲染期成功加载的资源 URL -> resource_type
+        self._live_resp = {}             # 活体 200 响应(页面关闭前取响应体)
+        self._live_bodies = {}           # URL -> 下载结果结构(浏览器已加载的字节, 免重下)
+        self._live_body_bytes = 0
         self._raw_refs = {}              # 原始引用字符串 -> 绝对 URL(本地化替换用)
         self._page_dir = "/"             # 目标页所在目录(目录型 URL, 相对路径基准)
         self._page_frag = ""             # 目标 URL 的 hash 路由(SPA #/login)
@@ -3711,6 +3715,16 @@ class ClonerEngine:
                 if frz.get("anims"):
                     self.log("RENDER", f"时间冻结: 暂停 {frz['anims']} 个动画, "
                                        f"清空定时器 {frz.get('timers', 0)} 个")
+            # 冻结后再等一轮可见图: 上面等图期间轮播定时器还在翻页, 冻结那一刻露出的往往
+            # 是刚翻到、图还没到的一页(mi.com 基准整屏空白)。冻结后版面不再动, 等的就是截图里那几张
+            with suppress(Exception):
+                pending = page.evaluate(IMG_PENDING_JS)
+                if pending:
+                    t_img = time.monotonic()
+                    deadline = t_img + config.BASELINE_IMG_FROZEN_WAIT_MS / 1000
+                    while time.monotonic() < deadline and page.evaluate(IMG_PENDING_JS):
+                        page.wait_for_timeout(200)
+                    self.log("RENDER", f"冻结后补等 {pending} 张可见图 {time.monotonic() - t_img:.1f}s")
             try:
                 self._full_shot(page, self.ws / "original_preview.png", "原站")
                 baseline_text = _safe_eval(TEXT_EXTRACT_JS)
@@ -3861,6 +3875,8 @@ class ClonerEngine:
                          "session": storage.get("session", {})}
             except Exception as exc:
                 self.log("WARN", f"状态快照失败: {exc}")
+        with suppress(Exception):
+            self._harvest_live_bodies()
         self._phase("采集-收尾", tp)
         final_url = url
         with suppress(Exception):
@@ -4043,8 +4059,41 @@ class ClonerEngine:
             if request.resource_type not in ASSET_RESOURCE_TYPES:
                 return
             self._live_seen[response.url] = request.resource_type
+            if response.status == 200 and request.resource_type in _LIVE_BODY_TYPES \
+                    and len(self._live_resp) < config.LIVE_BODY_MAX \
+                    and response.url.startswith(("http://", "https://")):
+                self._live_resp.setdefault(response.url, response)
         except Exception:
             return
+
+    def _harvest_live_bodies(self):
+        """页面关闭前把浏览器已加载资源的响应体取回(CDP 本地读取, 毫秒级)。
+
+        CAS 下载与活体回补原先把浏览器刚加载过的资源再从网络各下一遍: 慢站 CAS 20~30s、
+        活体回补串行逐个 fetch 再 20~45s(jd/techcrunch)。字节就是浏览器实际渲染用的那份
+        (含 Accept 协商出的 webp/avif), 比重下更忠实; 取不到(已被逐出/重定向)的照常走网络。"""
+        t0, n = time.monotonic(), 0
+        pending, self._live_resp = self._live_resp, {}
+        for url, resp in pending.items():
+            if url in self._live_bodies or self._live_body_bytes >= config.LIVE_BODY_BYTES:
+                continue
+            try:
+                body = resp.body()
+            except Exception:
+                continue
+            if not body or len(body) > config.MAX_ASSET_BYTES:
+                continue
+            ctype = ""
+            with suppress(Exception):
+                ctype = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
+            self._live_bodies[url] = {"url": url, "ok": True, "content": body,
+                                      "content_type": ctype, "error": "", "ext": ".bin",
+                                      "is_css": False, "status": 200, "via": "live"}
+            self._live_body_bytes += len(body)
+            n += 1
+        if n:
+            self.log("SMART-DL", f"活体响应体复用: 取回 {n} 个已加载资源 "
+                                 f"({self._live_body_bytes // 1024} KB, {time.monotonic() - t0:.1f}s)")
 
     def _finalize_mocks(self):
         entries, seen = [], set()
@@ -4244,6 +4293,9 @@ class ClonerEngine:
 
     def _fetch_asset(self, job: dict) -> dict:
         """L1 直连下载(线程池内执行, 禁止触碰 Playwright 对象)。"""
+        pre = self._live_bodies.get(job["url"])
+        if pre is not None:
+            return dict(pre)
         out = self.downloader.fetch_direct(job["url"],
                                            referer=job.get("referer") or self._target)
         return out
@@ -4357,8 +4409,9 @@ class ClonerEngine:
         for url, raw in candidates.items():
             if len(results) >= config.MAX_ASSETS_PER_TASK:
                 break
-            out = self.downloader.fetch_via_browser(url, ctx.request,
-                                                    referer=self._target)
+            pre = self._live_bodies.get(url)
+            out = dict(pre) if pre is not None else self.downloader.fetch_via_browser(
+                url, ctx.request, referer=self._target)
             out = self._normalize_out(out)
             if not out["ok"]:
                 continue
@@ -4399,14 +4452,22 @@ class ClonerEngine:
         # 浏览器会话自有熔断(requests 被拒的主机浏览器可能仍可达, 不沿用下载阶段熔断):
         # 串行回补里同一主机网络层连续失败即跳过余下, 免逐个空等超时
         b_fail = {}
-        for url in missing[:config.LIVE_HARVEST_MAX]:
+        # 已取回响应体的不占回补名额(本地读取, 不走网络); 名额只限需要真回源的
+        missing.sort(key=lambda u: u not in self._live_bodies)
+        net_left = config.LIVE_HARVEST_MAX
+        for url in missing:
             if len(results) >= config.MAX_ASSETS_PER_TASK:
                 break
+            if url not in self._live_bodies:
+                if net_left <= 0:
+                    break
+                net_left -= 1
             host = urlsplit(url).hostname or ""
             if b_fail.get(host, 0) >= config.HOST_FAIL_TRIP:
                 continue
-            out = self.downloader.fetch_via_browser(url, ctx.request,
-                                                    referer=self._target)
+            pre = self._live_bodies.get(url)
+            out = dict(pre) if pre is not None else self.downloader.fetch_via_browser(
+                url, ctx.request, referer=self._target)
             out = self._normalize_out(out)
             if not out["ok"]:
                 if not str(out.get("error") or "").startswith(("HTTP", "空响应体", "oversize",
@@ -4421,7 +4482,8 @@ class ClonerEngine:
                 for raw, absolute in parse_css_refs(text, out["url"]):
                     if absolute in results or absolute in self._live_seen:
                         continue
-                    child = self.downloader.fetch_via_browser(
+                    pre = self._live_bodies.get(absolute)
+                    child = dict(pre) if pre is not None else self.downloader.fetch_via_browser(
                         absolute, ctx.request, referer=out["url"])
                     child = self._normalize_out(child)
                     if child["ok"]:

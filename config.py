@@ -50,6 +50,7 @@ MAX_ASSET_BYTES = 64 * 1024 * 1024     # 单个静态资源体积上限(64MB)
 BASELINE_IMG_WAIT_MS = 8000       # 基准截图前等待加载中可见图片的上限
 CLONE_VIDEO_WAIT_MS = 1500        # 克隆截图前等首屏 autoplay 视频出帧的上限
 CLONE_IMG_WAIT_MS = 2000          # 克隆截图前等懒加载图到齐的上限(资源都在本地, 通常百毫秒级)
+BASELINE_IMG_FROZEN_WAIT_MS = 5000  # 时间冻结后补等可见图的上限(版面已静止)
 BASELINE_IMG_STALL_MS = 4000      # 等待期间连续这么久无一张到齐即放行
 HOST_FAIL_TRIP = 3                # 单主机网络层失败(SSL/超时/连接)达此次数即熔断
 MAX_ASSETS_PER_TASK = 400          # 单任务最大静态资源条目数
@@ -120,6 +121,8 @@ REPAIR_TIME_BUDGET = 300       # 修复循环时间预算(秒): 快站快修, �
 AI_TIME_BUDGET = 900           # 含 AI 修复的任务时间预算(秒): 超预算跳过 AI 轮       # 渲染驱动回补循环轮数(本地渲染->收集404->回源补抓);
                                # Vite/webpack 动态 chunk 是"entry->视图chunk->懒路由->
                                # 图片"多层依赖链, 每轮只能剥一层, 浅轮数补不到深层资源
+LIVE_BODY_MAX = 1500          # 活体响应体复用: 单任务最多留存的浏览器已加载资源数
+LIVE_BODY_BYTES = 256 * 1024 * 1024  # 活体响应体复用: 单任务留存总字节上限
 LIVE_HARVEST_MAX = 60          # 活体会话请求差集回补的单轮最大补抓数
 JS_REWRITE_MAX_BYTES = 8 * 1024 * 1024  # 参与本地化重写的单个 JS 文件体积上限
 
