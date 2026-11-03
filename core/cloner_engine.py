@@ -284,6 +284,9 @@ MEDIA_SHOT_JS = r"""
       const op = parseFloat(getComputedStyle(v).opacity);
       if (op > 0) { v.style.setProperty('opacity', String(op), 'important'); pinned++; }
     } catch (err) {}
+    // 基准时刻的播放进度: 克隆评分前跳到同一帧并暂停(录屏式预览视频逐帧都在变,
+    // 克隆从头播放到截图那一刻与基准是两帧, nuxt 展示墙整排失配)
+    try { if (v.readyState >= 2 && v.currentTime > 0) v.setAttribute('data-clone-vt', v.currentTime.toFixed(3)); } catch (err) {}
     if (v.getAttribute('poster')) return;
     try {
       if (v.readyState >= 2 && v.videoWidth) {
@@ -1114,10 +1117,32 @@ RUNTIME_FP_JS = r"""() => {
 
 # 克隆侧懒加载图一律转 eager 并等到齐: 资源全在本地沙盒, 整页截图前没被滚动窗口
 # 触发的 loading=lazy 图(页尾赞助商墙/logo 栅格)在截图里是空格, 原站基准却是满的
+# 只转基准时刻已到齐的图(采集侧打 data-clone-loaded): 基准里没到的图克隆也不强拉, 两侧同口径
 CLONE_IMG_EAGER_JS = r"""() => {
   let n = 0;
   for (const im of document.images) {
-    if (im.loading === 'lazy') { im.loading = 'eager'; n++; }
+    if (im.loading === 'lazy' && im.hasAttribute('data-clone-loaded')) { im.loading = 'eager'; n++; }
+  }
+  return n;
+}"""
+# 基准截图前: 文档序前 maxN 张懒加载图转 eager(页尾轮播/栅格没被滚动窗口触发的图);
+# 不全转 —— 一次拉上百张会被图床限流成坏图(wix 页尾整片 alt 文字)
+BASELINE_EAGER_JS = r"""(maxN) => {
+  let n = 0;
+  for (const im of document.images) {
+    if (n >= maxN) break;
+    if (im.loading !== 'lazy' || im.complete) continue;
+    const r = im.getBoundingClientRect();
+    if (r.width <= 1 || r.height <= 1) continue;
+    im.loading = 'eager'; n++;
+  }
+  return n;
+}"""
+# 基准截图后: 给截图时刻已解码完成的图打标, 供克隆侧决定哪些懒加载图该强拉
+MARK_LOADED_IMGS_JS = r"""() => {
+  let n = 0;
+  for (const im of document.images) {
+    if (im.complete && im.naturalWidth > 0) { im.setAttribute('data-clone-loaded', '1'); n++; }
   }
   return n;
 }"""
@@ -1126,6 +1151,42 @@ CLONE_IMG_DONE_JS = r"""() => {
     if (im.complete) continue;
     const r = im.getBoundingClientRect();
     if (r.width > 1 && r.height > 1) return false;
+  }
+  return true;
+}"""
+
+# 评分渲染专用(交付物不注入): 长周期定时器不触发。基准是时间冻结的快照, 克隆页加载后
+# 轮播自动翻页(setInterval/递归 setTimeout, 周期多为 3~6s)会在截图前翻到另一页 ——
+# 与 ANIM_ALIGN_JS 对 CSS 动画做的对齐同理, 这里对齐 JS 定时驱动的版面变化。短定时器
+# (懒渲染/防抖/预加载器收起)照常, 阈值取在两者之间
+SCORE_TIMER_GUARD_JS = r"""(() => {
+  try {
+    const si = window.setInterval, st = window.setTimeout;
+    window.setInterval = function (fn, ms) {
+      if ((+ms || 0) >= 2500) return 0;
+      return si.apply(this, arguments);
+    };
+    window.setTimeout = function (fn, ms) {
+      if ((+ms || 0) >= 3500) return 0;
+      return st.apply(this, arguments);
+    };
+  } catch (e) {}
+})();"""
+
+# 克隆侧视频对帧: 带 data-clone-vt 的视频暂停并跳到基准时刻; 返回需等待 seek 的个数
+VIDEO_SEEK_JS = r"""() => {
+  let n = 0;
+  for (const v of document.querySelectorAll('video[data-clone-vt]')) {
+    const t = parseFloat(v.getAttribute('data-clone-vt'));
+    if (!(t >= 0)) continue;
+    try { v.autoplay = false; v.pause(); v.currentTime = t; n++; } catch (e) {}
+  }
+  return n;
+}"""
+VIDEO_SEEK_DONE_JS = r"""() => {
+  for (const v of document.querySelectorAll('video[data-clone-vt]')) {
+    if (v.error || v.networkState === 3) continue;
+    if (v.seeking || v.readyState < 2) return false;
   }
   return true;
 }"""
@@ -1163,6 +1224,8 @@ TIME_FREEZE_JS = r"""
     out.timers = maxId;
   } catch (e) {}
   try { window.requestAnimationFrame = function () { return 0; }; } catch (e) {}
+  // 视频同样定格: 截图期间不再走帧, 媒体快照记下的进度就是截图里那一帧
+  try { document.querySelectorAll('video').forEach(v => { if (!v.paused) v.pause(); }); } catch (e) {}
   return out;
 }
 """
@@ -3736,7 +3799,7 @@ class ClonerEngine:
             with suppress(Exception):
                 # 与克隆侧同口径: 克隆截图前懒加载图全部转 eager(见 _load_clone), 基准不转
                 # 就是"克隆满、基准空"(mi.com 轮播页尾整块空白 -5 分)
-                page.evaluate(CLONE_IMG_EAGER_JS)
+                page.evaluate(BASELINE_EAGER_JS, config.BASELINE_EAGER_MAX)
                 pending = page.evaluate(IMG_PENDING_JS)
                 if pending:
                     t_img = time.monotonic()
@@ -3776,6 +3839,8 @@ class ClonerEngine:
             try:
                 self._full_shot(page, self.ws / "original_preview.png", "原站")
                 baseline_text = _safe_eval(TEXT_EXTRACT_JS)
+                with suppress(Exception):
+                    page.evaluate(MARK_LOADED_IMGS_JS)
                 self.log("RENDER", "原站纯净基准快照已保存(DOM 改动前)")
             except Exception as exc:
                 self.log("WARN", f"原站截图失败: {exc}")
@@ -4732,6 +4797,10 @@ class ClonerEngine:
                                  page_netloc)
         srcset_items = []
         for candidate, best in srcset_map.items():
+            # 候选自身已落地(浏览器按 sizes 实际选中的那档, 活体复用/回补拿到)就用它自己:
+            # 一律指向最大档时浏览器把 2x 大图缩下来, 锐度/重采样与原站那档不同
+            if candidate in results:
+                continue
             info = results.get(best)
             if info is not None:
                 srcset_items.append((candidate, info["local"]))
@@ -4880,6 +4949,10 @@ class ClonerEngine:
         with suppress(Exception):
             if page.evaluate(CLONE_IMG_EAGER_JS) or not page.evaluate(CLONE_IMG_DONE_JS):
                 page.wait_for_function(CLONE_IMG_DONE_JS, timeout=config.CLONE_IMG_WAIT_MS,
+                                       polling=100)
+        with suppress(Exception):
+            if page.evaluate(VIDEO_SEEK_JS):
+                page.wait_for_function(VIDEO_SEEK_DONE_JS, timeout=config.CLONE_VIDEO_WAIT_MS,
                                        polling=100)
         # 首屏 autoplay 视频解出第一帧前只显示 poster(常为低清占位), 原站基准里是真帧
         with suppress(Exception):
@@ -5213,6 +5286,8 @@ class ClonerEngine:
             failed_local, remote_missing = set(), set()
             page = ctx.new_page()
             page.set_default_timeout(30000)
+            with suppress(Exception):
+                page.add_init_script(SCORE_TIMER_GUARD_JS)
             # W4 状态注入(模式策略包): 采集期终态 Cookie(含 httpOnly)/Storage
             # 以沙盒原点(127.0.0.1)回放, 让运行时的登录态/配置态判断与源站一致。
             # HTML 注入版(inject_state_restore)无法恢复 httpOnly —— 此处补全。

@@ -2862,6 +2862,8 @@ class ClonerEngine:
             for variant in self._variants(url, page_netloc):
                 pairs[variant] = info["local"]
         for candidate, best in srcset_map.items():
+            if candidate in results:   # 口径冻结 2026-11-04: 已落地的候选用自身文件
+                continue
             info = results.get(best)
             if info is None:
                 continue

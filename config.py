@@ -51,6 +51,7 @@ BASELINE_IMG_WAIT_MS = 8000       # 基准截图前等待加载中可见图片�
 CLONE_VIDEO_WAIT_MS = 1500        # 克隆截图前等首屏 autoplay 视频出帧的上限
 CLONE_IMG_WAIT_MS = 2000          # 克隆截图前等懒加载图到齐的上限(资源都在本地, 通常百毫秒级)
 BASELINE_IMG_FROZEN_WAIT_MS = 5000  # 时间冻结后补等可见图的上限(版面已静止)
+BASELINE_EAGER_MAX = 40           # 基准截图前转 eager 的懒加载图上限(文档序)
 BASELINE_IMG_STALL_MS = 4000      # 等待期间连续这么久无一张到齐即放行
 HOST_FAIL_TRIP = 3                # 单主机网络层失败(SSL/超时/连接)达此次数即熔断
 MAX_ASSETS_PER_TASK = 400          # 单任务最大静态资源条目数
