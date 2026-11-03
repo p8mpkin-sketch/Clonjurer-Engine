@@ -49,7 +49,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
-from PIL import Image, ImageChops, ImageFilter, ImageStat
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageStat
 
 try:  # 评分向量化(可选依赖): 缺失时回落纯 Python 实现, 结果一致
     import numpy as _np
@@ -1160,14 +1160,14 @@ CLONE_IMG_DONE_JS = r"""() => {
 }"""
 
 # 评分渲染专用(交付物不注入): 长周期 setInterval 不触发。基准是时间冻结的快照, 克隆页加载后
-# 轮播自动翻页(周期多为 3~6s 的 setInterval)会在截图前翻到另一页 —— 与 ANIM_ALIGN_JS
+# 轮播自动翻页(周期 1.5~6s 的 setInterval, wix 模板墙是 1.5s)会在截图前翻到另一页 —— 与 ANIM_ALIGN_JS
 # 对 CSS 动画做的对齐同理。setTimeout 不拦: 一次性的长延时常是内容装配(qwik 页尾
 # 延时挂载, 拦掉后整页矮 85~150px), 拦它得不偿失
 SCORE_TIMER_GUARD_JS = r"""(() => {
   try {
     const si = window.setInterval;
     window.setInterval = function (fn, ms) {
-      if ((+ms || 0) >= 2500) return 0;
+      if ((+ms || 0) >= 1000) return 0;
       return si.apply(this, arguments);
     };
   } catch (e) {}
@@ -1227,6 +1227,14 @@ TIME_FREEZE_JS = r"""
       if (typeof CSSTransition !== 'undefined' && a instanceof CSSTransition) {
         try { a.finish(); out.anims++; continue; } catch (e) {}
       }
+      // 脚本发起的有限次动画(进视口入场、叠卡展开)同理跳到终点: 克隆里它们重放后停在终态,
+      // 基准冻在半途两边就对不上(wix 模板墙); 无限循环的才暂停
+      if (!(typeof CSSAnimation !== 'undefined' && a instanceof CSSAnimation)) {
+        try {
+          const t = a.effect && a.effect.getComputedTiming ? a.effect.getComputedTiming() : null;
+          if (t && isFinite(t.endTime)) { a.finish(); out.anims++; continue; }
+        } catch (e) {}
+      }
       a.pause(); out.anims++;
     }
   } catch (e) {}
@@ -1235,12 +1243,50 @@ TIME_FREEZE_JS = r"""
     for (let i = 1; i <= maxId; i++) { clearTimeout(i); clearInterval(i); }
     out.timers = maxId;
   } catch (e) {}
-  try { window.requestAnimationFrame = function () { return 0; }; } catch (e) {}
+  // 冻结后新挂的长定时器也不触发: 轮播常在补间结束(transitionend)时重挂下一次翻页,
+  // 清掉旧定时器挡不住它, 序列化时已翻到下一页(wix 模板墙比基准快一页)。短定时器
+  // (引擎自身的 120ms 等待、防抖)照常
+  try {
+    const st = window.setTimeout;
+    window.setInterval = function () { return 0; };
+    window.setTimeout = function (fn, ms) { return (+ms || 0) >= 500 ? 0 : st.apply(this, arguments); };
+  } catch (e) {}
+  // rAF 不在这里停: 定时器清掉后不会再起新一轮翻页, 但已在飞的 JS 补间(rAF 逐帧写
+  // transform 的轮播)要让它走完, 否则基准冻在两页之间(wix 模板墙)。见 RAF_FREEZE_JS
   // 视频同样定格: 截图期间不再走帧, 媒体快照记下的进度就是截图里那一帧
   try { document.querySelectorAll('video').forEach(v => { if (!v.paused) v.pause(); }); } catch (e) {}
   return out;
 }
 """
+
+# 脚本动画(element.animate 的 WAAPI)烘焙(基准截图后, 时间冻结中): 它们不在样式表里、
+# 序列化带不走, 克隆只剩动画开始前的静态版面 —— wix 模板墙用 WAAPI 转 3D 叠卡, 基准
+# 停在哪一张克隆都显示初始那张。把被动画的属性按截图时刻的计算值写成内联 !important
+WAAPI_BAKE_JS = r"""() => {
+  let n = 0;
+  const skip = new Set(['offset', 'easing', 'composite', 'computedOffset']);
+  const kebab = (p) => p === 'cssFloat' ? 'float' : p.replace(/[A-Z]/g, m => '-' + m.toLowerCase());
+  try {
+    for (const a of document.getAnimations()) {
+      if ((typeof CSSAnimation !== 'undefined' && a instanceof CSSAnimation) ||
+          (typeof CSSTransition !== 'undefined' && a instanceof CSSTransition)) continue;
+      const eff = a.effect, el = eff && eff.target;
+      if (!el || !el.style || eff.pseudoElement) continue;
+      const props = new Set();
+      try { for (const kf of eff.getKeyframes()) for (const k in kf) if (!skip.has(k)) props.add(kebab(k)); } catch (e) {}
+      if (!props.size) continue;
+      const cs = getComputedStyle(el);
+      for (const p of props) {
+        const v = cs.getPropertyValue(p);
+        if (v) el.style.setProperty(p, v, 'important');
+      }
+      n++;
+    }
+  } catch (e) {}
+  return n;
+}"""
+
+RAF_FREEZE_JS = r"""() => { try { window.requestAnimationFrame = function () { return 0; }; } catch (e) {} }"""
 
 # 动画相位固化(基准截图后、DEEP_FREEZE 前): 把每个元素 CSS 动画的当前进度写成
 # 负 animation-delay, 克隆页加载即从截图那一刻的相位起播; 并打 data-clone-anim
@@ -1871,6 +1917,44 @@ def _static_refs(html: str, base: str) -> dict:
     for raw, _absolute in parse_css_refs(html or "", base):
         _add(raw)
     return {"urls": urls, "srcsets": srcsets, "rawRefs": raw_refs}
+
+
+# 第三方广告位(程序化竞价, 每次请求创意都不同): 克隆不可能也不该复现某一次的竞价结果,
+# 评分时两侧同一位置统一遮成中灰。只认广告投放的专有标识(GPT 容器/iframe、主流 SSP 域名),
+# 站点自有的推广位不在此列。techcrunch 每轮 3~8 分的随机抖动全来自这里
+AD_RECTS_JS = r"""() => {
+  const out = [], sx = window.scrollX || 0, sy = window.scrollY || 0;
+  const AD_SRC = /doubleclick\.net|googlesyndication\.com|adservice\.google|amazon-adsystem\.com|adnxs\.com|taboola\.com|outbrain\.com|criteo\.(?:com|net)|pubmatic\.com|rubiconproject\.com/i;
+  const seen = new Set();
+  const add = (el) => {
+    if (!el || seen.has(el)) return;
+    seen.add(el);
+    const r = el.getBoundingClientRect();
+    if (r.width < 30 || r.height < 30) return;
+    out.push([Math.round(r.left + sx), Math.round(r.top + sy), Math.round(r.width), Math.round(r.height)]);
+  };
+  document.querySelectorAll('iframe').forEach(f => {
+    const id = f.id || '', src = f.getAttribute('src') || '';
+    if (id.startsWith('google_ads_iframe') || AD_SRC.test(src)) add(f);
+  });
+  document.querySelectorAll('[id^="div-gpt-ad"], [data-google-query-id]').forEach(add);
+  return out.slice(0, 80);
+}"""
+
+
+def _mask_rects(path, rects):
+    """按文档坐标把矩形区域涂成中灰(截图宽度即文档宽度, 越界自动裁)。"""
+    with Image.open(path) as im:
+        im.load()
+        out = im.convert("RGB")
+    draw = ImageDraw.Draw(out)
+    w, h = out.size
+    for x, y, rw, rh in rects:
+        if y >= h or x >= w:
+            continue
+        draw.rectangle([max(0, x), max(0, y), min(w, x + rw) - 1, min(h, y + rh) - 1],
+                       fill=(128, 128, 128))
+    out.save(path)
 
 
 def _frame_bounced(src: str, final: str, target: str) -> bool:
@@ -3096,6 +3180,18 @@ class ClonerEngine:
         return parts
 
     def _full_shot(self, page, path, label="截图", _fresh=False):
+        """整页截图 + 第三方广告位遮罩(评分口径, 见 AD_RECTS_JS)。"""
+        if label == "原站" and config.SCORE_MASK_ADS:
+            self._ad_rects = []
+            with suppress(Exception):
+                self._ad_rects = page.evaluate(AD_RECTS_JS) or []
+        self._full_shot_raw(page, path, label, _fresh)
+        rects = getattr(self, "_ad_rects", None)
+        if rects and label in ("原站", "克隆页", "保真轨"):
+            with suppress(Exception):
+                _mask_rects(path, rects)
+
+    def _full_shot_raw(self, page, path, label="截图", _fresh=False):
         """整页截图, 三级退化:
         1) 整页截图(SHOT_TIMEOUT);
         2) 限高裁剪截图: 高度取评分覆盖区(SCORE_MAX_HEIGHT 等比换算)与 GPU 纹理上限的较小值;
@@ -3874,6 +3970,7 @@ class ClonerEngine:
                 if frz.get("anims"):
                     self.log("RENDER", f"时间冻结: 暂停 {frz['anims']} 个动画, "
                                        f"清空定时器 {frz.get('timers', 0)} 个")
+            t_frz = time.monotonic()
             # 冻结后再等一轮可见图: 上面等图期间轮播定时器还在翻页, 冻结那一刻露出的往往
             # 是刚翻到、图还没到的一页(mi.com 基准整屏空白)。冻结后版面不再动, 等的就是截图里那几张
             with suppress(Exception):
@@ -3884,6 +3981,11 @@ class ClonerEngine:
                     while time.monotonic() < deadline and page.evaluate(IMG_PENDING_JS):
                         page.wait_for_timeout(200)
                     self.log("RENDER", f"冻结后补等 {pending} 张可见图 {time.monotonic() - t_img:.1f}s")
+            with suppress(Exception):
+                left = config.BASELINE_TWEEN_SETTLE_MS / 1000 - (time.monotonic() - t_frz)
+                if left > 0:
+                    page.wait_for_timeout(int(left * 1000))
+                _safe_eval(RAF_FREEZE_JS)
             try:
                 self._full_shot(page, self.ws / "original_preview.png", "原站")
                 baseline_text = _safe_eval(TEXT_EXTRACT_JS)
@@ -3892,6 +3994,10 @@ class ClonerEngine:
                 self.log("RENDER", "原站纯净基准快照已保存(DOM 改动前)")
             except Exception as exc:
                 self.log("WARN", f"原站截图失败: {exc}")
+            with suppress(Exception):
+                n_wa = _safe_eval(WAAPI_BAKE_JS)
+                if n_wa:
+                    self.log("RENDER", f"脚本动画烘焙: {n_wa} 个 WAAPI 动画按截图时刻写成内联样式")
             with suppress(Exception):
                 n_ph = _safe_eval(ANIM_PHASE_JS)
                 if n_ph:
