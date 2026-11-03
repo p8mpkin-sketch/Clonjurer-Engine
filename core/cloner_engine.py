@@ -297,7 +297,7 @@ MEDIA_SHOT_JS = r"""
         // 封面成了整块不透明底色盖住下层。WebP 保留 alpha, 不支持时才退回 JPEG
         let data = t.toDataURL('image/webp', 0.85);
         if (!data || !data.startsWith('data:image/webp')) data = t.toDataURL('image/jpeg', 0.85);
-        if (data && data.length > 2000) { v.setAttribute('poster', data); posters++; return; }
+        if (data && data.length > 2000) { v.setAttribute('poster', data); v.setAttribute('data-clone-poster', '1'); posters++; return; }
       }
     } catch (err) { /* 跨域视频帧不可读 → 截图 */ }
     v.setAttribute('data-clone-shot', String(n));
@@ -315,7 +315,7 @@ MEDIA_SHOT_APPLY_JS = r"""
     const src = shots[el.getAttribute('data-clone-shot')];
     el.removeAttribute('data-clone-shot');
     if (!src) return;
-    if (el.tagName === 'VIDEO') { el.setAttribute('poster', src); applied++; return; }
+    if (el.tagName === 'VIDEO') { el.setAttribute('poster', src); el.setAttribute('data-clone-poster', '1'); applied++; return; }
     const img = document.createElement('img');
     for (const a of Array.from(el.attributes)) {
       if (a.name === 'width' || a.name === 'height') continue;
@@ -1176,6 +1176,18 @@ SCORE_TIMER_GUARD_JS = r"""(() => {
 # 克隆侧视频对帧: 带 data-clone-vt 的视频暂停并跳到基准时刻; 返回需等待 seek 的个数
 VIDEO_SEEK_JS = r"""() => {
   let n = 0;
+  // 封面就是基准帧(媒体快照取的当前帧/基准截图裁图): 视频本身可播(资源在)时评分页直接
+  // 显示封面 —— 本地沙盒不支持 Range, mp4 跳帧常落不到准确位置(svelte 纪录片 98→90)
+  for (const v of document.querySelectorAll('video[data-clone-poster]')) {
+    try {
+      if (v.error || v.readyState < 1) continue;
+      v.autoplay = false; v.pause();
+      v.removeAttribute('data-clone-vt');
+      v.removeAttribute('src');
+      v.querySelectorAll('source').forEach(s => s.remove());
+      v.load();
+    } catch (e) {}
+  }
   for (const v of document.querySelectorAll('video[data-clone-vt]')) {
     const t = parseFloat(v.getAttribute('data-clone-vt'));
     if (!(t >= 0)) continue;
