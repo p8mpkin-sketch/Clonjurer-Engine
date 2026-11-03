@@ -66,6 +66,16 @@ class PadBeforeScale(unittest.TestCase):
             self.assertGreaterEqual(ce.compute_visual_similarity(a, b)["score"], 99.0)
 
 
+class LiveFrameStaticRefs(unittest.TestCase):
+    def test_styles_and_media_only(self):
+        html = ('<script src="//s.com/vue.js"></script><link rel="modulepreload" href="/m.mjs">'
+                '<link rel="stylesheet" href="//s.com/a.css"><img src="//qr.s.com/show?a=1&amp;t=2">'
+                '<div style="background:url(i/x.png)"></div>')
+        refs = ce._static_refs(html, "https://p.s.com/uc/login")
+        self.assertEqual(refs["urls"], ["https://s.com/a.css", "https://qr.s.com/show?a=1&t=2",
+                                        "https://p.s.com/uc/i/x.png"])
+
+
 class RuntimeEvidence(unittest.TestCase):
     def _ws(self, html):
         tmp = tempfile.mkdtemp()
