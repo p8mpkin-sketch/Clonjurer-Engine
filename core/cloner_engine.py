@@ -290,7 +290,10 @@ MEDIA_SHOT_JS = r"""
         const t = document.createElement('canvas');
         t.width = v.videoWidth; t.height = v.videoHeight;
         t.getContext('2d').drawImage(v, 0, 0);
-        const data = t.toDataURL('image/jpeg', 0.85);
+        // 带 alpha 的视频(VP9/HEVC 透明通道, 常用作光晕/悬浮物件叠层): JPEG 丢透明,
+        // 封面成了整块不透明底色盖住下层。WebP 保留 alpha, 不支持时才退回 JPEG
+        let data = t.toDataURL('image/webp', 0.85);
+        if (!data || !data.startsWith('data:image/webp')) data = t.toDataURL('image/jpeg', 0.85);
         if (data && data.length > 2000) { v.setAttribute('poster', data); posters++; return; }
       }
     } catch (err) { /* 跨域视频帧不可读 → 截图 */ }
@@ -757,6 +760,17 @@ FONT_BAKE_JS = r"""
     };
     const root = document.body;
     if (!root) return 0;
+    // 浏览器默认字体(没写 font-family 时的计算值, 如 "Times New Roman")不能烘焙成显式族名:
+    // 默认族是按文字脚本/lang 分派的(zh 页的数字/拉丁实际走中文默认字体), 写成显式
+    // "Times New Roman" 后数字与英文全变衬线(aliyun 页脚)
+    let defFam = null;
+    try {
+      const pr = document.createElement('span');
+      pr.style.setProperty('font-family', 'initial', 'important');
+      root.appendChild(pr);
+      defFam = getComputedStyle(pr).fontFamily;
+      pr.remove();
+    } catch (e) {}
     // 先全量读取(写入前), 避免写内联样式触发的重算影响后续读取
     const els = [root];
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, {
@@ -771,6 +785,7 @@ FONT_BAKE_JS = r"""
       const pv = parent ? comp(parent) : null;
       const diff = [];
       for (let i = 0; i < PROPS.length; i++) {
+        if (i === 0 && mine[0] === defFam) continue;
         if (!pv || pv[i] !== mine[i]) diff.push([PROPS[i], mine[i]]);
       }
       if (diff.length) plan.push([el, diff]);
@@ -1092,7 +1107,13 @@ TIME_FREEZE_JS = r"""
   const out = {anims: 0, timers: 0};
   try {
     for (const a of document.getAnimations()) {
-      if (a.playState === 'running') { a.pause(); out.anims++; }
+      if (a.playState !== 'running') continue;
+      // 过渡(轮播翻页/展开收起)是两个稳态之间的一段: 冻在半途基准就是"两页各露一半",
+      // 克隆静置在稳态, 整屏错位(mi.com 轮播 99.9→74.5)。过渡直接跳到终点, 循环动画才暂停
+      if (typeof CSSTransition !== 'undefined' && a instanceof CSSTransition) {
+        try { a.finish(); out.anims++; continue; } catch (e) {}
+      }
+      a.pause(); out.anims++;
     }
   } catch (e) {}
   try {
