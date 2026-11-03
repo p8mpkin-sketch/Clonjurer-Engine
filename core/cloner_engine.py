@@ -1774,6 +1774,24 @@ def _pad_to(im, height):
     return canvas
 
 
+def _src_pad_heights(size_a, size_b):
+    """同宽两图在原始分辨率上先补到同一高度再缩放: 各自缩放时 round(h*512/w) 的取整
+    让两图纵向比例差万分之几, 长页底部错开 1px, 逐块 NCC 对这种亚像素错位极敏感 ——
+    内容逐像素相同、克隆只多 5px 的 qwik 被评成 93.2(裁齐后 100.0)。先补齐再缩放,
+    相同内容落在相同网格上; 补齐区域与缩放后补齐同为底行均色, 缺失/多余照样失分。"""
+    (wa, ha), (wb, hb) = size_a, size_b
+    if wa != wb:
+        return ha, hb
+    h = max(ha, hb)
+    return h, h
+
+
+def _fit_padded(im, pad_h):
+    if pad_h and pad_h > im.size[1]:
+        im = _pad_to(im, pad_h)
+    return _fit_width(im)
+
+
 def _block_ncc(gray_a, gray_b, size=512, block=32) -> float:
     """块级归一化互相关: 双平坦且相近记 1, 一方有结构一方平坦记 0。
 
@@ -2008,8 +2026,9 @@ def _load_fit_pair(path_a, path_b, prime_calibration=False):
     # 读盘后立即对"没见过的文件"投机解码, 与 sha1 重叠: 用 (路径, 大小, mtime)
     # 只作提示 —— 是否命中仍以内容哈希为准, 投机解码结果确定且与按需解码相同
     entries = []
-    for path in (path_a, path_b):
-        data = Path(path).read_bytes()
+    datas = [Path(p).read_bytes() for p in (path_a, path_b)]
+    pads = _src_pad_heights(*(pixel_calibrator.image_size_of(d) for d in datas))
+    for path, data in zip((path_a, path_b), datas):
         hint = _stat_hint(path, len(data))
         with _FIT_CACHE_LOCK:
             likely_hit = hint is not None and _FIT_HINTS.get(str(path)) == hint
@@ -2020,7 +2039,7 @@ def _load_fit_pair(path_a, path_b, prime_calibration=False):
         key = key_job.result()
         keys.append(key)
         with _FIT_CACHE_LOCK:
-            hit = _FIT_CACHE.get(key)
+            hit = _FIT_CACHE.get((key, pads[i]))
             if hint is not None:
                 _FIT_HINTS[str(path)] = hint
                 while len(_FIT_HINTS) > 64:
@@ -2043,18 +2062,18 @@ def _load_fit_pair(path_a, path_b, prime_calibration=False):
             # 原站尺寸只读 PNG 头(校准以原站尺寸为网格基准, 克隆图不同尺寸时缩放对齐)
             prime = pool.submit(pixel_calibrator.prime_grid, key, im,
                                 pixel_calibrator.image_size_of(entries[0][2]))
-        return i, key, pool.submit(_fit_width, im), prime
+        return i, key, pool.submit(_fit_padded, im, pads[i]), prime
 
     staged = [_stage(i, key, fut) for i, key, fut in pending]
     prime_job = next((prime for _i, _k, _j, prime in staged if prime is not None), None)
     for i, key, job, _prime in staged:
         slots[i] = job.result()
         with _FIT_CACHE_LOCK:
-            _FIT_CACHE.pop(key, None)
-            _FIT_CACHE[key] = slots[i]
+            _FIT_CACHE.pop((key, pads[i]), None)
+            _FIT_CACHE[(key, pads[i])] = slots[i]
             while len(_FIT_CACHE) > _FIT_CACHE_MAX:
                 _FIT_CACHE.pop(next(iter(_FIT_CACHE)))
-    return slots, keys[0], prime_job
+    return slots, (keys[0], pads[0]), prime_job
 
 
 def _diff_image(ra, rb, y0, y1):
@@ -3522,6 +3541,46 @@ class ClonerEngine:
                                f"{applied} 个空白 Canvas/无帧视频从基准截图回填")
 
     @staticmethod
+    def _wait_quiet(page, cap_ms: int) -> bool:
+        """渲染相关请求静置: QUIET_MS 内无新请求且在途请求都已完成或已挂起超过 STALE_MS。
+
+        Playwright 的 networkidle 要求 500ms 内零连接, 埋点轮询/长连接/长轮询站点永远
+        等满上限(huawei/jd 每站白等 9s)。挂起久的请求(长轮询、流式、卡死的第三方)不影响
+        首屏渲染, 不再计入; 新请求还在冒出说明页面仍在装配, 照常等。"""
+        quiet_s, stale_s = config.NAV_QUIET_MS / 1000, config.NAV_STALE_MS / 1000
+        inflight, last = {}, [time.monotonic()]
+        skip = ("websocket", "eventsource", "media", "manifest", "other")
+
+        def _on_req(req):
+            if req.resource_type in skip:
+                return
+            inflight[id(req)] = time.monotonic()
+            last[0] = time.monotonic()
+
+        def _on_done(req):
+            inflight.pop(id(req), None)
+
+        page.on("request", _on_req)
+        page.on("requestfinished", _on_done)
+        page.on("requestfailed", _on_done)
+        try:
+            with suppress(Exception):
+                page.wait_for_load_state("load", timeout=cap_ms)
+            deadline = time.monotonic() + cap_ms / 1000
+            while time.monotonic() < deadline:
+                now = time.monotonic()
+                live = sum(1 for t in inflight.values() if now - t < stale_s)
+                if not live and now - last[0] >= quiet_s:
+                    return True
+                page.wait_for_timeout(100)
+            return False
+        finally:
+            for ev, fn in (("request", _on_req), ("requestfinished", _on_done),
+                           ("requestfailed", _on_done)):
+                with suppress(Exception):
+                    page.remove_listener(ev, fn)
+
+    @staticmethod
     def _probe_unreachable(ctx, url: str):
         """网络层可达性探测: 返回不可达原因, 可达(任何 HTTP 状态)返回 None。"""
         try:
@@ -3564,10 +3623,8 @@ class ClonerEngine:
                 page.goto(url, wait_until="domcontentloaded", timeout=config.PAGELOAD_TIMEOUT)
             else:
                 raise
-        try:
-            page.wait_for_load_state("networkidle", timeout=config.NETWORK_IDLE_TIMEOUT)
-        except Exception:
-            self.log("RENDER", "networkidle 等待超时, 继续后续固化流程")
+        if not self._wait_quiet(page, config.NETWORK_IDLE_TIMEOUT):
+            self.log("RENDER", "网络静置等待超时, 继续后续固化流程")
         self.log("RENDER", f"页面就绪 {time.time() - t_nav:.1f}s")
         tp = self._phase("采集-导航", t_nav_m)
         self._auto_settle_update_prompt(page)
@@ -3625,6 +3682,9 @@ class ClonerEngine:
             # 图片未到齐就截基准, 克隆(资源池更全)反被扣分: cn.vuejs 赞助商图床慢时
             # 基准里整区空白格子而克隆是满的(-15 分)。可见图仍在加载就再等一会(封顶)
             with suppress(Exception):
+                # 与克隆侧同口径: 克隆截图前懒加载图全部转 eager(见 _load_clone), 基准不转
+                # 就是"克隆满、基准空"(mi.com 轮播页尾整块空白 -5 分)
+                page.evaluate(CLONE_IMG_EAGER_JS)
                 pending = page.evaluate(IMG_PENDING_JS)
                 if pending:
                     t_img = time.monotonic()

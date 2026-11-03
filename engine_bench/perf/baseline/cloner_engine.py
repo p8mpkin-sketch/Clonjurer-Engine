@@ -1137,8 +1137,16 @@ def compute_visual_similarity(image_a: Path, image_b: Path, diff_path: Path = No
     score = 0.5*分段块级NCC + 0.3*分段边缘IoU + 0.2*文本F2(原站无文本时重分配)。
     """
     with Image.open(image_a) as ia, Image.open(image_b) as ib:
-        ra = _fit_width(ia.convert("RGB"))
-        rb = _fit_width(ib.convert("RGB"))
+        # 口径冻结(2026-11-04): 同宽两图先在原始分辨率补到同高再缩放(见引擎 _src_pad_heights)
+        (wa, ha), (wb, hb) = ia.size, ib.size
+        pa = pb = max(ha, hb) if wa == wb else None
+        ca, cb = ia.convert("RGB"), ib.convert("RGB")
+        if pa and pa > ha:
+            ca = _pad_to(ca, pa)
+        if pb and pb > hb:
+            cb = _pad_to(cb, pb)
+        ra = _fit_width(ca)
+        rb = _fit_width(cb)
     h_a, h_b = ra.size[1], rb.size[1]
     height = max(h_a, h_b)
     seg_count = max(1, -(-height // SCORE_SEGMENT))
