@@ -1841,6 +1841,36 @@ def _utf8_charset(html: str) -> str:
     return _META_CHARSET_RE.sub(lambda m: m.group(1) + "utf-8", html)
 
 
+_STATIC_ATTR_RE = re.compile(
+    r'<(?:img|script|link|source|video|audio|input|image)\b[^>]*?\s(src|href|poster|srcset|data-src)'
+    r'\s*=\s*(?:"([^"]*)"|\'([^\']*)\')', re.I)
+
+
+def _static_refs(html: str, base: str) -> dict:
+    """未经采集脚本的 HTML(活体 frame DOM 等)静态提取资源引用, 结构同 COLLECT_ASSETS_JS 结果。"""
+    urls, srcsets, raw_refs, seen = [], [], [], set()
+
+    def _add(raw):
+        raw = _html.unescape((raw or "").strip())
+        if not raw or raw.startswith(ASSET_SKIP_PREFIXES) or raw.startswith(("#", "javascript:")):
+            return
+        absolute = _urljoin(base, raw)
+        if absolute.startswith(("http://", "https://")) and absolute not in seen:
+            seen.add(absolute)
+            urls.append(absolute)
+            raw_refs.append([raw, absolute])
+
+    for m in _STATIC_ATTR_RE.finditer(html or ""):
+        attr, val = m.group(1).lower(), m.group(2) if m.group(2) is not None else m.group(3)
+        if attr == "srcset":
+            srcsets.append(_html.unescape(val))
+        else:
+            _add(val)
+    for raw, _absolute in parse_css_refs(html or "", base):
+        _add(raw)
+    return {"urls": urls, "srcsets": srcsets, "rawRefs": raw_refs}
+
+
 def _frame_bounced(src: str, final: str, target: str) -> bool:
     """iframe 以顶级页面导航后是否被弹走: 换了主机, 或落回宿主目标页。"""
     a, b = urlsplit(src), urlsplit(final)
@@ -4108,6 +4138,10 @@ class ClonerEngine:
                 # 改取宿主活体页里该 frame 的 DOM; 取不到则保留原 src 不固化。
                 live_html = _match_live_frame(src, page_result.get("live_frames") or {})
                 if live_html:
+                    # 活体 frame DOM 没经过采集脚本, 它引用的样式/图片从未进资源池, 离线
+                    # 回放全是外链(jd 登录框图标/二维码/样式全丢)。按 frame 地址静态提取引用补进去
+                    with suppress(Exception):
+                        merge_assets(_static_refs(live_html, src))
                     out_frames.append((src, live_html, ""))
                     self.log("RENDER", f"iframe 顶级导航被重定向, 改用宿主内活体 frame DOM "
                                        f"固化: {src[:100]}")
