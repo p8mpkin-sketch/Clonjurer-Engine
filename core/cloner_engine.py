@@ -1056,6 +1056,24 @@ IMG_PENDING_JS = r"""() => {
   return n;
 }"""
 
+# 克隆侧懒加载图一律转 eager 并等到齐: 资源全在本地沙盒, 整页截图前没被滚动窗口
+# 触发的 loading=lazy 图(页尾赞助商墙/logo 栅格)在截图里是空格, 原站基准却是满的
+CLONE_IMG_EAGER_JS = r"""() => {
+  let n = 0;
+  for (const im of document.images) {
+    if (im.loading === 'lazy') { im.loading = 'eager'; n++; }
+  }
+  return n;
+}"""
+CLONE_IMG_DONE_JS = r"""() => {
+  for (const im of document.images) {
+    if (im.complete) continue;
+    const r = im.getBoundingClientRect();
+    if (r.width > 1 && r.height > 1) return false;
+  }
+  return true;
+}"""
+
 # 视口内可见的 autoplay 视频都已有当前帧(readyState>=2); 出错/无源的不等
 VIDEO_FRAME_READY_JS = r"""() => {
   for (const v of document.querySelectorAll('video[autoplay]')) {
@@ -1229,6 +1247,26 @@ COLLAPSE_REVERT_JS = r"""
     }
   }
   return n;
+}
+"""
+
+# 克隆侧塌陷探针(布局校准用): 原站基准可见、克隆里被脚本内联 display:none 收起的块
+# (离线时广告/推荐位请求失败, 站点脚本把空位收掉; 采集侧回撤挡不住回放时再收一次)。
+# 返回 [路径, 去掉内联后样式表给出的 display], 由校准样式以 !important 压回。
+COLLAPSED_PROBE_JS = r"""
+(keys) => {
+  const out = [];
+  for (const k of keys) {
+    let el = null;
+    try { el = document.querySelector(k); } catch (e) { continue; }
+    if (!el || !el.style || el.style.display !== 'none') continue;
+    const prev = el.style.getPropertyValue('display'), pri = el.style.getPropertyPriority('display');
+    el.style.removeProperty('display');
+    const d = getComputedStyle(el).display;
+    el.style.setProperty('display', prev, pri);
+    if (d && d !== 'none') out.push([k, d]);
+  }
+  return out.slice(0, 40);
 }
 """
 
@@ -4648,6 +4686,10 @@ class ClonerEngine:
         if phases:
             tp = self._phase("评分-克隆滚动", tp)
         self._settle(page)
+        with suppress(Exception):
+            if page.evaluate(CLONE_IMG_EAGER_JS) or not page.evaluate(CLONE_IMG_DONE_JS):
+                page.wait_for_function(CLONE_IMG_DONE_JS, timeout=config.CLONE_IMG_WAIT_MS,
+                                       polling=100)
         # 首屏 autoplay 视频解出第一帧前只显示 poster(常为低清占位), 原站基准里是真帧
         with suppress(Exception):
             page.wait_for_function(VIDEO_FRAME_READY_JS, timeout=config.CLONE_VIDEO_WAIT_MS,
@@ -4671,6 +4713,17 @@ class ClonerEngine:
         orig_map = json.loads(layout_file.read_text(encoding="utf-8"))
         clone_map = page.evaluate(f"() => ({LAYOUT_MAP_JS})({LAYOUT_MAP_MAX})")
         css, n_bad = layout_fix_css(orig_map, clone_map)
+        seen = {e[0] for e in clone_map or []}
+        missing = [e[0] for e in orig_map if e[0] not in seen and e[2] >= 24]
+        if missing:
+            with suppress(Exception):
+                shown = page.evaluate(COLLAPSED_PROBE_JS, missing) or []
+                if shown:
+                    css = "\n".join([r for r in [css] if r] + [
+                        f"{k}{{display:{d}!important}}" for k, d in shown
+                        if re.fullmatch(r"[a-z-]+", d)])
+                    n_bad += len(shown)
+                    self.log("RENDER", f"布局校准: {len(shown)} 个基准可见块在克隆里被脚本收起, 压回显示")
         if not css:
             return detail, clone_text
         prev_css, prev_detail, prev_text = self._calib_css, detail, clone_text
@@ -4869,6 +4922,8 @@ class ClonerEngine:
                 bare = stem[host_at - 2:]
                 if len(bare) > 5:
                     pairs[bare] = local
+                if query >= 0 and query > host_at and len(url) - host_at + 2 > 5:
+                    pairs[url[host_at - 2:]] = local
                 continue
             stem = url if query < 0 else url[:query]      # scheme://netloc/path
             pairs[url] = local
@@ -4876,9 +4931,17 @@ class ClonerEngine:
             bare = stem[host_at - 2:]                     # //netloc/path
             if len(bare) > 5:
                 pairs[bare] = local
+            same = url[host_at:slash] == page_netloc
             path = stem[slash:]
-            if len(path) > 5 and url[host_at:slash] == page_netloc:
+            if len(path) > 5 and same:
                 pairs[path] = local
+            if query >= 0 and slash > host_at:
+                # 带查询串的协议相对/站内相对写法也要整串登记: 否则只剩去参的 stem 能命中,
+                # 同一端点不同参数(/_next/image?url=A / ?url=B)被 stem 前缀改写成同一张图
+                if len(url) - host_at + 2 > 5:
+                    pairs[url[host_at - 2:]] = local
+                if same and len(url) - slash > 5:
+                    pairs[url[slash:]] = local
 
     @classmethod
     def _fill_variants(cls, pairs: dict, url: str, local: str, page_netloc: str):
@@ -4903,6 +4966,11 @@ class ClonerEngine:
             pairs[bare] = local
         if path and len(path) > 5 and m.group(2) == page_netloc:
             pairs[path] = local
+        if len(url) > len(stem):                          # 带查询串: 整串的相对写法
+            if len(url) - m.end(1) - 1 > 5:
+                pairs[url[m.end(1) + 1:]] = local
+            if path and m.group(2) == page_netloc and len(url) - m.start(3) > 5:
+                pairs[url[m.start(3):]] = local
 
     @staticmethod
     def _variants(url: str, page_netloc: str):
@@ -4910,6 +4978,14 @@ class ClonerEngine:
         candidates = {url, f"{scheme}://{netloc}{path}", f"//{netloc}{path}"}
         if netloc == page_netloc and path.startswith("/"):
             candidates.add(path)
+        if "?" in url and netloc:
+            rest = url[url.find("//") :] if "//" in url else ""
+            if rest.startswith("//"):
+                candidates.add(rest)
+                if netloc == page_netloc and path.startswith("/"):
+                    i = rest.find("/", 2)
+                    if i > 0:
+                        candidates.add(rest[i:])
         return {c for c in candidates
                 if c and len(c) > 5 and c.startswith(("http", "//", "/"))}
 

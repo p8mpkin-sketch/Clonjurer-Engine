@@ -3062,11 +3062,19 @@ class ClonerEngine:
 
     @staticmethod
     def _variants(url: str, page_netloc: str):
-        parts = urlsplit(url)
-        candidates = {url, f"{parts.scheme}://{parts.netloc}{parts.path}",
-                      f"//{parts.netloc}{parts.path}"}
-        if parts.netloc == page_netloc and parts.path.startswith("/"):
-            candidates.add(parts.path)
+        _p = urlsplit(url)
+        scheme, netloc, path = _p.scheme, _p.netloc, _p.path
+        candidates = {url, f"{scheme}://{netloc}{path}", f"//{netloc}{path}"}
+        if netloc == page_netloc and path.startswith("/"):
+            candidates.add(path)
+        if "?" in url and netloc:
+            rest = url[url.find("//") :] if "//" in url else ""
+            if rest.startswith("//"):
+                candidates.add(rest)
+                if netloc == page_netloc and path.startswith("/"):
+                    i = rest.find("/", 2)
+                    if i > 0:
+                        candidates.add(rest[i:])
         return {c for c in candidates
                 if c and len(c) > 5 and c.startswith(("http", "//", "/"))}
 
