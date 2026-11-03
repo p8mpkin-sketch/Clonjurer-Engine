@@ -1842,12 +1842,16 @@ def _utf8_charset(html: str) -> str:
 
 
 _STATIC_ATTR_RE = re.compile(
-    r'<(?:img|script|link|source|video|audio|input|image)\b[^>]*?\s(src|href|poster|srcset|data-src)'
+    r'<(?:img|link|source|video|audio|input|image)\b[^>]*?\s(src|href|poster|srcset|data-src)'
     r'\s*=\s*(?:"([^"]*)"|\'([^\']*)\')', re.I)
 
 
 def _static_refs(html: str, base: str) -> dict:
-    """未经采集脚本的 HTML(活体 frame DOM 等)静态提取资源引用, 结构同 COLLECT_ASSETS_JS 结果。"""
+    """未经采集脚本的 HTML(活体 frame DOM 等)静态提取资源引用, 结构同 COLLECT_ASSETS_JS 结果。
+
+    只取样式与媒体, 不取 <script>: 活体 frame DOM 是固化快照, 它的脚本离线重跑只会再次
+    把自己弹回宿主; 且 frame 的框架包混进工作区会污染主页面的模式识别(jd 登录框的
+    Vue 包让 React 首页被判成 Vue)。"""
     urls, srcsets, raw_refs, seen = [], [], [], set()
 
     def _add(raw):
@@ -1855,6 +1859,8 @@ def _static_refs(html: str, base: str) -> dict:
         if not raw or raw.startswith(ASSET_SKIP_PREFIXES) or raw.startswith(("#", "javascript:")):
             return
         absolute = _urljoin(base, raw)
+        if urlsplit(absolute).path.lower().endswith((".js", ".mjs", ".cjs")):
+            return   # modulepreload/preload 的脚本同样不取
         if absolute.startswith(("http://", "https://")) and absolute not in seen:
             seen.add(absolute)
             urls.append(absolute)
