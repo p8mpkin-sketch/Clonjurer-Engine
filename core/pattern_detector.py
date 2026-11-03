@@ -259,12 +259,37 @@ def _confidence(pattern: str, hits: set, js_hits: set, dom_hits: set) -> float:
     return 0.6 if js_hits or dom_hits else 0.5
 
 
-def detect(workspace: Path, html: str = None) -> dict:
+_WEAK_PATTERNS = frozenset({"M-STATIC 纯静态", "M-Webpack水合MPA", "M-jQuery传统MPA",
+                            "M-jQuery传统MPA+iframe门户"})
+
+# 活体运行时证据(采集期在源站页面上探测, 见引擎 RUNTIME_FP_JS)只认这些名字:
+# 框架运行时挂在 window/DOM 节点上的专有对象, 不受拆包/混淆/本地化影响
+RUNTIME_NAMES = frozenset({"Vue", "React", "Next", "Nuxt", "Angular", "Remix", "Solid",
+                           "Ember", "Svelte", "Qwik", "Astro", "Shopify", "Wix", "WordPress",
+                           "jQuery", "Webpack"})
+
+
+def detect(workspace: Path, html: str = None, runtime=None) -> dict:
     """识别框架模式。返回 {pattern, features, confidence, evidence}。
 
-    html 传入采集期渲染 DOM 时以其为 DOM 证据(推荐); 缺省回落工作区 index.html。"""
+    html 传入采集期渲染 DOM 时以其为 DOM 证据(推荐); 缺省回落工作区 index.html。
+    runtime: 活体运行时证据(第三证据源)。字节指纹被拆包抹掉、DOM 又没留痕的站点
+    (纯客户端挂载的 React/Vue 应用)以前会落到 Webpack/STATIC, 运行时对象能救回;
+    与字节或 DOM 任一源互证时置信度按双源计。"""
     hits, js_hits, dom_hits = _scan(workspace, html)
+    rt = set(runtime or ()) & RUNTIME_NAMES
     pattern = classify(hits)
+    if rt and pattern in _WEAK_PATTERNS:
+        # 只在字节+DOM 判成弱类(纯静态/打包器/jQuery)时才让运行时证据改判: 强类已有
+        # 专有证据, 页面上顺带挂的小部件(React 客服挂件、Vue 埋点面板)不该改它的主类
+        hits = hits | rt
+        pattern = classify(hits)
     confidence = _confidence(pattern, hits, js_hits, dom_hits)
-    return {"pattern": pattern, "features": sorted(hits), "confidence": confidence,
-            "evidence": {"js": sorted(js_hits), "dom": sorted(dom_hits)}}
+    key = _KEY_EVIDENCE.get(pattern, set())
+    if key & rt:
+        confidence = max(confidence, 0.97 if key & (js_hits | dom_hits) else 0.93)
+    out = {"pattern": pattern, "features": sorted(hits), "confidence": confidence,
+           "evidence": {"js": sorted(js_hits), "dom": sorted(dom_hits)}}
+    if rt:
+        out["evidence"]["runtime"] = sorted(rt)
+    return out

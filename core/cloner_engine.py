@@ -1071,6 +1071,47 @@ IMG_PENDING_JS = r"""() => {
   return n;
 }"""
 
+# 框架运行时探针(源站活体页, 引擎改动 DOM 之前): 运行时挂在 window / 挂载节点上的
+# 专有对象, 拆包混淆抹不掉。结果作为 pattern_detector 的第三证据源(只认 RUNTIME_NAMES)
+RUNTIME_FP_JS = r"""() => {
+  const out = [];
+  const w = window;
+  const has = (k) => { try { return typeof w[k] !== 'undefined' && w[k] !== null; } catch (e) { return false; } };
+  try {
+    if (has('__NEXT_DATA__') || has('__next_f')) out.push('Next');
+    if (has('__NUXT__') || has('$nuxt') || has('useNuxtApp')) out.push('Nuxt');
+    if (has('__remixContext') || has('__reactRouterContext')) out.push('Remix');
+    if (has('_$HY')) out.push('Solid');
+    if (has('Ember') && w.Ember && w.Ember.VERSION) out.push('Ember');
+    if (has('ng') && w.ng && typeof w.ng.getComponent === 'function') out.push('Angular');
+    if (document.querySelector('[ng-version]')) out.push('Angular');
+    if (document.querySelector('[q\\:container]')) out.push('Qwik');
+    if (document.querySelector('astro-island')) out.push('Astro');
+    if (has('Shopify') && w.Shopify && (w.Shopify.shop || w.Shopify.theme)) out.push('Shopify');
+    if (has('wixBiSession') || has('viewerModel')) out.push('Wix');
+    if (has('wp') && w.wp && (w.wp.i18n || w.wp.hooks || w.wp.element)) out.push('WordPress');
+    if (has('jQuery') && w.jQuery && w.jQuery.fn && w.jQuery.fn.jquery) out.push('jQuery');
+    if (has('webpackJsonp') || Object.keys(w).some(k => k.startsWith('webpackChunk'))) out.push('Webpack');
+    if (has('__svelte') || has('__SVELTEKIT_DEV__')) out.push('Svelte');
+    // 挂载节点上的实例: React 18/19(__reactContainer$/__reactFiber$)、React<=17(_reactRootContainer)、
+    // Vue3(__vue_app__)、Vue2(__vue__); 只看 body 下前几层, 不全树遍历
+    const nodes = [document.body].concat(Array.from(document.querySelectorAll('body > *, body > * > *')).slice(0, 300));
+    let react = false, vue = false;
+    for (const el of nodes) {
+      if (!el) continue;
+      if (!react) {
+        if (el._reactRootContainer) react = true;
+        else for (const k in el) { if (k.startsWith('__reactContainer$') || k.startsWith('__reactFiber$')) { react = true; break; } }
+      }
+      if (!vue && (el.__vue_app__ || el.__vue__)) vue = true;
+      if (react && vue) break;
+    }
+    if (react) out.push('React');
+    if (vue) out.push('Vue');
+  } catch (e) {}
+  return Array.from(new Set(out));
+}"""
+
 # 克隆侧懒加载图一律转 eager 并等到齐: 资源全在本地沙盒, 整页截图前没被滚动窗口
 # 触发的 loading=lazy 图(页尾赞助商墙/logo 栅格)在截图里是空格, 原站基准却是满的
 CLONE_IMG_EAGER_JS = r"""() => {
@@ -3246,7 +3287,8 @@ class ClonerEngine:
             try:
                 # DOM 证据取采集期主页面渲染 DOM(此时 index.html 尚未本地化落盘)
                 self._pattern_info = pattern_detector.detect(
-                    self.ws, html=pages[0][1] if pages else None)
+                    self.ws, html=pages[0][1] if pages else None,
+                    runtime=getattr(self, "_runtime_hits", None))
                 self._strategy_pack = strategy_packs.for_pattern(
                     self._pattern_info["pattern"])
                 self.log("PATTERN",
@@ -3630,6 +3672,12 @@ class ClonerEngine:
         if not self._wait_quiet(page, config.NETWORK_IDLE_TIMEOUT):
             self.log("RENDER", "网络静置等待超时, 继续后续固化流程")
         self.log("RENDER", f"页面就绪 {time.time() - t_nav:.1f}s")
+        if screenshot:
+            with suppress(Exception):
+                rt = page.evaluate(RUNTIME_FP_JS) or []
+                self._runtime_hits = set(rt)
+                if rt:
+                    self.log("PATTERN", f"活体运行时证据: {', '.join(rt)}")
         tp = self._phase("采集-导航", t_nav_m)
         self._auto_settle_update_prompt(page)
         # 采集期主框架导航冻结: wikipedia 等站在固化序列中途自导航
