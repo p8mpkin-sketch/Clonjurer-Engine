@@ -335,10 +335,14 @@ MEDIA_SHOT_APPLY_JS = r"""
 FORM_ACTIVATE_JS = r"""
 async () => {
   let n = 0;
+  // focus 默认把输入框滚进视口: 滚动触发的 IntersectionObserver/滚动监听会改版面
+  // (wix 模板轮播进视口即换页, 序列化的 DOM 与基准截图不是同一页)。不滚, 滚了也回原位
+  const sx = window.scrollX, sy = window.scrollY;
   document.querySelectorAll('input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=file]), textarea, select').forEach(el => {
     if (n >= 60) return;
-    try { el.focus(); el.blur(); n++; } catch (e) {}
+    try { el.focus({preventScroll: true}); el.blur(); n++; } catch (e) {}
   });
+  try { if (window.scrollX !== sx || window.scrollY !== sy) window.scrollTo(sx, sy); } catch (e) {}
   if (n) {
     // "点外部关闭"类浮层(搜索下拉/联想面板)focus 即展开、blur 关不掉, 只认外部 mousedown:
     // 在 body 上派发一次外部点击序列收起它们(aliyun 顶栏搜索面板被固化进克隆)
