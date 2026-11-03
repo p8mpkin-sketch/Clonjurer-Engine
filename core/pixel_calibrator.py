@@ -200,6 +200,9 @@ ELEMENT_PROBE_JS = """(cells) => {
         const el = document.elementFromPoint(
             Math.min(x, innerWidth - 2), y - window.scrollY);
         if (!el) { out.push(null); continue; }
+        // 替换元素(图/视频/画布/内嵌文档/SVG)的格色是内容不是底色: 给它上底色只会在
+        // 透明像素处露出色块(资源回补到齐后整块显形), 一律不校准
+        if (el.closest('img,picture,video,canvas,iframe,object,embed,svg')) { out.push(null); continue; }
         // 自底向上收集 3 层, 再反转为"祖先 > 子"顺序(旧实现未反转, 选择器
         // 方向颠倒几乎从不命中); 用子代组合符 + nth-of-type 精确定位,
         // 避免 tag.class 后代链误伤同类元素; 标识符经 CSS.escape(不可信输入)

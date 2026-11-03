@@ -273,10 +273,18 @@ MEDIA_SHOT_JS = r"""
     cv.setAttribute('data-clone-shot', String(n));
     out.push(Object.assign({n: n++, kind: 'canvas'}, r));
   });
+  let pinned = 0;
   document.querySelectorAll('video').forEach(v => {
-    if (v.getAttribute('poster')) return;
     const r = rectOf(v);
     if (r.w < 8 || r.h < 8) return;
+    // 播放后才显形的视频(脚本在 playing/canplay 时把 opacity 从 0 拉到 1): 克隆里视频
+    // 不播, 显形逻辑不触发, 整块按样式表初值透明(wix 首屏光晕整片丢失)。基准时刻的
+    // 不透明度钉成内联, 封面帧才看得见
+    try {
+      const op = parseFloat(getComputedStyle(v).opacity);
+      if (op > 0) { v.style.setProperty('opacity', String(op), 'important'); pinned++; }
+    } catch (err) {}
+    if (v.getAttribute('poster')) return;
     try {
       if (v.readyState >= 2 && v.videoWidth) {
         const t = document.createElement('canvas');
@@ -289,7 +297,7 @@ MEDIA_SHOT_JS = r"""
     v.setAttribute('data-clone-shot', String(n));
     out.push(Object.assign({n: n++, kind: 'video'}, r));
   });
-  return {shots: out, posters: posters,
+  return {shots: out, posters: posters, pinned: pinned,
           docW: Math.max(document.documentElement.scrollWidth, window.innerWidth || 0)};
 }
 """
@@ -1199,6 +1207,28 @@ IFRAME_SRCS_JS = r"""
     try { out.push(new URL(raw, location.href).href); } catch (e) {}
   });
   return out.slice(0, 10);
+}
+"""
+
+# 基准后塌陷回撤: 基准截图时可见且尺寸稳定的块(layout_map 稳定项), 到序列化前被页面
+# 脚本用内联 display:none 收起 —— 典型是广告位竞价落空后 GPT collapseEmptyDivs 把空位
+# 连同外框一起收掉(techcrunch 14 个位整列上移 600px)。克隆按基准口径保留占位:
+# 只去掉内联 display:none, 不碰类名/样式表; 基准里本就不可见的块不在稳定项里, 不受影响。
+COLLAPSE_REVERT_JS = r"""
+(keys) => {
+  let n = 0;
+  for (const k of keys) {
+    let el = null;
+    try { el = document.querySelector(k); } catch (e) { continue; }
+    if (!el || !el.style || el.style.display !== 'none') continue;
+    el.style.removeProperty('display');
+    n++;
+    // 收起常是一层层做的(位 + 外框): 祖先同样被内联收起的一并回撤
+    for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+      if (p.style && p.style.display === 'none') { p.style.removeProperty('display'); n++; }
+    }
+  }
+  return n;
 }
 """
 
@@ -2459,16 +2489,45 @@ def _split_scheme_netloc_path(url: str):
 # ---------------------------------------------------------------------------
 # srcset / image-set 解析
 # ---------------------------------------------------------------------------
+_SRCSET_URL_RE = re.compile(r"[\s,]*([^\s]+)")
+
+
 def _srcset_entries(value: str):
+    """按 HTML 规范切 srcset: URL 是一段非空白(内部逗号属于 URL, 只剥尾逗号),
+    描述符读到括号外的逗号为止。按逗号粗切会把 WordPress/Jetpack 的
+    `?resize=150,100 150w` 切成 `?resize=150` 与 `100 150w`, 改写后留下
+    `x.jpg,100` 这种 404 候选, 整张图在克隆里裂掉。"""
     entries = []
-    for part in re.split(r"\s*,\s*", (value or "").strip()):
-        tokens = part.split()
-        if not tokens:
+    text = value or ""
+    pos, n = 0, len(text)
+    while pos < n:
+        m = _SRCSET_URL_RE.match(text, pos)
+        if not m:
+            break
+        url = m.group(1)
+        pos = m.end()
+        desc = ""
+        if url.endswith(","):
+            url = url.rstrip(",")
+        else:
+            depth, start = 0, pos
+            while pos < n:
+                ch = text[pos]
+                if ch == "(":
+                    depth += 1
+                elif ch == ")":
+                    depth = max(0, depth - 1)
+                elif ch == "," and depth == 0:
+                    break
+                pos += 1
+            desc = text[start:pos]
+            pos += 1
+        if not url:
             continue
-        url = tokens[0]
         width = 1
-        if len(tokens) > 1:
-            digits = tokens[1].lower().rstrip("wx")
+        tokens = desc.split()
+        if tokens:
+            digits = tokens[0].lower().rstrip("wx")
             if digits.isdigit():
                 width = int(digits) or 1
         entries.append((url, width))
@@ -3497,6 +3556,7 @@ class ClonerEngine:
         # 水合剥离/字体烘焙)之前截取 —— 否则评分比较的是"克隆 vs 引擎改过的
         # 原站", 引擎自身引入的失真被基准同步吸收, 分数系统性偏乐观。
         baseline_text = None
+        layout_stable = []
         if screenshot:
             with suppress(OSError):   # 重建/重试: 清掉上一轮基准, 防口径混用
                 (self.ws / "original_preview.png").unlink()
@@ -3549,6 +3609,7 @@ class ClonerEngine:
                 post = {e[0]: e[2] for e in _safe_eval(
                     f"() => ({LAYOUT_MAP_JS})({LAYOUT_MAP_MAX})")}
                 stable = [e for e in layout_pre if abs(post.get(e[0], -99) - e[2]) <= 1]
+                layout_stable = stable
                 (self.ws / "layout_map.json").write_text(
                     json.dumps(stable, ensure_ascii=False), encoding="utf-8")
         tp = self._phase("采集-基准截图", tp)
@@ -3558,6 +3619,12 @@ class ClonerEngine:
         if activated:
             self.log("RENDER", f"表单激活: focus/blur {activated} 个输入控件")
         counts = _safe_eval(DEEP_FREEZE_JS)
+        if layout_stable:
+            # DEEP_FREEZE 已停掉定时器: 此后页面脚本不再改 DOM, 回撤结果能留到序列化
+            with suppress(Exception):
+                n_rev = page.evaluate(COLLAPSE_REVERT_JS, [e[0] for e in layout_stable if e[2] > 0])
+                if n_rev:
+                    self.log("RENDER", f"基准后塌陷回撤: {n_rev} 个块在基准截图后被脚本收起, 按基准保留占位")
         self.log("CSSOM",
                  f"固化 {counts.get('css', 0)} 组运行时样式 / "
                  f"{counts.get('canvas', 0)} 个 Canvas / "
@@ -5067,6 +5134,14 @@ class ClonerEngine:
                     # 网格差分定位色差格(原站侧纯色格才取), elementFromPoint 映射到
                     # 克隆 DOM 元素, 以原站格色生成覆盖 —— 注入后重渲染重评分一轮。
                     if detail is not None and (detail.get('score') or 0) < 99 \
+                            and self._calibrations < 2 and failed_local \
+                            and not getattr(self, "_calib_deferred", False):
+                        # 本轮还有本地资源 404/兜底壳: 差异格多半是待回补的图, 按缺图时的
+                        # 截图上色会在资源到齐后变成色块 —— 让给下一轮(只让一次: 源站本身
+                        # 就 404 的资源永远回补不上, 不能因此永不校准)
+                        self._calib_deferred = True
+                        self.log("RENDER", f"像素校准暂缓: {len(failed_local)} 个本地资源待回补")
+                    elif detail is not None and (detail.get('score') or 0) < 99 \
                             and self._calibrations < 2:
                         try:
                             cal_cells = pixel_calibrator.divergent_cells(

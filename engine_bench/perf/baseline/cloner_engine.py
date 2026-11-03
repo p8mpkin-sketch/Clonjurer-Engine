@@ -1456,16 +1456,45 @@ def os_ext(path: str) -> str:
 # ---------------------------------------------------------------------------
 # srcset / image-set 解析
 # ---------------------------------------------------------------------------
+_SRCSET_URL_RE = re.compile(r"[\s,]*([^\s]+)")
+
+
 def _srcset_entries(value: str):
+    """按 HTML 规范切 srcset: URL 是一段非空白(内部逗号属于 URL, 只剥尾逗号),
+    描述符读到括号外的逗号为止。按逗号粗切会把 WordPress/Jetpack 的
+    `?resize=150,100 150w` 切成 `?resize=150` 与 `100 150w`, 改写后留下
+    `x.jpg,100` 这种 404 候选, 整张图在克隆里裂掉。"""
     entries = []
-    for part in re.split(r"\s*,\s*", (value or "").strip()):
-        tokens = part.split()
-        if not tokens:
+    text = value or ""
+    pos, n = 0, len(text)
+    while pos < n:
+        m = _SRCSET_URL_RE.match(text, pos)
+        if not m:
+            break
+        url = m.group(1)
+        pos = m.end()
+        desc = ""
+        if url.endswith(","):
+            url = url.rstrip(",")
+        else:
+            depth, start = 0, pos
+            while pos < n:
+                ch = text[pos]
+                if ch == "(":
+                    depth += 1
+                elif ch == ")":
+                    depth = max(0, depth - 1)
+                elif ch == "," and depth == 0:
+                    break
+                pos += 1
+            desc = text[start:pos]
+            pos += 1
+        if not url:
             continue
-        url = tokens[0]
         width = 1
-        if len(tokens) > 1:
-            digits = tokens[1].lower().rstrip("wx")
+        tokens = desc.split()
+        if tokens:
+            digits = tokens[0].lower().rstrip("wx")
             if digits.isdigit():
                 width = int(digits) or 1
         entries.append((url, width))
