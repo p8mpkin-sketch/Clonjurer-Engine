@@ -1159,20 +1159,16 @@ CLONE_IMG_DONE_JS = r"""() => {
   return true;
 }"""
 
-# 评分渲染专用(交付物不注入): 长周期定时器不触发。基准是时间冻结的快照, 克隆页加载后
-# 轮播自动翻页(setInterval/递归 setTimeout, 周期多为 3~6s)会在截图前翻到另一页 ——
-# 与 ANIM_ALIGN_JS 对 CSS 动画做的对齐同理, 这里对齐 JS 定时驱动的版面变化。短定时器
-# (懒渲染/防抖/预加载器收起)照常, 阈值取在两者之间
+# 评分渲染专用(交付物不注入): 长周期 setInterval 不触发。基准是时间冻结的快照, 克隆页加载后
+# 轮播自动翻页(周期多为 3~6s 的 setInterval)会在截图前翻到另一页 —— 与 ANIM_ALIGN_JS
+# 对 CSS 动画做的对齐同理。setTimeout 不拦: 一次性的长延时常是内容装配(qwik 页尾
+# 延时挂载, 拦掉后整页矮 85~150px), 拦它得不偿失
 SCORE_TIMER_GUARD_JS = r"""(() => {
   try {
-    const si = window.setInterval, st = window.setTimeout;
+    const si = window.setInterval;
     window.setInterval = function (fn, ms) {
       if ((+ms || 0) >= 2500) return 0;
       return si.apply(this, arguments);
-    };
-    window.setTimeout = function (fn, ms) {
-      if ((+ms || 0) >= 3500) return 0;
-      return st.apply(this, arguments);
     };
   } catch (e) {}
 })();"""
