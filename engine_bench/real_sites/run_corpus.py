@@ -19,7 +19,10 @@
 不做 per-site 特判: 低分站只能归因到模式类, 修复必须对整类生效。
 """
 import argparse
+import base64
+import io
 import json
+import os
 import statistics
 import sys
 import time
@@ -228,6 +231,8 @@ def run(args):
     md_path = RUNS / f"REPORT_{stamp}.md"
     md_path.write_text(_report(out, prev_name, prev), encoding="utf-8")
     print(f"报告: {md_path}\n明细: {json_path}")
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        _ci_thumbs(results)
     s = out["summary"]
     print(f"均分 {_fmt(s['mean'])}  交互轨均分 {_fmt(s['interactive_mean'])}  中位 {_fmt(s['median'])}"
           f"  完成 {s['completed']}/{s['total']}(不可达 {s['unreachable']})"
@@ -266,6 +271,37 @@ def _summary(results):
         "p50_elapsed": pct(elapsed, 0.5),
         "p90_elapsed": pct(elapsed, 0.9),
     }
+
+
+def _ci_thumbs(results, below=99.0):
+    """CI 上把未满分站点的两侧缩略图(base64 JPEG)打进日志: 产物下载在部分环境不可达,
+    job 日志总能取到; 远程归因不再只能看 <90 分站点(工作流里那段只管 <90)。"""
+    try:
+        from PIL import Image
+    except ImportError:
+        return
+    root = Path.cwd() / "workspaces"
+    for r in results:
+        if not isinstance(r.get("score"), (int, float)) or r["score"] >= below or r["score"] < 90:
+            continue
+        for name in ("original_preview.png", "cloned_preview.png"):
+            f = root / str(r["task_id"]) / name
+            if not f.is_file():
+                continue
+            try:
+                im = Image.open(f).convert("RGB")
+                im = im.resize((480, max(1, round(im.height * 480 / im.width))))
+                im = im.crop((0, 0, 480, min(im.height, 4000)))
+                buf = io.BytesIO()
+                im.save(buf, "JPEG", quality=60)
+            except Exception as exc:   # noqa: BLE001 缩略图只为归因, 失败不影响跑分
+                print(f"(缩略图失败 {r['task_id']} {name}: {exc})")
+                continue
+            b64 = base64.b64encode(buf.getvalue()).decode()
+            print(f"::group::shot {r['task_id']} {name} {r['url']}")
+            for k in range(0, len(b64), 4000):
+                print("SHOT64:" + b64[k:k + 4000])
+            print("::endgroup::")
 
 
 def _report(out, prev_name, prev):
