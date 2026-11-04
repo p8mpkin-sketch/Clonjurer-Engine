@@ -3560,8 +3560,8 @@ const __vueApp = createApp({
       ],
       deliveries: [
         { id: '', label: '网站工程', sub: 'Flask ZIP / Docker 部署', icon: 'globe', hint: '默认: 导出可独立运行的 Flask 网站工程' },
-        { id: 'desktop', label: '桌面应用', sub: 'macOS .app + Windows .exe', icon: 'monitor', hint: '把克隆结果装进 Electron 应用壳(未签名)' },
-        { id: 'apk', label: 'Android 应用', sub: 'APK(debug 证书签名)', icon: 'smartphone', hint: '把克隆结果装进 Android WebView 应用壳; 首次构建约 4 分钟' },
+        { id: 'desktop', label: '桌面应用', sub: 'macOS .app + Windows .exe', icon: 'monitor', hint: '系统 WebView 应用壳(macOS WKWebView / Windows WebView2), 体积≈站点 + 约 2.5MB; 未签名' },
+        { id: 'apk', label: 'Android 应用', sub: 'APK(debug 证书签名)', icon: 'smartphone', hint: '原生 Android WebView 应用壳, 体积≈站点 + 约 20KB; 构建数秒' },
       ],
       viewports: [
         { id: 'desktop', label: 'Desktop', size: '1920×1080' },

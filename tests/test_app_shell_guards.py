@@ -2,10 +2,12 @@
 
 - bundle_site: 只带站点内容(templates/static/mock_data 等), 不带 Flask 运行时文件; 页面路由/上游/反代开关进 site_meta;
 - Electron 壳: main.js 只监听 127.0.0.1, 实现路由表 / 录制接口 / 影子文件 / 反代兜底, 安全默认;
-- Flutter 壳: 资源包索引覆盖全部站点文件且偏移正确; 清单补丁声明(联网 + 仅 127.0.0.1 明文);
+- Android 原生壳: 站点进 assets, 虚拟 https 源拦截作答, 不放行明文, 包名校验;
+- Go 桌面壳: 只听 127.0.0.1, 窗口钳制, 依赖版本钉死;
 - toolchain._patch_android: 按声明改 AndroidManifest; 缺工具链/产物时 package_task 只报缺口不抛异常。
 """
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -63,21 +65,41 @@ class AppShellGuards(unittest.TestCase):
             self.assertEqual(pkg["productName"], "测试站")
             self.assertTrue((app / "site/site_meta.json").is_file())
 
-    def test_flutter_shell_pack_index(self):
+    def test_android_shell_native(self):
         with tempfile.TemporaryDirectory() as d:
             ws = _fake_ws(Path(d))
-            app = app_shell.flutter_shell(ws, Path(d) / "out", "测试站")
-            idx = json.loads((app / "assets/site_index.json").read_text(encoding="utf-8"))
-            pack = (app / "assets/site.pack").read_bytes()
-            off, ln = idx["files"]["static/css/a.css"]
-            self.assertEqual(pack[off:off + ln], b"body{color:red}")
-            self.assertIn("templates/about/index.html", idx["files"])
-            self.assertNotIn("app.py", idx["files"])
-            self.assertIn("webview_flutter", (app / "pubspec.yaml").read_text(encoding="utf-8"))
-            spec = json.loads((app / "clonjurer_android.json").read_text(encoding="utf-8"))
-            self.assertEqual(spec["cleartext_hosts"], ["127.0.0.1"])
-            server = (app / "lib/site_server.dart").read_text(encoding="utf-8")
-            self.assertIn("InternetAddress.loopbackIPv4", server)
+            app = app_shell.android_shell(ws, Path(d) / "out", "测试站", "com.clonjurer.task7")
+            self.assertTrue((app / "assets/site/static/css/a.css").is_file())
+            self.assertFalse((app / "assets/site/app.py").exists())
+            man = (app / "AndroidManifest.xml").read_text(encoding="utf-8")
+            self.assertIn('package="com.clonjurer.task7"', man)
+            self.assertIn('android:label="测试站"', man)
+            self.assertIn('android:usesCleartextTraffic="false"', man)   # 虚拟 https 源, 不放行明文
+            java = (app / "src/com/clonjurer/task7/MainActivity.java").read_text(encoding="utf-8")
+            for frag in ("shouldInterceptRequest", "matchMock", "setAllowFileAccess(false)", "https://\" + HOST",
+                         "ACTION_VIEW"):
+                self.assertIn(frag.replace("\\", ""), java.replace("\\", ""), frag)
+            self.assertNotIn("flutter", java.lower())
+            with self.assertRaises(ValueError):
+                app_shell.android_shell(ws, Path(d) / "out2", "x", "Bad Package")
+
+    def test_desktop_shell_go(self):
+        with tempfile.TemporaryDirectory() as d:
+            ws = _fake_ws(Path(d))
+            app = app_shell.desktop_shell(ws, Path(d) / "out", "测试站", {"width": 1920, "height": 1080}, "com.clonjurer.task7")
+            for f in ("server.go", "main.go", "window_darwin.go", "window_windows.go", "config.go", "go.mod",
+                      "site/site_meta.json", "site/templates/index.html"):
+                self.assertTrue((app / f).is_file(), f)
+            server = (app / "server.go").read_text(encoding="utf-8")
+            self.assertIn('"127.0.0.1:"', server)
+            self.assertNotIn("0.0.0.0", server)
+            cfg = (app / "config.go").read_text(encoding="utf-8")
+            self.assertIn('AppTitle  = "测试站"', cfg)
+            self.assertIn("AppWidth  = 1440", cfg)                       # 窗口钳制
+            gomod = (app / "go.mod").read_text(encoding="utf-8")
+            reqs = re.findall(r"^\s+(\S+) (v\S+)$", gomod, re.M)
+            self.assertEqual(len(reqs), 2)
+            self.assertTrue(all("latest" not in v for _, v in reqs))      # 依赖版本钉死
 
     def test_patch_android_manifest(self):
         with tempfile.TemporaryDirectory() as d:
@@ -110,7 +132,7 @@ class AppShellGuards(unittest.TestCase):
             with mock.patch.object(toolchain, "_which", return_value=None):
                 res2 = app_shell.package_task(2, ws2, "apk", log=lambda m: None)
             self.assertFalse(res2["ok"])
-            self.assertIn("Flutter SDK", res2["gap"])
+            self.assertIn("缺工具链", res2["gap"])
 
 
 if __name__ == "__main__":
