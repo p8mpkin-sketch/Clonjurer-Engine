@@ -42,6 +42,7 @@ import zipfile
 from contextlib import suppress
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests as upstream_http
 from flask import (Flask, Response, abort, jsonify, render_template, request,
@@ -1853,10 +1854,10 @@ def preview(task_id, subpath=""):
     site = _load_site_meta(ws)
     routes = site.get("routes", {})
     if subpath == "":
-        return send_from_directory(ws, routes.get("/", "index.html"))
+        return _pv_cookie(send_from_directory(ws, routes.get("/", "index.html")), task_id)
     normalized = "/" + subpath.strip("/")
     if normalized in routes:
-        return send_from_directory(ws, routes[normalized])
+        return _pv_cookie(send_from_directory(ws, routes[normalized]), task_id)
     target = (ws / subpath).resolve()
     if str(target).startswith(str(ws.resolve())) and target.is_file():
         return send_from_directory(ws, subpath)
@@ -1878,6 +1879,14 @@ def _parse_json(text: str) -> dict:
         return {}
 
 
+def _pv_cookie(resp, task_id):
+    """预览页面响应带上当前任务号: 样式表里的根路径引用(字体/背景图)的 Referer 是样式表
+    自身地址(/static/css/...), 不含 /preview/<id>, Referer 兜底认不出任务 —— 用它补位。"""
+    with suppress(Exception):
+        resp.set_cookie("clone_pv", str(task_id), path="/", samesite="Lax", httponly=True)
+    return resp
+
+
 @app.errorhandler(404)
 def not_found(_error):
     # Referer 智能沙盒路由兜底: 预览 iframe 内逃逸到根路径的静态资源 / Mock API
@@ -1885,8 +1894,16 @@ def not_found(_error):
     # 自动转发至对应工作空间。
     referer = request.headers.get("Referer", "")
     match = PREVIEW_REFERER_RE.search(referer)
-    if match and not request.path.startswith("/preview/"):
-        task = db.get_task(int(match.group(1)))
+    task_ref = match.group(1) if match else None
+    if task_ref is None and request.method == "GET" and referer \
+            and urlsplit(referer).netloc == request.host \
+            and not request.path.startswith(("/api/", "/preview/")):
+        # 同源、Referer 是克隆页里的子资源(样式表)而非平台页: 退到最近打开的预览任务
+        cookie_id = request.cookies.get("clone_pv", "")
+        if cookie_id.isdigit() and not urlsplit(referer).path.rstrip("/") in ("", "/index.html"):
+            task_ref = cookie_id
+    if task_ref and not request.path.startswith("/preview/"):
+        task = db.get_task(int(task_ref))
         if task is not None:
             resp = _serve_from_task(task, request.path)
             if resp is not None:
