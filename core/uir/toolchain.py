@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import platform as _platform
+import re
 import shutil
 import subprocess
 import sys
@@ -76,7 +77,34 @@ def zip_dir(src, dest) -> Path:
     return dest
 
 
-def build_apk(app_dir, release=False, log=_print, timeout=1800) -> dict:
+def _patch_android(app_dir: Path, log):
+    """按工程里的 clonjurer_android.json 补 Android 清单: 应用名、联网权限、只对指定主机放行明文 http。"""
+    spec_f = app_dir / "clonjurer_android.json"
+    man = app_dir / "android" / "app" / "src" / "main" / "AndroidManifest.xml"
+    if not spec_f.is_file() or not man.is_file():
+        return
+    spec = json.loads(spec_f.read_text(encoding="utf-8"))
+    xml = man.read_text(encoding="utf-8")
+    if spec.get("label"):
+        lab = (str(spec["label"]).replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;"))
+        xml = re.sub(r'android:label="[^"]*"', f'android:label="{lab}"', xml, count=1)
+    if spec.get("internet") and "android.permission.INTERNET" not in xml:
+        xml = xml.replace("<application", '<uses-permission android:name="android.permission.INTERNET"/>\n    <application', 1)
+    hosts = [h for h in spec.get("cleartext_hosts") or [] if re.match(r"^[A-Za-z0-9.-]+$", str(h))]
+    if hosts and "networkSecurityConfig" not in xml:
+        xml = xml.replace("<application", '<application android:networkSecurityConfig="@xml/network_security_config"', 1)
+        res = app_dir / "android" / "app" / "src" / "main" / "res" / "xml"
+        res.mkdir(parents=True, exist_ok=True)
+        doms = "".join(f'<domain includeSubdomains="false">{h}</domain>' for h in hosts)
+        (res / "network_security_config.xml").write_text(
+            '<?xml version="1.0" encoding="utf-8"?>\n<network-security-config>'
+            f'<domain-config cleartextTrafficPermitted="true">{doms}</domain-config></network-security-config>\n',
+            encoding="utf-8")
+    man.write_text(xml, encoding="utf-8")
+    log("  已按 clonjurer_android.json 补 Android 清单(应用名/联网权限/明文主机)")
+
+
+def build_apk(app_dir, release=False, log=_print, timeout=1800, org="com.clonjurer.generated") -> dict:
     """Flutter 工程(FlutterTarget 产物)→ APK。补齐 android/ 平台骨架时不覆盖已生成的 lib/。"""
     app_dir = Path(app_dir)
     flutter = _which("flutter", _FLUTTER_CANDIDATES)
@@ -88,9 +116,14 @@ def build_apk(app_dir, release=False, log=_print, timeout=1800) -> dict:
     if not (app_dir / "android").is_dir():
         # flutter create 对已存在的 lib/main.dart、pubspec.yaml 不覆盖(无 --overwrite)
         rc, out = _run([flutter, "create", ".", "--platforms=android", "--project-name", "generated_ui",
-                        "--org", "com.clonjurer.generated"], app_dir, env, log, timeout)
+                        "--org", org], app_dir, env, log, timeout)
         if rc:
             return {"ok": False, "gap": "flutter create 失败", "log": out}
+    _patch_android(app_dir, log)
+    tpl = app_dir / "test" / "widget_test.dart"
+    if tpl.is_file() and "MyApp" in tpl.read_text(encoding="utf-8", errors="ignore") and \
+            "class MyApp" not in "".join(p.read_text(encoding="utf-8", errors="ignore") for p in (app_dir / "lib").glob("*.dart")):
+        tpl.unlink()   # flutter create 模板测试引用不存在的 MyApp, 留着只会让 analyze/test 误报
     rc, out = _run([flutter, "pub", "get"], app_dir, env, log, timeout)
     if rc:
         return {"ok": False, "gap": "flutter pub get 失败(网络/依赖)", "log": out}

@@ -6,7 +6,9 @@ V2 批量任务调度器(纯线程模型)。
 - 每个任务由 ClonerEngine(同步版) 全流程执行, 异常自动落库为 failed。
 - 退出时尽力关闭全部线程本地浏览器实例。
 """
+import json
 import threading
+from pathlib import Path
 
 import config
 from core.browser_pool import SyncBrowserPool
@@ -73,6 +75,7 @@ class Scheduler:
                 else:
                     engine = ClonerEngine(task["id"], self.db, self.bus, self.pool)
                     engine.run()
+                self._package_if_requested(task)
             except Exception as exc:
                 # 瞬时 Playwright 会话崩溃(页面运行时重导航/浏览器回收)与
                 # 稳定失败不同源: 换新会话整体重跑一次, 避免偶发即判死
@@ -87,6 +90,37 @@ class Scheduler:
                 self.bus.publish(task["id"], "ERROR", f"引擎异常终止: {type(exc).__name__}: {exc}", "ERROR")
                 self.db.update_task(task["id"], status="failed",
                                     error_msg=f"{type(exc).__name__}: {exc}"[:1500])
+
+    def _package_if_requested(self, task: dict):
+        """交付形态后置步骤: 批次配置 package=desktop|apk 时, 把已完成任务的网站工程装进应用壳构建安装包。
+        在克隆/生成管线之外执行(不改 cloner_engine), 失败只记缺口, 不改变任务的完成状态与评分。"""
+        try:
+            batch = self.db.get_batch(task["batch_id"]) or {}
+            kind = (json.loads(batch.get("config_json") or "{}") or {}).get("package") or ""
+        except Exception:
+            return
+        if kind not in ("desktop", "apk"):
+            return
+        cur = self.db.get_task(task["id"]) or {}
+        if cur.get("status") != "completed" or not cur.get("workspace_path"):
+            return
+        from core import app_shell
+        tid = task["id"]
+        label = {"desktop": "桌面应用", "apk": "Android 应用"}[kind]
+        self.db.update_task(tid, stage=f"构建{label}")
+        self.bus.publish(tid, "BUILD", f"开始构建{label}(交付形态)")
+        try:
+            stats = json.loads(cur.get("stats_json") or "{}")
+        except Exception:
+            stats = {}
+        dom = cur.get("domain") or ""
+        title = dom if dom and dom != "generated" else (batch.get("name") or f"task{tid}").replace("生成 · ", "")
+        vp = config.VIEWPORTS.get(json.loads(batch.get("config_json") or "{}").get("viewport") or "", {})
+        res = app_shell.package_task(tid, Path(cur["workspace_path"]), kind, title=title, viewport=vp,
+                                     log=lambda m: self.bus.publish(tid, "BUILD", m))
+        stats["package"] = res
+        self.db.update_task(tid, stage="完成" if res.get("ok") else f"完成(构建{label}失败)",
+                            stats_json=json.dumps(stats, ensure_ascii=False))
 
     _TRANSIENT_MARKS = (
         "Execution context was destroyed",

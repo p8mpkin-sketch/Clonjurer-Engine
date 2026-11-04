@@ -192,6 +192,8 @@ def _sanitize_config(raw) -> dict:
         # 仿真交互层自定义: 登录提示文案(留空=默认池) 与 登录后跳转(留空=不跳转)
         "sim_login_message": str(raw.get("sim_login_message") or "").strip()[:120],
         "sim_login_redirect": str(raw.get("sim_login_redirect") or "").strip()[:500],
+        # 交付形态: "" = 网站工程(Flask ZIP, 默认); desktop = 桌面应用(.app + .exe); apk = Android 应用
+        "package": str(raw.get("package") or "") if str(raw.get("package") or "") in ("desktop", "apk") else "",
     }
 
 
@@ -1022,7 +1024,12 @@ def api_v4_generate():
     elif not description:
         return jsonify({"error": "描述输入不能为空"}), 400
     label = (description[:40] if description else f"截图 {time.strftime('%m-%d %H:%M')}")
-    cfg = {"mode": "generate", "gen": spec, "similarity": True,
+    package = str(form.get("package") or "").strip()
+    if package and package not in ("desktop", "apk"):
+        return jsonify({"error": f"package 仅支持 desktop/apk, 收到 {package!r}"}), 400
+    if package and target != "html_css":
+        return jsonify({"error": "交付形态 desktop/apk 装壳需要输出目标 html_css(Flutter 原生 APK 用 build=apk)"}), 400
+    cfg = {"mode": "generate", "gen": spec, "similarity": True, "package": package,
            "ai_api_key": str(form.get("ai_api_key") or "").strip()[:4096],
            "ai_base_url": str(form.get("ai_base_url") or "").strip()[:4096],
            "ai_model": str(form.get("ai_model") or "").strip()[:200]}
@@ -1055,14 +1062,21 @@ def api_v4_generate_report(task_id):
     return jsonify(payload)
 
 
+@app.get("/api/tasks/<int:task_id>/artifact/<int:idx>")
 @app.get("/api/v4/generate/<int:task_id>/artifact/<int:idx>")
-def api_v4_generate_artifact(task_id, idx):
-    """下载生成任务构建出的安装包(APK / macOS .app zip / Windows .exe zip), 只放行导出目录内、报告登记过的文件。"""
+def api_task_artifact(task_id, idx):
+    """下载任务构建出的安装包(APK / macOS .app zip / Windows .exe zip), 只放行导出目录内、报告登记过的文件。
+    来源: 交付形态后置构建(build_report.json, 克隆与生成任务通用) 或 界面生成的原生目标构建(generate_report.build)。"""
     task = _task_or_404(task_id)
-    rep = _workspace_of(task) / "generate_report.json"
-    if not rep.is_file():
-        return jsonify({"error": "生成报告尚未产出"}), 404
-    arts = ((_parse_json(rep.read_text(encoding="utf-8")) or {}).get("build") or {}).get("artifacts") or []
+    ws = _workspace_of(task)
+    arts = []
+    for rep, key in ((ws / "build_report.json", None), (ws / "generate_report.json", "build")):
+        if rep.is_file():
+            data = _parse_json(rep.read_text(encoding="utf-8")) or {}
+            arts = (data.get(key) if key else data or {}) or {}
+            arts = arts.get("artifacts") or []
+            if arts:
+                break
     if not 0 <= idx < len(arts):
         return jsonify({"error": "没有这个构建产物"}), 404
     name = Path(str(arts[idx].get("file") or "")).name

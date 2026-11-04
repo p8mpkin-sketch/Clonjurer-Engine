@@ -1909,6 +1909,19 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <i :data-lucide="submitting ? 'loader-2' : 'rocket'" :class="submitting ? 'animate-spin' : ''" class="w-4 h-4"></i>立即克隆
             </button>
           </div>
+          <!-- 交付形态: 同一个克隆任务, 产出网站工程 / 桌面应用 / Android 应用 -->
+          <div class="space-y-1.5">
+            <div class="text-[10px] text-slate-500 tracking-[0.16em] font-semibold flex items-center gap-1.5">交付形态 DELIVERY
+              <span class="tracking-normal font-normal text-slate-600">· 任务完成后自动构建, 在任务卡片下载</span></div>
+            <div class="grid grid-cols-3 gap-2">
+              <button v-for="d in deliveries" :key="d.id" @click="form.package=d.id" :title="d.hint"
+                :class="form.package===d.id ? 'border-indigo-500/40 bg-indigo-500/[0.10] text-indigo-200' : 'border-white/[0.06] bg-slate-950/50 text-slate-400 hover:border-white/[0.12] hover:text-slate-300'"
+                class="rounded-xl border px-2.5 py-2 text-left transition-all">
+                <div class="flex items-center gap-1.5 text-[10.5px] font-medium"><i :data-lucide="d.icon" class="w-3.5 h-3.5"></i>[[ d.label ]]</div>
+                <div class="text-[9px] text-slate-500 mt-0.5 leading-snug">[[ d.sub ]]</div>
+              </button>
+            </div>
+          </div>
           <div class="flex items-center justify-between gap-2">
             <button @click="advOpen=!advOpen"
               class="flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-indigo-300 transition-all">
@@ -2375,6 +2388,18 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 
               <div v-if="task.status==='failed' && task.error_msg" class="hidden"></div>
 
+              <!-- 交付形态产物: 安装包下载(与上方资产统计同一行式) -->
+              <div v-if="genArtifacts(task).length || genBuildGap(task)" class="flex flex-wrap items-center gap-1.5 text-[9.5px] font-mono">
+                <span class="text-slate-500 font-sans">安装包</span>
+                <a v-for="(a, i) in genArtifacts(task)" :key="'art' + i" :href="'/api/tasks/' + task.id + '/artifact/' + i"
+                  :title="a.label + ' · ' + a.file"
+                  class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded whitespace-nowrap bg-sky-500/10 border border-sky-500/30 text-sky-300 hover:bg-sky-500/20 transition-all">
+                  <i data-lucide="download" class="w-2.5 h-2.5"></i>[[ ({android: 'APK', darwin: 'macOS', win32: 'Windows', linux: 'Linux'})[a.platform] || a.label ]]
+                  <span class="text-slate-500">[[ (a.bytes / 1048576).toFixed(0) ]]MB</span></a>
+                <span v-if="genBuildGap(task)" :title="genBuildGap(task)"
+                  class="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300 font-sans">构建失败(悬停看原因)</span>
+              </div>
+
               <!-- 操作栏 -->
               <div class="flex items-center gap-1.5 pt-0.5 border-t border-white/[0.05] mt-auto">
                 <button @click="openPreview(task)" :disabled="task.status!=='completed'"
@@ -2385,13 +2410,6 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                   class="flex items-center gap-1 px-2.5 h-8 rounded-lg text-[10.5px] font-semibold text-emerald-300 border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
                   <i data-lucide="package" class="w-3 h-3"></i>下载
                 </button>
-                <a v-for="(a, i) in genArtifacts(task)" :key="'art' + i" :href="'/api/v4/generate/' + task.id + '/artifact/' + i"
-                  :title="a.file + ' · ' + (a.bytes / 1048576).toFixed(1) + ' MB'"
-                  class="flex items-center gap-1 px-2.5 h-8 rounded-lg text-[10.5px] font-semibold text-sky-300 border border-sky-500/40 bg-sky-500/10 hover:bg-sky-500/20 transition-all">
-                  <i data-lucide="download" class="w-3 h-3"></i>[[ a.label ]]
-                </a>
-                <span v-if="genBuildGap(task)" :title="genBuildGap(task)"
-                  class="flex items-center px-2 h-8 rounded-lg text-[10px] text-amber-300 border border-amber-500/40 bg-amber-500/10">构建缺口</span>
                 <div class="flex-1"></div>
                 <button @click="openInspector(task)" title="审查资产与录制 API" class="icon-btn2">
                   <i data-lucide="search-code" class="w-3.5 h-3.5"></i>
@@ -2802,14 +2820,23 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <div class="space-y-1"><label class="text-[10px] text-slate-500">渲染视口</label>
                 <select v-model="gen.viewport" class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-2 py-1.5 text-xs text-slate-200">
                   <option value="desktop">desktop 1920</option><option value="laptop">laptop 1440</option><option value="mobile">mobile 390</option></select></div>
-              <div class="space-y-1"><label class="text-[10px] text-slate-500">输出目标</label>
-                <select v-model="gen.target" @change="gen.build = gen.target==='flutter' ? 'apk' : gen.target==='electron' ? 'desktop' : ''" class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-2 py-1.5 text-xs text-slate-200">
-                  <option value="html_css">HTML / CSS(可预览评分)</option><option value="flutter">Flutter → Android APK</option><option value="electron">Electron → 桌面应用(可评分)</option></select></div>
-              <div class="space-y-1 col-span-2"><label class="text-[10px] text-slate-500">构建安装包(生成后自动构建, 不占生成预算; 首次 APK 构建约 4 分钟)</label>
-                <select v-model="gen.build" class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-2 py-1.5 text-xs text-slate-200">
-                  <option value="">不构建(只导出代码 / 页面)</option>
-                  <option value="apk" :disabled="gen.target!=='flutter'">Android APK(release, debug 证书签名; 需 Flutter 目标)</option>
-                  <option value="desktop" :disabled="gen.target!=='electron'">macOS .app + Windows .exe(未签名; 需 Electron 目标)</option></select></div>
+              <div class="space-y-1"><label class="text-[10px] text-slate-500">界面代码</label>
+                <select v-model="gen.target" @change="gen.package = (gen.target==='flutter' && gen.package==='desktop') ? '' : gen.package" class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-2 py-1.5 text-xs text-slate-200">
+                  <option value="html_css">HTML / CSS(可预览评分)</option><option value="flutter">Flutter 原生控件(D3 最小版)</option></select></div>
+              <!-- 交付形态: 与「新建克隆」同一组选项 -->
+              <div class="space-y-1.5 col-span-2">
+                <div class="text-[10px] text-slate-500 tracking-[0.16em] font-semibold flex items-center gap-1.5">交付形态 DELIVERY
+                  <span class="tracking-normal font-normal text-slate-600">· 任务完成后自动构建, 在任务卡片下载</span></div>
+                <div class="grid grid-cols-3 gap-2">
+                  <button v-for="d in deliveries" :key="d.id" @click="gen.package=d.id" :title="d.hint"
+                    :disabled="gen.target==='flutter' && d.id==='desktop'"
+                    :class="gen.package===d.id ? 'border-indigo-500/40 bg-indigo-500/[0.10] text-indigo-200' : 'border-white/[0.06] bg-slate-950/50 text-slate-400 hover:border-white/[0.12] hover:text-slate-300'"
+                    class="rounded-xl border px-2.5 py-2 text-left transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                    <div class="flex items-center gap-1.5 text-[10.5px] font-medium"><i :data-lucide="d.icon" class="w-3.5 h-3.5"></i>[[ d.label ]]</div>
+                    <div class="text-[9px] text-slate-500 mt-0.5 leading-snug">[[ gen.target==='flutter' && d.id==='apk' ? 'Flutter 原生界面 APK' : gen.target==='flutter' && d.id==='' ? 'Flutter 工程源码 ZIP' : d.sub ]]</div>
+                  </button>
+                </div>
+              </div>
               <div class="space-y-1"><label class="text-[10px] text-slate-500">目标分(≥即停)</label>
                 <input v-model.number="gen.targetScore" type="number" min="1" max="100" class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-2 py-1.5 text-xs text-slate-200"></div>
               <div class="space-y-1"><label class="text-[10px] text-slate-500">最多轮数 / 时间预算(s)</label>
@@ -2829,7 +2856,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <li>OutputTarget 把 UIR 渲染为离线可运行的 HTML/CSS(无外链), Playwright 整页截图。</li>
               <li>截图输入: 与参考图过三通道评分 v3(结构 NCC / 边缘 IoU / 文本 F2), 与克隆任务同一函数。描述输入: 无参考图, 自评分单列。</li>
               <li>低于目标分则把像素差分线索回喂下一轮; 只保留净提升轮次; 达标或预算耗尽即停。</li>
-              <li>产物进任务矩阵: 预览 / 导出 ZIP / 评分明细与「生成报告」均可查看; 选了构建安装包的任务另有 APK / .app / .exe 下载按钮。</li>
+              <li>产物进任务矩阵: 预览 / 导出 ZIP / 评分明细与「生成报告」均可查看; 选了桌面应用 / Android 应用交付形态的任务另有 .app / .exe / APK 下载按钮。</li>
             </ol>
             <div class="text-xs font-semibold text-slate-300 pt-2">边界</div>
             <p>仅重建界面外观与交互意图; 不做任何站点 / 应用特判; 移动端(L2)只处理自有 / 授权安装包的公开资源。</p>
@@ -3430,7 +3457,7 @@ const __vueApp = createApp({
         ]},
       ],
       schedulerBatches: [],
-      gen: { kind: 'description', description: '', viewport: 'laptop', target: 'html_css', build: '',
+      gen: { kind: 'description', description: '', viewport: 'laptop', target: 'html_css', package: '',
              targetScore: 85, maxRounds: 4, timeBudget: 240, file: null, preview: '', submitting: false, error: '' },
       opsKpis: { tracker_total: 0, links_total: 0, clicks_total: 0,
                  scheduler_running: 0, scheduler_pending: 0, scheduler_paused: false },
@@ -3497,7 +3524,7 @@ const __vueApp = createApp({
       tasks: [],
       telemetry: { browser: { active: 0, max: 4, alive: false }, cas: { assets: 0, hit_rate: 0 }, queue: { pending: 0, running: 0, completed: 0, failed: 0 }, batches: [] },
       urlsText: '',
-      form: { mode: 'single', maxPages: 3, viewport: 'desktop', renderTimeout: 30, cssom: true, mockApi: true, proxy: true, interactionSim: true, simLoginMessage: '', simLoginRedirect: '', disableHydration: false, similarity: true, cookie: '', bearer: '', ua: '', aiRepair: false, aiKey: '', aiModel: '', aiBaseUrl: '' },
+      form: { mode: 'single', maxPages: 3, viewport: 'desktop', renderTimeout: 30, cssom: true, mockApi: true, proxy: true, interactionSim: true, simLoginMessage: '', simLoginRedirect: '', disableHydration: false, similarity: true, cookie: '', bearer: '', ua: '', aiRepair: false, aiKey: '', aiModel: '', aiBaseUrl: '', package: '' },
       heroUrl: '', advOpen: true, poolRestarting: false,
       aiDefaults: { base_url: '', model: '' }, aiKeyConfigured: false,
       aiReport: { open: false, loading: false, busy: false, data: null },
@@ -3530,6 +3557,11 @@ const __vueApp = createApp({
         { id: 'matrix', label: '任务矩阵', icon: 'layout-grid' },
         { id: 'sandbox', label: '沙盒预览', icon: 'app-window' },
         { id: 'inspector', label: 'API 与资产审查', icon: 'search-code' },
+      ],
+      deliveries: [
+        { id: '', label: '网站工程', sub: 'Flask ZIP / Docker 部署', icon: 'globe', hint: '默认: 导出可独立运行的 Flask 网站工程' },
+        { id: 'desktop', label: '桌面应用', sub: 'macOS .app + Windows .exe', icon: 'monitor', hint: '把克隆结果装进 Electron 应用壳(未签名)' },
+        { id: 'apk', label: 'Android 应用', sub: 'APK(debug 证书签名)', icon: 'smartphone', hint: '把克隆结果装进 Android WebView 应用壳; 首次构建约 4 分钟' },
       ],
       viewports: [
         { id: 'desktop', label: 'Desktop', size: '1920×1080' },
@@ -5226,6 +5258,7 @@ const __vueApp = createApp({
         sim_login_message: this.form.simLoginMessage,
         sim_login_redirect: this.form.simLoginRedirect,
         ai_model: this.form.aiModel, ai_base_url: this.form.aiBaseUrl,
+        package: this.form.package,
       };
     },
     async submit() {
@@ -5267,7 +5300,9 @@ const __vueApp = createApp({
         const fd = new FormData();
         fd.append('kind', this.gen.kind); fd.append('description', this.gen.description);
         fd.append('viewport', this.gen.viewport); fd.append('target', this.gen.target);
-        if (this.gen.build) fd.append('build', this.gen.build);
+        // 交付形态: Flutter 原生界面直接构建 APK; HTML/CSS 产物与克隆任务一样装进应用壳
+        if (this.gen.package === 'apk' && this.gen.target === 'flutter') fd.append('build', 'apk');
+        else if (this.gen.package) fd.append('package', this.gen.package);
         fd.append('target_score', this.gen.targetScore); fd.append('max_rounds', this.gen.maxRounds);
         fd.append('time_budget', this.gen.timeBudget);
         if (this.gen.file) fd.append('image', this.gen.file);
@@ -5341,8 +5376,13 @@ const __vueApp = createApp({
     },
     exportAll() { window.open('/api/export_all', '_blank'); },
     downloadZip(task) { window.open('/api/download/' + task.id, '_blank'); },
-    genArtifacts(task) { const b = task && task.stats && task.stats.generate && task.stats.generate.build; return (b && b.artifacts) || []; },
-    genBuildGap(task) { const b = task && task.stats && task.stats.generate && task.stats.generate.build; return (b && b.gap) || ''; },
+    taskBuild(task) {
+      const st = (task && task.stats) || {};
+      if (st.package && st.package.artifacts && st.package.artifacts.length) return st.package;
+      return (st.generate && st.generate.build) || st.package || null;
+    },
+    genArtifacts(task) { const b = this.taskBuild(task); return (b && b.artifacts) || []; },
+    genBuildGap(task) { const b = this.taskBuild(task); return (b && !b.ok && b.gap) || ''; },
     openNewWindow(path) { window.open(path, '_blank'); },
 
     /* ---------- Tab 切换入口 ---------- */

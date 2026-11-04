@@ -313,3 +313,11 @@ class OutputTarget(Protocol):
 ### 9.13 95 分路线图(2026-11-05)
 
 2026-11-05 六维评分 67/100(Web 80 / L1 45 / L2·L3 50 / 速度效率 72 / 代码完整度 68 / 稳定 77)。从当前到各维 ≥95 的量化口径、技术路线、阶段闸门与所需资源见 `ROADMAP_95.md`; 本节不重复。约束不变: 禁 per-site 特判、留出集只测不调、Web 零回归。
+
+**交付形态统一(同日, 按 cz 反馈重做)**: 安装包不再是「界面生成」的专属选项, 而是**任务级的交付形态**, 与现有 UI 同一套卡片样式:
+- 「新建克隆」Hero 卡与「界面生成」面板都有同一组 `交付形态 DELIVERY` 三选一: 网站工程(Flask ZIP, 默认) / 桌面应用(macOS .app + Windows .exe) / Android 应用(APK)。批次配置键 `package`。
+- 实现 `core/app_shell.py`: 把任务已有的网站工程(flask_app: templates/static/mock_data + site.json 路由表)装进应用壳, 壳内置只监听 127.0.0.1 的本地服务器, 语义移植自导出的 Flask 工程(页面路由 / 录制接口四级匹配 / 影子文件 / 反代兜底), 所以绝对路径资源与多页路由在应用里与网站一致。桌面 = Electron(Node http); Android = Flutter + webview_flutter(dart:io HttpServer 读单文件资源包 site.pack + 索引), 清单只对 127.0.0.1 放行明文 http。
+- 调度器在任务完成后执行后置步骤 `Scheduler._package_if_requested`(不改 cloner_engine), 失败只记缺口不改评分; 产物 `exports/<id>_*.{apk,zip}`, 报告 `build_report.json`, 任务卡片在资产统计下方多一行「安装包」下载(统一接口 `GET /api/tasks/<id>/artifact/<i>`)。
+- 「界面生成」面板: HTML/CSS + 桌面/Android 走同一应用壳; Flutter 原生控件 + Android 走 §9.12 的原生构建。Electron 原生目标保留在引擎/API 中, 不再单独出现在 UI(与应用壳重复)。
+- 实测(8894 隔离实例, 浏览器操作新建克隆): example.com → 桌面应用: macOS 114MB zip / Windows x64 151MB zip(内含 PE32+ exe); example.com → Android 应用: 43MB APK, 模拟器启动显示克隆页; 另用一个已有门户克隆工作空间(27MB 资源)离线验证: APK 与 macOS 应用均正常加载 /static 绝对路径资源。
+- 缺口: 应用壳不含平台埋点/表单上报(只打包已有产物); 反代兜底需联网; Android 壳首次构建约 1 分钟(依赖已缓存时); 未签名同 §9.12。
