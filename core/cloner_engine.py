@@ -4839,9 +4839,9 @@ class ClonerEngine:
                 with suppress(Exception):
                     ctype = response.headers.get("content-type", "")
                 if _is_runtime_asset(response.url, ctype):
+                    # 只登记, 不进活体响应体复用: fetch 取的媒体可能是永不结束的流(直播/长连接),
+                    # 收尾时 resp.body() 会永久等待, 整个任务卡在采集阶段; 交给回补按网络限时下载
                     self._live_seen.setdefault(response.url, "runtime")
-                    if response.status == 200 and len(self._live_resp) < config.LIVE_BODY_MAX:
-                        self._live_resp.setdefault(response.url, response)
                 return
             if rtype not in ASSET_RESOURCE_TYPES:
                 return
