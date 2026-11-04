@@ -57,6 +57,7 @@ BASELINE_EAGER_MAX = 40           # 基准截图前转 eager 的懒加载图上�
 BASELINE_IMG_STALL_MS = 4000      # 等待期间连续这么久无一张到齐即放行
 HOST_FAIL_TRIP = 3                # 单主机网络层失败(SSL/超时/连接)达此次数即熔断
 MAX_ASSETS_PER_TASK = 400          # 单任务最大静态资源条目数
+CLONE_RESPONSIVE_MS = 8000         # 克隆页主线程看门狗: 加载后这么久执行不了一行脚本即判卡死
 RENDER_ASSET_RESERVE = 300         # 名额外预留给"浏览器实际加载过/克隆渲染实际请求"的资源:
                                    # 静态提取先把名额用满(苹果 @font-face 每字重 woff/woff2/ttf 三份,
                                    # 上百个从不加载的字体), 首屏视频这类真用到的反被挤掉

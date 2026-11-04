@@ -2062,6 +2062,10 @@ def detect_blocked_page(original_text: str, captured_text: str = "") -> str:
     return ""
 
 
+class CloneUnresponsive(RuntimeError):
+    """克隆页主线程无响应(脚本死循环/Promise 自旋): 后续任何 evaluate 都会永远挂起。"""
+
+
 class TargetUnreachable(RuntimeError):
     """目标站网络层不可达(DNS/连接/超时): 不是引擎缺陷, 不重试、单独计数。"""
 
@@ -5555,6 +5559,15 @@ class ClonerEngine:
                   wait_until="domcontentloaded", timeout=30000)
         with suppress(Exception):
             page.wait_for_load_state("load", timeout=self._strategy_pack.wait_load_timeout)
+        # 主线程看门狗: page.evaluate 没有超时, 克隆页脚本一旦死循环(截断的库让播放器
+        # Promise 自旋), 后面的滚动/截图 evaluate 会让整个任务永久挂起。wait_for_function
+        # 的超时由驱动侧计时, 主线程卡死也能返回
+        try:
+            page.wait_for_function("true", timeout=config.CLONE_RESPONSIVE_MS)
+        except Exception as exc:
+            if "Timeout" in type(exc).__name__ or "Timeout" in str(exc):
+                raise CloneUnresponsive(
+                    f"克隆页主线程 {config.CLONE_RESPONSIVE_MS}ms 无响应(页面脚本死循环)") from exc
         if phases:
             # 网络静置只在首评等: 校准重渲染时资源已在浏览器缓存/本地, 轮询类页面
             # 每次都会白等满上限(滚动 + 缓释仍保留, 懒加载照样揭示)
@@ -6104,6 +6117,12 @@ class ClonerEngine:
                 (self.ws / "cloned_text.txt").write_text(clone_text or "",
                                                          encoding="utf-8")
                 tp = self._phase("评分-克隆截图", tp)
+            except CloneUnresponsive as exc:
+                # 卡死的页面上截图也会挂起: 交互轨本轮作废, 由保真轨(MHTML 禁脚本)出分
+                self.log("WARN", f"克隆页渲染失败: {exc}")
+                with suppress(OSError):
+                    (self.ws / "cloned_preview.png").unlink()
+                clone_text = ""
             except Exception as exc:
                 self.log("WARN", f"克隆页渲染失败: {exc}")
                 with suppress(Exception):
