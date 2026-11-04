@@ -34,6 +34,9 @@
     {"url": "https://gitee.com/",              "expect": "",                       "tags": ["cn", "holdout"],           "holdout": true},
     {"url": "https://tailwindcss.com/",        "expect": "M-Next SSR",             "tags": ["global", "holdout", "next"], "holdout": true},
     {"url": "https://github.com/",             "expect": "",                       "tags": ["global", "holdout"],       "holdout": true},
-    {"url": "https://developer.mozilla.org/zh-CN/", "expect": "",                  "tags": ["global", "holdout"],       "holdout": true}
+    {"url": "https://developer.mozilla.org/zh-CN/", "expect": "",                  "tags": ["global", "holdout"],       "holdout": true},
+    {"url": "https://www.apple.com.cn/",       "expect": "",                       "tags": ["cn", "holdout", "dynamic"], "holdout": true},
+    {"url": "https://www.apple.com.cn/iphone/", "expect": "",                      "tags": ["cn", "holdout", "dynamic"], "holdout": true},
+    {"url": "https://www.apple.com.cn/airpods-pro/", "expect": "",                 "tags": ["cn", "holdout", "dynamic", "scroll-narrative"], "holdout": true}
   ]
 }
