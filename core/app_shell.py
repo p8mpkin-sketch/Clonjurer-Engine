@@ -7,8 +7,8 @@
   页面路由表 → templates/; 录制接口 mock_data.json(精确方法+路径 → 同路径 → undefined 段折叠 → 后缀段匹配);
   影子文件直通(static/ 与页面相对资源); 开启反代兜底且有上游时, 未命中请求转发上游; 否则 404。
 因此绝对路径资源(/static/...)、多页路由、录制接口在应用里与导出网站行为一致。
-  - 桌面: Electron(main.js 里 Node http 服务 + BrowserWindow 加载本地地址);
-  - Android: Flutter(dart:io HttpServer 从单文件资源包读内容 + webview_flutter 显示)。
+  - 桌面: Go + 系统 WebView(macOS WKWebView / Windows WebView2), 站点 go:embed 进单个可执行文件; Electron 壳保留为备选;
+  - Android: 原生 Activity + 系统 WebView, 在 shouldInterceptRequest 里按同一语义作答(虚拟源 https://app.local, 不开端口)。
 不在应用壳中加入埋点/上报; 只打包任务已有的产物, 不抓取任何新内容。
 """
 import json
@@ -20,7 +20,6 @@ import config
 
 ELECTRON_VERSION = "45.2.2"
 PACKAGER_VERSION = "20.3.0"
-WEBVIEW_FLUTTER_VERSION = "^4.14.1"
 
 # flask_app 中属于 Flask 运行时而非站点内容的文件/目录, 不进应用壳
 _INFRA = {"app.py", "Dockerfile", "docker-compose.yml", "requirements.txt", "run.sh", "run.bat",
@@ -199,347 +198,319 @@ def electron_shell(ws: Path, out: Path, title: str, viewport: dict = None) -> Pa
 
 
 # ---------------------------------------------------------------------------
-# Android: Flutter + WebView 壳
+# 桌面(默认): Go + 系统 WebView 壳(macOS WKWebView / Windows WebView2), 不内置浏览器内核
 # ---------------------------------------------------------------------------
-_DART_SERVER = r"""// Clonjurer 应用壳(Android)本地服务器: 语义与导出的 Flask 工程一致, 只监听 127.0.0.1。
-import 'dart:convert';
-import 'dart:io';
-import 'dart:typed_data';
-
-class SiteServer {
-  SiteServer(this.pack, Map<String, dynamic> index)
-      : files = Map<String, dynamic>.from(index['files'] as Map),
-        meta = Map<String, dynamic>.from(index['meta'] as Map) {
-    final m = read('mock_data.json');
-    if (m != null) {
-      try {
-        final d = jsonDecode(utf8.decode(m));
-        if (d is List) mocks = d;
-      } catch (_) {}
-    }
-  }
-
-  final Uint8List pack;
-  final Map<String, dynamic> files;
-  final Map<String, dynamic> meta;
-  List<dynamic> mocks = const [];
-
-  Uint8List? read(String rel) {
-    final e = files[rel];
-    if (e is! List) return null;
-    final off = e[0] as int, len = e[1] as int;
-    return Uint8List.sublistView(pack, off, off + len);
-  }
-
-  static String norm(Object? p) => '/' + (p ?? '').toString().replaceAll(RegExp(r'^/+|/+$'), '');
-
-  Map? matchMock(String p, String method) {
-    method = method.toUpperCase();
-    final target = norm(p);
-    Map? exact(String t) {
-      Map? loose;
-      for (final m in mocks) {
-        if (m is! Map || norm(m['path']) != t) continue;
-        if ((m['method'] ?? 'GET').toString().toUpperCase() == method) return m;
-        loose ??= m;
-      }
-      return loose;
-    }
-
-    var hit = exact(target);
-    if (hit == null && target.contains('undefined/')) {
-      hit = exact(norm(target.replaceAll(RegExp(r'(^|/)undefined(/|$)'), '/')));
-    }
-    if (hit == null) {
-      final req = target.split('/').where((s) => s.isNotEmpty).toList();
-      Map? best;
-      var bestLen = 0;
-      for (final m in mocks) {
-        if (m is! Map) continue;
-        final segs = norm(m['path']).split('/').where((s) => s.isNotEmpty).toList();
-        if (segs.length >= bestLen && req.length > segs.length &&
-            req.sublist(req.length - segs.length).join('/') == segs.join('/')) {
-          if ((m['method'] ?? 'GET').toString().toUpperCase() == method) return m;
-          best = m;
-          bestLen = segs.length;
-        }
-      }
-      hit = best;
-    }
-    return hit;
-  }
-
-  /// 解析一个请求: 返回 (状态码, Content-Type, 内容); null 表示需要转发上游。
-  (int, String, List<int>)? resolve(String rawPath, String method) {
-    final sub = rawPath.replaceAll(RegExp(r'^/+|/+$'), '');
-    final pages = Map<String, dynamic>.from(meta['pages'] as Map);
-    if (sub.isEmpty) return _file('templates/${pages['/'] ?? 'index.html'}');
-    final page = pages['/$sub'] ?? pages['/$sub/'] ?? pages[sub];
-    if (page != null && read('templates/$page') != null) return _file('templates/$page');
-    final mock = matchMock(sub, method);
-    if (mock != null) {
-      final raw = (mock['response_body'] ?? '').toString();
-      var ctype = 'text/plain; charset=utf-8';
-      try {
-        if (raw.isNotEmpty) {
-          jsonDecode(raw);
-          ctype = 'application/json; charset=utf-8';
-        }
-      } catch (_) {}
-      return (int.tryParse('${mock['status'] ?? 200}') ?? 200, ctype, utf8.encode(raw));
-    }
-    if (!sub.split('/').contains('..') && read(sub) != null) return _file(sub);
-    if (!'/$sub'.contains('/undefined/') && meta['proxy'] == true && '${meta['upstream']}'.isNotEmpty) return null;
-    return (404, 'text/html; charset=utf-8', utf8.encode('<h1>404 - Not Cloned</h1>'));
-  }
-
-  (int, String, List<int>) _file(String rel) {
-    final b = read(rel);
-    if (b == null) return (404, 'text/plain', const []);
-    return (200, mimeOf(rel), b);
-  }
-
-  static const _mime = {
-    'html': 'text/html; charset=utf-8', 'htm': 'text/html; charset=utf-8', 'css': 'text/css; charset=utf-8',
-    'js': 'text/javascript; charset=utf-8', 'mjs': 'text/javascript; charset=utf-8',
-    'json': 'application/json; charset=utf-8', 'svg': 'image/svg+xml', 'png': 'image/png', 'jpg': 'image/jpeg',
-    'jpeg': 'image/jpeg', 'gif': 'image/gif', 'webp': 'image/webp', 'avif': 'image/avif', 'ico': 'image/x-icon',
-    'woff2': 'font/woff2', 'woff': 'font/woff', 'ttf': 'font/ttf', 'otf': 'font/otf',
-    'eot': 'application/vnd.ms-fontobject', 'mp4': 'video/mp4', 'webm': 'video/webm', 'mp3': 'audio/mpeg',
-    'wasm': 'application/wasm', 'txt': 'text/plain; charset=utf-8',
-  };
-
-  static String mimeOf(String rel) {
-    final name = rel.split('/').last.split('@').first;
-    final dot = name.lastIndexOf('.');
-    return _mime[dot < 0 ? '' : name.substring(dot + 1).toLowerCase()] ?? 'application/octet-stream';
-  }
-
-  Future<int> serve({int port = 0}) async {
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
-    server.listen((req) async {
-      try {
-        String path;
-        try {
-          path = Uri.decodeComponent(req.uri.path);
-        } catch (_) {
-          path = req.uri.path;
-        }
-        final r = resolve(path, req.method);
-        if (r == null) {
-          await _proxy(req, path);
-          return;
-        }
-        req.response.statusCode = r.$1;
-        req.response.headers.set('Content-Type', r.$2);
-        req.response.add(r.$3);
-      } catch (_) {
-        req.response.statusCode = 500;
-      }
-      await req.response.close();
-    });
-    return server.port;
-  }
-
-  Future<void> _proxy(HttpRequest req, String path) async {
-    final upstream = '${meta['upstream']}';
-    final client = HttpClient();
-    try {
-      final body = await req.fold<List<int>>(<int>[], (a, b) => a..addAll(b));
-      final out = await client.openUrl(req.method, Uri.parse('$upstream/${path.replaceAll(RegExp(r'^/+'), '')}${req.uri.hasQuery ? '?${req.uri.query}' : ''}'));
-      req.headers.forEach((k, v) {
-        if (!const ['host', 'connection', 'accept-encoding', 'content-length', 'transfer-encoding', 'origin', 'referer'].contains(k)) {
-          out.headers.set(k, v);
-        }
-      });
-      out.headers.set('referer', '$upstream/');
-      out.headers.set('origin', upstream);
-      if (body.isNotEmpty) out.add(body);
-      final resp = await out.close();
-      req.response.statusCode = resp.statusCode;
-      final ct = resp.headers.value('content-type');
-      if (ct != null) req.response.headers.set('Content-Type', ct);
-      await req.response.addStream(resp);
-    } catch (_) {
-      req.response.statusCode = 502;
-    } finally {
-      client.close();
-      await req.response.close();
-    }
-  }
-}
-"""
-
-_DART_MAIN = r"""// Clonjurer 应用壳(Android): 本地服务器 + WebView 显示任务产出的网站。
-import 'dart:convert';
-
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:webview_flutter/webview_flutter.dart';
-
-import 'site_server.dart';
-
-const kTitle = %(title)s;
-const kPort = %(port)d;
-
-void main() {
-  WidgetsFlutterBinding.ensureInitialized();
-  runApp(const ShellApp());
-}
-
-class ShellApp extends StatelessWidget {
-  const ShellApp({super.key});
-  @override
-  Widget build(BuildContext context) =>
-      const MaterialApp(title: kTitle, debugShowCheckedModeBanner: false, home: ShellPage());
-}
-
-class ShellPage extends StatefulWidget {
-  const ShellPage({super.key});
-  @override
-  State<ShellPage> createState() => _ShellPageState();
-}
-
-class _ShellPageState extends State<ShellPage> {
-  WebViewController? _web;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _start();
-  }
-
-  Future<void> _start() async {
-    try {
-      final data = await rootBundle.load('assets/site.pack');
-      final index = jsonDecode(await rootBundle.loadString('assets/site_index.json')) as Map<String, dynamic>;
-      final server = SiteServer(data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes), index);
-      int port;
-      try {
-        port = await server.serve(port: kPort); // 固定端口: 页面的 localStorage/cookie 跨次启动保留
-      } catch (_) {
-        port = await server.serve();
-      }
-      final origin = 'http://127.0.0.1:$port';
-      final web = WebViewController()
-        ..setJavaScriptMode(JavaScriptMode.unrestricted)
-        ..setNavigationDelegate(NavigationDelegate(
-            onNavigationRequest: (r) =>
-                r.url.startsWith(origin) ? NavigationDecision.navigate : NavigationDecision.prevent))
-        ..loadRequest(Uri.parse('$origin/'));
-      setState(() => _web = web);
-    } catch (e) {
-      setState(() => _error = '$e');
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final web = _web;
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, _) async {
-        if (didPop) return;
-        if (web != null && await web.canGoBack()) {
-          await web.goBack();
-        } else {
-          await SystemNavigator.pop();
-        }
-      },
-      child: Scaffold(
-        body: SafeArea(
-          child: web != null
-              ? WebViewWidget(controller: web)
-              : Center(child: _error != null ? Text(_error!) : const CircularProgressIndicator()),
-        ),
-      ),
-    );
-  }
-}
-"""
-
-_DART_TEST = r"""// 冒烟测试: 本地服务器的路由 / 录制接口 / 静态资源解析(纯 Dart, 不依赖平台 WebView)。
-import 'dart:convert';
-import 'dart:io';
-
-import 'package:flutter_test/flutter_test.dart';
-import 'package:generated_ui/site_server.dart';
-
-void main() {
-  test('site server resolves index, static and recorded api', () {
-    final pack = File('assets/site.pack').readAsBytesSync();
-    final index = jsonDecode(File('assets/site_index.json').readAsStringSync()) as Map<String, dynamic>;
-    final s = SiteServer(pack, index);
-    final home = s.resolve('/', 'GET')!;
-    expect(home.$1, 200);
-    expect(home.$2, startsWith('text/html'));
-    expect(utf8.decode(home.$3, allowMalformed: true), contains('<'));
-    expect(s.resolve('/__definitely_missing__/x.png', 'GET')?.$1 ?? 404, anyOf(404, 502));
-    for (final m in s.mocks) {
-      final r = s.resolve('${m['path']}', '${m['method'] ?? 'GET'}');
-      expect(r, isNotNull);
-      expect(r!.$1, int.tryParse('${m['status'] ?? 200}') ?? 200);
-    }
-  });
-}
-"""
+_GO_TEMPLATES = Path(__file__).resolve().parent / "shell_templates" / "desktop_go"
 
 
-def _pack_dir(site: Path, pack: Path, index: Path, meta: dict):
-    files, off = {}, 0
-    with open(pack, "wb") as fh:
-        for p in sorted(site.rglob("*")):
-            if not p.is_file() or p.name == "site_meta.json":
-                continue
-            data = p.read_bytes()
-            fh.write(data)
-            files[p.relative_to(site).as_posix()] = [off, len(data)]
-            off += len(data)
-    index.write_text(json.dumps({"meta": meta, "files": files}, ensure_ascii=False), encoding="utf-8")
-    return off, len(files)
+def _ascii_name(title: str, fallback: str) -> str:
+    n = re.sub(r"[^A-Za-z0-9]+", "-", title).strip("-")
+    return (n[:40] or fallback)
 
 
-def flutter_shell(ws: Path, out: Path, title: str) -> Path:
-    app_dir = out / "flutter_shell"
+def desktop_shell(ws: Path, out: Path, title: str, viewport: dict = None, bundle_id: str = "com.clonjurer.app") -> Path:
+    """任务网站工程 → Go 桌面工程(server.go 与导出 Flask 工程同语义; 站点经 go:embed 打进单个可执行文件)。"""
+    app_dir = out / "desktop_shell"
     if app_dir.exists():
         shutil.rmtree(app_dir)
-    (app_dir / "lib").mkdir(parents=True)
-    (app_dir / "assets").mkdir()
-    (app_dir / "test").mkdir()
-    tmp = out / "_site_tmp"
-    meta = bundle_site(ws, tmp)
-    _pack_dir(tmp, app_dir / "assets" / "site.pack", app_dir / "assets" / "site_index.json", meta)
-    shutil.rmtree(tmp, ignore_errors=True)
+    shutil.copytree(_GO_TEMPLATES, app_dir)
+    bundle_site(ws, app_dir / "site")
+    vp = viewport or {}
     title = _safe_title(title)
     port = 47000 + (sum(title.encode("utf-8")) % 2000)
-    dart_title = "'" + title.replace("\\", "\\\\").replace("'", "\\'").replace("$", "\\$") + "'"
-    (app_dir / "lib" / "main.dart").write_text(_DART_MAIN % {"title": dart_title, "port": port}, encoding="utf-8")
-    (app_dir / "lib" / "site_server.dart").write_text(_DART_SERVER, encoding="utf-8")
-    (app_dir / "test" / "site_server_test.dart").write_text(_DART_TEST, encoding="utf-8")
-    (app_dir / "pubspec.yaml").write_text(f"""name: generated_ui
-description: Packaged by Clonjurer from a task's website output.
-publish_to: 'none'
-version: 0.1.0
-environment:
-  sdk: '>=3.3.0 <4.0.0'
-dependencies:
-  flutter:
-    sdk: flutter
-  webview_flutter: {WEBVIEW_FLUTTER_VERSION}
-dev_dependencies:
-  flutter_test:
-    sdk: flutter
-flutter:
-  uses-material-design: true
-  assets:
-    - assets/site.pack
-    - assets/site_index.json
-""", encoding="utf-8")
-    (app_dir / "analysis_options.yaml").write_text("analyzer:\n  exclude: [build/**]\n", encoding="utf-8")
-    # 交给 toolchain.build_apk: 需要联网权限访问本机服务器, 且只对 127.0.0.1 放行明文 http
-    (app_dir / "clonjurer_android.json").write_text(json.dumps(
-        {"label": title, "internet": True, "cleartext_hosts": ["127.0.0.1"]}, ensure_ascii=False), encoding="utf-8")
+    w = max(400, min(int(vp.get("width") or 1280), 1440))
+    h = max(600, min(int(vp.get("height") or 860), 900))
+    (app_dir / "config.go").write_text(
+        "package main\n\n// 由 Clonjurer 生成\nconst (\n"
+        f"\tAppTitle  = {json.dumps(title, ensure_ascii=False)}\n\tAppWidth  = {w}\n\tAppHeight = {h}\n\tAppPort   = {port}\n)\n",
+        encoding="utf-8")
+    # go.mod(依赖版本钉死)随模板目录复制
+    (app_dir / "shell.json").write_text(json.dumps({"title": title, "name": _ascii_name(title, "ClonjurerApp"),
+                                                    "bundle_id": bundle_id}, ensure_ascii=False), encoding="utf-8")
+    return app_dir
+
+
+# ---------------------------------------------------------------------------
+# Android: 原生 WebView 壳(无 Flutter / 无 Gradle; 体积 ≈ 几十 KB 代码 + 站点资源)
+# ---------------------------------------------------------------------------
+# 不起本地端口: 用虚拟 https 源 https://app.local, 在 shouldInterceptRequest 里按导出 Flask 工程的语义作答
+# (页面路由 / 录制接口 / 影子文件 / GET 反代兜底), 因此无需明文 http 放行, localStorage/Cookie 按该源持久。
+_ANDROID_MAIN = r"""// Clonjurer 应用壳(Android 原生): 系统 WebView + 请求拦截, 语义与导出的 Flask 工程一致。
+package %(pkg)s;
+
+import android.app.Activity;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Bundle;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+public class MainActivity extends Activity {
+    static final String HOST = "app.local";
+    static final String ORIGIN = "https://" + HOST;
+    private WebView web;
+    private JSONObject pages = new JSONObject();
+    private JSONArray mocks = new JSONArray();
+    private String upstream = "";
+    private boolean proxy = false;
+
+    @Override
+    protected void onCreate(Bundle state) {
+        super.onCreate(state);
+        try {
+            JSONObject meta = new JSONObject(readText("site/site_meta.json"));
+            JSONObject p = meta.optJSONObject("pages");
+            if (p != null) pages = p;
+            upstream = meta.optString("upstream", "");
+            proxy = meta.optBoolean("proxy", false);
+        } catch (Exception ignored) { }
+        try { mocks = new JSONArray(readText("site/mock_data.json")); } catch (Exception ignored) { }
+        web = new WebView(this);
+        WebSettings s = web.getSettings();
+        s.setJavaScriptEnabled(true);
+        s.setDomStorageEnabled(true);
+        s.setDatabaseEnabled(true);
+        s.setAllowFileAccess(false);
+        s.setAllowContentAccess(false);
+        s.setMediaPlaybackRequiresUserGesture(false);
+        web.setWebViewClient(new Client());
+        setContentView(web);
+        if (state == null) web.loadUrl(ORIGIN + "/"); else web.restoreState(state);
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle out) {
+        super.onSaveInstanceState(out);
+        web.saveState(out);
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public void onBackPressed() {
+        if (web.canGoBack()) web.goBack(); else super.onBackPressed();
+    }
+
+    // ------------------------------------------------------------------
+    private InputStream open(String rel) {
+        try { return getAssets().open(rel); } catch (IOException e) { return null; }
+    }
+
+    private String readText(String rel) throws IOException {
+        InputStream in = open(rel);
+        if (in == null) throw new IOException(rel);
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        byte[] buf = new byte[8192];
+        int n;
+        while ((n = in.read(buf)) > 0) bo.write(buf, 0, n);
+        in.close();
+        return new String(bo.toByteArray(), StandardCharsets.UTF_8);
+    }
+
+    static String strip(String p) {
+        return (p == null ? "" : p).replaceAll("^/+|/+$", "");
+    }
+
+    static String norm(Object p) {
+        return "/" + strip(p == null ? "" : String.valueOf(p));
+    }
+
+    static final Map<String, String> MIME = new HashMap<>();
+    static {
+        String[] kv = {"html", "text/html", "htm", "text/html", "css", "text/css", "js", "text/javascript",
+            "mjs", "text/javascript", "json", "application/json", "svg", "image/svg+xml", "png", "image/png",
+            "jpg", "image/jpeg", "jpeg", "image/jpeg", "gif", "image/gif", "webp", "image/webp", "avif", "image/avif",
+            "ico", "image/x-icon", "woff2", "font/woff2", "woff", "font/woff", "ttf", "font/ttf", "otf", "font/otf",
+            "eot", "application/vnd.ms-fontobject", "mp4", "video/mp4", "webm", "video/webm", "mp3", "audio/mpeg",
+            "wasm", "application/wasm", "txt", "text/plain"};
+        for (int i = 0; i < kv.length; i += 2) MIME.put(kv[i], kv[i + 1]);
+    }
+
+    static String mimeOf(String rel) {
+        String name = rel.substring(rel.lastIndexOf('/') + 1).split("@")[0];
+        int dot = name.lastIndexOf('.');
+        String m = dot < 0 ? null : MIME.get(name.substring(dot + 1).toLowerCase());
+        return m == null ? "application/octet-stream" : m;
+    }
+
+    static boolean textual(String mime) {
+        return mime.startsWith("text/") || mime.equals("application/json") || mime.equals("image/svg+xml");
+    }
+
+    private static WebResourceResponse resp(int code, String mime, InputStream body) {
+        Map<String, String> h = new HashMap<>();
+        h.put("Access-Control-Allow-Origin", ORIGIN);
+        h.put("Cache-Control", "no-cache");
+        String reason = code == 200 ? "OK" : code == 404 ? "Not Found" : code >= 500 ? "Error" : "Status";
+        return new WebResourceResponse(mime, textual(mime) ? "utf-8" : null, code, reason, h, body);
+    }
+
+    private static WebResourceResponse text(int code, String mime, String s) {
+        return resp(code, mime, new ByteArrayInputStream(s.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private WebResourceResponse file(String rel) {
+        InputStream in = open("site/" + rel);
+        if (in == null) return text(404, "text/html", "<h1>404 - Not Cloned</h1>");
+        return resp(200, mimeOf(rel), in);
+    }
+
+    private JSONObject matchMock(String p, String method) {
+        method = method == null ? "GET" : method.toUpperCase();
+        String target = norm(p);
+        JSONObject hit = exact(target, method);
+        if (hit == null && target.contains("undefined/"))
+            hit = exact(norm(target.replaceAll("(^|/)undefined(/|$)", "/")), method);
+        if (hit == null) {
+            List<String> req = segs(target);
+            JSONObject best = null;
+            int bestLen = 0;
+            for (int i = 0; i < mocks.length(); i++) {
+                JSONObject m = mocks.optJSONObject(i);
+                if (m == null) continue;
+                List<String> sg = segs(norm(m.optString("path")));
+                if (sg.size() >= bestLen && req.size() > sg.size()
+                        && req.subList(req.size() - sg.size(), req.size()).equals(sg)) {
+                    if (m.optString("method", "GET").toUpperCase().equals(method)) return m;
+                    best = m;
+                    bestLen = sg.size();
+                }
+            }
+            hit = best;
+        }
+        return hit;
+    }
+
+    private JSONObject exact(String t, String method) {
+        JSONObject loose = null;
+        for (int i = 0; i < mocks.length(); i++) {
+            JSONObject m = mocks.optJSONObject(i);
+            if (m == null || !norm(m.optString("path")).equals(t)) continue;
+            if (m.optString("method", "GET").toUpperCase().equals(method)) return m;
+            if (loose == null) loose = m;
+        }
+        return loose;
+    }
+
+    private static List<String> segs(String p) {
+        List<String> out = new ArrayList<>();
+        for (String x : p.split("/")) if (!x.isEmpty()) out.add(x);
+        return out;
+    }
+
+    WebResourceResponse resolve(Uri u, String method) throws IOException {
+        String sub = strip(u.getPath());
+        if (sub.isEmpty()) return file("templates/" + pages.optString("/", "index.html"));
+        String page = pages.optString("/" + sub, pages.optString("/" + sub + "/", pages.optString(sub, "")));
+        if (!page.isEmpty() && !page.contains("..")) {
+            InputStream probe = open("site/templates/" + page);
+            if (probe != null) { probe.close(); return file("templates/" + page); }
+        }
+        JSONObject mock = matchMock(sub, method);
+        if (mock != null) {
+            String raw = mock.optString("response_body", "");
+            String mime = "text/plain";
+            try { if (!raw.isEmpty()) { new org.json.JSONTokener(raw).nextValue(); mime = "application/json"; } }
+            catch (Exception ignored) { }
+            return text(mock.optInt("status", 200), mime, raw);
+        }
+        if (!Arrays.asList(sub.split("/")).contains("..")) {
+            InputStream in = open("site/" + sub);
+            if (in != null) return resp(200, mimeOf(sub), in);
+        }
+        String m = method == null ? "GET" : method.toUpperCase();
+        if (proxy && !upstream.isEmpty() && !("/" + sub).contains("/undefined/") && (m.equals("GET") || m.equals("HEAD")))
+            return fetchUpstream(sub, u.getEncodedQuery(), m);
+        return text(404, "text/html", "<h1>404 - Not Cloned</h1>");
+    }
+
+    private WebResourceResponse fetchUpstream(String sub, String query, String method) {
+        try {
+            URL url = new URL(upstream + "/" + sub + (query != null ? "?" + query : ""));
+            HttpURLConnection c = (HttpURLConnection) url.openConnection();
+            c.setRequestMethod(method);
+            c.setConnectTimeout(15000);
+            c.setReadTimeout(20000);
+            c.setRequestProperty("Referer", upstream + "/");
+            int code = c.getResponseCode();
+            if (code >= 300 && code < 400) code = 502;
+            String ct = c.getContentType();
+            String mime = ct == null ? mimeOf(sub) : ct.split(";")[0].trim();
+            InputStream in = code < 400 ? c.getInputStream() : c.getErrorStream();
+            return resp(code, mime, in != null ? in : new ByteArrayInputStream(new byte[0]));
+        } catch (Exception e) {
+            return text(502, "text/plain", "Upstream proxy failed");
+        }
+    }
+
+    class Client extends WebViewClient {
+        @Override
+        public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
+            Uri u = r.getUrl();
+            if (HOST.equals(u.getHost())) return false;
+            try { startActivity(new Intent(Intent.ACTION_VIEW, u)); } catch (Exception ignored) { }
+            return true;
+        }
+
+        @Override
+        public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest r) {
+            Uri u = r.getUrl();
+            if (!HOST.equals(u.getHost())) return null;
+            try { return resolve(u, r.getMethod()); }
+            catch (Exception e) { return text(500, "text/plain", "shell error"); }
+        }
+    }
+}
+"""
+
+_ANDROID_MANIFEST = """<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="%(pkg)s" android:versionCode="1" android:versionName="0.1.0">
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <application android:label="%(label)s" android:allowBackup="false" android:hardwareAccelerated="true"
+        android:usesCleartextTraffic="false" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <activity android:name=".MainActivity" android:exported="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+"""
+
+
+def android_shell(ws: Path, out: Path, title: str, package: str) -> Path:
+    """任务网站工程 → 原生 Android 工程目录(AndroidManifest.xml + src/ + assets/site/), 由 toolchain.build_android_shell 构建。"""
+    if not re.match(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$", package):
+        raise ValueError(f"非法包名 {package!r}")
+    app_dir = out / "android_shell"
+    if app_dir.exists():
+        shutil.rmtree(app_dir)
+    src = app_dir / "src" / Path(*package.split("."))
+    src.mkdir(parents=True)
+    bundle_site(ws, app_dir / "assets" / "site")
+    title = _safe_title(title)
+    label = title.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
+    (app_dir / "AndroidManifest.xml").write_text(_ANDROID_MANIFEST % {"pkg": package, "label": label}, encoding="utf-8")
+    (src / "MainActivity.java").write_text(_ANDROID_MAIN % {"pkg": package}, encoding="utf-8")
     return app_dir
 
 
@@ -580,12 +551,12 @@ def package_task(task_id, ws: Path, kind: str, title: str = "", viewport: dict =
     ws = Path(ws)
     try:
         if kind == "desktop":
-            app_dir = electron_shell(ws, ws / "app_shell", title, viewport)
+            app_dir = desktop_shell(ws, ws / "app_shell", title, viewport, bundle_id=f"com.clonjurer.task{task_id}")
             host = toolchain.host_platform()
-            res = toolchain.build_desktop(app_dir, [host] + (["win32"] if host != "win32" else []), log=log)
+            res = toolchain.build_go_desktop(app_dir, [host] + (["win32"] if host != "win32" else []), log=log)
         elif kind == "apk":
-            app_dir = flutter_shell(ws, ws / "app_shell", title)
-            res = toolchain.build_apk(app_dir, release=True, log=log, org=f"com.clonjurer.task{task_id}")
+            app_dir = android_shell(ws, ws / "app_shell", title, f"com.clonjurer.task{task_id}")
+            res = toolchain.build_android_shell(app_dir, log=log)
         else:
             return {"ok": False, "artifacts": [], "gap": f"未知交付形态 {kind!r}"}
         result = export_artifacts(kind, res, task_id, log=log)
