@@ -86,12 +86,12 @@ def extract_json(text: str) -> dict:
 
 
 def chat_json(ai_cfg: dict, system: str, user_text: str, images=(),
-              temperature: float = 0.2, timeout: int = None, max_tokens: int = None) -> dict:
+              temperature: float = 0.2, timeout: int = None, max_tokens: int = None, parts=()) -> dict:
     """同步调用, 返回解析后的 JSON 对象; 失败抛 RuntimeError。
 
     预算阶梯 (b, 2b, 4b): 内容为空且思考 token 吃光预算 → 升档; 内容非空但 finish_reason=length
     且 JSON 解析失败(UIR 节点树上百节点时 JSON 很长, 被截断) → 同样升档重试, 而不是直接回落。"""
-    content = [{"type": "text", "text": user_text}]
+    content = [{"type": "text", "text": user_text}] + list(parts or ())   # parts: 已编码好的图片 part(切段并行读图用)
     notes = []
     for p in images or ():
         p = Path(p)

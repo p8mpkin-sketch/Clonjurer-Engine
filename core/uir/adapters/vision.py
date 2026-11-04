@@ -382,11 +382,46 @@ _READ_SYSTEM = ("你是 OCR。逐字抄录截图中所有可见文字(按阅读�
                 "只输出 JSON: {\"lines\":[\"...\"]}。")
 
 
-def read_screenshot_text(ai_cfg: dict, image_path, max_lines: int = 400) -> str:
-    """模型读图得到参考文本(截图没有 DOM 文本, 这是评分 v3 文本通道唯一可得的参考)。失败抛异常。"""
-    obj = llm.chat_json(ai_cfg, _READ_SYSTEM, "请抄录这张界面截图里的全部可见文字。", images=[image_path], max_tokens=16384)
-    lines = [str(x).strip() for x in (obj.get("lines") or []) if str(x).strip()]
-    return "\n".join(lines[:max_lines])
+_READ_CACHE = {}   # (截图 sha1, 模型) → 参考文本: 同一截图在质量循环/重跑里只读一次
+
+
+def read_screenshot_text(ai_cfg: dict, image_path, max_lines: int = 400, workers: int = 6) -> str:
+    """模型读图得到参考文本(截图没有 DOM 文本, 这是评分 v3 文本通道唯一可得的参考)。
+
+    长页按 llm.image_parts 纵向切段后**每段一个请求并行发出**, 结果按段序拼接: 此前 6 段塞进同一个
+    请求串行生成, 门户整页读一次 2~3 分钟; 并行后墙钟 ≈ 最慢一段。单段失败只丢该段(记 None), 全部失败才抛。
+    结果按截图内容 sha1 + 模型缓存。"""
+    import hashlib
+    from concurrent.futures import ThreadPoolExecutor
+    data = Path(image_path).read_bytes()
+    key = (hashlib.sha1(data).hexdigest(), ai_cfg.get("model"))
+    if key in _READ_CACHE:
+        return _READ_CACHE[key]
+    parts, ranges, (W, H) = llm.image_parts(image_path)
+
+    def one(k):
+        note = (f"这是一张 {W}×{H}px 长截图纵向切成 {len(parts)} 段中的第 {k + 1} 段(原图 y 区间 "
+                f"[{ranges[k][0]},{ranges[k][1]}))。只抄录这一段里的文字。" if len(parts) > 1 else "")
+        obj = llm.chat_json(ai_cfg, _READ_SYSTEM, "请抄录这张界面截图里的全部可见文字。" + note,
+                            parts=[parts[k]], max_tokens=16384)
+        return [str(x).strip() for x in (obj.get("lines") or []) if str(x).strip()]
+
+    results, errors = [None] * len(parts), []
+    with ThreadPoolExecutor(max_workers=max(1, min(workers, len(parts)))) as ex:
+        futs = {ex.submit(one, k): k for k in range(len(parts))}
+        for f, k in futs.items():
+            try:
+                results[k] = f.result()
+            except Exception as exc:   # 单段失败不拖累其余段
+                errors.append(exc)
+    if all(r is None for r in results):
+        raise errors[0] if errors else RuntimeError("读图无结果")
+    lines = [ln for r in results if r for ln in r]
+    text = "\n".join(lines[:max_lines])
+    if len(_READ_CACHE) > 64:
+        _READ_CACHE.clear()
+    _READ_CACHE[key] = text
+    return text
 
 
 def _skeleton_list(skel: UIR, limit: int = 120) -> str:
