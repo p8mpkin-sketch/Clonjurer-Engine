@@ -177,6 +177,35 @@ def _shot_page(page, out_png):
     return page.evaluate("() => ({w: innerWidth, h: innerHeight, text: document.body ? document.body.innerText : ''})")
 
 
+_WV2_POLICY = r"Software\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments"
+
+
+def _webview2_debug_policy(exe_name, port):
+    """Windows: 按可执行文件名给 WebView2 写调试端口策略(HKCU, 官方企业策略键), 返回撤销函数; 其他系统返回 None。
+    只用于 CI 冒烟; 写之前已有同名值则不动它。"""
+    if os.name != "nt":
+        return None
+    import winreg
+    try:
+        key = winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, _WV2_POLICY, 0, winreg.KEY_ALL_ACCESS)
+    except OSError:
+        return None
+    try:
+        winreg.QueryValueEx(key, exe_name)
+        winreg.CloseKey(key)
+        return None
+    except OSError:
+        pass
+    winreg.SetValueEx(key, exe_name, 0, winreg.REG_SZ, f"--remote-debugging-port={port}")
+
+    def undo():
+        with suppress(OSError):
+            winreg.DeleteValue(key, exe_name)
+        with suppress(OSError):
+            winreg.CloseKey(key)
+    return undo
+
+
 def _diagnose(shots, tag) -> dict:
     """CDP 没起来时留证据: 整屏截图(看是否弹了错误框)+ WebView/Chromium 子进程命令行(看调试参数是否生效)。"""
     d = {}
@@ -242,6 +271,7 @@ def smoke_one(art, ref_html, shots, settle_s=3.0, boot_timeout=90):
     port = _free_port()
     cmd = [binary, f"--remote-debugging-port={port}"]   # Chromium/Electron 认命令行
     env = dict(os.environ, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=f"--remote-debugging-port={port}")  # WebView2 认环境变量
+    policy = _webview2_debug_policy(Path(binary).name, port)   # 环境变量未必生效(CI 实测), 再走官方策略键
     if sys.platform.startswith("linux"):
         cmd.append("--no-sandbox")  # 托管 runner 无 suid chrome-sandbox; 只影响 Linux 冒烟
     kw = {"start_new_session": True} if os.name != "nt" else {"creationflags": 0x00000200}
@@ -298,6 +328,8 @@ def smoke_one(art, ref_html, shots, settle_s=3.0, boot_timeout=90):
             r["error"] = f"{type(exc).__name__}: {exc}"
         finally:
             _kill_tree(proc)
+            if policy:
+                policy()
     with suppress(Exception):
         r["app_log_tail"] = log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-20:]
     return r
