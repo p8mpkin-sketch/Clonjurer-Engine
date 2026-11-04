@@ -181,3 +181,53 @@ class CalibInjection(unittest.TestCase):
         self.assertIn("<style data-clone-calib>@media (min-width: 1069px){\na{b:c}\n}</style></head>", out)
         eng._band_floor = 0
         self.assertIn("<style data-clone-calib>a{b:c}</style>", eng._put_calib("<head></head>", "a{b:c}"))
+
+
+LOAD_ONLY_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<style>body{margin:0}.col{margin-top:16px}</style></head><body>
+<div class="row"><div class="col" id="c">正文</div><div id="fade">渐显</div></div>
+<script>
+if (innerWidth >= 1000) document.getElementById('c').style.float = 'right';
+document.getElementById('fade').style.opacity = innerWidth >= 1000 ? '1' : '0';
+</script></body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class LoadTimeWidthStyles(unittest.TestCase):
+    def test_reload_fills_load_time_geometry_only(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 1440, "height": 800})
+                page.set_content(LOAD_ONLY_PAGE)
+                page.evaluate(ce.CV_RECORD_JS, "d")
+                for tag, w in (("t", 768), ("m", 390)):
+                    page.set_viewport_size({"width": w, "height": 800})
+                    page.evaluate(ce.CV_QUIET_JS, 100)
+                    page.evaluate(ce.CV_RECORD_JS, tag)
+                page.set_viewport_size({"width": 1440, "height": 800})
+                page.evaluate(ce.CV_QUIET_JS, 100)
+                page.evaluate(ce.CV_RECORD_JS, "b")
+                loads = {}
+                for tag, w in (("t", 768), ("m", 390)):
+                    p2 = b.new_page(viewport={"width": w, "height": 800})
+                    p2.set_content(LOAD_ONLY_PAGE)
+                    loads[tag] = p2.evaluate(ce.CV_PATHS_JS)
+                    p2.close()
+                out = page.evaluate(ce.CV_EMIT_JS, loads)
+                self.assertGreaterEqual(out["reload"], 2)          # float 的平板/手机取值
+                self.assertEqual(page.evaluate("document.getElementById('c').style.float"), "")
+                self.assertEqual(page.evaluate("document.getElementById('fade').style.opacity"), "1")  # 非几何属性不动
+                self.assertEqual(page.evaluate("getComputedStyle(document.getElementById('c')).float"), "right")
+                html = page.content()
+            finally:
+                b.close()
+            html = ce.scope_viewport_css(html, 1000, 0)
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 390, "height": 800})
+                page.set_content(html.replace("<script>", "<script type='x'>"))
+                self.assertEqual(page.evaluate("getComputedStyle(document.getElementById('c')).float"), "none")
+            finally:
+                b.close()

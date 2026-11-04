@@ -271,7 +271,8 @@ def _probe_viewports(args, results, vps):
     print(f"视口分项探针: {len(pairs)} 站 × {','.join(vps)}", flush=True)
     out_dir = RUNS / f"viewports_{time.strftime('%Y%m%d_%H%M%S')}"
     try:
-        res, _ = probe_tasks(args.base, pairs, vps, out_dir, workers=args.probe_workers)
+        res, _ = probe_tasks(args.base, pairs, vps, out_dir, workers=args.probe_workers,
+                             noise=args.probe_noise)
     except Exception as exc:   # noqa: BLE001 探针失败不影响主跑分
         print(f"(视口探针失败: {exc})")
         return
@@ -279,6 +280,8 @@ def _probe_viewports(args, results, vps):
         p = res.get(r["task_id"])
         if p:
             r["vp"] = {v: (p.get(v) or {}).get("score") for v in vps}
+            if args.probe_noise:
+                r["vp_ceiling"] = {v: (p.get(v) or {}).get("ceiling") for v in vps}
             r["vp_overflow"] = [v for v in vps if (p.get(v) or {}).get("clone_overflow_x")
                                 and not (p.get(v) or {}).get("orig_overflow_x")]
 
@@ -480,6 +483,7 @@ def main():
     ap.add_argument("--viewports", default="desktop,tablet,mobile",
                     help="视口分项探针(逗号分隔 desktop/tablet/mobile; none 关闭)")
     ap.add_argument("--probe-workers", type=int, default=3)
+    ap.add_argument("--probe-noise", action="store_true", help="视口探针另测原站自比上限(多一倍原站加载)")
     ap.add_argument("--render-timeout", type=int, default=0, help="页面加载超时秒(0=平台默认)")
     ap.add_argument("--timeout", type=int, default=3600, help="整批等待上限秒")
     ap.add_argument("--poll", type=float, default=2.0)

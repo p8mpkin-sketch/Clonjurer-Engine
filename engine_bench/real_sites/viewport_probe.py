@@ -45,13 +45,36 @@ async (maxH) => {
   return document.documentElement.scrollWidth;
 }
 """
+# 截图区内的图全部转 eager 并等到齐(封顶), 视频停帧, 字体就绪: 两侧同口径, 减少"一侧图没到"的噪声
+SETTLE_MEDIA_JS = r"""
+async ([maxH, capMs]) => {
+  const t0 = performance.now();
+  try { document.querySelectorAll('video').forEach(v => { try { v.pause(); } catch (e) {} }); } catch (e) {}
+  const inArea = im => { const r = im.getBoundingClientRect(); return r.width > 1 && r.height > 1 && r.top + scrollY < maxH; };
+  for (const im of document.images) if (im.loading === 'lazy' && inArea(im)) im.loading = 'eager';
+  try { await Promise.race([document.fonts.ready, new Promise(r => setTimeout(r, capMs))]); } catch (e) {}
+  while (performance.now() - t0 < capMs) {
+    const pending = Array.from(document.images).filter(im => !im.complete && inArea(im)).length;
+    if (!pending) break;
+    await new Promise(r => setTimeout(r, 150));
+  }
+  return Math.round(performance.now() - t0);
+}
+"""
 
 
 def _shoot(ctx, url, vp, out: Path, timeout_ms=45000):
     page = ctx.new_page()
     info = {"url": url}
     try:
-        page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+        for attempt in range(4):   # 网络层抖动(RESET/CLOSED/断网)退避重试, 不当成克隆缺陷
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                break
+            except Exception as exc:   # noqa: BLE001
+                if attempt == 3 or "net::ERR_" not in str(exc):
+                    raise
+                time.sleep(2 * (attempt + 1))
         with suppress(Exception):
             page.wait_for_load_state("networkidle", timeout=8000)
         with suppress(Exception):
@@ -60,6 +83,11 @@ def _shoot(ctx, url, vp, out: Path, timeout_ms=45000):
         sw = page.evaluate(SCROLL_JS, max_h)
         with suppress(Exception):
             page.wait_for_load_state("networkidle", timeout=4000)
+        with suppress(Exception):
+            page.evaluate(SETTLE_MEDIA_JS, [max_h, 6000])
+        with suppress(Exception):
+            from core.cloner_engine import AD_RECTS_JS
+            info["ads"] = page.evaluate(AD_RECTS_JS) or []
         info["scroll_width"] = sw
         info["overflow_x"] = sw > vp["width"] + 2
         full_h = page.evaluate("document.documentElement.scrollHeight")
@@ -78,7 +106,7 @@ def _shoot(ctx, url, vp, out: Path, timeout_ms=45000):
     return info
 
 
-def probe_one(browser, base, task_id, url, viewports, outdir: Path, clone_tpl=None):
+def probe_one(browser, base, task_id, url, viewports, outdir: Path, clone_tpl=None, noise=False):
     from core.cloner_engine import compute_visual_similarity
     res = {"task_id": task_id, "url": url}
     for name in viewports:
@@ -95,9 +123,28 @@ def probe_one(browser, base, task_id, url, viewports, outdir: Path, clone_tpl=No
         row = {"orig_overflow_x": ia.get("overflow_x"), "clone_overflow_x": ib.get("overflow_x"),
                "orig_h": ia.get("height"), "clone_h": ib.get("height")}
         if ia.get("ok") and ib.get("ok"):
+            rects = (ia.get("ads") or []) + (ib.get("ads") or [])
+            if rects:   # 第三方竞价广告位两侧统一遮灰(与引擎评分同口径)
+                from core.cloner_engine import _mask_rects
+                _mask_rects(a, rects)
+                _mask_rects(b, rects)
             sim = compute_visual_similarity(a, b, outdir / f"{task_id}_{name}_diff.png",
                                             orig_text=ia.get("text", ""), clone_text=ib.get("text", ""))
             row.update({k: sim.get(k) for k in ("score", "structure", "edge", "text", "height_ratio")})
+            if noise:
+                # 原站自比: 隔一次重新加载原站再比, 得到本口径下的可达上限(活体随机性)
+                ctx2 = browser.new_context(viewport=vp, user_agent=UA, device_scale_factor=1)
+                try:
+                    a2 = outdir / f"{task_id}_{name}_orig2.png"
+                    i2 = _shoot(ctx2, url, vp, a2)
+                finally:
+                    ctx2.close()
+                if i2.get("ok"):
+                    if rects or i2.get("ads"):
+                        from core.cloner_engine import _mask_rects
+                        _mask_rects(a2, rects + (i2.get("ads") or []))
+                    row["ceiling"] = compute_visual_similarity(
+                        a, a2, None, orig_text=ia.get("text", ""), clone_text=i2.get("text", "")).get("score")
         else:
             row["error"] = ia.get("error") or ib.get("error")
         res[name] = row
@@ -105,7 +152,7 @@ def probe_one(browser, base, task_id, url, viewports, outdir: Path, clone_tpl=No
 
 
 def probe_tasks(base, tasks, viewports=("desktop", "tablet", "mobile"), outdir=None, workers=3,
-                clone_tpl=None):
+                clone_tpl=None, noise=False):
     """tasks: [(task_id, url)]。返回 {task_id: {viewport: {score,...}}}。"""
     from playwright.sync_api import sync_playwright
     outdir = Path(outdir or tempfile.mkdtemp(prefix="vprobe_"))
@@ -118,7 +165,7 @@ def probe_tasks(base, tasks, viewports=("desktop", "tablet", "mobile"), outdir=N
             try:
                 for tid, url in chunk:
                     t0 = time.time()
-                    r = probe_one(browser, base, tid, url, viewports, outdir, clone_tpl)
+                    r = probe_one(browser, base, tid, url, viewports, outdir, clone_tpl, noise)
                     r["probe_s"] = round(time.time() - t0, 1)
                     results[tid] = r
                     print(f"  探针 #{tid} {url}: " + "  ".join(
@@ -141,6 +188,7 @@ def main():
     ap.add_argument("--out", default="")
     ap.add_argument("--workers", type=int, default=3)
     ap.add_argument("--clone-url", default="", help="克隆地址模板, 默认 {base}/preview/{id}/")
+    ap.add_argument("--noise", action="store_true", help="另测原站自比上限(每视口多一次原站加载)")
     args = ap.parse_args()
     pairs = []
     if args.run:
@@ -155,7 +203,7 @@ def main():
                 pairs.append((tid, row[0]))
     vps = [v.strip() for v in args.viewports.split(",") if v.strip()]
     res, outdir = probe_tasks(args.base, pairs, vps, args.out or None, args.workers,
-                              args.clone_url or None)
+                              args.clone_url or None, args.noise)
     print(f"\n截图/热力图: {outdir}")
     print("| # | 站点 | " + " | ".join(vps) + " |")
     print("|---|---|" + "---|" * len(vps))
@@ -167,6 +215,8 @@ def main():
             s = c.get("score", "-")
             if c.get("clone_overflow_x") and not c.get("orig_overflow_x"):
                 s = f"{s} ↔"
+            if c.get("ceiling") is not None:
+                s = f"{s} /{c['ceiling']}"
             cells.append(str(s))
         print(f"| {tid} | {url} | " + " | ".join(cells) + " |")
     (outdir / "probe.json").write_text(json.dumps(res, ensure_ascii=False, indent=2), encoding="utf-8")

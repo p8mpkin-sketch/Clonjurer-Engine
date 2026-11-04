@@ -989,13 +989,37 @@ def scope_bake_css(html: str, floor: int) -> str:
 CV_RECORD_JS = r"""
 (tag) => {
   const m = window.__cvRec || (window.__cvRec = {els: [], snaps: {}});
-  if (tag === 'd') m.els = Array.from(document.body ? document.body.querySelectorAll('*') : []).slice(0, 20000);
+  if (tag === 'd') {
+    m.els = Array.from(document.body ? document.body.querySelectorAll('*') : []).slice(0, 20000);
+    m.paths = m.els.map(__CV_PATH__);
+  }
   m.snaps[tag] = m.els.map(e => e.getAttribute('style') || '');
   m.widths = m.widths || {};
   m.widths[tag] = window.innerWidth;
   return m.els.length;
 }
 """
+
+# 结构路径(tag:同类序号 链): 主页与窄屏重载页按它对齐元素
+CV_PATH_FN = r"""(e) => {
+  const p = [];
+  while (e && e.parentElement && e !== document.body) {
+    let i = 1, s = e;
+    while ((s = s.previousElementSibling)) if (s.tagName === e.tagName) i++;
+    p.unshift(e.tagName.toLowerCase() + ':' + i);
+    e = e.parentElement;
+  }
+  return p.join('>');
+}"""
+CV_RECORD_JS = CV_RECORD_JS.replace("__CV_PATH__", CV_PATH_FN)
+
+# 窄屏重载页的内联样式表: {路径: [标签, class, style]}
+CV_PATHS_JS = r"""() => {
+  const out = {}, pathOf = """ + CV_PATH_FN + r""";
+  const els = Array.from(document.body ? document.body.querySelectorAll('*') : []).slice(0, 20000);
+  for (const e of els) out[pathOf(e)] = [e.tagName, String(e.className && e.className.baseVal !== undefined ? e.className.baseVal : e.className || ''), e.getAttribute('style') || ''];
+  return out;
+}"""
 
 CV_QUIET_JS = r"""
 (ms) => new Promise(res => {
@@ -1013,10 +1037,15 @@ CV_QUIET_JS = r"""
 """
 
 CV_EMIT_JS = r"""
-() => {
+(loads) => {
   const m = window.__cvRec;
-  const out = {vw: 0, banded: 0, els: 0};
+  const out = {vw: 0, banded: 0, els: 0, reload: 0};
   if (!m || !m.snaps.d || !m.snaps.b) return out;
+  // 只在页面加载时按宽度写一次的内联样式(resize 不再改它): 以窄屏重载页同路径元素的取值
+  // 补进对应视口快照。只认几何类属性 —— 重载页没滚动过, 滚动入场的 opacity/transform 等
+  // 初始态不能当成"该视口的取值"
+  const GEOM = /^(float|clear|width|height|min-width|max-width|min-height|max-height|margin-|padding-|top|right|bottom|left|position|font-size|line-height|letter-spacing|flex-|order|grid-|text-align|columns?)/;
+  loads = loads || {};
   const SKIP = /^(transition|animation|will-change|cursor|pointer-events|--)/;
   const dummy = document.createElement('div').style;
   const parse = s => {
@@ -1032,10 +1061,27 @@ CV_EMIT_JS = r"""
   const tags = ['t', 'm'].filter(t => m.snaps[t]);
   m.els.forEach((el, i) => {
     const sd = m.snaps.d[i];
-    if (!el.isConnected || tags.every(t => m.snaps[t][i] === sd)) return;
+    if (!el.isConnected) return;
+    const reloadDiff = m.paths && tags.some(t => loads[t] && loads[t][m.paths[i]] && loads[t][m.paths[i]][2] !== sd);
+    if (!reloadDiff && tags.every(t => m.snaps[t][i] === sd)) return;
     if (m.snaps.b[i] !== sd && tags.every(t => m.snaps[t][i] === m.snaps.b[i])) return;
     const D = parse(sd), B = parse(m.snaps.b[i]), V = {};
     tags.forEach(t => { V[t] = parse(m.snaps[t][i]); });
+    tags.forEach(t => {
+      const L = loads[t] && m.paths ? loads[t][m.paths[i]] : null;
+      if (!L || L[0] !== el.tagName) return;
+      const cls = String(el.className && el.className.baseVal !== undefined ? el.className.baseVal : el.className || '');
+      if (L[1] !== cls || L[2] === sd) return;
+      const LV = parse(L[2]);
+      const keys = new Set(Object.keys(D).concat(Object.keys(LV)));
+      for (const p of keys) {
+        if (!GEOM.test(p)) continue;
+        if (JSON.stringify(V[t][p]) !== JSON.stringify(D[p])) continue;   // 缩放已采到
+        if (JSON.stringify(LV[p]) === JSON.stringify(D[p])) continue;
+        if (LV[p]) V[t][p] = LV[p]; else delete V[t][p];
+        out.reload++;
+      }
+    });
     const cur = parse(el.getAttribute('style') || '');
     const props = new Set(Object.keys(D));
     tags.forEach(t => Object.keys(V[t]).forEach(p => props.add(p)));
@@ -4135,12 +4181,48 @@ class ClonerEngine:
             page.evaluate("window.scrollTo(0, 0)")
             page.evaluate(CV_RECORD_JS, "b")
             self.log("RENDER", f"多视口内联采集: {n} 个元素 × 平板/手机视口 {time.monotonic() - t0:.1f}s")
+            if self.cfg.get("viewport_reload", True):
+                self._start_narrow_loads(page, height)
         except Exception as exc:
             with suppress(Exception):
                 page.set_viewport_size({"width": width, "height": height})
             with suppress(Exception):
                 page.evaluate("window.__cvRec = null")
             self.log("WARN", f"多视口内联采集失败: {exc}")
+
+    def _start_narrow_loads(self, page, height):
+        """同上下文另开平板/手机宽的页面重新加载目标页(只等到响应提交, 与主页后续采集并行):
+        只在加载时按宽度写一次的内联样式, 缩放采不到, 要靠窄屏首载对照(见 CV_EMIT_JS)。"""
+        self._cv_pages = []
+        for tag, w in (("t", 768), ("m", 390)):
+            p2 = None
+            try:
+                p2 = page.context.new_page()
+                p2.set_viewport_size({"width": w, "height": height})
+                p2.goto(page.url, wait_until="commit", timeout=10000)
+                self._cv_pages.append((tag, p2))
+            except Exception as exc:
+                with suppress(Exception):
+                    if p2 is not None:
+                        p2.close()
+                self.log("WARN", f"窄屏首载对照({w}px)启动失败: {str(exc)[:120]}")
+
+    def _collect_narrow_loads(self, budget_s=8.0):
+        """收回窄屏首载页的内联样式表并关页; 预算内没加载完的放弃。"""
+        loads, t0 = {}, time.monotonic()
+        for tag, p2 in getattr(self, "_cv_pages", []) or []:
+            try:
+                left = max(0.5, budget_s - (time.monotonic() - t0))
+                p2.wait_for_load_state("load", timeout=int(left * 1000))
+                p2.evaluate(CV_QUIET_JS, 300)
+                loads[tag] = p2.evaluate(CV_PATHS_JS) or {}
+            except Exception:
+                pass
+            finally:
+                with suppress(Exception):
+                    p2.close()
+        self._cv_pages = []
+        return loads
 
     def _bg_freeze_css(self):
         """A1-lite.2 背景色权威固化: 原站截图四边条带采样主背景色。
@@ -4474,10 +4556,11 @@ class ClonerEngine:
                 self.log("RENDER", f"内联尺寸流式化: 全宽 {fl.get('width', 0)} / 轨道 {fl.get('track', 0)}"
                                    f" / 位移 {fl.get('shift', 0)}(采集视口下不变, 换视口随容器伸缩)")
         with suppress(Exception):
-            cv = _safe_eval(CV_EMIT_JS) or {}
+            loads = self._collect_narrow_loads()
+            cv = page.evaluate(CV_EMIT_JS, loads) or {}
             if cv.get("els"):
                 self.log("RENDER", f"多视口内联样式: {cv['els']} 个元素, {cv.get('vw', 0)} 个按视口宽比例改写为 vw,"
-                                   f" {cv.get('banded', 0)} 个移入分视口样式表")
+                                   f" {cv.get('banded', 0)} 个移入分视口样式表(其中窄屏首载补采 {cv.get('reload', 0)})")
         # N1 保真轨: MHTML 快照(采集期活体渲染的权威固化)。
         # Chromium 对 MHTML 的回放默认禁脚本 —— 确定性由构造保证。
         if screenshot:
