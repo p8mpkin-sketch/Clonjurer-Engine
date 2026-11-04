@@ -340,3 +340,10 @@ class OutputTarget(Protocol):
 - **桌面**: Go + 系统 WebView(`core/shell_templates/desktop_go`; macOS WKWebView 经 cgo 本机构建, Windows WebView2 纯 Go 在 macOS 上交叉编译), 站点 `go:embed` 进单个可执行文件, 本地服务器只听 127.0.0.1(Info.plist 只放行本地网络)。构建 `toolchain.build_go_desktop`; 依赖版本钉死在模板 go.mod。Electron 壳代码保留为备选, 默认不用。
 - 实测(同一 example.com 克隆): APK 43MB → **25KB**; macOS 114MB → **2.5MB**(zip); Windows 151MB → **2.9MB**(zip, exe 7.4MB)。27MB 资源的门户克隆: APK 24MB、macOS 34.5MB, 即「站点本身 + 极小壳」; 模拟器与本机窗口截图均正常渲染。
 - 缺口: Windows 包需系统自带 WebView2 运行时(Win10/11 通常已带, 缺失时弹窗提示); Windows 包未在实机运行; 桌面壳外链在窗口内打开(未拦截到系统浏览器); Android 壳的上游反代只支持 GET/HEAD(WebView 拦截拿不到请求体); Linux 桌面壳未实现; 签名同前。
+
+### 9.15 Web 窄屏两处通用修复与留出集复测(2026-11-05)
+
+- **窄屏 DOM 变体到位**: 抽取窄屏首载页子树前先平滑滚到底再回顶并跑 ANIM_PHASE_JS(与主页基准后同口径)。此前进视口才起播的入场动画停在 opacity:0, 窄屏版整块空白。语料内 nuxt.com 平板 77.6→88.9、手机 69.3→93.0。
+- **尺寸属性参与分视口比较**: svg/img/canvas 由脚本按视口写的 width/height 属性记成等价 CSS, 成比例改 vw、离散进分视口样式表(此前只比 style, logo 在手机宽保持桌面尺寸溢出)。语料内 remix.run 手机 84.1→86.9。
+- 国际语料内 10 站三视口: 桌面 93.4 / 平板 93.4 / 手机 93.4(REPORT_20261105_021244)。
+- **留出集 11 站复测(只测不调, REPORT_20261105_021846)**: 均分 91.2, 桌面 86.7(前 86.1) / 平板 73.0(前 70.7) / 手机 74.2(前 72.0), p90 68.3s(本机同时跑多线程)。残差仍集中在 github / gitee / MDN 窄屏(40~55) 与 bilibili(全视口 32~46), 语料内尚无同类站复现, 按纪律不在留出站上调。
