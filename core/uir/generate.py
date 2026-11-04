@@ -107,8 +107,10 @@ class GenerateEngine:
             from PIL import Image
             with Image.open(image) as im:
                 vp = {"width": im.size[0], "height": min(im.size[1], 1200)}
+        source = Path(self.spec["source_path"]) if self.spec.get("source_path") else None
         return GenRequest(kind=kind, image_path=image, description=self.spec.get("description") or "",
-                          viewport=vp, hints=hints, meta={"task_id": self.task_id})
+                          viewport=vp, hints=hints, source_path=source,
+                          meta={"task_id": self.task_id, "layout": self.spec.get("layout", "")})
 
     def _execute(self) -> dict:
         budget = int(self.spec.get("time_budget") or settings.GENERATE_TIME_BUDGET)
@@ -147,6 +149,17 @@ class GenerateEngine:
             if errs:
                 self.log("GEN", f"UIR 校验告警 {len(errs)} 条: {errs[0]}")
             rr = target.render(uir, self.ws, ctx)
+            if not rr.shootable:
+                # 非可截图目标(Flutter 等): 像素评分不覆盖, 单轮产出代码即止, 分数记 None
+                self.log("GEN", f"目标 {target_name} 不可截图, 跳过像素评分; 产物 {rr.entry_file.name} ({rr.meta.get('bytes')} 字节)")
+                best = {"score": None, "detail": {"score": None, "scoring": "none", "warnings": ["目标不可截图, 像素评分不覆盖"]},
+                        "round": rnd, "uir_stats": uir.stats()}
+                report["rounds"].append({"round": rnd, "tier": uir.meta.get("tier"), "nodes": uir.root.count(),
+                                         "score": None, "elapsed": round(time.monotonic() - t_r, 1), "kept": True,
+                                         "entry": str(rr.entry_file)})
+                report["tier"] = uir.meta.get("tier") or report["tier"]
+                report["scoring"] = "none"
+                break
             self._stage(f"第 {rnd} 轮渲染评分", 20 + rnd * 15)
             shot = render.screenshot_dir(self.pool, self.ws, rr.entry_file, self.ws / "cloned_preview.png",
                                          req.viewport, log=self.log)
@@ -197,14 +210,19 @@ class GenerateEngine:
         self._stage("打包产物", 90)
         detail = best["detail"]
         (self.ws / "similarity_detail.json").write_text(json.dumps(detail, ensure_ascii=False, indent=2), encoding="utf-8")
-        pages_map = {"/": "index.html"}
+        pages_map = {"/": "index.html"} if (self.ws / "index.html").is_file() else {}
         site_meta = {"task_id": self.task_id, "domain": "generated", "upstream": "", "routes": pages_map,
                      "proxy_enabled": False, "similarity": best["score"], "similarity_detail": detail,
                      "fidelity_score": None, "frames": [], "pattern": "UIR-GENERATE",
                      "generate": {"kind": kind, "target": target_name, "tier": report["tier"]}}
         (self.ws / "site.json").write_text(json.dumps(site_meta, ensure_ascii=False, indent=2), encoding="utf-8")
-        zip_path = flask_generator.generate_project(self.task_id, "", self.ws, pages_map, [], False,
-                                                    tracker_hook="", tracker_cfg=None)
+        if pages_map:
+            zip_path = flask_generator.generate_project(self.task_id, "", self.ws, pages_map, [], False,
+                                                        tracker_hook="", tracker_cfg=None)
+        else:   # 代码型产物(Flutter): 直接打包产物目录
+            zip_path = config.EXPORTS_DIR / f"{self.task_id}.zip"
+            flask_generator.build_zip(self.ws / "flutter_app" if (self.ws / "flutter_app").is_dir() else self.ws,
+                                      zip_path, f"generated_{self.task_id}")
         report["final_score"] = best["score"]
         report["best_round"] = best["round"]
         report["uir_stats"] = best["uir_stats"]

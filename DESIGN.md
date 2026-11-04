@@ -259,3 +259,18 @@ class OutputTarget(Protocol):
 - **L2**:APK 构建需 Flutter SDK + Android SDK + 签名链,本仓库不含工具链;`OutputTarget(Flutter)` 只产出可读 Widget 代码,构建/CI/签名列为缺口。加固包静态路线不可用(边界内行为,非缺陷)。
 - **跨目标保真**:Flutter/桌面目标无法复用像素评分(需各自渲染器)。初期以「代码可读 + 可构建」为验收;像素评分(`compute_visual_similarity`)仍只覆盖 Web/Electron 的 HTML 渲染产物。
 - **语料纪律**:生成能力建独立小语料 + 留出集(5 截图 + 5 描述起步),报分按「克隆/生成」「语料内/留出集」分组,沿用 `_summary_one` 外包分组模式。
+
+### 9.11 D2/D3 落地实录与缺口(2026-11-04)
+
+**已落地**(全部在 `core/uir/`, 调度器一处分流, 未改 `cloner_engine.py`):
+- 输入适配器: `description`(五类通用页面原型 + LLM 回落)、`screenshot`(XY 版面切分 + 文字行字形代理 + 图片区裁切回填 + 多模态 LLM)、`web_dom`(克隆 DOM 直通, 零回归闸门逐字节相同)、`apk_static`(授权 APK zip 的二进制 AXML/ARSC 只读解析, 或工程 `res/layout` 明文 XML; **从不读取 classes*.dex / lib / assets**, 布局缺失或不可解析只报告 `static_unavailable` 并建议运行期授权采集)。
+- 输出目标: `html_css`(可截图、可评分、接入预览/导出)、`flutter`(`lib/main.dart` + `theme.dart` + `pubspec.yaml`, 不可截图)。
+- 实测(本机无大模型 Key, 全走确定性 Tier 0): 描述用例 5/5 ≥85(desc-self 自评均 88.6, 单列); 截图回环 5 例像素均 46.5, 真实站点留出集 8 例均 39.8(只看不调)——结构级确定性重建在 NCC/边缘像素口径上的诚实天花板, 不以合成用例继续调参。
+
+**缺口清单**:
+1. **L1 ≥85 截图目标依赖多模态 Tier 1**: 通道与回落已接好, 需配置多模态 Key 后在留出集上验证; 口径不变。
+2. **L2 工具链**: Flutter SDK / Android SDK / 签名链(keystore, key.properties)不在仓库; `flutter analyze/build` 的 CI 作业未建; drawable 资源搬运与 `@drawable` 引用解析仅做文件名匹配。
+3. **L2 覆盖度**: ConstraintLayout 约束 → 线性布局近似; `<include>/<merge>`、样式/主题(`@style`)、`dimens`、多密度资源未解析; Jetpack Compose 界面无布局 XML, 静态路线天然不可用(需动态 a11y 路线)。
+4. **L2 动态路线 / L3**: `a11y` 适配器(uiautomator 界面树 / macOS AX / UIA)未实现, 仅设计。
+5. **跨目标像素评分**: Flutter/桌面产物无渲染器接入, 仅「代码可读」验收。
+6. **API**: `POST /api/v4/generate` 目前接受 screenshot/description; `apk_static` 走离线调用(`GenRequest.source_path`), 上传入口与授权声明留给平台侧。
