@@ -93,6 +93,13 @@ jobs:
         run: |
           python engine_bench/build/ci_build.py build --target "$ANDROID_TARGET" --render build_ci/render.json --report reports/apk.json
           python -c "import json;print('APK_PATH=' + json.load(open('reports/apk.json'))['artifact'])" >> "$GITHUB_ENV"
+      - name: 腾出磁盘(模拟器系统镜像约 8GB, 托管 runner 余量不够会 No space left on device)
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost /usr/share/swift \
+            /opt/hostedtoolcache/CodeQL /usr/local/lib/android/sdk/ndk /usr/local/share/powershell
+          sudo docker image prune --all --force > /dev/null 2>&1 || true
+          df -h / | tail -1
       - name: 开启 KVM(模拟器加速)
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
