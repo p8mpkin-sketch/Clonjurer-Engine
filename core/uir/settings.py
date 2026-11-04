@@ -31,3 +31,6 @@ SEG_COLOR_QUANT = 24              # 色彩量化步长(每通道)
 SEG_MAX_DEPTH = 4                 # 递归切分深度上限
 SEG_MAX_NODES = 400               # 单页 UIR 节点上限
 PALETTE_MAX = 8                   # 令牌色板最多颜色数
+
+# 版面分析 v2: 从输入截图裁切回填为图片的面积上限(占整页比例; 0 = 不回填, 用于消融对照)
+SEG_PIC_CAP = float(os.environ.get("CLONER_GEN_PIC_CAP", "0.6"))

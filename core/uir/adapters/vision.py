@@ -452,6 +452,13 @@ class ScreenshotAdapter:
                 return uir
             except Exception as exc:
                 ctx.log("UIR", f"多模态 UIR 不可用, 回落确定性版面分析: {type(exc).__name__}: {str(exc)[:160]}")
+        if (req.hints.get("seg_algo") or "v2") == "v2":
+            from core.uir.adapters.layout import segment_v2
+            uir = segment_v2(img, asset_dir=(ctx.ws / "static" / "img") if ctx.ws else None)
+            ctx.log("UIR", f"截图→UIR(确定性版面分析 v2: 原分辨率分层切分/边框圆角/文字行, "
+                           f"图片回填 {uir.meta.get('picture_regions')} 块/{uir.meta.get('picture_area')}): "
+                           f"{uir.root.count()} 节点, {W}×{H}")
+            return uir
         depth = int(req.hints.get("seg_depth") or settings.SEG_MAX_DEPTH)
         min_area = float(req.hints.get("seg_min_area") or settings.SEG_MIN_REGION_AREA)
         min_run = int(req.hints.get("seg_min_run") or 6)

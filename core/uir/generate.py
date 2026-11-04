@@ -224,7 +224,11 @@ class GenerateEngine:
                      "last_render": str(self.ws / "cloned_preview.png") if kind == "screenshot" else None}
             if kind == "screenshot":
                 hints["regions"] = render.region_hints(ref_png, self.ws / "cloned_preview.png", detail)
-                if uir.meta.get("tier") == "deterministic":
+                if uir.meta.get("tier") == "deterministic" and uir.meta.get("seg") == "v2":
+                    # v2 之后再给 v1(缩略图 XY 切分)一轮作为对照候选, 只保留更高分者
+                    hints["seg_algo"] = "v1"
+                elif uir.meta.get("tier") == "deterministic":
+                    hints["seg_algo"] = "v1"
                     # 确定性细化: 深度 +1, 最小区域面积减半, 沟槽最短长度 -1(≥2) —— 都朝"切得更细"单调
                     hints["seg_depth"] = min(int(req.hints.get("seg_depth") or settings.SEG_MAX_DEPTH) + 1, 8)
                     hints["seg_min_area"] = max(0.0002, float(req.hints.get("seg_min_area") or settings.SEG_MIN_REGION_AREA) * 0.5)
