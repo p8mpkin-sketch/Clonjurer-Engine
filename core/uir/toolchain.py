@@ -417,8 +417,10 @@ def build_android_shell(app_dir, log=_print, timeout=600, min_sdk=24) -> dict:
                     "--ks-key-alias", "androiddebugkey", "--out", str(final), str(aligned)], app_dir, env, log, timeout)
     if rc or not final.is_file():
         return {"ok": False, "gap": "apksigner 签名失败", "log": out}
+    sig = sign_apk(final, sdk, log=log, timeout=timeout)   # 有 release keystore 时重签, 两种情况都 verify
     return {"ok": True, "artifact": str(final), "bytes": final.stat().st_size, "mode": "release",
-            "signing": "Android debug keystore", "build_tools": bt.name, "target_sdk": target_sdk}
+            "signing": sig["label"], "signed": sig["signed"], "signing_detail": sig,
+            "build_tools": bt.name, "target_sdk": target_sdk}
 
 
 _INFO_PLIST = """<?xml version="1.0" encoding="UTF-8"?>
@@ -488,12 +490,16 @@ def build_go_desktop(app_dir, platforms=None, log=_print, timeout=1800) -> dict:
         else:
             fails[plat] = "Linux 桌面壳未实现(需 GTK WebKit)"
             continue
+        sig = sign_desktop_artifact(plat, target, log=log, timeout=timeout)
         size = sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
         built.append({"platform": plat, "arch": tag, "dir": str(d), "executable": str(target),
-                      "exe_bytes": exe.stat().st_size, "dir_bytes": size})
+                      "exe_bytes": exe.stat().st_size, "dir_bytes": size,
+                      "signing": sig["label"], "signed": sig["signed"], "signing_detail": sig})
     gap = "; ".join(f"{k}: {str(v)[:200]}" for k, v in fails.items()) or None
+    labels = "; ".join(f"{b['platform']}: {b['signing']}" for b in built)
     return {"ok": bool(built) and not fails, "artifacts": built, "failures": fails, "gap": gap,
-            "signing": "未签名(macOS 未公证 / Windows 无 Authenticode); Windows 需系统自带 WebView2 运行时"}
+            "signing": (labels or "未签名(无产物)") + "; Windows 需系统自带 WebView2 运行时",
+            "signed": bool(built) and all(b["signed"] for b in built)}
 
 
 def build_desktop(app_dir, platforms=None, arch=None, log=_print, timeout=1800) -> dict:

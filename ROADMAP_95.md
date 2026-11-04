@@ -106,7 +106,7 @@
 
 - 三个作业都是 `workflow_dispatch` + 夜间定时, 不进每次 push 的 `engine-gate`(构建 5~10 分钟)。
 - 闸门: 三平台 CI 绿, 产物签名校验通过, 冒烟截图与 html_css 渲染像素 v3 ≥90(同一 HTML 应接近逐值)。
-- **落地(2026-11-05)**: `.github/workflows/build.yml`(`app-build`, 手动 + 夜间 03:00)+ `core/uir/toolchain.py` 签名步骤 + `engine_bench/build/ci_build.py` 冒烟驱动, 详见 DESIGN.md §9.14。未配 secret 时照常出包, 文件名带 `-unsigned`。需要 cz 在仓库 Settings → Secrets and variables → Actions 添加的 secret 名见 §8 末尾。
+- **落地(2026-11-05)**: `.github/workflows/build.yml`(`app-build`, 手动 + 夜间 03:00)+ `core/uir/toolchain.py` 签名步骤 + `engine_bench/build/ci_build.py` 冒烟驱动, 详见 DESIGN.md §9.15。未配 secret 时照常出包, 文件名带 `-unsigned`。需要 cz 在仓库 Settings → Secrets and variables → Actions 添加的 secret 名见 §8 末尾。
 
 ### 3.4 L2 静态覆盖度补齐(配合 a11y 做兜底)
 `<include>/<merge>`、`@style/@dimen` 解析、多密度资源选择、ConstraintLayout 约束 → Flex 近似的精度提升; 解析不了的一律 `static_unavailable` 走动态通道, 不猜。

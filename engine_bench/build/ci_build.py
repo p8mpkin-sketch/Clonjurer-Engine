@@ -1,13 +1,13 @@
 """三平台构建 CI 的驱动脚本(ROADMAP_95.md §3.3, .github/workflows/build.yml 调用)。
 
 样本取 engine_bench/gen_cases/cases.json 的描述用例(确定性路线, 不调模型), 渲染成
-BUILD_TARGETS 里选定的壳工程(默认 Flutter / Electron) + html_css 参考页, 再调用 core.uir.toolchain 构建签名, 最后做启动冒烟:
+BUILD_TARGETS 里选定的壳工程(默认系统 WebView 壳; Flutter / Electron 可选) + html_css 参考页, 再调用 core.uir.toolchain 构建签名, 最后做启动冒烟:
 Chromium 内核的桌面壳带 --remote-debugging-port 启动, 经 CDP 截图, 与同一份 HTML 在 Playwright Chromium 下的
 渲染按评分 v3 同口径比较(同为 Chromium, 应接近逐值)。所有子命令都把结果写成 JSON, 便于汇总。
 
-    python engine_bench/build/ci_build.py render --case d_login --targets flutter,electron --out build_ci
-    python engine_bench/build/ci_build.py build  --target flutter  --render build_ci/render.json --report r.json
-    python engine_bench/build/ci_build.py build  --target electron --render build_ci/render.json --platform win32 --report r.json
+    python engine_bench/build/ci_build.py render --case d_login --targets android-webview,desktop-go --out build_ci
+    python engine_bench/build/ci_build.py build  --target android-webview --render build_ci/render.json --report r.json
+    python engine_bench/build/ci_build.py build  --target desktop-go --render build_ci/render.json --platform win32 --report r.json
     python engine_bench/build/ci_build.py smoke-desktop --report r.json --ref build_ci/web/index.html \
         --shots shots --min-score 90
     python engine_bench/build/ci_build.py summary r1.json r2.json ...   # Markdown 汇总(写入运行摘要)
@@ -47,16 +47,26 @@ def _case(case_id):
     raise SystemExit(f"未知用例 {case_id!r}; 可选: {', '.join(c['id'] for c in cases)}")
 
 
-# 构建目标表: CI 只认这张表, 不写死某个壳。新增壳(如原生 WebView 的 Android 壳、Tauri 桌面壳)=
-# 注册一个 OutputTarget + toolchain 里一个同签名的 build 函数 + 这里加一行; workflow 用输入切换, 不用改。
-#   kind:  apk → build(app_dir, release=...); desktop → build(app_dir, platforms, arch)
-#   smoke: cdp   = 带 --remote-debugging-port 启动, CDP 截图与参考 HTML 比较(Chromium 内核的壳)
-#          alive = 只验证启动后进程存活(系统 WebView 类壳没有通用 CDP, 不出分)
-#          emulator = 由 android_smoke.sh 在模拟器里验证
+# 构建目标表: CI 只认这张表, 不写死某个壳。新增壳 = 一个渲染方式 + toolchain 里一个 build 函数 + 这里加一行;
+# workflow 用输入切换(android_target / desktop_target), 签名按产物类型(APK / .app / .exe)做, 与壳无关。
+#   render: uir   = UIR 经注册的 OutputTarget 渲染(flutter / electron)
+#           shell = 先渲染 html_css, 当作「网站工程」交给 core.app_shell 装壳(与克隆任务的交付形态同一条路)
+#   kind:   apk → build(app_dir); desktop → build(app_dir, platforms[, arch])
+#   smoke:  cdp      = 带 --remote-debugging-port(WebView2 另经环境变量)启动, CDP 截图与参考 HTML 比较, 设门槛
+#           alive    = 只验证启动后进程存活(WKWebView 等没有通用 CDP, 不出分)
+#           emulator = 由 android_smoke.sh 在模拟器里验证; 可按平台给 dict
 BUILD_TARGETS = {
-    "flutter": {"kind": "apk", "app_dir": "flutter_app", "build": "build_apk", "smoke": "emulator"},
-    "electron": {"kind": "desktop", "app_dir": "electron_app", "build": "build_desktop", "smoke": "cdp"},
+    # 默认: 系统 WebView 壳(包体 KB/MB 级, core/app_shell.py)
+    "android-webview": {"kind": "apk", "render": "shell", "shell": "android_shell", "app_dir": "android_shell",
+                        "build": "build_android_shell", "smoke": "emulator"},
+    "desktop-go": {"kind": "desktop", "render": "shell", "shell": "desktop_shell", "app_dir": "desktop_shell",
+                   "build": "build_go_desktop", "smoke": {"win32": "cdp", "darwin": "alive"}},
+    # 可选: 自带运行时的壳
+    "flutter": {"kind": "apk", "render": "uir", "app_dir": "flutter_app", "build": "build_apk", "smoke": "emulator"},
+    "electron": {"kind": "desktop", "render": "uir", "app_dir": "electron_app", "build": "build_desktop",
+                 "smoke": "cdp"},
 }
+DEFAULT_TARGETS = "android-webview,desktop-go"
 
 
 def _target(name):
@@ -65,26 +75,50 @@ def _target(name):
     return BUILD_TARGETS[name]
 
 
+def _site_workspace(web_dir: Path, ws: Path, viewport) -> Path:
+    """html_css 产物 → 最小「网站工程」工作区(flask_app/templates + static + site.json), 供 app_shell 装壳。"""
+    import shutil
+    fa = ws / "flask_app"
+    if ws.exists():
+        shutil.rmtree(ws)
+    (fa / "templates").mkdir(parents=True)
+    shutil.copy2(web_dir / "index.html", fa / "templates" / "index.html")
+    if (web_dir / "static").is_dir():
+        shutil.copytree(web_dir / "static", fa / "static")
+    (ws / "site.json").write_text(json.dumps({"routes": {"/": "index.html"}}), encoding="utf-8")
+    return ws
+
+
 def cmd_render(args):
+    from core import app_shell
     from core.uir.adapters.description import build_from_description
     from core.uir.registry import get_output
     c = _case(args.case)
     w, h = (int(v) for v in args.viewport.lower().split("x"))
     u = build_from_description(c["text"], {"width": w, "height": h})
-    out = Path(args.out)
+    out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     (out / "uir.json").write_text(u.to_json(), encoding="utf-8")
     web = get_output("html_css").render(u, out / "web")   # 参考页: 冒烟截图的比较基准
     info = {"case": c["id"], "viewport": [w, h], "web": str(web.entry_file.resolve()), "targets": {}}
+    title = str(u.meta.get("title") or c["id"])
     for name in [t for t in args.targets.split(",") if t]:
         spec = _target(name)
-        res = get_output(name).render(u, out / name)
-        info["targets"][name] = {"app": str((out / name / spec["app_dir"]).resolve()), "meta": res.meta}
+        if spec["render"] == "shell":
+            ws = _site_workspace(out / "web", out / "site_ws", {"width": w, "height": h})
+            pkg_or_vp = {"package": "com.clonjurer.ci." + c["id"].replace("-", "_")} if spec["kind"] == "apk" \
+                else {"viewport": {"width": w, "height": h}, "bundle_id": "com.clonjurer.ci." + c["id"]}
+            app = getattr(app_shell, spec["shell"])(ws, out / name, title, **pkg_or_vp)
+            info["targets"][name] = {"app": str(Path(app).resolve()), "meta": {"shell": spec["shell"]}}
+        else:
+            res = get_output(name).render(u, out / name)
+            info["targets"][name] = {"app": str((out / name / spec["app_dir"]).resolve()), "meta": res.meta}
     _write(out / "render.json", info)
     return 0
 
 
 def cmd_build(args):
+    import inspect
     from core.uir import toolchain
     spec = _target(args.target)
     app = args.app or json.loads(Path(args.render).read_text(encoding="utf-8"))["targets"][args.target]["app"]
@@ -92,9 +126,11 @@ def cmd_build(args):
     if build is None:
         res = {"ok": False, "gap": f"toolchain 缺 {spec['build']}()"}
     elif spec["kind"] == "apk":
-        res = build(app, release=not args.debug)
+        kw = {"release": not args.debug} if "release" in inspect.signature(build).parameters else {}
+        res = build(app, **kw)
     else:
-        res = build(app, [p for p in args.platform.split(",") if p] or None, args.arch or None)
+        kw = {"arch": args.arch} if args.arch and "arch" in inspect.signature(build).parameters else {}
+        res = build(app, [p for p in args.platform.split(",") if p] or None, **kw)
     _write(args.report, {"kind": spec["kind"], "target": args.target, "smoke": spec["smoke"], **res})
     return 0 if res.get("ok") else 1
 
@@ -180,14 +216,15 @@ def smoke_one(art, ref_html, shots, settle_s=3.0, boot_timeout=90):
         r["error"] = "产物里找不到可执行文件"
         return r
     port = _free_port()
-    cmd = [binary, f"--remote-debugging-port={port}"]
+    cmd = [binary, f"--remote-debugging-port={port}"]   # Chromium/Electron 认命令行
+    env = dict(os.environ, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=f"--remote-debugging-port={port}")  # WebView2 认环境变量
     if sys.platform.startswith("linux"):
         cmd.append("--no-sandbox")  # 托管 runner 无 suid chrome-sandbox; 只影响 Linux 冒烟
     kw = {"start_new_session": True} if os.name != "nt" else {"creationflags": 0x00000200}
     log_path = shots / f"app-{tag}.log"
     t0 = time.monotonic()
     with open(log_path, "wb") as lf:
-        proc = subprocess.Popen(cmd, stdout=lf, stderr=subprocess.STDOUT, **kw)
+        proc = subprocess.Popen(cmd, stdout=lf, stderr=subprocess.STDOUT, env=env, **kw)
         try:
             ver = None
             while time.monotonic() - t0 < boot_timeout and proc.poll() is None:
@@ -207,7 +244,7 @@ def smoke_one(art, ref_html, shots, settle_s=3.0, boot_timeout=90):
                 b = p.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
                 page = None
                 for _ in range(60):
-                    pages = [pg for c in b.contexts for pg in c.pages if pg.url.startswith("file:")]
+                    pages = [pg for c in b.contexts for pg in c.pages if pg.url.startswith(("file:", "http://127.0.0.1", "http://localhost", "https://"))]
                     if pages:
                         page = pages[0]
                         break
@@ -244,14 +281,20 @@ def cmd_smoke_desktop(args):
     rep = json.loads(Path(args.report).read_text(encoding="utf-8"))
     plats = [p for p in args.platform.split(",") if p]
     arts = [a for a in rep.get("artifacts", []) if not plats or a["platform"] in plats]
-    mode = rep.get("smoke", "cdp")
-    if mode == "alive":
-        results = [smoke_alive(a, args.shots) for a in arts]
-        ok = bool(results) and all(x.get("launched") and x.get("alive") for x in results)
-    else:
-        results = [smoke_one(a, args.ref, args.shots, boot_timeout=args.boot_timeout) for a in arts]
-        ok = bool(results) and all(x.get("launched") and x.get("alive") and isinstance(x.get("score"), (int, float))
-                                   and x["score"] >= args.min_score for x in results)
+    smoke = rep.get("smoke", "cdp")
+    results = []
+    for a in arts:
+        mode = smoke.get(a["platform"], "alive") if isinstance(smoke, dict) else smoke
+        if mode == "cdp":
+            x = smoke_one(a, args.ref, args.shots, boot_timeout=args.boot_timeout)
+            x["mode"] = "cdp"
+            x["pass"] = bool(x.get("launched") and x.get("alive") and isinstance(x.get("score"), (int, float))
+                             and x["score"] >= args.min_score)
+        else:
+            x = smoke_alive(a, args.shots)
+            x["pass"] = bool(x.get("launched") and x.get("alive"))
+        results.append(x)
+    ok = bool(results) and all(x["pass"] for x in results)
     _write(args.out or Path(args.shots) / "smoke.json",
            {"kind": "smoke-desktop", "ok": ok, "min_score": args.min_score, "results": results})
     return 0 if ok else 1
@@ -321,7 +364,7 @@ def main(argv=None):
     r = sub.add_parser("render")
     r.add_argument("--case", default="d_login")
     r.add_argument("--viewport", default="420x760")
-    r.add_argument("--targets", default="flutter,electron", help="逗号分隔, 取自 BUILD_TARGETS")
+    r.add_argument("--targets", default=DEFAULT_TARGETS, help="逗号分隔, 取自 BUILD_TARGETS")
     r.add_argument("--out", required=True)
     b = sub.add_parser("build")
     b.add_argument("--target", required=True, help="BUILD_TARGETS 里的名字")

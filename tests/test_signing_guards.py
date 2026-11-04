@@ -182,6 +182,27 @@ class WorkflowGuards(unittest.TestCase):
             self.assertIn(n, doc, f"{n} 未在 toolchain.py 签名说明里登记")
         self.assertNotRegex(text, r"BEGIN (RSA |EC )?PRIVATE KEY")
 
+    def test_build_targets_resolve(self):
+        """BUILD_TARGETS 每一行都能落到真实的 build 函数 / 装壳函数 / OutputTarget; workflow 默认值在表里。"""
+        import importlib.util
+        import re
+        from core import app_shell
+        from core.uir.registry import list_outputs
+        spec = importlib.util.spec_from_file_location("ci_build", ROOT / "engine_bench" / "build" / "ci_build.py")
+        ci = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ci)
+        for name, t in ci.BUILD_TARGETS.items():
+            self.assertTrue(callable(getattr(toolchain, t["build"], None)), name)
+            self.assertIn(t["kind"], ("apk", "desktop"))
+            if t["render"] == "shell":
+                self.assertTrue(callable(getattr(app_shell, t["shell"], None)), name)
+            else:
+                self.assertIn(name, list_outputs())
+        wf = ROOT / ".github" / "workflows" / "build.yml"
+        if wf.is_file():
+            for d in re.findall(r"inputs\.(?:android|desktop)_target \|\| '([^']+)'", wf.read_text(encoding="utf-8")):
+                self.assertIn(d, ci.BUILD_TARGETS)
+
 
 if __name__ == "__main__":
     unittest.main()

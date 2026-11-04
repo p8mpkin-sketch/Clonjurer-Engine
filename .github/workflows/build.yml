@@ -1,12 +1,12 @@
 name: app-build
 
-# 三平台安装包构建 + 签名 + 启动冒烟(ROADMAP_95.md §3.3, DESIGN.md §9.14)。
+# 三平台安装包构建 + 签名 + 启动冒烟(ROADMAP_95.md §3.3, DESIGN.md §9.15)。
 # 触发: 手动、每晚, 以及改动构建链本身(toolchain / 目标 / 本 workflow)的 PR。
 # 样本: engine_bench/gen_cases/cases.json 的描述用例(确定性路线, 不调模型) → UIR →
-#   Android: Flutter 目标 → release APK → apksigner 签名/校验 → 模拟器安装启动截图(跨渲染器, 分数只记录)
-#   macOS:   Electron 目标 → .app → codesign(+公证) → 启动经 CDP 截图, 与同一份 HTML 比较(门槛 min_score)
-#   Windows: Electron 目标 → .exe → Authenticode → 实机启动经 CDP 截图, 与同一份 HTML 比较(门槛 min_score)
-# 壳可切换(输入 android_target / desktop_target, 取值见 ci_build.py BUILD_TARGETS), 不写死 Flutter / Electron;
+#   Android: 原生 WebView 壳(默认)/ Flutter → release APK → apksigner 签名/校验 → 模拟器安装启动截图(分数只记录)
+#   macOS:   Go+WKWebView 壳(默认, 启动存活)/ Electron(CDP 截图比分) → .app → codesign(+公证)
+#   Windows: Go+WebView2 壳(默认)/ Electron → .exe → Authenticode → 实机启动经 CDP 截图, 与同一份 HTML 比较(门槛 min_score)
+# 壳可切换(输入 android_target / desktop_target, 取值见 ci_build.py BUILD_TARGETS), 不写死任何一种壳;
 # 签名按产物类型(APK / .app / .exe)做, 与壳无关。
 # 签名证书全部来自 repo secrets(名字见 core/uir/toolchain.py 签名说明); 未配置时自动退回
 # debug / ad-hoc / 不签, 产物文件名带 -unsigned, 运行摘要的「签名」列写明原因。
@@ -17,6 +17,8 @@ on:
       - ".github/workflows/build.yml"
       - "core/uir/toolchain.py"
       - "core/uir/targets/**"
+      - "core/app_shell.py"
+      - "core/shell_templates/**"
       - "engine_bench/build/**"
   workflow_dispatch:
     inputs:
@@ -31,11 +33,11 @@ on:
       android_target:
         description: "Android 壳(engine_bench/build/ci_build.py BUILD_TARGETS 里 kind=apk 的目标)"
         required: false
-        default: "flutter"
+        default: "android-webview"
       desktop_target:
         description: "桌面壳(BUILD_TARGETS 里 kind=desktop 的目标)"
         required: false
-        default: "electron"
+        default: "desktop-go"
       flutter_version:
         description: "Flutter 版本(留空=stable 最新)"
         required: false
@@ -50,8 +52,8 @@ concurrency:
 env:
   CASE: ${{ github.event.inputs.case || 'd_login' }}
   MIN_SCORE: ${{ github.event.inputs.min_score || '90' }}
-  ANDROID_TARGET: ${{ github.event.inputs.android_target || 'flutter' }}
-  DESKTOP_TARGET: ${{ github.event.inputs.desktop_target || 'electron' }}
+  ANDROID_TARGET: ${{ github.event.inputs.android_target || 'android-webview' }}
+  DESKTOP_TARGET: ${{ github.event.inputs.desktop_target || 'desktop-go' }}
   PYTHONUTF8: "1"
   PYTHONIOENCODING: "utf-8"
 
@@ -161,8 +163,25 @@ jobs:
           python-version: "3.12"
           cache: pip
       - uses: actions/setup-node@v4
+        if: env.DESKTOP_TARGET == 'electron'
         with:
           node-version: "22"
+      - uses: actions/setup-go@v5
+        if: env.DESKTOP_TARGET == 'desktop-go'
+        with:
+          go-version: stable
+          cache-dependency-path: core/shell_templates/desktop_go/go.mod
+      - name: 确认 WebView2 运行时(Windows 系统 WebView 壳)
+        if: matrix.platform == 'win32' && env.DESKTOP_TARGET == 'desktop-go'
+        shell: pwsh
+        run: |
+          $keys = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}',
+                  'HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          $v = $keys | ForEach-Object { (Get-ItemProperty $_ -ErrorAction SilentlyContinue).pv } | Where-Object { $_ } | Select-Object -First 1
+          if ($v) { "WebView2 运行时 $v"; exit 0 }
+          "未检测到 WebView2 运行时, 安装 Evergreen 版"
+          Invoke-WebRequest 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile "$env:RUNNER_TEMP\wv2.exe"
+          Start-Process "$env:RUNNER_TEMP\wv2.exe" -ArgumentList '/silent','/install' -Wait
       - name: Python 依赖与 Chromium(参考页渲染/评分)
         run: |
           python -m pip install --upgrade pip
@@ -197,7 +216,7 @@ jobs:
         run: |
           python engine_bench/build/ci_build.py build --target "$DESKTOP_TARGET" --render build_ci/render.json \
             --platform ${{ matrix.platform }} --arch ${{ matrix.arch }} --report reports/desktop-${{ matrix.platform }}.json
-      - name: 实机启动冒烟(CDP 截图 vs 参考 HTML)
+      - name: 实机启动冒烟(CDP 截图 vs 参考 HTML; 无 CDP 的壳只验启动存活)
         run: |
           python engine_bench/build/ci_build.py smoke-desktop --report reports/desktop-${{ matrix.platform }}.json \
             --ref build_ci/web/index.html --shots shots/${{ matrix.platform }} --min-score "$MIN_SCORE" \

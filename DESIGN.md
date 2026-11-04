@@ -341,7 +341,7 @@ class OutputTarget(Protocol):
 - 实测(同一 example.com 克隆): APK 43MB → **25KB**; macOS 114MB → **2.5MB**(zip); Windows 151MB → **2.9MB**(zip, exe 7.4MB)。27MB 资源的门户克隆: APK 24MB、macOS 34.5MB, 即「站点本身 + 极小壳」; 模拟器与本机窗口截图均正常渲染。
 - 缺口: Windows 包需系统自带 WebView2 运行时(Win10/11 通常已带, 缺失时弹窗提示); Windows 包未在实机运行; 桌面壳外链在窗口内打开(未拦截到系统浏览器); Android 壳的上游反代只支持 GET/HEAD(WebView 拦截拿不到请求体); Linux 桌面壳未实现; 签名同前。
 
-### 9.14 签名与三平台构建 CI(2026-11-05)
+### 9.15 签名与三平台构建 CI(2026-11-05)
 
 落地 ROADMAP_95.md §3.3 的第一版, 不改任何生成/克隆逻辑:
 - **签名步骤**(`core/uir/toolchain.py`, 纯增量): `build_apk` / `build_desktop` 构建后自动签名并校验, 结果写回报告: `signing`(给人看的标签, 未签名一律以「未签名」开头)、`signed`(布尔)、`signing_detail`(状态/校验/证书)。
@@ -354,7 +354,7 @@ class OutputTarget(Protocol):
 - **CI**(`.github/workflows/build.yml`, `app-build`): 手动 + 每晚北京时间 03:00 + 只改构建链(toolchain / Flutter·Electron 目标 / 本 workflow)的 PR, 不进引擎 PR 闸门。样本 = `gen_cases/cases.json` 描述用例(确定性路线, 不调模型)。
   - android(ubuntu): Flutter → release APK → 签名校验 → android-emulator-runner(API 34)安装、启动、进程存活、`screencap`; 截图与参考 HTML 按 dp 视口比较, **跨渲染器只记录不设门槛**(L2 跨目标评分的第一个数据点)。
   - desktop(macos-latest arm64 / windows-latest x64): Electron 打包 → 签名 → **实机启动**: 带 `--remote-debugging-port` 启动产物, 经 CDP 截图, 与同一份 HTML 在 Playwright Chromium 下同视口渲染比较, 低于 `min_score`(默认 90)即红。Windows 这一步是 .exe 第一次在真实 Windows 上启动验证。
-  - **壳可切换**: workflow 输入 `android_target` / `desktop_target`(默认 flutter / electron)取自 `engine_bench/build/ci_build.py` 的 `BUILD_TARGETS` 表。将来换原生 WebView 的 Android 壳或 Tauri 桌面壳 = 注册 OutputTarget + toolchain 里同签名的 build 函数 + 表里加一行, workflow 与签名都不用改(签名按产物类型 APK / .app / .exe 做, 与壳无关)。冒烟方式也随表: Chromium 内核的壳走 CDP 截图比分, 系统 WebView 类的壳退为「启动存活」(不出分)。
+  - **壳可切换, 默认系统 WebView 壳**: workflow 输入 `android_target` / `desktop_target` 取自 `engine_bench/build/ci_build.py` 的 `BUILD_TARGETS` 表。默认 `android-webview`(原生 Activity + 系统 WebView, `toolchain.build_android_shell`)与 `desktop-go`(Go + WKWebView / WebView2, `toolchain.build_go_desktop`), 两者走 `core/app_shell.py` 装壳, 与克隆任务的「交付形态」同一条路(CI 把 html_css 参考页当作网站工程装进去); `flutter` / `electron` 保留为可选。签名按产物类型做, 新壳的 build 函数结束时同样调 `sign_apk` / `sign_desktop_artifact`。冒烟方式随表: Electron 与 Windows WebView2 走 CDP 截图比分(WebView2 经 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` 开调试端口), macOS WKWebView 没有通用 CDP, 只验启动存活; Windows 作业先确认 WebView2 运行时, 缺则装 Evergreen 版。
   - 冒烟比较时两侧都隐藏滚动条(桌面窗口的经典滚动条占 15px, 会让长页整体错位: 实测落地页 35.5 → 100.0)。5 个描述用例 linux 包冒烟均 100.0。
   - 产物按签名状态命名(`clonjurer-<用例>-<平台>-<架构>[-unsigned].zip/.apk`), 报告与截图上传, `summary` 作业把构建/签名/冒烟汇总进运行摘要。
 - **本地验证(云端容器, Linux)**: render → `@electron/packager` linux-x64 + win32-x64 → Xvfb 下启动 linux 包经 CDP 截图, 与参考 HTML 比较 100.0; 用临时自签名 pfx 走 osslsigncode 给 win32 .exe 签名成功(容器内时间戳服务不可达, 退回无时间戳并如实标注)。未在本地验证: Flutter/APK 签名(容器无 Flutter/Android SDK, 由伪 apksigner 单测覆盖)、macOS codesign/公证、Windows 上 signtool 与实机启动 —— 都要等 CI 首跑。
