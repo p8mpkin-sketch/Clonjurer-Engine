@@ -309,3 +309,7 @@ class OutputTarget(Protocol):
 **前端接入(同日)**: 生成面板「输出目标」新增 Electron, 新增「构建安装包」(选 Flutter 自动选 APK, 选 Electron 自动选桌面包); 生成任务 `spec.build=apk|desktop` 在打包后构建(不占生成预算), 产物放 `exports/`, 任务行出现 APK / macOS .app / Windows .exe 下载按钮(`GET /api/v4/generate/<id>/artifact/<i>`, 只放行报告登记且位于导出目录的文件); 失败显示「构建缺口」。隔离实例 8894 端到端: 浏览器提交「商品列表 + Flutter + APK」→ 42.6 MB APK → 下载 → 模拟器启动渲染正常。
 自动冒烟测试在端到端里抓到并修复 Flutter 目标的通用布局缺陷: 无伸缩子项的横排改 `Wrap`(窄屏折行而非溢出); 网格改「等宽列 + 内容自适应行高 + 按最小列宽 140 减列」(固定 childAspectRatio 纵向溢出); `Expanded` 只由横排父级包裹(放进 Wrap/滚动竖排会抛 ParentData 异常); Android `0dp + layout_weight` 不再钉成宽 0; drawable 图片加 `errorBuilder` 回落占位。五类描述原型 + APK 夹具 + 实测 UIR 共 7 例 analyze / test 全过。
 仍缺: Electron 任务的「沙盒预览」不指向壳内页面(产物可下载、评分正常); Flutter 版式仍是近似(如顶栏导航折行与 Web 不同)。
+
+### 9.13 95 分路线图(2026-11-05)
+
+2026-11-05 六维评分 67/100(Web 80 / L1 45 / L2·L3 50 / 速度效率 72 / 代码完整度 68 / 稳定 77)。从当前到各维 ≥95 的量化口径、技术路线、阶段闸门与所需资源见 `ROADMAP_95.md`; 本节不重复。约束不变: 禁 per-site 特判、留出集只测不调、Web 零回归。
