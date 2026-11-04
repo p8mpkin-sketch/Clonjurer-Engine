@@ -2022,3 +2022,29 @@ def apply_replacements(text: str, pairs) -> str:
         return text
     pattern, mapping = _replacement_matcher(pairs)
     return pattern.sub(lambda m: mapping.get(m.group(0), m.group(0)), text)
+
+
+# 埋点/广告信标: 渲染驱动回补不回源(真实语料里修复回补 20~65s 多数耗在这类请求上, 每轮带随机参数
+# 都"不同", 负缓存挡不住; 它们是 1x1 像素或计数接口, 回补进来也不改变画面)。只按通用形态识别,
+# 不认具体站点: 路径段是常见上报动词, 或主机名首段是常见上报子域, 或「图片扩展名 + 超长查询串」。
+_BEACON_SEG = re.compile(r"(?:^|/)(?:log|logs|logger|track|tracker|tracking|beacon|pixel|collect|"
+                         r"stat|stats|statistics|report|monitor|ping|pv|uv|click|impression|analytics|"
+                         r"metrics|telemetry|rum|gtag|ga|adx?|ads|adserver|eclick|cm)(?:$|[/.])", re.I)
+_BEACON_HOST = re.compile(r"^(?:track|tracker|tracking|log|logs|stat|stats|analytics|metrics|telemetry|"
+                          r"beacon|pixel|collect|eclick|click|pos|ad|ads|adx|cm|data|report|mon|monitor)"
+                          r"[0-9-]*\.", re.I)
+
+
+def beacon_like(url: str) -> bool:
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return False
+    host = (parts.hostname or "").lower()
+    path = parts.path or "/"
+    if _BEACON_HOST.match(host):
+        return True
+    if _BEACON_SEG.search(path):
+        return True
+    ext = path.rsplit(".", 1)[-1].lower() if "." in path.rsplit("/", 1)[-1] else ""
+    return ext in ("gif", "jpg", "jpeg", "png", "bin", "") and len(parts.query) >= 120

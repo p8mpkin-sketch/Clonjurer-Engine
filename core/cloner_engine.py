@@ -122,6 +122,7 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     WAAPI_BAKE_JS,
 )
 from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部 import 路径不变
+    beacon_like,
     ASSET_RESOURCE_TYPES,
     ASSET_SKIP_PREFIXES,
     BLOB_INLINE_MAX,
@@ -2393,6 +2394,7 @@ class ClonerEngine:
         # 单站修复回补耗时 180s(techcrunch); 回源失败的 URL 后续轮次不再重试
         deadline = time.monotonic() + config.BACKFILL_BUDGET
         dead = self._backfill_dead
+        skipped_beacons = 0
 
         def _fetch(url):
             if url in dead or time.monotonic() > deadline:
@@ -2420,15 +2422,40 @@ class ClonerEngine:
                 hashlib.sha256(content).hexdigest(), len(content))
             return True
 
+        todo = []
         for url in remote_missing:
             if not url.startswith(("http://", "https://")):
                 continue
             if url in results or any(v in results
                                      for v in self._variants(url, page_netloc)):
                 continue
+            if beacon_like(url):
+                skipped_beacons += 1
+                continue
+            todo.append(url)
+        # 第三方外联先并发直连预取(CDN 图片/字体/脚本不依赖会话 Cookie): 此前逐个走浏览器会话串行回源,
+        # 一个慢请求就吃掉整轮 20s 时限。直连失败的再按原路径走浏览器会话; 同源 URL 一律走会话。
+        pre = {}
+        third = [u for u in todo if urlsplit(u).netloc != page_netloc and u not in dead]
+        if third:
+            ex = ThreadPoolExecutor(max_workers=8, thread_name_prefix="backfill")
+            try:
+                futs = {ex.submit(self.downloader.fetch_direct, u, self._target): u for u in third}
+                done, _ = _wait_futures(list(futs), timeout=max(0.5, deadline - time.monotonic()))
+                for f in done:
+                    with suppress(Exception):
+                        pre[futs[f]] = self._normalize_out(f.result())
+            finally:
+                ex.shutdown(wait=False, cancel_futures=True)   # 没回来的直连不等, 不拖住本轮
+        for url in todo:
             if len(results) + len(new) >= config.MAX_ASSETS_PER_TASK + config.RENDER_ASSET_RESERVE:
                 break
-            out = _fetch(url)
+            out = pre.get(url)
+            if out is not None and not out["ok"] and "HTTP 4" not in str(out.get("error")):
+                dead.add(url)          # 第三方直连超时/连不上: 浏览器会话也救不回, 不再串行重试
+                continue
+            if out is None or not out["ok"]:
+                out = _fetch(url)
             if out is not None and out["ok"]:
                 new[out["url"]] = self._store(out)
                 self.log("SMART-DL", f"渲染缺失回补: {new[out['url']]['cat']}"
@@ -2536,6 +2563,8 @@ class ClonerEngine:
                 break
         if shadows:
             self.log("SMART-DL", f"影子落盘 {shadows} 个运行时相对路径资源")
+        if skipped_beacons:
+            self.log("SMART-DL", f"跳过 {skipped_beacons} 个埋点/广告信标形态的外联(不影响画面, 不回源)")
         if time.monotonic() > deadline:
             self.log("SMART-DL", f"修复回补达到时限({config.BACKFILL_BUDGET}s), 余下缺失本轮跳过")
         return new, shadows
