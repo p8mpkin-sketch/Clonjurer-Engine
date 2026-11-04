@@ -5648,7 +5648,7 @@ class ClonerEngine:
         return f'<style data-clone-calib>{band_wrap(css, self._band_floor)}</style>'
 
     def _put_calib(self, html: str, css: str) -> str:
-        return self._put_calib(html, css, self._band_floor)
+        return self._inject_calib(html, css, self._band_floor)
 
     def _band_floor_of(self, html: str, width: int = 0) -> int:
         """页面(内联样式 + 本地化后的外链样式表)里不超过 width(默认采集宽度)的最大宽度断点。"""

@@ -171,3 +171,13 @@ class LiveViewportScope(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CalibInjection(unittest.TestCase):
+    def test_put_calib_band_wrapped(self):
+        eng = ce.ClonerEngine.__new__(ce.ClonerEngine)
+        eng._band_floor = 1069
+        out = eng._put_calib("<html><head></head><body></body></html>", "a{b:c}")
+        self.assertIn("<style data-clone-calib>@media (min-width: 1069px){\na{b:c}\n}</style></head>", out)
+        eng._band_floor = 0
+        self.assertIn("<style data-clone-calib>a{b:c}</style>", eng._put_calib("<head></head>", "a{b:c}"))
