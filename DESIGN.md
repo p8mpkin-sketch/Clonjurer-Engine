@@ -112,3 +112,150 @@
 
 - 评分使用进程级小线程池：缩放结果最多 4 张、参考图中间量最多 2 份、校准统计最多 8 份，键都是文件内容 sha1；所有池任务都是叶子任务，调度器多 worker 并发评分不会死锁。
 - 本仓库仅保留通用引擎算法与本地测试能力，完整平台中的运营类功能不在本仓库范围内。
+
+---
+
+## 9. 通用 UI 重建引擎(L1/L2/L3)
+
+本章记录引擎从「Web 界面重建」演进为「通用 UI 重建」的架构基线。核心主张:**一切输入归一化为统一中间表示 UIR,一切输出目标从 UIR 渲染**;新能力只能以 InputAdapter / OutputTarget 形式进入,不另起炉灶,Web 侧能力零回归。
+
+### 9.1 定位与授权边界
+
+- **能力分层**:L1 截图/描述 → 可运行网站(生成式);L2 自有/授权 APK 的公开资源 → 跨平台应用(RN/Flutter);L3 桌面应用界面重建(Electron/Tauri,仅设计)。
+- **授权边界(硬约束)**:只重建界面「外观 + 交互意图」。L2 仅解析**自有/授权**安装包的**公开资源**(布局 XML / 图片 / 文案),**不触碰 DEX/so、不脱壳、不绕过任何保护机制**,不提取第三方程序的内部实现代码。遇加固/资源加密包即判「静态不可用」,退回「需运行期授权采集」建议,不做破解尝试。
+- **工程铁律(延续克隆侧)**:严禁 per-site/per-app 特判;确定性算法优先、LLM 兜底;评分 v3 口径不变,直接泛化为生成质量奖励函数;engine_bench 语料+留出集跑分不得下降。
+
+### 9.2 三个关键取舍
+
+1. **组件粒度 = 语义组件为主 + `box` 原语兜底(混合)**。语义节点(nav/hero/card/list/button/input…)做主干,保留能表达任意容器的 `box` 原语做逃生舱。Web 适配器可整树退化为 `box`→保证零回归;视觉侧只给得出区域+角色→用语义节点。评分 v3 是像素级奖励,粒度不必对齐源 DOM,只要渲染像素对得上——粒度自由度由此解锁。
+2. **样式表达 = 全局设计令牌表 + 每节点「类型化样式集(引用令牌 + 原值覆盖)」双层**。令牌(色板/字阶/间距/圆角/阴影)从输入量化抽取;节点样式是一组类型化属性(布局/盒/文本),默认引用令牌、允许原值覆盖。Web 适配器填原值→零回归;视觉适配器量化成令牌;Flutter 目标直接读类型化属性。这是同时伺候「Web 不回归」与「跨目标可渲染」的唯一表示。
+3. **交互建模 = 声明式「交互意图」闭集,按目标各自渲染**。组件挂一个小词表的交互意图(navigate/toggle/open-overlay/submit-form/input/countdown/carousel…),不含业务逻辑、不搬源 JS。每个 OutputTarget 把意图翻成自己的惯用法(Web 复用现成 `INTERACTION_SIM` 仿真层;Flutter 出 onPressed 桩)。与引擎「不赌离线重放 JS」哲学一致,且可从视觉推断。
+
+### 9.3 UIR JSON Schema(权威定义)
+
+顶层:
+```jsonc
+{
+  "uir_version": "1",
+  "meta": {
+    "source_kind": "web_dom|vision|description|apk_static|a11y",
+    "viewport": {"w": 1920, "h": 1080},
+    "title": "", "lang": "zh"
+  },
+  "tokens": {
+    "color":      {"c0": "#0b5fff", "c1": "#111827", "...": "..."},
+    "font":       {"f0": {"family": "Inter", "fallback": "sans-serif"}},
+    "text_style": {"t0": {"size": 16, "weight": 400, "line": 1.5, "color": "c1", "font": "f0", "align": "left"}},
+    "space":      {"s0": 0, "s1": 4, "s2": 8, "s3": 12, "s4": 16, "s5": 24, "s6": 32},
+    "radius":     {"r0": 0, "r1": 4, "r2": 8, "r3": 9999},
+    "shadow":     {"sh0": "0 1px 2px rgba(0,0,0,.08)"}
+  },
+  "root": { /* node */ }
+}
+```
+
+节点(node):
+```jsonc
+{
+  "id": "n1",
+  "role": "box|text|image|icon|button|input|nav|list|list_item|card|header|footer|hero|divider|overlay",
+  "layout": {"mode": "flow|flex|grid|stack|absolute", "direction": "row|col",
+             "justify": "start|center|end|between", "align": "start|center|end|stretch",
+             "gap": "s2", "wrap": false, "cols": 3},
+  "box": {"w": "100%|px|auto", "h": "auto", "pad": ["s2","s3","s2","s3"], "margin": ["s0"],
+          "bg": "c0", "radius": "r1", "border": {"w": 1, "color": "c1", "style": "solid"},
+          "shadow": "sh0", "opacity": 1.0,
+          "position": {"top": "px", "left": "px", "z": 10}  /* 仅 absolute */},
+  "text_ref": "t0",
+  "content": {"text": "登录", "src": "assets/img/hero.png", "alt": "", "icon": "search", "placeholder": "手机号"},
+  "intents": [{"on": "click|submit|input|change", "do": "navigate|toggle|open-overlay|submit-form|countdown|carousel-advance|none",
+               "target": "n9", "meta": {"seconds": 60}}],
+  "children": [ /* node, ... */ ],
+  "raw": {"tag": "div", "attrs": {"class": "x"}, "css": "/* 计算样式串 */"}
+}
+```
+
+字段语义:
+- **tokens**:全局去重的设计原子。节点样式字段(`bg`/`color`/`gap`/`radius`/`shadow`/`text_ref`)默认是令牌键(字符串引用);也可直接给原值(如 `"bg": "#fff"`、`"gap": 8`),渲染器两者都认——这就是「引用令牌 + 原值覆盖」双层。
+- **role**:语义角色,决定默认渲染惯用法与可用交互意图;`box` 是无语义容器(万能逃生舱)。
+- **layout / box**:类型化、目标无关的布局与盒模型;各 OutputTarget 自行翻译(Web→flexbox/grid;Flutter→Row/Column/Stack/Container)。
+- **intents**:交互意图闭集;无逻辑,只声明「控件用途」,由目标提供罐装安全行为。
+- **raw**:可选逃生舱。Web 适配器把克隆产物的 `tag/attrs/计算样式串` 原样塞入;HtmlCss 目标见 `raw` 即原样回吐 → 逐字节等价 → 零回归。非 Web 目标忽略 `raw`,只读类型化字段。
+
+校验:`core/uir/schema.json` 为权威 JSON Schema,`core/uir/model.py` 提供 dataclass 与 `validate()`(轻量自校验,不引第三方)。
+
+### 9.4 现有克隆 DOM → UIR 映射(证明 Web 平滑迁入)
+
+- Web 适配器 `web_dom.from_clone_workspace(ws) -> UIR` **不做语义识别**:把克隆产物(渲染后快照 DOM + CSSOM 固化样式)逐节点转 `role:"box"/"text"/"image"`,样式整串塞进 `raw.css`,标签与属性进 `raw.tag/attrs`。令牌表可空(或仅做无损色板抽取)。
+- `HtmlCssOutputTarget` 对带 `raw` 的节点原样回吐 `tag+attrs+css` → 产出与当前克隆直出**逐字节等价**。
+- **零回归闸门(可测试)**:同一克隆任务走两条路——「克隆直出 HTML」与「克隆→UIR→HtmlCss」——对同一对(原站图,产物图)用 `compute_visual_similarity` 打分必须**逐值一致**。此闸门进 `tests/`,保证 UIR 迁入不动 Web 分数。
+- 语义上卷(把 `box` 树归并为 nav/card/list)是**可选增强层**,仅生成侧(vision)启用,不改克隆直出路径,不进 `cloner_engine.py` 主流程。Web 适配器作为旁路模块存在,供迁移测试与未来统一导出。
+
+### 9.5 InputAdapter / OutputTarget 接口规范与挂载点
+
+```python
+# core/uir/registry.py
+class InputAdapter(Protocol):
+    kind: str                                   # "vision"/"description"/"web_dom"/"apk_static"/"a11y"
+    def to_uir(self, req: GenRequest, ctx: BuildContext) -> UIR: ...
+
+class OutputTarget(Protocol):
+    name: str                                   # "html_css"/"flutter"/...
+    shootable: bool                             # 产物能否被 Playwright 截图参与像素评分
+    def render(self, uir: UIR, out_dir: Path, ctx: BuildContext) -> RenderResult: ...
+
+@register_input("vision") / @register_output("html_css")   # 发现式注册, 新增能力零侵入
+```
+
+- **BuildContext**:时间预算 `(start, deadline)`、AI 配置(任务级 > 环境 > 默认,与克隆侧同源)、日志总线 `log(tag, msg)`、工作空间路径、评分函数句柄 `score(orig, clone, ...)`。
+- **三处挂载点**:
+  1. **调度器**(唯一侵入现有文件处,且极小):生成任务用 sentinel——`batch config.mode == "generate"` 或 `target_url` 以 `uir:` 前缀标识。`scheduler._worker` 一处分支:生成任务 → `generate.run_generation_task(task, db, bus, pool)`;克隆任务 → `ClonerEngine`(原样)。**不碰 `cloner_engine.py`**。
+  2. **时间预算**:复用 `REPAIR_TIME_BUDGET`/`AI_TIME_BUDGET` 同款阶梯;新增 `GENERATE_TIME_BUDGET` / `GENERATE_TARGET_SCORE`(≥85 即停)/ `GENERATE_MAX_ROUNDS`。快任务快停,慢任务限时收敛。
+  3. **评分闭环**:复用 `compute_visual_similarity`(口径与克隆侧**完全一致**)与 `pixel_calibrator.divergent_cells` 区域线索(同 AI vision repair),把差异喂回下一轮生成 prompt。
+
+### 9.6 L1 数据流(生成式「截图/描述转代码」)
+
+```
+输入(截图 bytes / 文字描述)
+  → VisionInputAdapter(多模态理解, 复用 OpenAI 兼容通道与 max_tokens 预算阶梯)
+  → UIR
+  → HtmlCssOutputTarget(UIR → HTML/CSS, 沿用 [[ ]] 定界符与内联 SVG 图标约定)
+  → Playwright 渲染 + 全页截图(复用 browser_pool)
+  → compute_visual_similarity(与参考图打分)
+  → 低于 GENERATE_TARGET_SCORE 则带差异线索迭代(≤ GENERATE_MAX_ROUNDS 或预算用尽)
+  → 产物接入现有预览(/preview/<task>)与导出(zip)
+```
+
+- **参考图口径**:截图输入时,参考图 = 输入截图(与克隆侧「原站图」同位);描述输入时无参考图,评分退化为「结构自洽 + 文本覆盖(描述关键词 F2)」,**报分单列**,不混入截图用例的保真均分。
+- **API**:`POST /api/v4/generate`(多部分或 JSON:`kind=screenshot|description`,附图或文本,可选 AI 覆盖)→ 建生成任务 → 走调度器 → 产物链路。
+- **前端**:生成入口沿用既有 UI 约定(`[[ ]]` 定界符、内联 SVG 图标)。
+
+### 9.7 L2 可行性(移动端,授权 APK)
+
+- **静态路线(D3 骨架先做)**:授权 APK 即标准 zip。`ApkStaticInputAdapter` 用 `zipfile` 读取并解析**公开资源**:`AndroidManifest.xml`(主题/屏幕/label)、`res/layout/*.xml`(控件树:LinearLayout/ConstraintLayout/TextView/ImageView/Button…)、`res/drawable*|mipmap*`(图片)、`res/values/strings.xml`(文案)→ UIR。Android 控件/属性映射到 UIR role/layout/box。
+  - **严格边界**:只读公开资源;**不碰 `classes*.dex`、`lib/*.so`,不脱壳,不解密**。二进制 AXML(编译后的 XML)用轻量只读解析(自研 AXML 解码或 `androguard` 只读模式,择一,避免重依赖)。资源被加密/加固 → 判「静态不可用」,输出「建议动态授权采集」,不做破解。
+- **动态路线(可行性,非本次实现)**:授权设备上 `uiautomator dump` 得 view hierarchy(类名/文本/bounds/资源 id)→ `A11yInputAdapter`(与桌面 a11y 同一适配器族)→ UIR。需真机/模拟器 + ADB,属**运行期授权采集**,不涉及静态破解。
+- **OutputTarget(Flutter)**:UIR → Flutter Widget 树(Scaffold/Column/Row/Container/Text/Image/ElevatedButton…)。D3 只做最小版:L1 级简单页能产出**可读** Widget 代码;构建/CI/签名列为缺口(见 9.10)。
+
+### 9.8 L3 路线设计(桌面端,仅设计)
+
+- **采集**:读授权桌面应用的操作系统可访问性树(macOS AX API / Windows UI Automation / Linux AT-SPI):角色、标题、bounds、值。a11y 树是 OS 提供的**公开无障碍接口**,非反编译。→ `A11yInputAdapter` → UIR。
+- **输出**:`ElectronOutputTarget`(Chromium + HTML,与 HtmlCss 目标高度复用:UIR→HTML 直接装进 Electron 壳)或 `TauriOutputTarget`(系统 WebView + Rust 壳,体积小但需 Rust 工具链)。
+- **边界**:仅重建外观与交互意图,不反编译目标程序。
+
+### 9.9 依赖 / 工期 / 风险
+
+| 能力 | 关键依赖 | 预估工期 | 主要风险 |
+|------|----------|----------|----------|
+| L1 截图/描述转代码 | 多模态模型(OpenAI 兼容,已有通道);Playwright(已有) | 本次 D2 | 模型质量决定上限;无 API Key 时整体不可用(自动跳过,与 AI 修复同) |
+| L2 静态 APK → UIR | `zipfile`(标准库)+ AXML 只读解析 | D3 骨架 + 后续 | 加固/资源加密包静态不可用(按边界退回,不破解);控件→UIR 映射覆盖度 |
+| L2 Flutter 产物 | Flutter SDK + Android SDK + 签名链(本仓库不含) | 骨架本次,构建后续 | 工具链/CI/签名是独立工程缺口 |
+| L2 动态路线 | 真机/模拟器 + ADB + uiautomator | 仅可行性 | 运行期授权采集,需设备 |
+| L3 桌面 | OS a11y API + Electron/Tauri | 仅设计 | 各 OS a11y 差异;Tauri 需 Rust |
+
+### 9.10 落地缺口清单(诚实声明)
+
+- **L1**:多模态模型质量是上限;无 API Key 时 L1 不可用(自动跳过,确定性克隆管线不受影响)。
+- **L2**:APK 构建需 Flutter SDK + Android SDK + 签名链,本仓库不含工具链;`OutputTarget(Flutter)` 只产出可读 Widget 代码,构建/CI/签名列为缺口。加固包静态路线不可用(边界内行为,非缺陷)。
+- **跨目标保真**:Flutter/桌面目标无法复用像素评分(需各自渲染器)。初期以「代码可读 + 可构建」为验收;像素评分(`compute_visual_similarity`)仍只覆盖 Web/Electron 的 HTML 渲染产物。
+- **语料纪律**:生成能力建独立小语料 + 留出集(5 截图 + 5 描述起步),报分按「克隆/生成」「语料内/留出集」分组,沿用 `_summary_one` 外包分组模式。
