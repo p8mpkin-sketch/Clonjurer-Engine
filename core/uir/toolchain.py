@@ -367,7 +367,11 @@ def build_android_shell(app_dir, log=_print, timeout=600, min_sdk=24) -> dict:
     if not sdk or not javac:
         return {"ok": False, "gap": "缺工具链: " + ", ".join(n for n, v in (("Android SDK", sdk), ("JDK(javac)", javac)) if not v)}
     bt = _latest(Path(sdk) / "build-tools", "*")
-    plat = _latest(Path(sdk) / "platforms", "android-*")
+    # 只取整数 API 的正式平台: android-37.2 这类小版本平台会让 targetSdk 写成 "37.2", aapt2 当成开发版平台,
+    # 正式系统安装时报 INSTALL_FAILED_OLDER_SDK(CI runner 实测); 没有整数平台时才退回任意平台
+    stable = [p for p in (Path(sdk) / "platforms").glob("android-*") if p.name.split("-", 1)[-1].isdigit()]
+    plat = max(stable, key=lambda p: int(p.name.split("-", 1)[-1])) if stable else None
+    plat = plat or _latest(Path(sdk) / "platforms", "android-*")
     if not bt or not plat or not (plat / "android.jar").is_file():
         return {"ok": False, "gap": "缺工具链: Android build-tools / platform(android.jar)"}
     tool = {n: str(bt / n) for n in ("aapt2", "d8", "zipalign", "apksigner")}
