@@ -145,6 +145,9 @@ class GenerateEngine:
                 ref_text = ""
         if ref_text:
             (self.ws / "original_text.txt").write_text(ref_text, encoding="utf-8")
+        # 参考文本读图是评分前置, 不占生成预算(长页切 6 段读一遍可达 2~3 分钟, 否则后续轮全部静默跳过模型)
+        ctx.deadline = time.monotonic() + budget
+        deadline = ctx.deadline
 
         report = {"kind": kind, "target": target_name, "tier": None, "rounds": [], "final_score": None,
                   "reference_text": ("provided" if self.spec.get("reference_text") else ("model-read" if ref_text else "none")),

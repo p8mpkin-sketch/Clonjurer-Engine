@@ -408,6 +408,8 @@ class ScreenshotAdapter:
         with Image.open(img) as im:
             W, H = im.size
         llm_mode = (req.meta or {}).get("llm_mode") or "skeleton_fill"
+        if ctx.ai_cfg and ctx.expired() and not req.hints.get("force_tier0"):
+            ctx.log("UIR", f"时间预算已耗尽(剩余 {ctx.remaining():.0f}s), 本轮跳过模型, 走确定性版面分析")
         if ctx.ai_cfg and not ctx.expired() and not req.hints.get("force_tier0") and llm_mode == "skeleton_fill":
             depth = int(req.hints.get("seg_depth") or settings.SEG_MAX_DEPTH)
             skel = segment(img, max_depth=depth, asset_dir=(ctx.ws / "static" / "img") if ctx.ws else None)
