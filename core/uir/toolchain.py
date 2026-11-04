@@ -1,0 +1,151 @@
+"""OutputTarget 产物 → 可分发二进制的显式构建步骤(APK / 桌面 .app / .exe)。
+
+render() 只做纯代码生成; 构建依赖仓库外的工具链(Flutter SDK + Android SDK、Node + Electron),
+这里只负责探测与调用, 缺工具链时返回 {"ok": False, "gap": ...} 而不是抛异常, 便于上层诚实报告。
+
+    python -m core.uir.toolchain apk <flutter_app 目录> [--release]
+    python -m core.uir.toolchain desktop <electron_app 目录> [--platform darwin,win32] [--arch arm64]
+"""
+import argparse
+import json
+import os
+import platform as _platform
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+_FLUTTER_CANDIDATES = ("/opt/homebrew/bin/flutter", "/usr/local/bin/flutter",
+                       "~/flutter/bin/flutter", "~/development/flutter/bin/flutter")
+_ANDROID_CANDIDATES = ("~/Library/Android/sdk", "/opt/homebrew/share/android-commandlinetools",
+                       "/usr/local/share/android-commandlinetools", "~/Android/Sdk")
+
+
+def _which(name, candidates=()):
+    p = shutil.which(name)
+    if p:
+        return p
+    for c in candidates:
+        c = os.path.expanduser(c)
+        if os.access(c, os.X_OK):
+            return c
+    return None
+
+
+def find_android_sdk():
+    for env in ("ANDROID_HOME", "ANDROID_SDK_ROOT"):
+        v = os.environ.get(env)
+        if v and Path(v, "platforms").is_dir():
+            return v
+    for c in _ANDROID_CANDIDATES:
+        c = os.path.expanduser(c)
+        if Path(c, "platforms").is_dir():
+            return c
+    return None
+
+
+def _run(cmd, cwd, env, log, timeout):
+    log(f"$ {' '.join(cmd)}")
+    t = time.monotonic()
+    p = subprocess.run(cmd, cwd=str(cwd), env=env, capture_output=True, text=True, timeout=timeout)
+    tail = (p.stdout + p.stderr).strip().splitlines()[-15:]
+    log(f"  → exit {p.returncode} ({time.monotonic() - t:.0f}s)")
+    return p.returncode, "\n".join(tail)
+
+
+def _print(msg):
+    print(msg, flush=True)
+
+
+def build_apk(app_dir, release=False, log=_print, timeout=1800) -> dict:
+    """Flutter 工程(FlutterTarget 产物)→ APK。补齐 android/ 平台骨架时不覆盖已生成的 lib/。"""
+    app_dir = Path(app_dir)
+    flutter = _which("flutter", _FLUTTER_CANDIDATES)
+    sdk = find_android_sdk()
+    missing = [n for n, v in (("Flutter SDK", flutter), ("Android SDK", sdk), ("JDK", _which("java"))) if not v]
+    if missing:
+        return {"ok": False, "gap": "缺工具链: " + ", ".join(missing)}
+    env = dict(os.environ, ANDROID_HOME=sdk, ANDROID_SDK_ROOT=sdk)
+    if not (app_dir / "android").is_dir():
+        # flutter create 对已存在的 lib/main.dart、pubspec.yaml 不覆盖(无 --overwrite)
+        rc, out = _run([flutter, "create", ".", "--platforms=android", "--project-name", "generated_ui",
+                        "--org", "com.clonjurer.generated"], app_dir, env, log, timeout)
+        if rc:
+            return {"ok": False, "gap": "flutter create 失败", "log": out}
+    rc, out = _run([flutter, "pub", "get"], app_dir, env, log, timeout)
+    if rc:
+        return {"ok": False, "gap": "flutter pub get 失败(网络/依赖)", "log": out}
+    rc, analyze = _run([flutter, "analyze", "--no-fatal-infos", "--no-fatal-warnings"], app_dir, env, log, timeout)
+    rc_t, test = _run([flutter, "test"], app_dir, env, log, timeout) if (app_dir / "test").is_dir() else (None, "")
+    mode = "release" if release else "debug"
+    rc_b, out = _run([flutter, "build", "apk", f"--{mode}"], app_dir, env, log, timeout)
+    apk = app_dir / "build" / "app" / "outputs" / "flutter-apk" / f"app-{mode}.apk"
+    if rc_b or not apk.is_file():
+        return {"ok": False, "gap": f"flutter build apk --{mode} 失败", "log": out}
+    signing = "debug keystore(Flutter 模板默认)"  # 正式发布需自备 keystore + key.properties
+    return {"ok": True, "artifact": str(apk), "bytes": apk.stat().st_size, "mode": mode,
+            "analyze_ok": rc == 0, "analyze_tail": analyze, "test_ok": (rc_t == 0) if rc_t is not None else None,
+            "test_tail": test, "signing": signing}
+
+
+def build_desktop(app_dir, platforms=None, arch=None, log=_print, timeout=1800) -> dict:
+    """Electron 工程(ElectronTarget 产物)→ 各平台可执行包(macOS .app / Windows .exe / Linux)。"""
+    app_dir = Path(app_dir)
+    npm, npx = _which("npm"), _which("npx")
+    if not (npm and npx):
+        return {"ok": False, "gap": "缺工具链: Node.js/npm"}
+    arch_given = arch
+    arch = arch or ("arm64" if _platform.machine() in ("arm64", "aarch64") else "x64")
+    host = {"Darwin": "darwin", "Windows": "win32"}.get(_platform.system(), "linux")
+    platforms = platforms or [host]
+    if not (app_dir / "node_modules" / "electron").is_dir():
+        rc, out = _run([npm, "install", "--no-audit", "--no-fund"], app_dir, os.environ.copy(), log, timeout)
+        if rc:
+            return {"ok": False, "gap": "npm install 失败(网络/镜像)", "log": out}
+    built, fails = [], {}
+    for plat in platforms:
+        # 交叉打包(如 macOS 上出 Windows 包)默认 x64: 目标机器主流架构, 而不是宿主架构
+        a = arch_given or (arch if plat == host else "x64")
+        rc, out = _run([npx, "--no-install", "@electron/packager", ".", f"--platform={plat}", f"--arch={a}",
+                        "--out=dist", "--overwrite", "--ignore=^/dist"], app_dir, os.environ.copy(), log, timeout)
+        if rc:
+            fails[plat] = out
+            continue
+        for d in sorted((app_dir / "dist").glob(f"*-{plat}-{a}")):
+            exe = None
+            if plat == "darwin":
+                exe = next(d.glob("*.app"), None)
+            elif plat == "win32":
+                exe = next((p for p in d.glob("*.exe") if "squirrel" not in p.name.lower()), None)
+            else:
+                exe = next((p for p in d.iterdir() if p.is_file() and os.access(p, os.X_OK)
+                            and p.suffix == "" and not p.name.startswith("chrome")), None)
+            size = sum(f.stat().st_size for f in d.rglob("*") if f.is_file() and not f.is_symlink())
+            built.append({"platform": plat, "arch": a, "dir": str(d), "executable": str(exe) if exe else None,
+                          "exe_bytes": (exe.stat().st_size if exe and exe.is_file() else None), "dir_bytes": size})
+    return {"ok": bool(built) and not fails, "artifacts": built, "failures": fails,
+            "signing": "未签名(macOS 未公证 / Windows 无 Authenticode)"}
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="python -m core.uir.toolchain")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    a = sub.add_parser("apk")
+    a.add_argument("app_dir")
+    a.add_argument("--release", action="store_true")
+    d = sub.add_parser("desktop")
+    d.add_argument("app_dir")
+    d.add_argument("--platform", default="")
+    d.add_argument("--arch", default="")
+    args = ap.parse_args(argv)
+    if args.cmd == "apk":
+        res = build_apk(args.app_dir, release=args.release)
+    else:
+        res = build_desktop(args.app_dir, [p for p in args.platform.split(",") if p] or None, args.arch or None)
+    print(json.dumps(res, ensure_ascii=False, indent=2))
+    return 0 if res.get("ok") else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

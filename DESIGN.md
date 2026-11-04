@@ -274,3 +274,34 @@ class OutputTarget(Protocol):
 4. **L2 动态路线 / L3**: `a11y` 适配器(uiautomator 界面树 / macOS AX / UIA)未实现, 仅设计。
 5. **跨目标像素评分**: Flutter/桌面产物无渲染器接入, 仅「代码可读」验收。
 6. **API**: `POST /api/v4/generate` 目前接受 screenshot/description; `apk_static` 走离线调用(`GenRequest.source_path`), 上传入口与授权声明留给平台侧。
+
+### 9.12 真实构建实录: APK 与桌面二进制(2026-11-05)
+
+**结论**: 引擎内已能从 UIR 产出**真实 APK** 与**真实桌面二进制**(macOS .app / Windows .exe)。构建是显式步骤 `core/uir/toolchain.py`, `render()` 仍是纯代码生成、不联网不调工具链; 缺工具链时返回 `{"ok": false, "gap": ...}` 而非抛异常。
+
+**新增**:
+- `OutputTarget("electron")`(`core/uir/targets/electron.py`): 复用 `html_css`, 同一份 index.html/app.css 原样装进 Electron 壳(逐字节相同, 有测试闸门), 因此桌面产物与 Web 同为 Chromium 渲染, `shootable=True`, 像素评分直接覆盖; `main.js` 安全默认(contextIsolation / sandbox / 无 nodeIntegration, 外链交系统浏览器, 不在应用内导航外站); `package.json` 钉死 electron 45.2.2 + @electron/packager 20.3.0; 窗口取 UIR 视口。
+- `toolchain.build_apk()`: `flutter create`(只补 android/ 骨架, 不覆盖生成的 lib/) → `pub get` → `analyze` → `test` → `build apk`。
+- `toolchain.build_desktop()`: `npm install` → `@electron/packager` 按平台打包; 交叉打包默认 x64。
+- Flutter 目标随产物带 `test/widget_test.dart`(冒烟: 能构建出 Scaffold)与无 include 的 `analysis_options.yaml`: 否则 `flutter create` 模板测试引用不存在的 `MyApp`、分析配置引用未声明的 `flutter_lints`, analyze 误报 18 个错误。
+- Flutter 目标两处通用缺陷修复(真机截图发现): ① 按钮的底色/圆角/内边距外包在 Container 装饰上, 渲染成「蓝色块里套一个默认按钮」, 现并入 `ElevatedButton.styleFrom`; ② 内边距 2/3 值未按 CSS 简写展开(`[12,24]` 被展开成上 12 其余 24), 现按 1/2/3/4 值规则展开。
+
+**实测**(本机 macOS arm64, 样本 = 描述适配器 Tier 0 生成的登录页 UIR, 非第三方应用):
+
+| 产物 | 大小 | 验证 |
+|------|------|------|
+| `app-release.apk`(arm64-v8a / armeabi-v7a / x86_64, minSdk 由 Flutter 模板定, compileSdk 36) | 47.5 MB(45.3 MiB) | analyze 无问题、flutter test 通过、apksigner 校验通过; 已在 API 25 arm64 模拟器安装启动, 截图与 Electron 渲染版式一致, 验证后已卸载 |
+| macOS `Clonjurer.app`(arm64, 未签名) | 257 MB(目录) | 本机启动, 经 CDP 截图确认页面完整渲染 |
+| Windows `Clonjurer.exe`(x64, PE32+ GUI) | 主程序 249 MB / 目录 357 MB | 在 macOS 上交叉打包; `file` 确认 PE32+ x86-64; **未在 Windows 实机运行** |
+
+首次 APK 构建 245s(Gradle 冷启动拉依赖), 之后 17s; Electron 每平台约 20s。
+
+**本机为此安装的工具链(均在仓库外)**: Flutter 3.47.9(`brew install --cask flutter`, 已关闭 flutter/dart 遥测); Android SDK `platforms;android-36` + `build-tools;36.0.0`(sdkmanager, 使用本机已接受的 android-sdk-license, 未接受新条款); 既有: Android cmdline-tools(`/opt/homebrew/share/android-commandlinetools`)、OpenJDK 21、Node 26 / npm 11。Electron 运行时在 `npm install` 时下载到生成工程的 node_modules。
+
+**缺口(更新 §9.11 第 2/4/5 条)**:
+1. **签名**: APK 用 Flutter 模板默认的 debug keystore 签名(release 构建亦然), 上架需自备 keystore + `key.properties`; macOS 未签名未公证(Gatekeeper 会拦截他人机器上的首次打开), Windows 无 Authenticode。
+2. **安装器/体积**: 只出可执行目录, 未做 dmg / msi / nsis 安装器; APK 未按 ABI 拆分(`--split-per-abi` 可降到约 1/3); Electron 包体约 250–370 MB, 若在意体积需 Tauri(系统 WebView, 需 Rust 工具链, 未做)。
+3. **CI**: 构建只在本机跑通, 没有 CI 作业; 首次构建需联网拉 Gradle/pub/npm 依赖。
+4. **跨目标评分**: Electron 产物被像素评分覆盖(同一 HTML); Flutter 渲染仍无评分接入, 现阶段验收为 analyze + test + 可构建 + 模拟器截图人工核对。
+5. **Windows 实机**: .exe 只验证了文件格式, 未在 Windows 上运行。
+6. **L3 采集侧**: 桌面 a11y 输入适配器(macOS AX / UIA)仍未实现, 本次只落地输出侧。

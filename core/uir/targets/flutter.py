@@ -7,7 +7,8 @@
   input→TextField, divider→Divider, list→ListView/GridView, header→AppBar 风格 Container;
 - 交互意图 → onPressed 桩(submit-form 弹 SnackBar, navigate/toggle 为 TODO 注释), 不含业务逻辑;
 - raw 节点(Web 逃生舱)在 Flutter 侧忽略, 只读类型化字段。
-不可被 Playwright 截图(shootable=False): 像素评分不覆盖此目标, 验收口径为「代码可读 + flutter analyze 可过」(工具链为缺口)。
+不可被 Playwright 截图(shootable=False): 像素评分不覆盖此目标, 验收口径为「flutter analyze 无问题 + flutter test 通过 + 可构建 APK」
+(构建见 core/uir/toolchain.py, 工具链在仓库外)。
 """
 import re
 from pathlib import Path
@@ -65,10 +66,10 @@ class _Gen:
             return None
         if not isinstance(vals, (list, tuple)):
             vals = [vals]
-        p = [self.px(x) or 0.0 for x in vals[:4]]
-        while len(p) < 4:
-            p.append(p[-1] if p else 0.0)
-        t, r, b, l = p
+        p = [self.px(x) or 0.0 for x in vals[:4]] or [0.0]
+        # CSS 简写展开: 1 值=四边, 2 值=上下/左右, 3 值=上/左右/下, 4 值=上右下左
+        t, r, b, l = {1: lambda v: (v[0],) * 4, 2: lambda v: (v[0], v[1], v[0], v[1]),
+                      3: lambda v: (v[0], v[1], v[2], v[1]), 4: lambda v: tuple(v)}[len(p)](p)
         if t == r == b == l:
             return f"const EdgeInsets.all({t:g})"
         return f"const EdgeInsets.fromLTRB({l:g}, {t:g}, {r:g}, {b:g})"
@@ -134,9 +135,22 @@ class _Gen:
             if role == "link":
                 w = f"TextButton(onPressed: () {{ {body} }}, child: {label})"
             else:
-                bg = self.color(B.get("bg")) if B.get("bg") else None
-                style = f", style: ElevatedButton.styleFrom(backgroundColor: {bg})" if bg else ""
+                # 底色/圆角/内边距/文字色并入按钮自身样式, 不再外包 Container 装饰(否则出现「色块里套一个默认按钮」)
+                st = self.text_style(node)
+                if st:
+                    label = f"Text({_dart_str(c.get('text', ''))}, style: {st})"
+                sty = []
+                if B.get("bg"):
+                    sty.append(f"backgroundColor: {self.color(B['bg'])}")
+                r = self.px(B.get("radius"), "radius") if B.get("radius") is not None else None
+                if r is not None:
+                    sty.append(f"shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular({min(r, 999):g}))")
+                pad = self.sides(B.get("pad"))
+                if pad:
+                    sty.append(f"padding: {pad}")
+                style = f", style: ElevatedButton.styleFrom({', '.join(sty)})" if sty else ""
                 w = f"ElevatedButton(onPressed: () {{ {body} }}{style}, child: {label})"
+                B = {k: v for k, v in B.items() if k not in ("bg", "radius", "pad")}
         else:
             kids = [self.widget(ch, depth + 1) for ch in node.children]
             if c.get("text"):
@@ -259,8 +273,31 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
 flutter:
   uses-material-design: true
+"""
+
+# 自带冒烟测试与分析配置: `flutter create .` 补骨架时不覆盖已存在文件, 否则模板的 widget_test.dart
+# 引用不存在的 MyApp、analysis_options 引用未声明的 flutter_lints, 会让 flutter analyze 误报失败。
+_WIDGET_TEST = """// 冒烟测试: 生成的界面能构建出 Scaffold 且无异常。
+import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/material.dart';
+import 'package:generated_ui/main.dart';
+
+void main() {
+  testWidgets('generated page builds', (WidgetTester tester) async {
+    await tester.pumpWidget(const GeneratedApp());
+    expect(find.byType(Scaffold), findsOneWidget);
+  });
+}
+"""
+
+_ANALYSIS_OPTIONS = """# 生成工程不依赖 flutter_lints(免联网拉包), 只用 Dart 默认分析规则。
+analyzer:
+  exclude: [build/**]
 """
 
 _README = """# 生成的 Flutter 工程(最小版)
@@ -273,6 +310,8 @@ flutter pub get
 flutter analyze
 flutter build apk --debug              # 发布包需配置签名(key.properties / keystore)
 ```
+
+或在引擎侧调用 `python -m core.uir.toolchain apk <本目录> [--release]`(补骨架 → pub get → analyze → build)。
 
 落地缺口(见 DESIGN.md §9.11): 工具链/构建 CI/签名链、资源(drawable)搬运、像素评分不覆盖 Flutter 渲染。
 """
@@ -292,6 +331,9 @@ class FlutterTarget:
         (out / "lib" / "theme.dart").write_text(g.theme_dart(), encoding="utf-8")
         (out / "pubspec.yaml").write_text(_PUBSPEC, encoding="utf-8")
         (out / "README.md").write_text(_README, encoding="utf-8")
+        (out / "analysis_options.yaml").write_text(_ANALYSIS_OPTIONS, encoding="utf-8")
+        (out / "test").mkdir(exist_ok=True)
+        (out / "test" / "widget_test.dart").write_text(_WIDGET_TEST, encoding="utf-8")
         (Path(out_dir) / "uir.json").write_text(uir.to_json(indent=2), encoding="utf-8")
         return RenderResult(entry_file=out / "lib" / "main.dart", shootable=False,
                             assets=["flutter_app/lib/theme.dart", "flutter_app/pubspec.yaml", "uir.json"],

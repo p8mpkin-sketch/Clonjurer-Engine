@@ -197,6 +197,19 @@ class FlutterTargetGuards(unittest.TestCase):
             self.assertEqual(main.count("("), main.count(")"))   # 括号配对: 可读代码的最低闸门
             self.assertEqual(main.count("["), main.count("]"))
 
+    def test_button_style_and_css_shorthand(self):
+        """按钮底色/圆角/内边距并入 styleFrom(不外包 Container 色块); 2 值内边距按 CSS 简写展开(上下/左右)。"""
+        u = build_from_description("蓝色登录页, 品牌叫 云帆")
+        with tempfile.TemporaryDirectory() as d:
+            main = FlutterTarget().render(u, Path(d)).entry_file.read_text(encoding="utf-8")
+            line = next(l for l in main.splitlines() if "ElevatedButton(" in l)
+            self.assertTrue(line.strip().startswith("ElevatedButton("), line)
+            self.assertIn("backgroundColor:", line)
+            self.assertIn("RoundedRectangleBorder(", line)
+            self.assertIn("EdgeInsets.fromLTRB(24, 12, 24, 12)", line)
+            self.assertTrue((Path(d) / "flutter_app/test/widget_test.dart").is_file())
+            self.assertNotIn("include:", (Path(d) / "flutter_app/analysis_options.yaml").read_text(encoding="utf-8"))
+
     def test_apk_uir_to_flutter(self):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "app.zip"
