@@ -231,3 +231,63 @@ class LoadTimeWidthStyles(unittest.TestCase):
                 self.assertEqual(page.evaluate("getComputedStyle(document.getElementById('c')).float"), "none")
             finally:
                 b.close()
+
+
+VARIANT_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<style>body{margin:0}</style></head><body><header>站头</header>
+<main id="m"></main>
+<script>
+var m = document.getElementById('m');
+var css = document.createElement('style');
+if (innerWidth >= 1000) {
+  m.innerHTML = '<div class="cards"><div class="card">甲</div><div class="card">乙</div><div class="card">丙</div></div>';
+} else {
+  css.textContent = '.slider{height:40px;background:rgb(1,2,3)}';
+  m.innerHTML = '<section class="slider"><ul><li>甲</li><li>乙</li><li>丙</li></ul></section>';
+}
+document.head.appendChild(css);
+</script></body></html>"""
+
+
+class _FakeEngine:
+    cfg = {}
+    log = staticmethod(lambda *a: None)
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class DomVariants(unittest.TestCase):
+    def test_narrow_structure_inserted_and_switched(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 1440, "height": 800})
+                page.set_content(VARIANT_PAGE)
+                eng = _FakeEngine()
+                eng._cv_pages = []
+                loads = {}
+                for tag, w in (("t", 768), ("m", 390)):
+                    p2 = b.new_page(viewport={"width": w, "height": 800})
+                    p2.set_content(VARIANT_PAGE)
+                    eng._cv_pages.append((tag, p2))
+                    loads[tag] = p2.evaluate(ce.CV_PATHS_JS)
+                n = ce.ClonerEngine._inject_dom_variants(eng, page, loads)
+                self.assertEqual(n, 1)                       # 平板/手机同一版, 合并成一个
+                self.assertFalse(page.evaluate("document.querySelector('.slider').checkVisibility()"))
+                self.assertEqual(page.evaluate("document.querySelector('main').getAttribute('data-cv-vp')"), "d")
+                html = page.content()
+            finally:
+                b.close()
+            html = ce.scope_viewport_css(html, 1000, 0)
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 390, "height": 800})
+                page.set_content(html.replace("<script>", "<script type='x'>"))
+                self.assertFalse(page.evaluate("document.querySelector('.cards').checkVisibility()"))
+                self.assertEqual(page.evaluate("getComputedStyle(document.querySelector('.slider')).backgroundColor"),
+                                 "rgb(1, 2, 3)")                # 窄屏运行时样式随变体带上
+                page.set_viewport_size({"width": 1440, "height": 800})
+                self.assertFalse(page.evaluate("document.querySelector('.slider').checkVisibility()"))
+                self.assertTrue(page.evaluate("document.querySelector('.cards').checkVisibility()"))
+            finally:
+                b.close()

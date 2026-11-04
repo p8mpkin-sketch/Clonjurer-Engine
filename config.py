@@ -126,6 +126,8 @@ MAX_FRAME_DEPTH = 2            # iframe 递归深度上限(主页面为第 0 层
 RENDER_REPAIR_ROUNDS = 6       # 视觉修复迭代轮数上限
 REPAIR_MIN_GAIN = 0.5          # 修复循环收敛判定: 缺失集合不变且分数涨幅低于此值即停
 FIDELITY_SKIP_ABOVE = 97.0    # 交互轨达到此分时不渲染保真轨(头条取优不受影响)
+VIEWPORT_VARIANT_MAX = 40      # 窄屏 DOM 变体: 结构不同的子树超过此数视为内容随机(推荐流), 不注入
+VIEWPORT_VARIANT_BYTES = 3_000_000   # 窄屏变体 HTML / 附带样式各自上限
 STATIC_TRACK_MARGIN = 5.0     # 保真轨领先交互轨达此分差时, 试做"静态版"(剥离应用脚本)交付物
                               # 并实测; 静态版也领先交互轨此分差才设为默认预览/导出
 BACKFILL_BUDGET = 20          # 单轮渲染缺失回补的回源时限(秒)

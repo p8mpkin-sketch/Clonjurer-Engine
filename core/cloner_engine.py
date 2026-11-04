@@ -1017,8 +1017,127 @@ CV_RECORD_JS = CV_RECORD_JS.replace("__CV_PATH__", CV_PATH_FN)
 CV_PATHS_JS = r"""() => {
   const out = {}, pathOf = """ + CV_PATH_FN + r""";
   const els = Array.from(document.body ? document.body.querySelectorAll('*') : []).slice(0, 20000);
-  for (const e of els) out[pathOf(e)] = [e.tagName, String(e.className && e.className.baseVal !== undefined ? e.className.baseVal : e.className || ''), e.getAttribute('style') || ''];
+  for (const e of els) out[pathOf(e)] = [e.tagName, String(e.className && e.className.baseVal !== undefined ? e.className.baseVal : e.className || ''), e.getAttribute('style') || '',
+    Array.from(e.children, c => c.tagName).join(',').slice(0, 400)];
   return out;
+}"""
+
+# ---- 窄屏 DOM 变体 ----
+# React/Vue 站按断点渲染不同的 DOM(ant.design 手机宽新闻卡片换成单卡轮播): 样式怎么
+# 改都救不回结构。窄屏首载页与主页按结构路径对齐, 子元素结构不同的最上层子树把窄屏版
+# 也序列化进克隆, 两版各打 data-cv-vp 视口令牌, 由分视口样式表只显示当前视口那一版。
+ALT_EXTRACT_JS = r"""(paths) => {
+  const resolve = (path) => {
+    let e = document.body;
+    for (const seg of path ? path.split('>') : []) {
+      const [tag, n] = seg.split(':');
+      let k = 0, hit = null;
+      for (const c of e.children) if (c.tagName.toLowerCase() === tag && ++k === +n) { hit = c; break; }
+      if (!hit) return null;
+      e = hit;
+    }
+    return e;
+  };
+  const out = {};
+  for (const p of paths) {
+    const el = resolve(p);
+    if (!el) continue;
+    const c = el.cloneNode(true);
+    c.querySelectorAll('script,noscript').forEach(x => x.remove());
+    c.querySelectorAll('[data-src],[data-original],[data-lazy-src]').forEach(x => {
+      const v = x.getAttribute('data-src') || x.getAttribute('data-original') || x.getAttribute('data-lazy-src');
+      if (v && /^(IMG|SOURCE|IFRAME|VIDEO)$/.test(x.tagName) && !x.getAttribute('src')) x.setAttribute('src', v);
+    });
+    c.querySelectorAll('img[loading]').forEach(x => x.removeAttribute('loading'));
+    // 窄屏页没滚动过: 滚动入场库的初始隐藏态与主页 DEEP_FREEZE 同口径显形
+    c.querySelectorAll('[data-aos], .wow, [data-scroll], [data-sr-id], [data-reveal], [data-animate]').forEach(x => {
+      x.style.setProperty('opacity', '1', 'important');
+      x.style.setProperty('visibility', 'visible', 'important');
+      x.style.setProperty('transform', 'none', 'important');
+    });
+    // 相对地址按窄屏页绝对化(插入主页后基准相同, 但防 <base> 差异)
+    c.querySelectorAll('[src],[href],[srcset],[poster]').forEach(x => {
+      for (const a of ['src', 'href', 'poster']) {
+        const v = x.getAttribute(a);
+        if (v && !/^(data:|blob:|#|javascript:|mailto:|tel:)/i.test(v)) { try { x.setAttribute(a, new URL(v, document.baseURI).href); } catch (e) {} }
+      }
+    });
+    out[p] = [c.outerHTML, (el.innerText || '').trim().length, el.getElementsByTagName('*').length];
+  }
+  return out;
+}"""
+
+# 主页同路径子树的体量(文本长度/元素数), 判断窄屏版是"换了结构"还是"还没加载完"
+SUBTREE_SIZE_JS = r"""(paths) => {
+  const resolve = (path) => {
+    let e = document.body;
+    for (const seg of path ? path.split('>') : []) {
+      const [tag, n] = seg.split(':');
+      let k = 0, hit = null;
+      for (const c of e.children) if (c.tagName.toLowerCase() === tag && ++k === +n) { hit = c; break; }
+      if (!hit) return null;
+      e = hit;
+    }
+    return e;
+  };
+  const out = {};
+  for (const p of paths) { const el = resolve(p); if (el) out[p] = [(el.innerText || '').trim().length, el.getElementsByTagName('*').length]; }
+  return out;
+}"""
+
+# 运行时样式文本(<style> 与文档级构造样式表): 窄屏版组件的 CSS-in-JS 样式只在窄屏页里有
+STYLE_TEXTS_JS = r"""() => {
+  const out = [];
+  const txt = (sheet) => { try { let t = ''; for (const r of sheet.cssRules) t += r.cssText + '\n'; return t; } catch (e) { return ''; } };
+  for (const st of document.querySelectorAll('style')) {
+    if (st.hasAttribute('data-clone-bake') || st.hasAttribute('data-clone-vp') || st.hasAttribute('data-cssom')) continue;
+    const t = st.sheet ? txt(st.sheet) : (st.textContent || '');
+    if (t.trim()) out.push(t);
+  }
+  try { for (const sh of document.adoptedStyleSheets || []) { const t = txt(sh); if (t.trim()) out.push(t); } } catch (e) {}
+  return out;
+}"""
+
+ALT_INJECT_JS = r"""({items, css}) => {
+  const resolve = (path) => {
+    let e = document.body;
+    for (const seg of path ? path.split('>') : []) {
+      const [tag, n] = seg.split(':');
+      let k = 0, hit = null;
+      for (const c of e.children) if (c.tagName.toLowerCase() === tag && ++k === +n) { hit = c; break; }
+      if (!hit) return null;
+      e = hit;
+    }
+    return e;
+  };
+  // 先全部解析出主页元素再插入(插入会改变后续兄弟的同类序号)
+  const plan = items.map(it => [resolve(it.path), it]).filter(x => x[0]);
+  let n = 0;
+  for (const [el, it] of plan) {
+    el.setAttribute('data-cv-vp', it.own);
+    let anchor = el;
+    for (const alt of it.alts) {
+      const t = document.createElement('template');
+      t.innerHTML = alt.html;
+      const node = t.content.firstElementChild;
+      if (!node) continue;
+      node.setAttribute('data-cv-vp', alt.bands);
+      anchor.after(node);
+      anchor = node;
+      n++;
+    }
+  }
+  if (n) {
+    const st = document.createElement('style');
+    st.setAttribute('data-clone-vp', 'alt');
+    const hide = (b) => '[data-cv-vp]:not([data-cv-vp~="' + b + '"]){display:none!important}';
+    st.textContent = '@media all/*cv-d*/{' + hide('d') + '}\n'
+      + '@media (min-width: 99999px)/*cv-t*/{' + hide('t') + '}\n'
+      + '@media (min-width: 99999px)/*cv-m*/{' + hide('m') + '}\n'
+      + (css ? '@media (min-width: 99999px)/*cv-x*/{\n' + css + '\n}' : '');
+    (document.head || document.documentElement).appendChild(st);
+  }
+  return n;
 }"""
 
 CV_QUIET_JS = r"""
@@ -1129,7 +1248,7 @@ CV_EMIT_JS = r"""
 }
 """
 
-_CV_BAND_RE = re.compile(r"@media [^{]*?/\*cv-([dtm])\*/\{")
+_CV_BAND_RE = re.compile(r"@media [^{]*?/\*cv-([dtmx])\*/\{")
 
 
 def scope_viewport_css(html: str, floor_d: int, floor_t: int) -> str:
@@ -1140,7 +1259,8 @@ def scope_viewport_css(html: str, floor_d: int, floor_t: int) -> str:
     st = floor_t if 390 < floor_t <= 768 else 600
     conds = {"d": f"@media (min-width: {sd}px)/*cv-d*/{{",
              "t": f"@media (min-width: {st}px) and (max-width: {sd - 0.02:.2f}px)/*cv-t*/{{",
-             "m": f"@media (max-width: {st - 0.02:.2f}px)/*cv-m*/{{"}
+             "m": f"@media (max-width: {st - 0.02:.2f}px)/*cv-m*/{{",
+             "x": f"@media (max-width: {sd - 0.02:.2f}px)/*cv-x*/{{"}
     return _CV_BAND_RE.sub(lambda m: conds[m.group(1)], html)
 
 
@@ -4294,12 +4414,69 @@ class ClonerEngine:
                 p2.evaluate(CV_QUIET_JS, 300)
                 loads[tag] = p2.evaluate(CV_PATHS_JS) or {}
             except Exception:
-                pass
-            finally:
                 with suppress(Exception):
                     p2.close()
-        self._cv_pages = []
         return loads
+
+    def _close_narrow_loads(self):
+        for _tag, p2 in getattr(self, "_cv_pages", []) or []:
+            with suppress(Exception):
+                p2.close()
+        self._cv_pages = []
+
+    def _inject_dom_variants(self, page, loads):
+        """窄屏 DOM 变体(见 ALT_EXTRACT_JS): 结构不同的最上层子树把窄屏版并列插入主页。"""
+        if not loads or not self.cfg.get("viewport_variants", True):
+            return 0
+        main = page.evaluate(CV_PATHS_JS) or {}
+        pages = dict(getattr(self, "_cv_pages", []) or [])
+        variants = {}                      # path -> {tag: html}
+        for tag, other in loads.items():
+            diff = sorted(p for p, v in main.items() if p and p in other
+                          and other[p][0] == v[0] and other[p][3] != v[3])
+            top = []
+            for p in diff:
+                if not any(p.startswith(q + ">") for q in top):
+                    top.append(p)
+            if not top or len(top) > config.VIEWPORT_VARIANT_MAX or tag not in pages:
+                continue
+            with suppress(Exception):
+                htmls = pages[tag].evaluate(ALT_EXTRACT_JS, top) or {}
+                sizes = page.evaluate(SUBTREE_SIZE_JS, list(htmls))
+                for p, (h, alt_text, alt_n) in htmls.items():
+                    main_text, main_n = sizes.get(p, (0, 0))
+                    # 窄屏版明显"更空": 多半是异步内容(赞助位/推荐流)还没到, 不是换了结构
+                    if alt_text < 0.5 * main_text or alt_n < 0.3 * main_n:
+                        continue
+                    variants.setdefault(p, {})[tag] = h
+        if not variants:
+            return 0
+        total = sum(len(h) for v in variants.values() for h in v.values())
+        if total > config.VIEWPORT_VARIANT_BYTES:
+            self.log("RENDER", f"窄屏 DOM 变体 {len(variants)} 处共 {total // 1024}KB 超上限, 不注入")
+            return 0
+        items = []
+        for p, v in variants.items():
+            alts = []
+            if len(v) == 2 and v.get("t") == v.get("m"):
+                alts.append({"bands": "t m", "html": v["t"]})
+            else:
+                alts += [{"bands": t, "html": h} for t, h in v.items()]
+            own = " ".join(["d"] + [t for t in ("t", "m") if t not in v])
+            items.append({"path": p, "own": own, "alts": alts})
+        css_main = set(page.evaluate(STYLE_TEXTS_JS) or [])
+        extra = []
+        for tag in {t for v in variants.values() for t in v}:
+            with suppress(Exception):
+                extra += [t for t in (pages[tag].evaluate(STYLE_TEXTS_JS) or []) if t not in css_main]
+        css = "\n".join(dict.fromkeys(extra))[:config.VIEWPORT_VARIANT_BYTES]
+        if re.search(r"</style", css, re.I):
+            css = ""
+        n = page.evaluate(ALT_INJECT_JS, {"items": items, "css": css})
+        if n:
+            self.log("RENDER", f"窄屏 DOM 变体: {len(items)} 处子树结构随视口不同, 并列插入 {n} 个窄屏版"
+                               f"({total // 1024}KB, 附窄屏运行时样式 {len(css) // 1024}KB)")
+        return n
 
     def _bg_freeze_css(self):
         """A1-lite.2 背景色权威固化: 原站截图四边条带采样主背景色。
@@ -4634,10 +4811,17 @@ class ClonerEngine:
                                    f" / 位移 {fl.get('shift', 0)}(采集视口下不变, 换视口随容器伸缩)")
         with suppress(Exception):
             loads = self._collect_narrow_loads()
-            cv = page.evaluate(CV_EMIT_JS, loads) or {}
-            if cv.get("els"):
-                self.log("RENDER", f"多视口内联样式: {cv['els']} 个元素, {cv.get('vw', 0)} 个按视口宽比例改写为 vw,"
-                                   f" {cv.get('banded', 0)} 个移入分视口样式表(其中窄屏首载补采 {cv.get('reload', 0)})")
+            try:
+                cv = page.evaluate(CV_EMIT_JS, loads) or {}
+                if cv.get("els"):
+                    self.log("RENDER", f"多视口内联样式: {cv['els']} 个元素, {cv.get('vw', 0)} 个按视口宽比例改写为 vw,"
+                                       f" {cv.get('banded', 0)} 个移入分视口样式表(其中窄屏首载补采 {cv.get('reload', 0)})")
+                try:
+                    self._inject_dom_variants(page, loads)
+                except Exception as exc:
+                    self.log("WARN", f"窄屏 DOM 变体注入失败: {str(exc)[:160]}")
+            finally:
+                self._close_narrow_loads()
         # N1 保真轨: MHTML 快照(采集期活体渲染的权威固化)。
         # Chromium 对 MHTML 的回放默认禁脚本 —— 确定性由构造保证。
         if screenshot:
