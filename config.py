@@ -126,6 +126,8 @@ MAX_FRAME_DEPTH = 2            # iframe 递归深度上限(主页面为第 0 层
 RENDER_REPAIR_ROUNDS = 6       # 视觉修复迭代轮数上限
 REPAIR_MIN_GAIN = 0.5          # 修复循环收敛判定: 缺失集合不变且分数涨幅低于此值即停
 FIDELITY_SKIP_ABOVE = 97.0    # 交互轨达到此分时不渲染保真轨(头条取优不受影响)
+STATIC_TRACK_MARGIN = 5.0     # 保真轨领先交互轨达此分差时, 试做"静态版"(剥离应用脚本)交付物
+                              # 并实测; 静态版也领先交互轨此分差才设为默认预览/导出
 BACKFILL_BUDGET = 20          # 单轮渲染缺失回补的回源时限(秒)
 REPAIR_TIME_BUDGET = 300       # 修复循环时间预算(秒): 快站快修, 慢站限时收敛(P0-A 速度调度)
 AI_TIME_BUDGET = 900           # 含 AI 修复的任务时间预算(秒): 超预算跳过 AI 轮       # 渲染驱动回补循环轮数(本地渲染->收集404->回源补抓);

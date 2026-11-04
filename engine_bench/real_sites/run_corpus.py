@@ -209,6 +209,10 @@ def run(args):
             "blocked": stats.get("baseline_blocked") or None,
             "interactive": stats.get("interactive_score"),
             "fidelity": stats.get("fidelity_score"),
+            # 所见即所得: 预览/导出默认交付物的实测分(静态版接管时取静态版, 否则交互轨)
+            "preview": stats.get("static_score") if stats.get("preview_track") == "static"
+            else stats.get("interactive_score"),
+            "preview_track": stats.get("preview_track") or "interactive",
             "track": stats.get("dominant_track"),
             "structure": sim.get("structure"), "edge": sim.get("edge"), "text": sim.get("text"),
             "warnings": sim.get("warnings") or [],
@@ -240,7 +244,9 @@ def run(args):
     if os.environ.get("GITHUB_ACTIONS") == "true":
         _ci_thumbs(results)
     s = out["summary"]
-    print(f"均分 {_fmt(s['mean'])}  交互轨均分 {_fmt(s['interactive_mean'])}  中位 {_fmt(s['median'])}"
+    print(f"均分 {_fmt(s['mean'])}  交互轨均分 {_fmt(s['interactive_mean'])}"
+          f"  预览所见均分 {_fmt(s.get('preview_mean'))}(静态版接管 {s.get('static_delivered', 0)} 站)"
+          f"  中位 {_fmt(s['median'])}"
           f"  完成 {s['completed']}/{s['total']}(不可达 {s['unreachable']})"
           f"  识别命中 {s['pattern_hits']}/{s['pattern_checked']}"
           f"  耗时 p50 {_fmt(s['p50_elapsed'])}s / p90 {_fmt(s['p90_elapsed'])}s"
@@ -323,6 +329,8 @@ def _summary_one(results):
         # 诚实口径: 头条分取双轨最优, 交互轨(可交互交付物)单独看均分;
         # 网络不可达与引擎失败分开计数, 前者不是引擎缺陷
         "interactive_mean": round(statistics.mean(inter), 1) if inter else None,
+        "preview_mean": _mean_of(results, "preview"),
+        "static_delivered": sum(1 for r in results if r.get("preview_track") == "static"),
         "ge90": sum(1 for x in scores if x >= 90),
         "unreachable": sum(1 for r in results if r.get("failure") == "unreachable"),
         "engine_failed": sum(1 for r in results if r.get("failure") == "engine"),
@@ -333,6 +341,12 @@ def _summary_one(results):
         # 视口分项(探针口径): {desktop/tablet/mobile: 均分}
         "vp_mean": _vp_means(results),
     }
+
+
+def _mean_of(results, key):
+    xs = [r.get(key) for r in results
+          if isinstance(r.get(key), (int, float)) and not r.get("blocked")]
+    return round(statistics.mean(xs), 1) if xs else None
 
 
 def _vp_means(results):
@@ -391,7 +405,8 @@ def _report(out, prev_name, prev):
              f"- 站点 {s['total']}: 完成 {s['completed']} / 失败 {s['failed']}"
              f"(网络不可达 {s.get('unreachable', 0)}, 引擎 {s.get('engine_failed', 0)}) / 超时 {s['timeout']}",
              f"- 还原度: 均分 **{_fmt(s['mean'])}**, 中位 {_fmt(s['median'])}, 最低 {_fmt(s['min'])};"
-             f" ≥90 分 {s.get('ge90')} 站; 交互轨均分 {_fmt(s.get('interactive_mean'))}",
+             f" ≥90 分 {s.get('ge90')} 站; 交互轨均分 {_fmt(s.get('interactive_mean'))};"
+             f" 预览所见均分 {_fmt(s.get('preview_mean'))}(静态版接管 {s.get('static_delivered', 0)} 站)",
              f"- 识别命中: {s['pattern_hits']}/{s['pattern_checked']}",
              f"- 耗时: 平均 {_fmt(s['mean_elapsed'])}s, p50 {_fmt(s.get('p50_elapsed'))}s,"
              f" p90 {_fmt(s.get('p90_elapsed'))}s; 保真轨胜出 {s['fidelity_dominant']} 站"

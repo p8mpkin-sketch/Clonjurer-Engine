@@ -3451,6 +3451,7 @@ class ClonerEngine:
         self._pattern_info = {"pattern": "DEFAULT", "features": [], "confidence": 0.0}
         self._strategy_pack = strategy_packs.for_pattern("DEFAULT")
         self._fidelity_score = None           # N1 保真轨评分(双轨取优用)
+        self._static_score = None            # 静态版交付物实测分(保真轨明显领先时才做)
         self._fidelity_rendered = False      # 保真轨 MHTML 已渲染(每任务一次)
         self._layout_calibrated = False      # 布局校准已尝试(每任务一次)
         self._backfill_dead = set()          # 修复回补回源失败的 URL(跨轮负缓存)
@@ -3995,6 +3996,8 @@ class ClonerEngine:
 
             if want_score and detail is not None:
                 self._write_final_diff()
+                with suppress(Exception):
+                    self._static_score = self._try_static_track(ctx, score)
 
             # ---- 智能 Mock(表单解析, 可选 LLM 润色) ----
             html_sources = []
@@ -4120,6 +4123,11 @@ class ClonerEngine:
         stats["interactive_score"] = score if isinstance(score, (int, float)) else None
         stats["fidelity_score"] = fidelity if isinstance(fidelity, (int, float)) else None
         stats["dominant_track"] = "interactive"
+        static_score = getattr(self, "_static_score", None)
+        if isinstance(static_score, (int, float)):
+            # 预览/导出默认给的是静态版: 记下它的实测分, 跑分据此报"所见即所得"口径
+            stats["static_score"] = static_score
+            stats["preview_track"] = "static"
         stats["score_baseline"] = "pristine"   # 基准截图取自 DOM 改动前(v4.5 起)
         blocked = self._detect_blocked()
         if blocked:
@@ -4133,6 +4141,75 @@ class ClonerEngine:
                   similarity_score=score, stats_json=json.dumps(stats, ensure_ascii=False),
                   zip_path=str(zip_path))
         self.db.increment_completed(self.task["batch_id"])
+
+    def _try_static_track(self, ctx, inter_score):
+        """预览/导出与头条分对齐: 头条分取两轨最优, 但预览与导出交付的是交互轨页面 ——
+        交互轨塌了(SPA 路由在预览路径下渲染成 404 页、离线水合清空 DOM、脚本报错)而
+        保真轨高分时, 用户看到的与分数不符(36kr 引擎 100、预览 16)。
+        保真轨明显领先时, 生成"静态版"(采集 DOM 剥离应用脚本, 引擎注入物与 JSON 数据
+        保留, 与 MHTML 保真轨同语义但资源已本地化), 用同一评分实测; 静态版也明显领先才
+        设为默认页, 交互版另存 <页>.interactive.html。返回静态版分数(未采用返回 None)。"""
+        fid = getattr(self, "_fidelity_score", None)
+        margin = config.STATIC_TRACK_MARGIN
+        if not (isinstance(fid, (int, float)) and isinstance(inter_score, (int, float))) \
+                or fid - inter_score < margin:
+            return None
+        main = self._main_page_file()
+        original = self.ws / "original_preview.png"
+        if not (main.is_file() and original.is_file()):
+            return None
+        html = main.read_text(encoding="utf-8", errors="replace")
+        static, stripped = _strip_hydration_html(html)
+        if not stripped:
+            return None
+        t0 = time.monotonic()
+        main.write_text(static, encoding="utf-8")
+        server = _LocalPreviewServer(self.ws, use_tape=self._strategy_pack.net_tape)
+        server.start()
+        base = f"http://127.0.0.1:{server.port}"
+        page = ctx.new_page()
+        s_detail = None
+        try:
+            page.set_default_timeout(30000)
+            with suppress(Exception):
+                page.add_init_script(SCORE_TIMER_GUARD_JS)
+
+            def _guard(route):
+                try:
+                    if route.request.url.startswith(base):
+                        route.continue_()
+                    else:
+                        route.abort()
+                except Exception:
+                    with suppress(Exception):
+                        route.abort()
+            page.route("**/*", _guard)
+            self._load_clone(page, base)
+            shot = self.ws / "static_preview.png"
+            self._full_shot(page, shot, "静态版")
+            text = page.evaluate(TEXT_EXTRACT_JS) or ""
+            orig_txt = self.ws / "original_text.txt"
+            s_detail = compute_visual_similarity(
+                original, shot, orig_text=orig_txt.read_text(errors="replace") if orig_txt.is_file() else "",
+                clone_text=text)
+        except Exception as exc:
+            self.log("WARN", f"静态版评分失败: {exc}")
+        finally:
+            with suppress(Exception):
+                page.close()
+            with suppress(Exception):
+                server.stop()
+            self._phase("评分-静态版", t0)
+        s_score = (s_detail or {}).get("score")
+        if isinstance(s_score, (int, float)) and s_score - inter_score >= margin:
+            main.with_name(main.stem + ".interactive.html").write_text(html, encoding="utf-8")
+            self.log("RENDER", f"静态版交付: 交互轨 {inter_score} / 保真轨 {fid} / 静态版 {s_score}"
+                               f"(剥离 {stripped} 个应用脚本); 预览与导出默认静态版, 交互版另存"
+                               f" {main.stem}.interactive.html")
+            return s_score
+        main.write_text(html, encoding="utf-8")
+        self.log("RENDER", f"静态版未领先(交互轨 {inter_score} / 静态版 {s_score}), 保留交互版交付")
+        return None
 
     def _detect_blocked(self) -> str:
         def _read(name):
