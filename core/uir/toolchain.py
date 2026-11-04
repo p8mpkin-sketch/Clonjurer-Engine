@@ -170,7 +170,7 @@ def sign_apk(apk, sdk=None, log=_print, timeout=600) -> dict:
     if not apksigner:
         return _sig(status, label, verified=None, gap="缺 apksigner(Android build-tools)")
     rc, out = _run([apksigner, "verify", "--print-certs", str(apk)], apk.parent, os.environ.copy(), log, timeout)
-    cert = next((ln.split(":", 1)[1].strip() for ln in out.splitlines() if "certificate DN" in ln), None)
+    cert = next((ln.split("certificate DN:", 1)[1].strip() for ln in out.splitlines() if "certificate DN:" in ln), None)
     if status == "signed" and cert and "Android Debug" in cert:
         status, label = "unsigned-debug", "未签名(签名证书仍是 Android Debug)"
     return _sig(status, label, signed=status == "signed", verified=rc == 0, cert=cert)
