@@ -136,12 +136,22 @@ class GenerateEngine:
                   "scoring": "v3-segmented" if kind == "screenshot" else "desc-self-v1",
                   "target_score": target_score, "budget": budget, "ai_model": (ai_cfg or {}).get("model")}
         best, hints = None, {}
+        # 确定性优先、LLM 兜底(字面执行): 有 Key 时第 1 轮强制走 Tier 0 作为地板(2s 级), 后续 LLM 轮
+        # 只有净提升才会被保留 —— 否则 LLM 轮每轮 2~4 分钟, 预算内从未评估过确定性候选, 实测留出集
+        # 像素均分 39.8(Tier 0) → 23.2(全 LLM) 还被当成"最优"保留。
+        floor_round = 1 if ai_cfg and target.shootable else 0
+        if floor_round:
+            max_rounds += 1
         for rnd in range(1, max_rounds + 1):
             if ctx.expired():
                 self.log("GEN", "时间预算耗尽, 停止迭代")
                 break
             self._stage(f"第 {rnd} 轮生成", 10 + rnd * 15)
             t_r = time.monotonic()
+            if rnd == floor_round:
+                hints = dict(hints, force_tier0=True)
+            elif hints.get("force_tier0"):
+                hints = {k: v for k, v in hints.items() if k != "force_tier0"}
             req = self._request(hints)
             snap = _snapshot(self.ws)
             uir = adapter.to_uir(req, ctx)
@@ -202,8 +212,8 @@ class GenerateEngine:
             else:
                 hints["feedback"] = (f"自评 {score}: 文本覆盖 {detail.get('text')}, 结构 {detail.get('structure')}; "
                                      "请补全描述中出现的具体文案与控件")
-                if uir.meta.get("tier") == "deterministic":
-                    break  # 确定性原型无随机性, 再跑一轮无意义
+                if uir.meta.get("tier") == "deterministic" and not (ai_cfg and rnd == floor_round):
+                    break  # 确定性原型无随机性, 再跑一轮无意义(地板轮除外: 之后还要让 LLM 轮竞争)
 
         if best is None:
             raise RuntimeError("没有任何一轮产出有效结果")

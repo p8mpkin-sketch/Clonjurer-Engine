@@ -158,6 +158,19 @@ class VisionTier0Guards(unittest.TestCase):
             self.assertIn("position:absolute", css)
 
 
+class DeterministicFloor(unittest.TestCase):
+    """有 Key 时第 1 轮必须是确定性地板(force_tier0), 之后才轮到 LLM; 无 Key 时不加地板轮。"""
+
+    def test_floor_round_planned(self):
+        src = (ROOT / "core/uir/generate.py").read_text(encoding="utf-8")
+        self.assertIn("floor_round = 1 if ai_cfg and target.shootable else 0", src)
+        self.assertIn('hints = dict(hints, force_tier0=True)', src)
+        # 适配器契约: force_tier0 命中时不得调用大模型
+        for mod in ("vision", "description"):
+            code = (ROOT / f"core/uir/adapters/{mod}.py").read_text(encoding="utf-8")
+            self.assertIn('not req.hints.get("force_tier0")', code)
+
+
 class RegistryAndDispatch(unittest.TestCase):
     def test_registry(self):
         self.assertIn("screenshot", list_inputs())
