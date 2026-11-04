@@ -4424,6 +4424,20 @@ class ClonerEngine:
                 p2.close()
         self._cv_pages = []
 
+    @staticmethod
+    def _settle_narrow_page(p2):
+        """窄屏首载页在抽取变体子树前与主页同口径「到位」: 平滑滚到底再回顶(触发进视口才起播的
+        入场动画 / 懒加载, 否则抽到的是 opacity:0 的初始态, 克隆窄屏整块空白), 再把动画相位写成
+        负 animation-delay(ANIM_PHASE_JS, 与主页基准后同一步)。时限内做不完就按当前态抽取。"""
+        budget = max(1.0, float(getattr(config, "VIEWPORT_VARIANT_SETTLE", 4.0)))
+        with suppress(Exception):
+            p2.evaluate(ClonerEngine.AUTO_SCROLL_JS, [int(budget * 1000), 54000])
+            p2.wait_for_timeout(400)
+            p2.evaluate("window.scrollTo(0, 0)")
+            p2.evaluate(CV_QUIET_JS, 300)
+        with suppress(Exception):
+            p2.evaluate(ANIM_PHASE_JS)
+
     def _inject_dom_variants(self, page, loads):
         """窄屏 DOM 变体(见 ALT_EXTRACT_JS): 结构不同的最上层子树把窄屏版并列插入主页。"""
         if not loads or not self.cfg.get("viewport_variants", True):
@@ -4440,6 +4454,7 @@ class ClonerEngine:
                     top.append(p)
             if not top or len(top) > config.VIEWPORT_VARIANT_MAX or tag not in pages:
                 continue
+            ClonerEngine._settle_narrow_page(pages[tag])
             with suppress(Exception):
                 htmls = pages[tag].evaluate(ALT_EXTRACT_JS, top) or {}
                 sizes = page.evaluate(SUBTREE_SIZE_JS, list(htmls))

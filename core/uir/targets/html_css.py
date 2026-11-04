@@ -63,6 +63,7 @@ body{font-family:var(--font-f0,system-ui,-apple-system,'Segoe UI',Roboto,'PingFa
 img{display:block;max-width:100%;height:auto}
 a{color:inherit;text-decoration:none}
 p{margin:0}
+ul,ol{margin:0;padding:0;list-style:none}
 button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer;border:0;background:none;padding:0}
 input{border:1px solid rgba(0,0,0,.14);border-radius:6px;padding:10px 12px;background:#fff;width:100%;outline:none}
