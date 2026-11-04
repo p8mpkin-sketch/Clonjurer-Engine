@@ -687,31 +687,31 @@ RESPONSIVE_META = ('<meta name="viewport" '
                    'content="width=device-width, initial-scale=1.0">')
 
 RESPONSIVE_CSS = """<style data-clone-preview="responsive">
-/* 移动端适配兜底(桌面不受影响)。
-   策略: 不强改老站桌面布局(会裁掉内容), 而是
+/* 移动端适配兜底: 只对原站无 viewport meta 的定宽老站注入(桌面不受影响)。
    1) 视口按设备宽渲染(viewport meta 已注入);
-   2) 响应式站点自然收缩;
-   3) 固定宽度老站可横向平移查看而不破版。 */
+   2) 固定宽度老站可横向平移查看而不破版(只设在 html 上: 设在 body 上会让 body
+      变成滚动容器, 文档高度塌成一屏)。 */
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 @media screen and (max-width: 768px) {
-  html, body { overflow-x: auto !important; }
-  img, video { max-width: 100% !important; height: auto !important; }
+  html { overflow-x: auto !important; }
+  img, video { max-width: 100% !important; }
+  img { height: auto; }
   iframe { max-width: 100% !important; }  /* 不动 height: 登录 iframe 依赖定高 */
   input, select, textarea { font-size: 16px !important; }
   table { max-width: 100%; }
 }
-@media screen and (max-width: 359px) {
-  body { font-size: 14px !important; }
-}
 </style>"""
+
+_VIEWPORT_META_RE = re.compile(r"<meta\b[^>]*\bname\s*=\s*[\"']?viewport\b", re.I)
 
 
 def _inject_responsive(html: str) -> str:
-    """视口 meta + 移动端兜底 CSS。已有 viewport meta 则不覆盖(尊重原站)。"""
-    if "viewport" not in html[:4000]:
-        match = re.search(r"<head[^>]*>", html, re.I)
-        at = match.end() if match else 0
-        html = html[:at] + RESPONSIVE_META + html[at:]
+    """原站已有 viewport meta → 原样返回(它自己的媒体查询就是权威); 否则补 meta + 兜底 CSS。"""
+    if _VIEWPORT_META_RE.search(html):
+        return html
+    match = re.search(r"<head[^>]*>", html, re.I)
+    at = match.end() if match else 0
+    html = html[:at] + RESPONSIVE_META + html[at:]
     match = re.search(r"</head\s*>", html, re.I)
     if match:
         at = match.start()
@@ -719,6 +719,7 @@ def _inject_responsive(html: str) -> str:
     else:
         html = html + RESPONSIVE_CSS
     return html
+
 
 OUTER_HTML_JS = r"""
 () => ('<!DOCTYPE html>\n' + document.documentElement.outerHTML)

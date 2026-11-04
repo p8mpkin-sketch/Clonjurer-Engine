@@ -34,6 +34,7 @@ import hashlib
 import html as _html
 import io
 import json
+import math
 import os
 import posixpath
 import re
@@ -163,6 +164,7 @@ DEEP_FREEZE_JS = r"""
   const serializeSheet = (sheet, kind) => {
     try {
       if (sheet.disabled) return;
+      if (sheet.ownerNode && sheet.ownerNode.hasAttribute && sheet.ownerNode.hasAttribute('data-clone-bake')) return;
       const rules = sheet.cssRules;
       if (!rules || !rules.length) return;
       let text = '';
@@ -741,6 +743,39 @@ window.addEventListener('sim-redirect', function (ev) {
 });
 })();</script>"""
 
+# 视口作用域烘焙: 引擎按采集视口(1920)的计算值做的固化(字体度量/WAAPI 终态)以前写成内联
+# !important, 任何宽度下都压过站点自己的媒体查询 —— 克隆在平板/手机视口下仍是桌面字号与
+# 版式(cn.vuejs 手机视口 45 分, 去掉后 100)。改为: 相同声明集合并成一个令牌, 元素打
+# data-cb 令牌, 规则写进 <style data-clone-bake>, 外包 "@media all" 占位; 落盘时
+# (_scope_bake_css)按站点样式表断点换成"采集视口所在断点区间", 区间外回落到站点 CSS。
+# 选择器带 3 个 :not(#\#) 提到 (3,1,0) 特异度 + !important, 采集视口下与内联 !important 等效。
+SCOPED_BAKE_FN = r"""(kind, plan) => {
+  const SPEC = ':not(#\\#):not(#\\#):not(#\\#)';
+  const seq = (window.__cloneBakeSeq = (window.__cloneBakeSeq || 0) + 1);
+  const sets = new Map(), rules = [];
+  let n = 0;
+  for (const [el, decls] of plan) {
+    const body = decls.filter(d => d[1] && !/[{}<>]/.test(d[1]))
+                      .map(d => d[0] + ':' + d[1] + '!important').join(';');
+    if (!body) continue;
+    let tok = sets.get(body);
+    if (!tok) {
+      tok = kind + seq + '-' + sets.size;
+      sets.set(body, tok);
+      rules.push('[data-cb~="' + tok + '"]' + SPEC + '{' + body + '}');
+    }
+    const cur = el.getAttribute('data-cb');
+    el.setAttribute('data-cb', cur ? cur + ' ' + tok : tok);
+    n++;
+  }
+  if (!rules.length) return 0;
+  const st = document.createElement('style');
+  st.setAttribute('data-clone-bake', kind);
+  st.textContent = '@media all{\n' + rules.join('\n') + '\n}';
+  (document.head || document.documentElement).appendChild(st);
+  return n;
+}"""
+
 # A2 字体度量固化 v2(逐元素差分继承): 旧版取每类标签"第一个元素"的
 # computed font/color/background 以 `tag{...!important}` 套到全部同类元素
 # (第一个 span 是 12px 角标 → 全页 span 变 12px), 真实改坏页面。
@@ -797,15 +832,10 @@ FONT_BAKE_JS = r"""
       }
       if (diff.length) plan.push([el, diff]);
     }
-    for (const [el, diff] of plan) {
-      for (const [p, v] of diff) {
-        if (v) el.style.setProperty(p, v, 'important');
-      }
-    }
-    return plan.length;
+    return __SCOPED_BAKE__('f', plan);
   } catch (e) { return 0; }
 }
-"""
+""".replace("__SCOPED_BAKE__", "(" + SCOPED_BAKE_FN + ")")
 
 _SCRIPT_TAG_RE = re.compile(r"<script\b([^>]*)>.*?</script\s*>", re.I | re.S)
 
@@ -846,38 +876,40 @@ REMOVE_SCRIPTS_JS = r"""
 }
 """
 
-# 响应式适配注入: 补 viewport meta + 手机防溢出 + 表单可用性。
-# 克隆页普遍缺失 viewport meta(手机按 980px 桌面布局渲染再整页缩小, 文字不可读),
-# 且桌面站常见固定宽度容器/超宽绝对定位元素造成横向滚动。
+# 响应式适配注入(仅限原站没有 viewport meta 的老式定宽站): 补 viewport meta + 手机防溢出。
+# 原站自带 viewport meta 说明它自己做了响应式, 任何兜底 CSS 都只会改坏它: 旧版对所有页
+# 注入 `img{height:auto!important}`(压掉 h-full/object-cover 的定高图, huawei 手机视口
+# 首图拉成 2865px 高) 与 `html,body{overflow-x:auto!important}`(body 成为滚动容器,
+# 整页高度塌成一屏, gitee 手机视口只剩 844px)。
 RESPONSIVE_META = ('<meta name="viewport" '
                    'content="width=device-width, initial-scale=1.0">')
 
 RESPONSIVE_CSS = """<style data-clone-preview="responsive">
-/* 移动端适配兜底(桌面不受影响)。
-   策略: 不强改老站桌面布局(会裁掉内容), 而是
+/* 移动端适配兜底: 只对原站无 viewport meta 的定宽老站注入(桌面不受影响)。
    1) 视口按设备宽渲染(viewport meta 已注入);
-   2) 响应式站点自然收缩;
-   3) 固定宽度老站可横向平移查看而不破版。 */
+   2) 固定宽度老站可横向平移查看而不破版(只设在 html 上: 设在 body 上会让 body
+      变成滚动容器, 文档高度塌成一屏)。 */
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 @media screen and (max-width: 768px) {
-  html, body { overflow-x: auto !important; }
-  img, video { max-width: 100% !important; height: auto !important; }
+  html { overflow-x: auto !important; }
+  img, video { max-width: 100% !important; }
+  img { height: auto; }
   iframe { max-width: 100% !important; }  /* 不动 height: 登录 iframe 依赖定高 */
   input, select, textarea { font-size: 16px !important; }
   table { max-width: 100%; }
 }
-@media screen and (max-width: 359px) {
-  body { font-size: 14px !important; }
-}
 </style>"""
+
+_VIEWPORT_META_RE = re.compile(r"<meta\b[^>]*\bname\s*=\s*[\"']?viewport\b", re.I)
 
 
 def _inject_responsive(html: str) -> str:
-    """视口 meta + 移动端兜底 CSS。已有 viewport meta 则不覆盖(尊重原站)。"""
-    if "viewport" not in html[:4000]:
-        match = re.search(r"<head[^>]*>", html, re.I)
-        at = match.end() if match else 0
-        html = html[:at] + RESPONSIVE_META + html[at:]
+    """原站已有 viewport meta → 原样返回(它自己的媒体查询就是权威); 否则补 meta + 兜底 CSS。"""
+    if _VIEWPORT_META_RE.search(html):
+        return html
+    match = re.search(r"<head[^>]*>", html, re.I)
+    at = match.end() if match else 0
+    html = html[:at] + RESPONSIVE_META + html[at:]
     match = re.search(r"</head\s*>", html, re.I)
     if match:
         at = match.start()
@@ -885,6 +917,245 @@ def _inject_responsive(html: str) -> str:
     else:
         html = html + RESPONSIVE_CSS
     return html
+
+
+# ---- 采集视口断点区间 ----------------------------------------------------------
+# 引擎按采集视口算出的固化(字体烘焙/WAAPI 终态/布局与像素校准)只在"与采集视口同一
+# 断点区间"内成立: 区间下界 = 站点样式表里不超过采集宽度的最大宽度断点。
+_MEDIA_PRELUDE_RE = re.compile(r"@media\b([^{;]*)\{", re.I)
+_LINK_MEDIA_RE = re.compile(r"<link\b[^>]*\bmedia\s*=\s*[\"']([^\"']+)[\"']", re.I)
+_WIDTH_FEAT_RE = re.compile(
+    r"(min|max)-width\s*:\s*([\d.]+)\s*(px|em|rem)"
+    r"|width\s*(>=|<=|>|<)\s*([\d.]+)\s*(px|em|rem)"
+    r"|([\d.]+)\s*(px|em|rem)\s*(>=|<=|>|<)\s*width", re.I)
+
+
+def _media_breakpoints(css_text: str) -> set:
+    """样式文本里全部宽度媒体特性 → "版式从这个宽度起换一套"的下界集合(px)。"""
+    out = set()
+
+    def px(v, unit):
+        return float(v) * (16.0 if unit.lower() in ("em", "rem") else 1.0)
+    preludes = [m.group(1) for m in _MEDIA_PRELUDE_RE.finditer(css_text)]
+    preludes += _LINK_MEDIA_RE.findall(css_text)
+    for pre in preludes:
+        for m in _WIDTH_FEAT_RE.finditer(pre):
+            if m.group(1):
+                v = px(m.group(2), m.group(3))
+                out.add(v if m.group(1).lower() == "min" else v + 1)
+            elif m.group(4):          # width >= N / width > N / width <= N / width < N
+                v, op = px(m.group(5), m.group(6)), m.group(4)
+                out.add(v + 1 if op in (">", "<=") else v)
+            else:                     # N <= width / N < width
+                v, op = px(m.group(7), m.group(8)), m.group(9)
+                out.add(v + 1 if op == "<" else v)
+    return out
+
+
+def capture_band_floor(css_texts, capture_width: int) -> int:
+    """采集视口所在断点区间的下界(px, 取整); 站点无宽度断点(非响应式)返回 0。"""
+    floor = 0.0
+    for text in css_texts:
+        for b in _media_breakpoints(text or ""):
+            if floor < b <= capture_width:
+                floor = b
+    return int(math.ceil(floor)) if floor >= 1 else 0
+
+
+def band_wrap(css: str, floor: int) -> str:
+    """把只在采集视口区间成立的覆盖样式限定到该区间。"""
+    if not css or floor <= 0:
+        return css
+    return f"@media (min-width: {floor}px){{\n{css}\n}}"
+
+
+_BAKE_STYLE_RE = re.compile(r"(<style data-clone-bake=\"\w+\">)@media all\{")
+
+
+def scope_bake_css(html: str, floor: int) -> str:
+    """引擎烘焙表的 "@media all" 占位换成采集视口区间。"""
+    if floor <= 0:
+        return html
+    return _BAKE_STYLE_RE.sub(lambda m: m.group(1) + f"@media (min-width: {floor}px){{", html)
+
+
+# 多视口内联样式采集: 站点脚本按视口写的内联样式(jQuery 宽屏才写 float:right、React
+# useBreakpoint 渲染出的 font-size:38px、按窗口宽算的尺寸)只在采集视口下序列化, 换视口
+# 后不再有脚本去改(runoob 手机视口整列下移、ant.design 手机视口标题仍是桌面字号)。
+# 采集期在基准截图前把活体页依次缩到平板/手机宽再还原, 记录每个元素各视口下的内联样式:
+# - 与视口宽成正比的 px 值 → 改写成 vw(连续依赖);
+# - 其余在视口间取值不同(且还原后回到原值)的属性 → 从内联移到按视口分段的样式表
+#   (离散依赖)。分段边界由落盘时按样式表断点换掉占位(scope_viewport_css)。
+CV_RECORD_JS = r"""
+(tag) => {
+  const m = window.__cvRec || (window.__cvRec = {els: [], snaps: {}});
+  if (tag === 'd') m.els = Array.from(document.body ? document.body.querySelectorAll('*') : []).slice(0, 20000);
+  m.snaps[tag] = m.els.map(e => e.getAttribute('style') || '');
+  m.widths = m.widths || {};
+  m.widths[tag] = window.innerWidth;
+  return m.els.length;
+}
+"""
+
+CV_QUIET_JS = r"""
+(ms) => new Promise(res => {
+  let last = performance.now();
+  const ob = new MutationObserver(() => { last = performance.now(); });
+  try { ob.observe(document.body, {attributes: true, attributeFilter: ['style', 'class'], subtree: true, childList: true}); } catch (e) {}
+  const t0 = performance.now();
+  const tick = () => {
+    const now = performance.now();
+    if (now - last >= ms || now - t0 > 1500) { ob.disconnect(); res(Math.round(now - t0)); }
+    else setTimeout(tick, 50);
+  };
+  requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(tick, 50)));
+})
+"""
+
+CV_EMIT_JS = r"""
+() => {
+  const m = window.__cvRec;
+  const out = {vw: 0, banded: 0, els: 0};
+  if (!m || !m.snaps.d || !m.snaps.b) return out;
+  const SKIP = /^(transition|animation|will-change|cursor|pointer-events|--)/;
+  const dummy = document.createElement('div').style;
+  const parse = s => {
+    const o = {};
+    if (!s) return o;
+    dummy.cssText = s;
+    for (let i = 0; i < dummy.length; i++) { const p = dummy[i]; o[p] = [dummy.getPropertyValue(p), dummy.getPropertyPriority(p)]; }
+    return o;
+  };
+  const W = m.widths, SPEC = ':not(#\\#):not(#\\#):not(#\\#)';
+  const bands = {d: [], t: [], m: []};
+  const px = v => { const r = /^(-?[\d.]+)px$/.exec(v || ''); return r ? parseFloat(r[1]) : null; };
+  const tags = ['t', 'm'].filter(t => m.snaps[t]);
+  m.els.forEach((el, i) => {
+    const sd = m.snaps.d[i];
+    if (!el.isConnected || tags.every(t => m.snaps[t][i] === sd)) return;
+    if (m.snaps.b[i] !== sd && tags.every(t => m.snaps[t][i] === m.snaps.b[i])) return;
+    const D = parse(sd), B = parse(m.snaps.b[i]), V = {};
+    tags.forEach(t => { V[t] = parse(m.snaps[t][i]); });
+    const cur = parse(el.getAttribute('style') || '');
+    const props = new Set(Object.keys(D));
+    tags.forEach(t => Object.keys(V[t]).forEach(p => props.add(p)));
+    const rule = {d: [], t: [], m: []};
+    let touched = false;
+    for (const p of props) {
+      if (SKIP.test(p)) continue;
+      const dv = D[p], bv = B[p];
+      if (JSON.stringify(dv) !== JSON.stringify(bv)) continue;          // 还原后没回到原值: 状态性变化, 不归视口
+      if (tags.every(t => JSON.stringify(V[t][p]) === JSON.stringify(dv))) continue;
+      if (JSON.stringify(cur[p]) !== JSON.stringify(dv)) continue;      // 引擎后续已改写(流式化等), 以它为准
+      const nums = [['d', dv]].concat(tags.map(t => [t, V[t][p]])).map(([t, v]) => [t, v ? px(v[0]) : null]);
+      if (nums.every(([t, n]) => n !== null && n !== 0)) {
+        const r = nums.map(([t, n]) => n / W[t]);
+        if (r.every(x => Math.abs(x - r[0]) <= Math.abs(r[0]) * 0.015)) {
+          el.style.setProperty(p, (r[0] * 100).toFixed(4) + 'vw', dv[1]);
+          out.vw++; touched = true;
+          continue;
+        }
+      }
+      if (/[{}<>]/.test(JSON.stringify([dv, V.t && V.t[p], V.m && V.m[p]]))) continue;
+      el.style.removeProperty(p);
+      if (dv) rule.d.push(p + ':' + dv[0] + (dv[1] ? '!important' : ''));
+      tags.forEach(t => { const v = V[t][p]; if (v) rule[t].push(p + ':' + v[0] + (v[1] ? '!important' : '')); });
+      out.banded++; touched = true;
+    }
+    if (!touched) return;
+    out.els++;
+    if (rule.d.length + rule.t.length + rule.m.length) {
+      el.setAttribute('data-cv', String(i));
+      for (const k of ['d', 't', 'm']) if (rule[k].length) bands[k].push('[data-cv="' + i + '"]' + SPEC + '{' + rule[k].join(';') + '}');
+    }
+  });
+  if (bands.d.length + bands.t.length + bands.m.length) {
+    const st = document.createElement('style');
+    st.setAttribute('data-clone-vp', '');
+    // 活体页(及 MHTML 保真轨)只生效采集视口段; 平板/手机段的占位条件永不成立, 落盘时换成真实区间
+    st.textContent = '@media all/*cv-d*/{\n' + bands.d.join('\n') + '\n}\n'
+      + '@media (min-width: 99999px)/*cv-t*/{\n' + bands.t.join('\n') + '\n}\n'
+      + '@media (min-width: 99999px)/*cv-m*/{\n' + bands.m.join('\n') + '\n}';
+    (document.head || document.documentElement).appendChild(st);
+  }
+  window.__cvRec = null;
+  return out;
+}
+"""
+
+_CV_BAND_RE = re.compile(r"@media [^{]*?/\*cv-([dtm])\*/\{")
+
+
+def scope_viewport_css(html: str, floor_d: int, floor_t: int) -> str:
+    """多视口内联样式表的三段占位 → 真实区间。断点缺失时按常见栅格取分界。"""
+    if "/*cv-" not in html:
+        return html
+    sd = floor_d if floor_d > 768 else 1024
+    st = floor_t if 390 < floor_t <= 768 else 600
+    conds = {"d": f"@media (min-width: {sd}px)/*cv-d*/{{",
+             "t": f"@media (min-width: {st}px) and (max-width: {sd - 0.02:.2f}px)/*cv-t*/{{",
+             "m": f"@media (max-width: {st - 0.02:.2f}px)/*cv-m*/{{"}
+    return _CV_BAND_RE.sub(lambda m: conds[m.group(1)], html)
+
+
+# 内联尺寸流式化(序列化前): 轮播/全宽块的脚本常把"容器当前宽度"写成内联 px
+# (swiper/slick 的 slide width:1920px、轨道 width:N×1920px、translate3d(-1920px)),
+# 手机视口下仍是 1920px 宽(huawei 首屏轮播 2865px 高)。只改与容器宽度成整数倍关系
+# 的值: 采集视口下计算结果逐像素不变, 换视口时随容器伸缩。
+INLINE_FLUID_JS = r"""
+() => {
+  const out = {width: 0, track: 0, shift: 0};
+  const near = (a, b) => Math.abs(a - b) <= 1;
+  const inner = el => {
+    const cs = getComputedStyle(el);
+    return el.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+  };
+  const pxOf = v => { const m = /^(-?[\d.]+)px$/.exec((v || '').trim()); return m ? parseFloat(m[1]) : null; };
+  const cands = Array.from(document.querySelectorAll('[style*="width"],[style*="translate"]')).slice(0, 5000);
+  const plan = [];
+  for (const el of cands) {
+    const parent = el.parentElement;
+    if (!parent || el.closest('svg')) continue;
+    const pw = inner(parent);
+    if (pw < 150) continue;
+    const w = pxOf(el.style.width);
+    const kids = Array.from(el.children);
+    if (w !== null && w >= 150) {
+      const k = Math.round(w / pw);
+      const slides = kids.filter(c => near(pxOf(c.style.width) || -1, pw));
+      if (k >= 2 && k <= 60 && near(w, k * pw) && slides.length >= 2) {
+        // 轨道: 宽 = k × 容器, 子项各宽 1 个容器
+        plan.push([el, 'width', (k * 100) + '%']);
+        for (const c of slides) plan.push([c, 'width', (100 / k).toFixed(4) + '%']);
+        out.track++;
+      } else if (near(w, pw)) {
+        plan.push([el, 'width', '100%']);
+        out.width++;
+      }
+    }
+    // 位移: translate(-m × 单页宽) → 按自身宽度的百分比(单页宽 = 容器宽或首个子项宽)
+    const tf = el.style.transform || '';
+    const tm = /translate(3d|X)?\(\s*(-?[\d.]+)px/.exec(tf);
+    if (tm && parseFloat(tm[2]) !== 0) {
+      const dx = parseFloat(tm[2]);
+      const own = el.getBoundingClientRect().width;
+      const unit = kids.length && kids[0].getBoundingClientRect().width > 100
+        ? kids[0].getBoundingClientRect().width : pw;
+      const m = Math.round(Math.abs(dx) / unit);
+      if (own > 100 && m >= 1 && Math.abs(Math.abs(dx) - m * unit) <= m) {
+        const pct = (dx / own * 100).toFixed(4) + '%';
+        plan.push([el, 'transform', tf.replace(tm[0], tm[0].replace(/-?[\d.]+px$/, pct))]);
+        out.shift++;
+      }
+    }
+  }
+  for (const [el, p, v] of plan) {
+    const pri = el.style.getPropertyPriority(p);
+    el.style.setProperty(p, v, pri);
+  }
+  return out;
+}
+"""
 
 OUTER_HTML_JS = r"""
 () => ('<!DOCTYPE html>\n' + document.documentElement.outerHTML)
@@ -1264,6 +1535,7 @@ TIME_FREEZE_JS = r"""
 # 停在哪一张克隆都显示初始那张。把被动画的属性按截图时刻的计算值写成内联 !important
 WAAPI_BAKE_JS = r"""() => {
   let n = 0;
+  const plan = [];
   const skip = new Set(['offset', 'easing', 'composite', 'computedOffset']);
   const kebab = (p) => p === 'cssFloat' ? 'float' : p.replace(/[A-Z]/g, m => '-' + m.toLowerCase());
   try {
@@ -1276,15 +1548,13 @@ WAAPI_BAKE_JS = r"""() => {
       try { for (const kf of eff.getKeyframes()) for (const k in kf) if (!skip.has(k)) props.add(kebab(k)); } catch (e) {}
       if (!props.size) continue;
       const cs = getComputedStyle(el);
-      for (const p of props) {
-        const v = cs.getPropertyValue(p);
-        if (v) el.style.setProperty(p, v, 'important');
-      }
+      plan.push([el, Array.from(props, p => [p, cs.getPropertyValue(p)])]);
       n++;
     }
   } catch (e) {}
+  try { __SCOPED_BAKE__('w', plan); } catch (e) {}
   return n;
-}"""
+}""".replace("__SCOPED_BAKE__", "(" + SCOPED_BAKE_FN + ")")
 
 RAF_FREEZE_JS = r"""() => { try { window.requestAnimationFrame = function () { return 0; }; } catch (e) {} }"""
 
@@ -3104,6 +3374,7 @@ class ClonerEngine:
         self._calibrations = 0               # A1 像素校准执行次数
         self._phase_acc = {}                 # 子阶段累计耗时(秒): 提速定位用
         self._calib_css = ""                 # A1 校准覆盖(跨修复轮持久, _localize 注入)
+        self._band_floor = 0                 # 采集视口断点区间下界(视口作用域固化用)
         self._captured_at = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
         self._net_tape = []              # VCR 网络磁带(W2): XHR/fetch 全量文本响应
         self._tape_seen = set()          # (method, path, query) 去重
@@ -3801,6 +4072,32 @@ class ClonerEngine:
             return html[:insert_at] + script + html[insert_at:]
         return script + html
 
+    def _probe_viewports(self, page):
+        """活体页依次缩到平板/手机宽再还原, 记录各视口下的内联样式(见 CV_RECORD_JS)。
+        只在桌面宽采集时做; 还原后等脚本静置, 基准截图在此之后, 口径不受影响。"""
+        vp = page.viewport_size or {}
+        width, height = vp.get("width") or 0, vp.get("height") or 0
+        if width < 1024 or not self.cfg.get("viewport_probe", True):
+            return
+        t0 = time.monotonic()
+        try:
+            n = page.evaluate(CV_RECORD_JS, "d")
+            for tag, w in (("t", 768), ("m", 390)):
+                page.set_viewport_size({"width": w, "height": height})
+                page.evaluate(CV_QUIET_JS, 250)
+                page.evaluate(CV_RECORD_JS, tag)
+            page.set_viewport_size({"width": width, "height": height})
+            page.evaluate(CV_QUIET_JS, 300)
+            page.evaluate("window.scrollTo(0, 0)")
+            page.evaluate(CV_RECORD_JS, "b")
+            self.log("RENDER", f"多视口内联采集: {n} 个元素 × 平板/手机视口 {time.monotonic() - t0:.1f}s")
+        except Exception as exc:
+            with suppress(Exception):
+                page.set_viewport_size({"width": width, "height": height})
+            with suppress(Exception):
+                page.evaluate("window.__cvRec = null")
+            self.log("WARN", f"多视口内联采集失败: {exc}")
+
     def _bg_freeze_css(self):
         """A1-lite.2 背景色权威固化: 原站截图四边条带采样主背景色。
 
@@ -3996,6 +4293,9 @@ class ClonerEngine:
         self._auto_scroll(page)
         self.log("RENDER", f"懒加载与滚动完成 {time.time() - t_nav:.1f}s")
         tp = self._phase("采集-懒加载滚动", tp)
+        if screenshot:
+            self._probe_viewports(page)
+            tp = self._phase("采集-多视口内联", tp)
         # 评分基准(纯净原站): 必须在任何引擎 DOM 改动(表单激活/DEEP_FREEZE/
         # 水合剥离/字体烘焙)之前截取 —— 否则评分比较的是"克隆 vs 引擎改过的
         # 原站", 引擎自身引入的失真被基准同步吸收, 分数系统性偏乐观。
@@ -4124,6 +4424,16 @@ class ClonerEngine:
                 self.log("RENDER", f"字体度量固化: {baked} 个元素逐元素烘焙(差分继承)")
         except Exception:
             pass
+        with suppress(Exception):
+            fl = _safe_eval(INLINE_FLUID_JS) or {}
+            if any(fl.values()):
+                self.log("RENDER", f"内联尺寸流式化: 全宽 {fl.get('width', 0)} / 轨道 {fl.get('track', 0)}"
+                                   f" / 位移 {fl.get('shift', 0)}(采集视口下不变, 换视口随容器伸缩)")
+        with suppress(Exception):
+            cv = _safe_eval(CV_EMIT_JS) or {}
+            if cv.get("els"):
+                self.log("RENDER", f"多视口内联样式: {cv['els']} 个元素, {cv.get('vw', 0)} 个按视口宽比例改写为 vw,"
+                                   f" {cv.get('banded', 0)} 个移入分视口样式表")
         # N1 保真轨: MHTML 快照(采集期活体渲染的权威固化)。
         # Chromium 对 MHTML 的回放默认禁脚本 —— 确定性由构造保证。
         if screenshot:
@@ -5222,12 +5532,12 @@ class ClonerEngine:
         prev_shot = cloned.read_bytes()
         merged = list(dict.fromkeys((self._calib_css + "\n" + css).split("\n")))
         self._calib_css = "\n".join(r for r in merged if r)
-        style = f"<style data-clone-calib>{self._calib_css}</style>"
+        style = self._calib_style(self._calib_css)
         if "data-clone-calib" in prev_doc:
             doc = re.sub(r"<style data-clone-calib>.*?</style>", lambda _m: style,
                          prev_doc, count=1, flags=re.S)
         else:
-            doc = self._inject_calib(prev_doc, self._calib_css)
+            doc = self._put_calib(prev_doc, self._calib_css)
         idx_html.write_text(doc, encoding="utf-8")
         self._load_clone(page, base)
         self._full_shot(page, cloned, "克隆页")
@@ -5247,10 +5557,35 @@ class ClonerEngine:
                            f"评分 {before}→{after}")
         return detail, clone_text
 
+    def _calib_style(self, css: str) -> str:
+        """校准覆盖是按采集视口测出来的尺寸/底色: 限定在采集视口断点区间内。"""
+        return f'<style data-clone-calib>{band_wrap(css, self._band_floor)}</style>'
+
+    def _put_calib(self, html: str, css: str) -> str:
+        return self._put_calib(html, css, self._band_floor)
+
+    def _band_floor_of(self, html: str, width: int = 0) -> int:
+        """页面(内联样式 + 本地化后的外链样式表)里不超过 width(默认采集宽度)的最大宽度断点。"""
+        width = width or config.VIEWPORTS.get(self.cfg.get("viewport", "desktop"),
+                                              config.VIEWPORTS["desktop"])["width"]
+        texts = [html]
+        root = self.ws.resolve()
+        for href in re.findall(r"<link\b[^>]*?\bhref\s*=\s*[\"']([^\"'#?]+\.css)[\"'#?]", html, re.I)[:80]:
+            if href.startswith(("http:", "https:", "//", "data:")):
+                continue
+            for cand in (self.ws / href.lstrip("/"),
+                         self.ws / self._page_dir.lstrip("/") / href):
+                with suppress(OSError, ValueError):
+                    f = cand.resolve()
+                    if str(f).startswith(str(root)) and f.is_file():
+                        texts.append(f.read_text(encoding="utf-8", errors="replace")[:3_000_000])
+                        break
+        return capture_band_floor(texts, width)
+
     @staticmethod
-    def _inject_calib(html: str, css: str) -> str:
-        """校准覆盖置于 </head> 前(晚于站点样式, 层叠优先)。"""
-        style = f'<style data-clone-calib>{css}</style>'
+    def _inject_calib(html: str, css: str, floor: int = 0) -> str:
+        """校准覆盖置于 </head> 前(晚于站点样式, 层叠优先); floor>0 时限定在采集视口区间。"""
+        style = f'<style data-clone-calib>{band_wrap(css, floor)}</style>'
         if re.search(r"</head>", html, re.I):
             return re.sub(r"</head>", lambda _m: style + "</head>", html, count=1, flags=re.I)
         return style + html
@@ -5306,8 +5641,13 @@ class ClonerEngine:
             # (指向 CDN/原站即整类漂移); 剥离后恢复"按克隆页自身路径解析"
             # 的统一不变量 —— 与 page_dir 影子落盘机制配套
             localized = _BASE_TAG_RE.sub("", rewrite_js_navigation(html))
+            floor = self._band_floor_of(localized)
+            if route == "/":
+                self._band_floor = floor
+            localized = scope_bake_css(localized, floor)
+            localized = scope_viewport_css(localized, floor, self._band_floor_of(localized, 768))
             if route == "/" and self._calib_css:
-                localized = self._inject_calib(localized, self._calib_css)
+                localized = self._put_calib(localized, self._calib_css)
             localized = self._inject_spa_disguise(localized, route)
             localized = inject_state_restore(localized)
             if bg_css:
@@ -5347,6 +5687,7 @@ class ClonerEngine:
         for i, (_src, html) in enumerate(iframe_pages):
             localized = _BASE_TAG_RE.sub(
                 "", rewrite_js_navigation(apply_replacements(html, html_pairs)))
+            localized = scope_bake_css(localized, self._band_floor_of(localized))
             localized = self._inject_after_head(localized, sim_script)
             localized = _utf8_charset(_inject_responsive(localized))
             (self.ws / f"iframe_{i + 1}.html").write_text(
@@ -5355,6 +5696,7 @@ class ClonerEngine:
         for i, (_src, html, _text) in enumerate(frame_records):
             localized = _BASE_TAG_RE.sub(
                 "", rewrite_js_navigation(apply_replacements(html, html_pairs)))
+            localized = scope_bake_css(localized, self._band_floor_of(localized))
             localized = self._inject_after_head(localized, sim_script)
             localized = _utf8_charset(_inject_responsive(localized))
             (self.ws / "frames" / f"frame_{i + 1}.html").write_text(
@@ -5745,14 +6087,13 @@ class ClonerEngine:
                                         doc = idx_html.read_text(encoding='utf-8',
                                                                  errors='replace')
                                         prev_doc = doc
-                                        cal_style = (f'<style data-clone-calib>'
-                                                     f'{cal_css}</style>')
+                                        cal_style = self._calib_style(cal_css)
                                         if 'data-clone-calib' in doc:
                                             doc = re.sub(
                                                 r'<style data-clone-calib>.*?</style>',
                                                 lambda _m: cal_style, doc, count=1, flags=re.S)
                                         else:
-                                            doc = self._inject_calib(doc, cal_css)
+                                            doc = self._put_calib(doc, cal_css)
                                         idx_html.write_text(doc, encoding='utf-8')
                                         self._calibrations += 1
                                         self.log("RENDER", f"像素校准: {len(cal_cells)} "

@@ -223,6 +223,10 @@ def run(args):
             "error": (task.get("error_msg") or "")[:300],
         })
 
+    vps = [v for v in (args.viewports or "").split(",") if v.strip() and v.strip() != "none"]
+    if vps:
+        _probe_viewports(args, results, [v.strip() for v in vps])
+
     RUNS.mkdir(parents=True, exist_ok=True)
     prev_name, prev = _previous_run()
     out = {"stamp": stamp, "base": args.base, "batch_id": batch_id, "viewport": args.viewport,
@@ -245,8 +249,38 @@ def run(args):
         g = s.get(key)
         if g:
             print(f"  {name} {g['total']} 站: 均分 {_fmt(g['mean'])}  交互轨 {_fmt(g['interactive_mean'])}"
-                  f"  最低 {_fmt(g['min'])}  p50 {_fmt(g['p50_elapsed'])}s")
+                  f"  最低 {_fmt(g['min'])}  p50 {_fmt(g['p50_elapsed'])}s" + _vp_line(g))
+    if s.get("vp_mean"):
+        print("  视口分项(探针)" + _vp_line(s))
     return 0 if s["completed"] == s["total"] else 2
+
+
+def _probe_viewports(args, results, vps):
+    """多视口分项: 桌面采集的克隆在平板/手机宽下与原站同宽对比(见 viewport_probe.py)。
+    desktop 探针分是本方法(活体原站 vs 预览, 无冻结)的噪声基线, 与引擎分不同口径。"""
+    sys.path.insert(0, str(HERE))
+    try:
+        from viewport_probe import probe_tasks
+    except ImportError as exc:
+        print(f"(视口探针不可用, 跳过: {exc})")
+        return
+    pairs = [(r["task_id"], r["url"]) for r in results
+             if r["status"] == "completed" and not r.get("blocked")]
+    if not pairs:
+        return
+    print(f"视口分项探针: {len(pairs)} 站 × {','.join(vps)}", flush=True)
+    out_dir = RUNS / f"viewports_{time.strftime('%Y%m%d_%H%M%S')}"
+    try:
+        res, _ = probe_tasks(args.base, pairs, vps, out_dir, workers=args.probe_workers)
+    except Exception as exc:   # noqa: BLE001 探针失败不影响主跑分
+        print(f"(视口探针失败: {exc})")
+        return
+    for r in results:
+        p = res.get(r["task_id"])
+        if p:
+            r["vp"] = {v: (p.get(v) or {}).get("score") for v in vps}
+            r["vp_overflow"] = [v for v in vps if (p.get(v) or {}).get("clone_overflow_x")
+                                and not (p.get(v) or {}).get("orig_overflow_x")]
 
 
 def _summary(results):
@@ -293,7 +327,26 @@ def _summary_one(results):
         "blocked": sum(1 for r in results if r.get("blocked")),
         "p50_elapsed": pct(elapsed, 0.5),
         "p90_elapsed": pct(elapsed, 0.9),
+        # 视口分项(探针口径): {desktop/tablet/mobile: 均分}
+        "vp_mean": _vp_means(results),
     }
+
+
+def _vp_means(results):
+    out = {}
+    for r in results:
+        for v, sc in (r.get("vp") or {}).items():
+            if isinstance(sc, (int, float)) and not r.get("blocked"):
+                out.setdefault(v, []).append(sc)
+    return {v: round(statistics.mean(xs), 1) for v, xs in out.items()}
+
+
+_VP_NAMES = {"desktop": "桌面", "tablet": "平板768", "mobile": "手机390"}
+
+
+def _vp_line(g):
+    vm = g.get("vp_mean") or {}
+    return "".join(f"  {_VP_NAMES.get(v, v)} {_fmt(x)}" for v, x in vm.items())
 
 
 def _ci_thumbs(results, below=99.0):
@@ -345,14 +398,20 @@ def _report(out, prev_name, prev):
         if g:
             lines.append(f"- **{name}** {g['total']} 站: 均分 {_fmt(g['mean'])}, 交互轨 {_fmt(g['interactive_mean'])},"
                          f" 最低 {_fmt(g['min'])}, 识别 {g['pattern_hits']}/{g['pattern_checked']},"
-                         f" p50 {_fmt(g['p50_elapsed'])}s / p90 {_fmt(g['p90_elapsed'])}s")
+                         f" p50 {_fmt(g['p50_elapsed'])}s / p90 {_fmt(g['p90_elapsed'])}s"
+                         + (";" + _vp_line(g) if g.get("vp_mean") else ""))
+    if s.get("vp_mean"):
+        lines.append("- **视口分项**(桌面视口采集的克隆, 在各宽度下与原站同宽对比; 探针口径: 活体原站无冻结,"
+                     " 桌面列是本口径的噪声基线):" + _vp_line(s))
     if s.get("holdout"):
         lines.append("")
     if prev_name:
         lines.append(f"对比上一轮 `{prev_name}`: Δ 列为分数增减。")
         lines.append("")
-    lines.append("| # | 站点 | 期望模式 | 检出模式 | 命中 | 分 | Δ | 交互 | 保真 | 轨 | 耗时 s | 最慢阶段 | 错误 |")
-    lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+    vps = list(s.get("vp_mean") or {})
+    lines.append("| # | 站点 | 期望模式 | 检出模式 | 命中 | 分 | Δ | 交互 | 保真 | 轨 | "
+                 + "".join(f"{_VP_NAMES.get(v, v)} | " for v in vps) + "耗时 s | 最慢阶段 | 错误 |")
+    lines.append("|---|---|---|---|---|---|---|---|---|---|" + "---|" * len(vps) + "---|---|---|")
 
     def key(r):
         return (r["status"] != "completed", r["score"] if isinstance(r["score"], (int, float)) else -1)
@@ -372,7 +431,10 @@ def _report(out, prev_name, prev):
             hit += "ᴴ"
         lines.append(f"| {r['task_id']} | {r['url']} | {r['expect'] or '-'} | {r['detected'] or '-'} | {hit}"
                      f" | {_fmt(r['score'])} | {delta} | {_fmt(r['interactive'])} | {_fmt(r['fidelity'])}"
-                     f" | {r['track'] or '-'} | {_fmt(r['elapsed_s'])} | {slowest} | {err} |")
+                     f" | {r['track'] or '-'} | "
+                     + "".join(f"{_fmt((r.get('vp') or {}).get(v))}{'↔' if v in (r.get('vp_overflow') or []) else ''} | "
+                               for v in vps)
+                     + f"{_fmt(r['elapsed_s'])} | {slowest} | {err} |")
     lines += ["", "## 阶段耗时(秒)", ""]
     stages = []
     for r in out["results"]:
@@ -415,6 +477,9 @@ def main():
     ap.add_argument("--sites", default="", help="逗号分隔 URL, 覆盖语料")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--viewport", default="desktop", choices=["desktop", "laptop", "mobile"])
+    ap.add_argument("--viewports", default="desktop,tablet,mobile",
+                    help="视口分项探针(逗号分隔 desktop/tablet/mobile; none 关闭)")
+    ap.add_argument("--probe-workers", type=int, default=3)
     ap.add_argument("--render-timeout", type=int, default=0, help="页面加载超时秒(0=平台默认)")
     ap.add_argument("--timeout", type=int, default=3600, help="整批等待上限秒")
     ap.add_argument("--poll", type=float, default=2.0)
