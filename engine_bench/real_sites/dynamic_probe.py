@@ -91,8 +91,17 @@ def _walk(page, url, positions, shot_dir, tag, settle_ms):
     page.wait_for_timeout(1500)
     rows = []
     for i, y in enumerate(positions):
-        actual = page.evaluate(SCROLL_TO_JS, [int(y), 240, 60])
-        page.wait_for_timeout(settle_ms)
+        # 页内起跑 + 限时等完成标记: 克隆页脚本卡死时 evaluate 会永久挂起
+        try:
+            page.evaluate("([src, a]) => { window.__dynDone = null; (0, eval)('(' + src + ')')(a)"
+                          ".then(v => { window.__dynDone = v; }); }", [SCROLL_TO_JS, [int(y), 240, 60]])
+            page.wait_for_function("window.__dynDone !== null", timeout=30000, polling=100)
+            page.wait_for_timeout(settle_ms)
+            page.wait_for_function("true", timeout=8000)
+        except Exception as exc:
+            rows.append({"y": y, "actual": None, "shot": None, "features": {}, "hung": str(exc)[:80]})
+            break
+        actual = page.evaluate("window.__dynDone")
         feats = page.evaluate(FEATURES_JS)
         path = shot_dir / f"{tag}_{i:02d}.png"
         page.screenshot(path=str(path))
@@ -154,7 +163,13 @@ def main():
     server.stop()
 
     report = []
-    for o, c in zip(orig, clone):
+    for i, o in enumerate(orig):
+        c = clone[i] if i < len(clone) else {"shot": None, "features": {}}
+        if not o.get("shot") or not c.get("shot"):
+            # 任一侧卡死: 该点及之后记 0 分(克隆页卡死对用户就是整页不可用)
+            report.append({"y": o["y"], "score": 0.0, "orig": o["features"], "clone": c["features"],
+                           "hung": True})
+            continue
         det = compute_visual_similarity(Path(o["shot"]), Path(c["shot"]))
         report.append({"y": o["y"], "score": det["score"], "orig": o["features"], "clone": c["features"]})
     mean = sum(r["score"] for r in report) / max(1, len(report))
@@ -164,7 +179,7 @@ def main():
     print("  y      分    " + "  ".join(f"{k}(原/克)" for k in keys))
     for r in report:
         cells = "  ".join(f"{r['orig'].get(k, 0)}/{r['clone'].get(k, 0)}".rjust(len(k) + 5) for k in keys)
-        print(f"  {r['y']:<6} {r['score']:5.1f}  {cells}")
+        print(f"  {r['y']:<6} {r['score']:5.1f}  {cells}" + ("  [卡死]" if r.get("hung") else ""))
     (out_dir / f"dyn_{args.task}.json").write_text(
         json.dumps({"url": url, "mean": mean, "points": report}, ensure_ascii=False, indent=1),
         encoding="utf-8")
