@@ -177,6 +177,30 @@ def _shot_page(page, out_png):
     return page.evaluate("() => ({w: innerWidth, h: innerHeight, text: document.body ? document.body.innerText : ''})")
 
 
+def _diagnose(shots, tag) -> dict:
+    """CDP 没起来时留证据: 整屏截图(看是否弹了错误框)+ WebView/Chromium 子进程命令行(看调试参数是否生效)。"""
+    d = {}
+    if os.name == "nt":
+        png = Path(shots) / f"screen-{tag}.png"
+        ps = ("Add-Type -AssemblyName System.Windows.Forms,System.Drawing;"
+              "$b=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds;"
+              "$i=New-Object System.Drawing.Bitmap $b.Width,$b.Height;"
+              "[System.Drawing.Graphics]::FromImage($i).CopyFromScreen($b.Location,[System.Drawing.Point]::Empty,$b.Size);"
+              f"$i.Save('{png}');"
+              "Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'webview|msedge|electron' -or "
+              "$_.CommandLine -match 'remote-debugging' } | ForEach-Object { $_.Name + ' :: ' + $_.CommandLine }")
+        with suppress(Exception):
+            out = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True,
+                                 timeout=60)
+            d["processes"] = [ln[:400] for ln in out.stdout.splitlines() if ln.strip()][:20]
+            d["screen"] = str(png) if png.is_file() else None
+    else:
+        with suppress(Exception):
+            out = subprocess.run(["ps", "-eo", "pid,args"], capture_output=True, text=True, timeout=30)
+            d["processes"] = [ln[:400] for ln in out.stdout.splitlines() if "remote-debugging" in ln][:20]
+    return d
+
+
 def smoke_alive(art, shots, wait_s=15.0):
     """无 CDP 的壳: 启动 → 等待 → 进程仍存活即通过(不出分)。"""
     shots = Path(shots)
@@ -235,6 +259,8 @@ def smoke_one(art, ref_html, shots, settle_s=3.0, boot_timeout=90):
                 time.sleep(0.5)
             if not ver:
                 r["error"] = "启动失败或 CDP 端口未就绪" + (f"(exit {proc.returncode})" if proc.poll() is not None else "")
+                r["alive"] = proc.poll() is None
+                r["diag"] = _diagnose(shots, tag)
                 return r
             r["launched"] = True
             r["boot_s"] = round(time.monotonic() - t0, 1)
