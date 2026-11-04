@@ -41,6 +41,8 @@ REQUEST_TIMEOUT = 20               # 单个上游资源请求超时(秒, 浏览�
 REQUEST_CONNECT_READ = (6, 10)     # requests 直连: (连接, 读空闲) 超时; 读超时按无数据间隔计, 不限大文件总时长
 PAGELOAD_TIMEOUT = 45_000          # Playwright 页面导航超时(毫秒)
 REACHABILITY_PROBE_TIMEOUT = 12_000  # 首导航失败后的网络层可达性探测上限(毫秒)
+AUTO_SCROLL_SMOOTH = False       # 采集滚动改页内平滑连续滚动(400px/两帧): 防苹果类性能守卫把跳滚判成掉帧降级;
+                                 # 机器高负载下页面加载期本身就会降级, 语料未回归前默认关(见 DESIGN 动态形态一节)
 AUTO_SCROLL_BUDGET = 25          # 采集期自动滚动总时限(秒)
 SHOT_TIMEOUT = 30_000             # 单次截图上限(毫秒), 超时走限高退化
 NETWORK_IDLE_TIMEOUT = 9_000       # networkidle 等待上限(毫秒)
@@ -57,6 +59,7 @@ BASELINE_EAGER_MAX = 40           # 基准截图前转 eager 的懒加载图上�
 BASELINE_IMG_STALL_MS = 4000      # 等待期间连续这么久无一张到齐即放行
 HOST_FAIL_TRIP = 3                # 单主机网络层失败(SSL/超时/连接)达此次数即熔断
 MAX_ASSETS_PER_TASK = 400          # 单任务最大静态资源条目数
+CLONE_SCROLL_MAX_MS = 30000        # 克隆页懒加载滚动的完成时限(超时即判页面脚本卡死)
 CLONE_RESPONSIVE_MS = 8000         # 克隆页主线程看门狗: 加载后这么久执行不了一行脚本即判卡死
 RENDER_ASSET_RESERVE = 300         # 名额外预留给"浏览器实际加载过/克隆渲染实际请求"的资源:
                                    # 静态提取先把名额用满(苹果 @font-face 每字重 woff/woff2/ttf 三份,

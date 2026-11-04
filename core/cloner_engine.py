@@ -4696,7 +4696,46 @@ class ClonerEngine:
                 pass
             page.wait_for_timeout(1500)
 
+    # 页内平滑滚动: 400px 一步、每步等两帧(rAF, 后台页 rAF 不触发时 100ms 兜底)再 60ms, 不在中途
+    # 长驻留(驻留期间视频起播解码, 负载高时掉帧同样触发降级; 实测 400px/两帧连续滚动在
+    # 机器高负载下仍保持增强版)。没赶上加载的媒体由修复循环按克隆实际请求回补。
+    # 旧实现每步 scrollTo 跳 900px 再等 320ms: 苹果类页面的性能守卫把大跨度跳滚判成掉帧, 整页降级成非增强版(html 改
+    # no-enhanced、滚动擦洗视频容器被移除), 采集到的是降级后的 DOM —— 克隆版面塌陷
+    AUTO_SCROLL_JS = r"""async ([budgetMs, maxPx]) => {
+      const t0 = performance.now();
+      const frame = () => new Promise(r => { let done = false;
+        const fin = () => { if (!done) { done = true; r(); } };
+        requestAnimationFrame(() => requestAnimationFrame(fin)); setTimeout(fin, 100); });
+      let y = 0, H = document.documentElement.scrollHeight;
+      while (y < H && y < maxPx) {
+        y += 400;
+        window.scrollTo(0, y);
+        await frame();
+        await new Promise(r => setTimeout(r, 60));
+        H = Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0);
+        if (performance.now() - t0 > budgetMs) return {y: y, h: H, timeout: true};
+      }
+      return {y: y, h: H, timeout: false};
+    }"""
+
     def _auto_scroll(self, page):
+        """平滑滚动到底再回顶, 触发 IntersectionObserver / 无限加载(见 AUTO_SCROLL_JS)。
+        总时长受 AUTO_SCROLL_BUDGET 约束(页内计时, 一次往返)。"""
+        if not config.AUTO_SCROLL_SMOOTH:
+            return self._auto_scroll_stepped(page)
+        try:
+            res = page.evaluate(self.AUTO_SCROLL_JS,
+                                [int(config.AUTO_SCROLL_BUDGET * 1000), 54000]) or {}
+            if res.get("timeout"):
+                self.log("RENDER", f"自动滚动达到时限({config.AUTO_SCROLL_BUDGET}s), "
+                                   f"停在 {res.get('y')}/{res.get('h')}px")
+            page.wait_for_timeout(600)
+            page.evaluate("window.scrollTo(0, 0)")
+            page.wait_for_timeout(400)
+        except Exception as exc:
+            self.log("WARN", f"自动滚动中断: {exc}")
+
+    def _auto_scroll_stepped(self, page):
         """分步滚动到底再回顶, 触发 IntersectionObserver / 无限加载。
         总时长受 AUTO_SCROLL_BUDGET 约束 —— 主线程被
         WebGL/滚动动画占满的重页(CI 软件渲染下单次 evaluate 可达数秒)不再拖满 60 步。"""
@@ -5285,7 +5324,9 @@ class ClonerEngine:
         host = urlsplit(self._target).netloc
         n = 0
         for url, kind in list(self._live_seen.items()):
-            if kind not in ("runtime", "media"):
+            # script: 脚本按拼出的路径动态插入的库(苹果播放器按 /ac/libs/hls.js/<ver>/hls.js
+            # 现拼地址加载): 缺了它播放器在克隆里 Promise 自旋, 整页主线程卡死
+            if kind not in ("runtime", "media", "script"):
                 continue
             parts = urlsplit(url)
             if parts.netloc != host:
@@ -5607,10 +5648,24 @@ class ClonerEngine:
         return {"round": round_i, "detail": dict(detail), "files": files, "bytes": keep,
                 "calib": self._calib_css, "results": dict(results)}
 
+    _KEEP_ON_RESTORE_RE = re.compile(
+        r"\.(?:mp4|m4v|webm|mov|m4s|m4a|mp3|aac|ogg|ogv|png|jpe?g|gif|webp|avif|svg|"
+        r"ktx2?|basis|hdr|exr|glb|gltf|drc|usdz|lsd|woff2?|ttf|otf)$", re.I)
+
     def _restore_round(self, snap, results):
+        kept = 0
         for f in self._round_files() - snap["files"]:
+            rel = f.relative_to(self.ws).parts
+            # 后几轮按原路径回补的媒体/贴图/字体留下: 只有页面脚本按这条路径真去请求才会
+            # 用到, 回退不该把它们删掉 —— 整页静态分在滚动叙事页上随视频帧/进场状态抖动
+            # ±5 分, 按分数回退曾把 AirPods 页整组视频删光(克隆里视频全部 404)
+            if rel and rel[0] not in ("static", "frames") and self._KEEP_ON_RESTORE_RE.search(f.name):
+                kept += 1
+                continue
             with suppress(OSError):
                 f.unlink()
+        if kept:
+            self.log("RENDER", f"修复轮回退保留 {kept} 个按原路径回补的媒体/贴图/字体")
         for f, data in snap["bytes"].items():
             with suppress(OSError):
                 f.write_bytes(data)
@@ -5660,8 +5715,18 @@ class ClonerEngine:
             tp = self._phase("评分-克隆加载", tp)
         if self._strategy_pack.scroll_pass:
             # 懒加载触发: 分段滚动到底再回顶, 派发 IntersectionObserver
-            with suppress(Exception):
-                page.evaluate(self.CLONE_SCROLL_JS)
+            # 不 await 页内滚动: 滚到某段触发页面脚本死循环时, 等它返回的 evaluate 会永久挂起;
+            # 改为页内起跑 + 驱动侧限时轮询完成标记, 超时即判卡死(交互轨本轮作废)
+            try:
+                page.evaluate("(src) => { window.__cloneScrollDone = false;"
+                              " (0, eval)('(' + src + ')')().then(() => { window.__cloneScrollDone = true; },"
+                              " () => { window.__cloneScrollDone = true; }); }", self.CLONE_SCROLL_JS)
+                page.wait_for_function("window.__cloneScrollDone === true",
+                                       timeout=config.CLONE_SCROLL_MAX_MS, polling=200)
+            except Exception as exc:
+                if "Timeout" in type(exc).__name__ or "Timeout" in str(exc):
+                    raise CloneUnresponsive(
+                        f"克隆页滚动 {config.CLONE_SCROLL_MAX_MS}ms 未完成(页面脚本死循环)") from exc
         if phases:
             tp = self._phase("评分-克隆滚动", tp)
         self._settle(page)
