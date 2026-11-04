@@ -2759,6 +2759,72 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
     </div>
 
     <!-- ======================= AI Mock 数据生成(AI Mock Generator) ======================= -->
+    <div v-show="view==='generate'" class="flex-1 min-h-0 overflow-y-auto custom-scroll">
+      <div class="max-w-[1400px] mx-auto px-6 py-6 space-y-4">
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h2 class="font-display text-lg font-bold text-slate-100">界面生成(截图 / 描述 → 可运行网站)</h2>
+            <p class="text-[11px] text-slate-500 mt-0.5">通用 UI 重建引擎 L1 · 输入 → UIR 中间表示 → HTML/CSS → Playwright 渲染 → 评分 v3 质量循环(≥目标分即停) · 产物走统一预览/导出</p>
+          </div>
+          <div class="flex items-center gap-2 text-[11px] text-slate-400">
+            <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-white/[0.08] bg-slate-950/60">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5 text-indigo-300"><path d="m15 4 1 1-9 9-1-1zM3 21l3-1 1-3"/><path d="M14 7l3 3"/></svg>
+              确定性优先 · 大模型兜底(未配置 Key 时自动走 Tier 0)
+            </span>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 xl:grid-cols-[440px_1fr] gap-4 items-start">
+          <div class="rounded-2xl border border-white/[0.07] bg-[#0A1120]/70 backdrop-blur-xl p-4 space-y-4">
+            <div class="flex gap-1 p-1 rounded-lg bg-slate-950/70 border border-white/[0.06]">
+              <button @click="gen.kind='description'" :class="gen.kind==='description' ? 'bg-indigo-500/20 text-indigo-200 border-indigo-500/40' : 'text-slate-400 border-transparent'"
+                class="flex-1 px-3 py-1.5 rounded-md border text-[11px] transition-all">文字描述</button>
+              <button @click="gen.kind='screenshot'" :class="gen.kind==='screenshot' ? 'bg-indigo-500/20 text-indigo-200 border-indigo-500/40' : 'text-slate-400 border-transparent'"
+                class="flex-1 px-3 py-1.5 rounded-md border text-[11px] transition-all">界面截图</button>
+            </div>
+            <div v-show="gen.kind==='description'" class="space-y-1.5">
+              <label class="text-[10px] text-slate-500">页面描述(原型由关键词决定: 登录 / 落地页 / 仪表盘 / 商品列表 / 文章; 用「」给出标题文案, 可写颜色与数量)</label>
+              <textarea v-model="gen.description" rows="6" maxlength="4000" placeholder="例如: 一个蓝色主题的登录页, 有手机号、密码和短信验证码, 品牌叫 云帆, 标题「欢迎登录云帆控制台」"
+                class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500/50 resize-none"></textarea>
+            </div>
+            <div v-show="gen.kind==='screenshot'" class="space-y-1.5">
+              <label class="text-[10px] text-slate-500">界面截图(PNG/JPG, ≤12MB; 参考图即该截图, 评分口径与克隆侧一致)</label>
+              <input type="file" accept="image/*" @change="handleGenFile" class="block w-full text-[11px] text-slate-400 file:mr-3 file:px-3 file:py-1.5 file:rounded-md file:border-0 file:bg-indigo-500/20 file:text-indigo-200">
+              <img v-if="gen.preview" :src="gen.preview" class="mt-2 max-h-48 rounded-lg border border-white/[0.08] object-contain bg-slate-950/60">
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div class="space-y-1"><label class="text-[10px] text-slate-500">渲染视口</label>
+                <select v-model="gen.viewport" class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-2 py-1.5 text-xs text-slate-200">
+                  <option value="desktop">desktop 1920</option><option value="laptop">laptop 1440</option><option value="mobile">mobile 390</option></select></div>
+              <div class="space-y-1"><label class="text-[10px] text-slate-500">输出目标</label>
+                <select v-model="gen.target" class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-2 py-1.5 text-xs text-slate-200">
+                  <option value="html_css">HTML / CSS(可预览评分)</option><option value="flutter">Flutter Widget(D3 最小版)</option></select></div>
+              <div class="space-y-1"><label class="text-[10px] text-slate-500">目标分(≥即停)</label>
+                <input v-model.number="gen.targetScore" type="number" min="1" max="100" class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-2 py-1.5 text-xs text-slate-200"></div>
+              <div class="space-y-1"><label class="text-[10px] text-slate-500">最多轮数 / 时间预算(s)</label>
+                <div class="flex gap-2"><input v-model.number="gen.maxRounds" type="number" min="1" max="12" class="w-1/2 rounded-lg bg-slate-950/80 border border-white/[0.08] px-2 py-1.5 text-xs text-slate-200">
+                <input v-model.number="gen.timeBudget" type="number" min="10" max="3600" class="w-1/2 rounded-lg bg-slate-950/80 border border-white/[0.08] px-2 py-1.5 text-xs text-slate-200"></div></div>
+            </div>
+            <p class="text-[10px] text-slate-500">大模型配置沿用「新建批次」表单里的 AI 字段(任务级 &gt; 环境变量 &gt; 默认); 未配置时走确定性版面分析 / 页面原型。</p>
+            <div v-if="gen.error" class="text-[11px] text-rose-300">[[ gen.error ]]</div>
+            <button @click="submitGenerate" :disabled="gen.submitting"
+              class="w-full px-3 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-semibold disabled:opacity-50 transition-all">
+              [[ gen.submitting ? '提交中…' : '开始生成' ]]</button>
+          </div>
+          <div class="rounded-2xl border border-white/[0.07] bg-[#0A1120]/70 backdrop-blur-xl p-4 space-y-3 text-[11px] text-slate-400 leading-relaxed">
+            <div class="text-xs font-semibold text-slate-300">流程与口径</div>
+            <ol class="list-decimal pl-4 space-y-1">
+              <li>输入经 InputAdapter 归一化为 <b class="text-slate-200">UIR</b>(组件树 + 设计令牌 + 内容 + 交互意图)。</li>
+              <li>OutputTarget 把 UIR 渲染为离线可运行的 HTML/CSS(无外链), Playwright 整页截图。</li>
+              <li>截图输入: 与参考图过三通道评分 v3(结构 NCC / 边缘 IoU / 文本 F2), 与克隆任务同一函数。描述输入: 无参考图, 自评分单列。</li>
+              <li>低于目标分则把像素差分线索回喂下一轮; 只保留净提升轮次; 达标或预算耗尽即停。</li>
+              <li>产物进任务矩阵: 预览 / 导出 ZIP / 评分明细与「生成报告」均可查看。</li>
+            </ol>
+            <div class="text-xs font-semibold text-slate-300 pt-2">边界</div>
+            <p>仅重建界面外观与交互意图; 不做任何站点 / 应用特判; 移动端(L2)只处理自有 / 授权安装包的公开资源。</p>
+          </div>
+        </div>
+      </div>
+    </div>
     <div v-show="view==='mockgen'" class="flex-1 min-h-0 overflow-y-auto custom-scroll">
       <div class="max-w-[1400px] mx-auto px-6 py-6 space-y-4">
         <div class="flex items-center justify-between gap-3 flex-wrap">
@@ -3342,6 +3408,7 @@ const __vueApp = createApp({
         { title: 'AI 增强', items: [
           { id: 'ai', label: 'AI 视觉修复', icon: 'flask-conical' },
           { id: 'mockgen', label: 'AI Mock 数据生成', icon: 'database' },
+          { id: 'generate', label: '界面生成(截图/描述)', icon: 'wand-2' },
         ]},
         { title: '运营与追踪', items: [
           { id: 'scheduler', label: '定时任务', icon: 'calendar-clock' },
@@ -3351,6 +3418,8 @@ const __vueApp = createApp({
         ]},
       ],
       schedulerBatches: [],
+      gen: { kind: 'description', description: '', viewport: 'laptop', target: 'html_css',
+             targetScore: 85, maxRounds: 4, timeBudget: 240, file: null, preview: '', submitting: false, error: '' },
       opsKpis: { tracker_total: 0, links_total: 0, clicks_total: 0,
                  scheduler_running: 0, scheduler_pending: 0, scheduler_paused: false },
       matrixView: 'grid', projectPill: '', groupByDomain: false,
@@ -5168,6 +5237,39 @@ const __vueApp = createApp({
         this.toast('✅ 批次 #' + data.batch_id + ' 创建成功, ' + data.accepted + ' 个任务已开始运行');
       } catch (e) { this.submitError = '网络错误: ' + e; }
       finally { this.submitting = false; }
+    },
+    handleGenFile(ev) {
+      const file = ev.target.files && ev.target.files[0];
+      this.gen.file = file || null; this.gen.preview = '';
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => { this.gen.preview = String(reader.result || ''); };
+      reader.readAsDataURL(file);
+    },
+    async submitGenerate() {
+      this.gen.error = '';
+      if (this.gen.kind === 'description' && !this.gen.description.trim()) { this.gen.error = '请输入页面描述'; return; }
+      if (this.gen.kind === 'screenshot' && !this.gen.file) { this.gen.error = '请选择界面截图'; return; }
+      this.gen.submitting = true;
+      try {
+        const fd = new FormData();
+        fd.append('kind', this.gen.kind); fd.append('description', this.gen.description);
+        fd.append('viewport', this.gen.viewport); fd.append('target', this.gen.target);
+        fd.append('target_score', this.gen.targetScore); fd.append('max_rounds', this.gen.maxRounds);
+        fd.append('time_budget', this.gen.timeBudget);
+        if (this.gen.file) fd.append('image', this.gen.file);
+        if (this.form.aiKey) fd.append('ai_api_key', this.form.aiKey);
+        if (this.form.aiModel) fd.append('ai_model', this.form.aiModel);
+        if (this.form.aiBaseUrl) fd.append('ai_base_url', this.form.aiBaseUrl);
+        if (this.currentProjectId !== '' && this.currentProjectId !== null) fd.append('project_id', this.currentProjectId);
+        const r = await fetch('/api/v4/generate', { method: 'POST', body: fd });
+        const data = await r.json();
+        if (!r.ok) { this.gen.error = data.error || '提交失败'; this.toast('❌ ' + this.gen.error); return; }
+        this.currentBatchId = data.batch_id; this.statusFilter = ''; this.activeTab = 'matrix'; this.view = 'tasks';
+        await this.refreshTasks(); await this.refreshTelemetry();
+        this.toast('✅ 生成任务 #' + data.task_id + ' 已入队 (' + data.kind + ' → ' + data.target + ')');
+      } catch (e) { this.gen.error = '网络错误: ' + e; }
+      finally { this.gen.submitting = false; }
     },
     handleImportFile(ev) {
       const file = ev.target.files && ev.target.files[0];

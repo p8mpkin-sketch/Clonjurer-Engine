@@ -31,6 +31,8 @@ import io
 import csv
 import io
 import json
+import os
+import base64
 import re
 import shutil
 import subprocess
@@ -947,6 +949,101 @@ def v4_ai_batch_repair():
     _audit("ai.batch_repair", f"批量修复队列: {len(queue)} 个任务")
     return jsonify({"ok": True, "queued": len(queue),
                     "task_ids": [t["id"] for t in queue]}), 202
+
+
+# ---------------------------------------------------------------------------
+# 通用 UI 重建引擎 · L1 生成(截图/描述 → UIR → HTML/CSS), 走现有任务调度与产物链路
+# ---------------------------------------------------------------------------
+@app.post("/api/v4/generate")
+def api_v4_generate():
+    """multipart/form-data 或 JSON:
+    kind=screenshot|description; description=文字; image=文件(截图); viewport=desktop|laptop|mobile;
+    target(默认 html_css); target_score / max_rounds / time_budget(可选); ai_api_key/ai_model/ai_base_url(可选)。
+    建一个 mode=generate 的批次 + 1 个任务, target_url 带 uir:generate: 前缀交由调度器分流。"""
+    from core.uir import settings as gen_settings
+    from core.uir.registry import list_inputs, list_outputs
+    if request.content_type and request.content_type.startswith("multipart/"):
+        form, files = request.form, request.files
+    else:
+        form, files = (request.get_json(silent=True) or {}), {}
+    kind = str(form.get("kind") or "description").strip()
+    if kind not in ("screenshot", "description"):
+        return jsonify({"error": f"kind 仅支持 screenshot/description, 可用适配器: {list_inputs()}"}), 400
+    target = str(form.get("target") or "html_css").strip()
+    if target not in list_outputs():
+        return jsonify({"error": f"未知输出目标 {target!r}, 可用: {list_outputs()}"}), 400
+    description = str(form.get("description") or "").strip()[:gen_settings.GEN_MAX_DESC_CHARS]
+    spec = {"kind": kind, "target": target, "description": description}
+    for key, lo, hi in (("target_score", 1, 100), ("max_rounds", 1, 12), ("time_budget", 10, 3600)):
+        raw = form.get(key)
+        if raw not in (None, ""):
+            try:
+                spec[key] = max(lo, min(hi, float(raw) if key == "target_score" else int(float(raw))))
+            except (TypeError, ValueError):
+                return jsonify({"error": f"{key} 非法"}), 400
+    vp_name = form.get("viewport")
+    if vp_name in config.VIEWPORTS:
+        spec["viewport"] = {"width": config.VIEWPORTS[vp_name]["width"], "height": config.VIEWPORTS[vp_name]["height"]}
+    if kind == "screenshot":
+        up = files.get("image") if files else None
+        data_b64 = form.get("image_base64")
+        gen_settings.GEN_INPUTS_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = f"{int(time.time() * 1000)}_{os.getpid()}"
+        dest = gen_settings.GEN_INPUTS_DIR / f"{stamp}.png"
+        try:
+            if up is not None and up.filename:
+                raw = up.read()
+            elif data_b64:
+                raw = base64.b64decode(str(data_b64).split(",", 1)[-1])
+            else:
+                return jsonify({"error": "截图输入需上传 image 文件或 image_base64"}), 400
+            if len(raw) > gen_settings.GEN_MAX_IMAGE_BYTES:
+                return jsonify({"error": "截图超过体积上限"}), 400
+            from PIL import Image as _PILImage
+            import io as _io
+            with _PILImage.open(_io.BytesIO(raw)) as im:
+                im = im.convert("RGB")
+                if im.size[0] < 64 or im.size[1] < 64:
+                    return jsonify({"error": "截图尺寸过小"}), 400
+                im.save(dest, format="PNG")
+        except Exception as exc:
+            return jsonify({"error": f"截图不可解析: {type(exc).__name__}"}), 400
+        spec["image_path"] = str(dest)
+        spec["reference_text"] = str(form.get("reference_text") or "")[:20000]
+    elif not description:
+        return jsonify({"error": "描述输入不能为空"}), 400
+    label = (description[:40] if description else f"截图 {time.strftime('%m-%d %H:%M')}")
+    cfg = {"mode": "generate", "gen": spec, "similarity": True,
+           "ai_api_key": str(form.get("ai_api_key") or "").strip()[:4096],
+           "ai_base_url": str(form.get("ai_base_url") or "").strip()[:4096],
+           "ai_model": str(form.get("ai_model") or "").strip()[:200]}
+    project_id = form.get("project_id")
+    project_id = int(project_id) if str(project_id or "").isdigit() else None
+    if project_id is not None and db.get_project(project_id) is None:
+        return jsonify({"error": f"项目 #{project_id} 不存在"}), 400
+    name = str(form.get("name") or "").strip() or f"生成 · {label}"
+    target_url = f"{gen_settings.TARGET_URL_PREFIX}{kind}:{label}"
+    batch_id = db.create_batch(name, [(target_url, "generated")], cfg, project_id)
+    task = db.list_tasks(batch_id=batch_id, limit=1)
+    task_id = task[0]["id"] if task else None
+    scheduler.start()
+    bus.publish(None, "SCHED", f"生成批次 #{batch_id} 已入队 ({kind} → {target})")
+    _audit("generate.create", f"生成批次 #{batch_id}「{name}」({kind} → {target})")
+    return jsonify({"batch_id": batch_id, "task_id": task_id, "name": name, "kind": kind, "target": target}), 201
+
+
+@app.get("/api/v4/generate/<int:task_id>/report")
+def api_v4_generate_report(task_id):
+    task = _task_or_404(task_id)
+    ws = _workspace_of(task)
+    rep = ws / "generate_report.json"
+    if not rep.is_file():
+        return jsonify({"error": "生成报告尚未产出"}), 404
+    payload = _parse_json(rep.read_text(encoding="utf-8"))
+    uir = ws / "uir.json"
+    payload["uir_stats"] = payload.get("uir_stats") or {}
+    payload["has_uir"] = uir.is_file()
+    return jsonify(payload)
 
 
 @app.get("/api/v4/theme")

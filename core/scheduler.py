@@ -11,6 +11,7 @@ import threading
 import config
 from core.browser_pool import SyncBrowserPool
 from core.cloner_engine import ClonerEngine
+from core.uir import generate as uir_generate
 
 
 class Scheduler:
@@ -66,8 +67,12 @@ class Scheduler:
             self.bus.publish(task["id"], "SCHED",
                           f"Worker-{index} 接手任务 #{task['id']} ({task['domain']})")
             try:
-                engine = ClonerEngine(task["id"], self.db, self.bus, self.pool)
-                engine.run()
+                if uir_generate.is_generate_task(task):
+                    # 通用 UI 重建引擎(L1 生成任务): 按 target_url 前缀分流, 不进克隆管线
+                    uir_generate.run_generation_task(task, self.db, self.bus, self.pool)
+                else:
+                    engine = ClonerEngine(task["id"], self.db, self.bus, self.pool)
+                    engine.run()
             except Exception as exc:
                 # 瞬时 Playwright 会话崩溃(页面运行时重导航/浏览器回收)与
                 # 稳定失败不同源: 换新会话整体重跑一次, 避免偶发即判死
