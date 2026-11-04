@@ -994,6 +994,10 @@ CV_RECORD_JS = r"""
     m.paths = m.els.map(__CV_PATH__);
   }
   m.snaps[tag] = m.els.map(e => e.getAttribute('style') || '');
+  // 脚本按视口写的尺寸属性(svg/img/canvas 的 width/height 属性, 如按容器宽算出的 logo 尺寸)
+  // 不在 style 里, 记成等价 CSS 一并参与分视口比较(CSS 宽高覆盖展示属性)
+  m.attrs = m.attrs || {};
+  m.attrs[tag] = m.els.map(__CV_ATTR__);
   m.widths = m.widths || {};
   m.widths[tag] = window.innerWidth;
   return m.els.length;
@@ -1011,7 +1015,16 @@ CV_PATH_FN = r"""(e) => {
   }
   return p.join('>');
 }"""
-CV_RECORD_JS = CV_RECORD_JS.replace("__CV_PATH__", CV_PATH_FN)
+CV_ATTR_FN = r"""(e) => {
+  if (!(e instanceof SVGSVGElement) && e.tagName !== 'IMG' && e.tagName !== 'CANVAS') return '';
+  let s = '';
+  for (const a of ['width', 'height']) {
+    const v = e.getAttribute(a);
+    if (v && /^\d+(\.\d+)?$/.test(v.trim())) s += a + ':' + (+v).toFixed(2).replace(/\.?0+$/, '') + 'px;';
+  }
+  return s;
+}"""
+CV_RECORD_JS = CV_RECORD_JS.replace("__CV_PATH__", CV_PATH_FN).replace("__CV_ATTR__", CV_ATTR_FN)
 
 # 窄屏重载页的内联样式表: {路径: [标签, class, style]}
 CV_PATHS_JS = r"""() => {
@@ -1178,30 +1191,33 @@ CV_EMIT_JS = r"""
   const bands = {d: [], t: [], m: []};
   const px = v => { const r = /^(-?[\d.]+)px$/.exec(v || ''); return r ? parseFloat(r[1]) : null; };
   const tags = ['t', 'm'].filter(t => m.snaps[t]);
+  const attrOf = __CV_ATTR__;
+  const S = (t, i) => m.snaps[t][i] + ((m.attrs && m.attrs[t] && m.attrs[t][i]) ? ';' + m.attrs[t][i] : '');
   m.els.forEach((el, i) => {
-    const sd = m.snaps.d[i];
+    const sdRaw = m.snaps.d[i], sd = S('d', i);
     if (!el.isConnected) return;
-    const reloadDiff = m.paths && tags.some(t => loads[t] && loads[t][m.paths[i]] && loads[t][m.paths[i]][2] !== sd);
-    if (!reloadDiff && tags.every(t => m.snaps[t][i] === sd)) return;
-    if (m.snaps.b[i] !== sd && tags.every(t => m.snaps[t][i] === m.snaps.b[i])) return;
-    const D = parse(sd), B = parse(m.snaps.b[i]), V = {};
-    tags.forEach(t => { V[t] = parse(m.snaps[t][i]); });
+    const reloadDiff = m.paths && tags.some(t => loads[t] && loads[t][m.paths[i]] && loads[t][m.paths[i]][2] !== sdRaw);
+    if (!reloadDiff && tags.every(t => S(t, i) === sd)) return;
+    if (S('b', i) !== sd && tags.every(t => S(t, i) === S('b', i))) return;
+    const D = parse(sd), B = parse(S('b', i)), V = {}, Draw = parse(sdRaw);
+    tags.forEach(t => { V[t] = parse(S(t, i)); });
     tags.forEach(t => {
       const L = loads[t] && m.paths ? loads[t][m.paths[i]] : null;
       if (!L || L[0] !== el.tagName) return;
       const cls = String(el.className && el.className.baseVal !== undefined ? el.className.baseVal : el.className || '');
-      if (L[1] !== cls || L[2] === sd) return;
+      if (L[1] !== cls || L[2] === sdRaw) return;
       const LV = parse(L[2]);
       const keys = new Set(Object.keys(D).concat(Object.keys(LV)));
       for (const p of keys) {
         if (!GEOM.test(p)) continue;
+        if (!(p in Draw) && !(p in LV)) continue;                         // 来自尺寸属性: 重载页只给了 style, 不比
         if (JSON.stringify(V[t][p]) !== JSON.stringify(D[p])) continue;   // 缩放已采到
         if (JSON.stringify(LV[p]) === JSON.stringify(D[p])) continue;
         if (LV[p]) V[t][p] = LV[p]; else delete V[t][p];
         out.reload++;
       }
     });
-    const cur = parse(el.getAttribute('style') || '');
+    const cur = parse((el.getAttribute('style') || '') + ';' + attrOf(el));
     const props = new Set(Object.keys(D));
     tags.forEach(t => Object.keys(V[t]).forEach(p => props.add(p)));
     const rule = {d: [], t: [], m: []};
@@ -1246,7 +1262,7 @@ CV_EMIT_JS = r"""
   window.__cvRec = null;
   return out;
 }
-"""
+""".replace("__CV_ATTR__", CV_ATTR_FN)
 
 _CV_BAND_RE = re.compile(r"@media [^{]*?/\*cv-([dtmx])\*/\{")
 

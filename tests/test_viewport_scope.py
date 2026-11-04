@@ -291,3 +291,48 @@ class DomVariants(unittest.TestCase):
                 self.assertTrue(page.evaluate("document.querySelector('.cards').checkVisibility()"))
             finally:
                 b.close()
+
+
+SVG_ATTR_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<style>body{margin:0}</style></head><body>
+<svg id="logo" viewBox="0 0 100 10"><rect width="100" height="10"/></svg>
+<svg id="icon" width="24" height="24" viewBox="0 0 24 24"><rect width="24" height="24"/></svg>
+<script>
+function fit(){ var l=document.getElementById('logo'); var w=Math.min(innerWidth-48,600);
+  l.setAttribute('width', String(w)); l.setAttribute('height', String(w/10)); }
+fit(); addEventListener('resize', fit);
+</script></body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class ViewportSizeAttrs(unittest.TestCase):
+    def test_script_written_svg_size_attrs_follow_viewport(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 1440, "height": 800})
+                page.set_content(SVG_ATTR_PAGE)
+                page.evaluate(ce.CV_RECORD_JS, "d")
+                for tag, w in (("t", 768), ("m", 390)):
+                    page.set_viewport_size({"width": w, "height": 800})
+                    page.evaluate(ce.CV_QUIET_JS, 100)
+                    page.evaluate(ce.CV_RECORD_JS, tag)
+                page.set_viewport_size({"width": 1440, "height": 800})
+                page.evaluate(ce.CV_QUIET_JS, 100)
+                page.evaluate(ce.CV_RECORD_JS, "b")
+                out = page.evaluate(ce.CV_EMIT_JS)
+                self.assertGreaterEqual(out["banded"], 1)
+                self.assertEqual(page.evaluate("document.getElementById('logo').getBoundingClientRect().width"), 600)
+                html = page.content()
+            finally:
+                b.close()
+            html = ce.scope_viewport_css(html, 1000, 0)
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 390, "height": 800})
+                page.set_content(html.replace("<script>", "<script type='x'>"))
+                self.assertEqual(page.evaluate("document.getElementById('logo').getBoundingClientRect().width"), 342)
+                self.assertEqual(page.evaluate("document.getElementById('icon').getBoundingClientRect().width"), 24)
+            finally:
+                b.close()
