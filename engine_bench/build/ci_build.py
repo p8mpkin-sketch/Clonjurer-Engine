@@ -53,14 +53,15 @@ def _case(case_id):
 #           shell = 先渲染 html_css, 当作「网站工程」交给 core.app_shell 装壳(与克隆任务的交付形态同一条路)
 #   kind:   apk → build(app_dir); desktop → build(app_dir, platforms[, arch])
 #   smoke:  cdp      = 带 --remote-debugging-port(WebView2 另经环境变量)启动, CDP 截图与参考 HTML 比较, 设门槛
-#           alive    = 只验证启动后进程存活(WKWebView 等没有通用 CDP, 不出分)
+#           alive    = 只验证启动后进程存活; Windows 上另截主窗口客户区与参考 HTML 比较, 分数只记录
+#                      (系统 WebView 壳: WebView2 在 CI 上不接受外部开调试端口, WKWebView 没有 CDP)
 #           emulator = 由 android_smoke.sh 在模拟器里验证; 可按平台给 dict
 BUILD_TARGETS = {
     # 默认: 系统 WebView 壳(包体 KB/MB 级, core/app_shell.py)
     "android-webview": {"kind": "apk", "render": "shell", "shell": "android_shell", "app_dir": "android_shell",
                         "build": "build_android_shell", "smoke": "emulator"},
     "desktop-go": {"kind": "desktop", "render": "shell", "shell": "desktop_shell", "app_dir": "desktop_shell",
-                   "build": "build_go_desktop", "smoke": {"win32": "cdp", "darwin": "alive"}},
+                   "build": "build_go_desktop", "smoke": "alive"},
     # 可选: 自带运行时的壳
     "flutter": {"kind": "apk", "render": "uir", "app_dir": "flutter_app", "build": "build_apk", "smoke": "emulator"},
     "electron": {"kind": "desktop", "render": "uir", "app_dir": "electron_app", "build": "build_desktop",
@@ -177,35 +178,6 @@ def _shot_page(page, out_png):
     return page.evaluate("() => ({w: innerWidth, h: innerHeight, text: document.body ? document.body.innerText : ''})")
 
 
-_WV2_POLICY = r"Software\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments"
-
-
-def _webview2_debug_policy(exe_name, port):
-    """Windows: 按可执行文件名给 WebView2 写调试端口策略(HKCU, 官方企业策略键), 返回撤销函数; 其他系统返回 None。
-    只用于 CI 冒烟; 写之前已有同名值则不动它。"""
-    if os.name != "nt":
-        return None
-    import winreg
-    try:
-        key = winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, _WV2_POLICY, 0, winreg.KEY_ALL_ACCESS)
-    except OSError:
-        return None
-    try:
-        winreg.QueryValueEx(key, exe_name)
-        winreg.CloseKey(key)
-        return None
-    except OSError:
-        pass
-    winreg.SetValueEx(key, exe_name, 0, winreg.REG_SZ, f"--remote-debugging-port={port}")
-
-    def undo():
-        with suppress(OSError):
-            winreg.DeleteValue(key, exe_name)
-        with suppress(OSError):
-            winreg.CloseKey(key)
-    return undo
-
-
 def _diagnose(shots, tag) -> dict:
     """CDP 没起来时留证据: 整屏截图(看是否弹了错误框)+ WebView/Chromium 子进程命令行(看调试参数是否生效)。"""
     d = {}
@@ -230,8 +202,65 @@ def _diagnose(shots, tag) -> dict:
     return d
 
 
-def smoke_alive(art, shots, wait_s=15.0):
-    """无 CDP 的壳: 启动 → 等待 → 进程仍存活即通过(不出分)。"""
+_WIN_CAPTURE = r"""
+Add-Type -AssemblyName System.Drawing
+Add-Type @'
+using System; using System.Runtime.InteropServices;
+public class CjW {
+  [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out RECT r);
+  [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref POINT p);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  public struct RECT { public int L, T, R, B; }
+  public struct POINT { public int X, Y; }
+}
+'@
+[CjW]::SetProcessDPIAware() | Out-Null
+$h = [IntPtr]::Zero
+for ($i = 0; $i -lt 60 -and $h -eq [IntPtr]::Zero; $i++) {
+  $h = (Get-Process -Id __PID__).MainWindowHandle; if ($h -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 500 } }
+if ($h -eq [IntPtr]::Zero) { 'NOWINDOW'; exit 2 }
+[CjW]::SetForegroundWindow($h) | Out-Null; Start-Sleep -Milliseconds 800
+$r = New-Object CjW+RECT; [CjW]::GetClientRect($h, [ref]$r) | Out-Null
+$pt = New-Object CjW+POINT; [CjW]::ClientToScreen($h, [ref]$pt) | Out-Null
+$w = $r.R - $r.L; $hh = $r.B - $r.T
+$bmp = New-Object System.Drawing.Bitmap $w, $hh
+[System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($pt.X, $pt.Y, 0, 0, (New-Object System.Drawing.Size $w, $hh))
+$bmp.Save('__OUT__'); "$w $hh"
+"""
+
+
+def _capture_window(pid, out_png):
+    """Windows: 截应用主窗口客户区(屏幕像素, 不依赖 WebView 调试协议)。返回 (w, h) 或 None。"""
+    ps = _WIN_CAPTURE.replace("__PID__", str(int(pid))).replace("__OUT__", str(Path(out_png).resolve()))
+    with suppress(Exception):
+        out = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True, timeout=90)
+        last = (out.stdout.strip().splitlines() or [""])[-1].split()
+        if out.returncode == 0 and len(last) == 2 and Path(out_png).is_file():
+            return int(last[0]), int(last[1])
+    return None
+
+
+def _score_window(app_png, ref_html, size, shots, tag):
+    """窗口截图 vs 参考 HTML 在同尺寸视口下的渲染(只截首屏, 与窗口所见一致)。"""
+    from playwright.sync_api import sync_playwright
+    from core.cloner_engine import compute_visual_similarity
+    ref_png, diff_png = Path(shots) / f"ref-{tag}.png", Path(shots) / f"diff-{tag}.png"
+    with sync_playwright() as p:
+        b = p.chromium.launch()
+        pg = b.new_context(viewport={"width": size[0], "height": size[1]}).new_page()
+        pg.goto(Path(ref_html).resolve().as_uri())
+        pg.wait_for_load_state("load")
+        pg.wait_for_timeout(500)
+        pg.screenshot(path=str(ref_png))
+        b.close()
+    sc = compute_visual_similarity(ref_png, app_png, diff_png)
+    return sc.get("score"), {k: sc.get(k) for k in ("structure", "edge") if k in sc}, [str(app_png), str(ref_png), str(diff_png)]
+
+
+def smoke_alive(art, shots, wait_s=15.0, ref_html=None):
+    """无 CDP 的壳: 启动 → 等待 → 进程仍存活即通过。Windows 上另截主窗口客户区与参考 HTML 比较,
+    分数只记录不设门槛(系统 WebView 的滚动条/字体与 headless Chromium 不同)。"""
     shots = Path(shots)
     shots.mkdir(parents=True, exist_ok=True)
     tag = f"{art['platform']}-{art['arch']}"
@@ -250,6 +279,15 @@ def smoke_alive(art, shots, wait_s=15.0):
         r["alive"] = proc.poll() is None
         if not r["alive"]:
             r["error"] = f"启动后退出(exit {proc.returncode})"
+        elif os.name == "nt" and ref_html:
+            app_png = shots / f"app-{tag}.png"
+            size = _capture_window(proc.pid, app_png)
+            if size:
+                r["viewport"] = list(size)
+                with suppress(Exception):
+                    r["score"], r["detail"], r["shots"] = _score_window(app_png, ref_html, size, shots, tag)
+            else:
+                r["window"] = "未找到主窗口"
         _kill_tree(proc)
     with suppress(Exception):
         r["app_log_tail"] = log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-20:]
@@ -270,8 +308,7 @@ def smoke_one(art, ref_html, shots, settle_s=3.0, boot_timeout=90):
         return r
     port = _free_port()
     cmd = [binary, f"--remote-debugging-port={port}"]   # Chromium/Electron 认命令行
-    env = dict(os.environ, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=f"--remote-debugging-port={port}")  # WebView2 认环境变量
-    policy = _webview2_debug_policy(Path(binary).name, port)   # 环境变量未必生效(CI 实测), 再走官方策略键
+    env = os.environ.copy()
     if sys.platform.startswith("linux"):
         cmd.append("--no-sandbox")  # 托管 runner 无 suid chrome-sandbox; 只影响 Linux 冒烟
     kw = {"start_new_session": True} if os.name != "nt" else {"creationflags": 0x00000200}
@@ -328,8 +365,6 @@ def smoke_one(art, ref_html, shots, settle_s=3.0, boot_timeout=90):
             r["error"] = f"{type(exc).__name__}: {exc}"
         finally:
             _kill_tree(proc)
-            if policy:
-                policy()
     with suppress(Exception):
         r["app_log_tail"] = log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-20:]
     return r
@@ -349,7 +384,7 @@ def cmd_smoke_desktop(args):
             x["pass"] = bool(x.get("launched") and x.get("alive") and isinstance(x.get("score"), (int, float))
                              and x["score"] >= args.min_score)
         else:
-            x = smoke_alive(a, args.shots)
+            x = smoke_alive(a, args.shots, ref_html=args.ref)
             x["pass"] = bool(x.get("launched") and x.get("alive"))
         results.append(x)
     ok = bool(results) and all(x["pass"] for x in results)
@@ -402,10 +437,15 @@ def cmd_summary(args):
             art = "; ".join(f"{a['platform']}-{a['arch']} {_mb(a.get('dir_bytes'))}" for a in d.get("artifacts", []))
             lines.append(f"| {name} | {ok} | {art or '-'} | {d.get('signing', '-')} | - |")
         elif kind == "smoke-desktop":
-            sm = "; ".join(f"{x['platform']}: " + (f"{x['score']:.1f}" if isinstance(x.get("score"), (int, float))
-                                                   else "启动存活" if x.get("mode") == "alive" and x.get("alive")
-                                                   else x.get("error", "未出分")) for x in d.get("results", []))
-            lines.append(f"| {p.name} | {ok} | - | - | {sm} (门槛 {d.get('min_score')}) |")
+            def _one(x):
+                sc = f"{x['score']:.1f}" if isinstance(x.get("score"), (int, float)) else None
+                if x.get("mode") == "alive":
+                    if not x.get("alive"):
+                        return f"{x['platform']}: {x.get('error', '未存活')}"
+                    return f"{x['platform']}: 启动存活" + (f", 窗口截图 vs 参考 {sc}(只记录)" if sc else "")
+                return f"{x['platform']}: " + (f"{sc}(门槛 {d.get('min_score')})" if sc else x.get("error", "未出分"))
+            sm = "; ".join(_one(x) for x in d.get("results", []))
+            lines.append(f"| {p.name} | {ok} | - | - | {sm} |")
         elif kind == "score":
             lines.append(f"| {p.name} | 记录 | - | - | 模拟器截图 vs 参考 HTML: {d.get('score')} |")
     out = "\n".join(lines) + "\n"
