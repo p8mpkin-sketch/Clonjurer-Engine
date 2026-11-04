@@ -39,8 +39,14 @@ class ModelGuards(unittest.TestCase):
         self.assertEqual(u.validate(), [])
 
     def test_closed_sets(self):
-        u = UIR(root=Node(role="button", intents=[{"on": "click", "do": "launch-rocket"}])).normalize()
-        self.assertTrue(any("交互意图非法" in e for e in u.validate()))
+        raw = UIR(root=Node(id="b", role="button", intents=[{"on": "click", "do": "launch-rocket"}]))
+        self.assertTrue(any("交互意图非法" in e for e in raw.validate()))      # 未归一化: 闭集校验拒绝
+        u = UIR(root=Node(role="button", intents=[{"on": "click", "do": "launch-rocket"}, {"on": "tap", "do": "focus"}],
+                          layout={"mode": "row"})).normalize()
+        self.assertEqual([i["do"] for i in u.root.intents], ["none", "input"])  # 归一化: 漂移词收敛到闭集
+        self.assertEqual(u.root.intents[1]["on"], "click")
+        self.assertEqual(u.root.layout, {"mode": "flex", "direction": "row"})
+        self.assertEqual(u.validate(), [])
         u2 = UIR(root=Node(role="text", text_ref="t9")).normalize()
         self.assertTrue(any("text_ref 未定义" in e for e in u2.validate()))
 

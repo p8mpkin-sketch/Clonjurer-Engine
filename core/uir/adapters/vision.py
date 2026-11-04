@@ -295,7 +295,25 @@ _LLM_SYSTEM = (
     "image,icon,button,input,link,nav,list,list_item,card,header,footer,hero,divider,badge,avatar,table,form,section。"
     "图片区域用 image 角色并给出 w/h, 不要外链。根节点宽度等于截图宽度 W。文字必须逐字抄录截图中可见文案。"
     "若用户附带了上一轮的像素差分线索, 优先修正这些区域的尺寸/颜色/缺失内容。"
+    "用户还会附带引擎确定性版面分析得到的「区块骨架」(每块的像素位置/尺寸/底色/文字行数): 请以它为几何依据, "
+    "每个区块对应一个节点(container 用 layout.mode=absolute 与 box.position{top,left} + w/h 精确摆放), "
+    "在其中填入真实文字与控件; 不要遗漏骨架里的区块, 整页高度必须等于截图高度。"
 )
+
+
+def skeleton_hint(uir: UIR, limit: int = 48) -> str:
+    """确定性版面分析 → 给模型的区块骨架文本(位置/尺寸/底色/文字行数), 锚定几何。"""
+    lines = []
+    for n in uir.root.children:
+        pos, b = n.box.get("position") or {}, n.box
+        if b.get("w") is None or b.get("h") is None:
+            continue
+        bands = sum(1 for c in n.children if c.role == "text")
+        lines.append(f"- top {pos.get('top', 0)} left {pos.get('left', 0)} w {b['w']} h {b['h']} bg {b.get('bg')}"
+                     + (f" 文字行 {bands}" if bands else "") + (" 图片区" if n.role == "image" else ""))
+        if len(lines) >= limit:
+            break
+    return "\n".join(lines)
 
 
 @register_input("screenshot")
@@ -313,17 +331,21 @@ class ScreenshotAdapter:
                     if req.hints.get("score") is not None:
                         hint_txt += f"\n上一轮评分 {req.hints['score']} (结构 {req.hints.get('structure')} / 边缘 {req.hints.get('edge')})"
                 images = [img] + ([req.hints["last_render"]] if req.hints.get("last_render") else [])
+                skel = segment(img, asset_dir=None)
                 user = (f"截图尺寸 {W}×{H}。第 1 张图是目标界面截图" +
                         ("; 第 2 张图是上一轮生成产物的渲染截图(用于对比修正)" if len(images) > 1 else "") +
-                        f"。{hint_txt}\n请输出 UIR JSON。")
-                obj = llm.chat_json(ctx.ai_cfg, _LLM_SYSTEM, user, images=images)
+                        f"。{hint_txt}\n\n区块骨架(像素坐标, 共 {len(skel.root.children)} 块):\n{skeleton_hint(skel)}"
+                        f"\n\n请输出 UIR JSON。")
+                obj = llm.chat_json(ctx.ai_cfg, _LLM_SYSTEM, user, images=images, max_tokens=16384)
                 uir = UIR.from_dict(obj).normalize()
                 errs = uir.validate()
                 if errs:
                     raise ValueError("; ".join(errs[:3]))
                 uir.meta.update({"source_kind": "vision", "tier": "llm", "viewport": {"w": W, "h": H}})
-                if "w" not in uir.root.box:
-                    uir.root.box["w"] = W
+                # 根几何钉死到参考图: 宽=W, 最小高=H, 溢出裁切(评分按同宽同高对齐)
+                uir.root.box.update({"w": W, "min_h": H, "overflow": "hidden"})
+                if not uir.tokens.color:
+                    uir.tokens.color = dict(skel.tokens.color)
                 return uir
             except Exception as exc:
                 ctx.log("UIR", f"多模态 UIR 不可用, 回落确定性版面分析: {type(exc).__name__}: {str(exc)[:160]}")

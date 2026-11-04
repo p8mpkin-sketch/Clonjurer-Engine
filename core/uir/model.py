@@ -157,6 +157,30 @@ class UIR:
             if not node.id or node.id in seen:
                 node.id = fresh()
             seen.add(node.id)
+            # 对生成侧(LLM)常见漂移做宽松归一化, 而不是整树拒绝回落:
+            mode = node.layout.get("mode")
+            if mode in ("row", "col", "column", "horizontal", "vertical"):
+                node.layout["mode"] = "flex"
+                node.layout.setdefault("direction", "row" if mode in ("row", "horizontal") else "col")
+            elif mode in ("block", "inline", "none", ""):
+                node.layout.pop("mode", None)
+            elif mode and mode not in LAYOUT_MODES:
+                node.layout["mode"] = "flex"
+            if node.layout.get("direction") in ("column", "vertical"):
+                node.layout["direction"] = "col"
+            elif node.layout.get("direction") in ("horizontal",):
+                node.layout["direction"] = "row"
+            kept = []
+            for it in node.intents:
+                if not isinstance(it, dict):
+                    continue
+                if it.get("do") not in INTENT_DO:
+                    it["do"] = {"submit": "submit-form", "tap": "navigate", "press": "navigate", "link": "navigate",
+                                "open": "open-overlay", "close": "toggle", "focus": "input", "type": "input"}.get(str(it.get("do")), "none")
+                if it.get("on") and it["on"] not in INTENT_ON:
+                    it["on"] = "click"
+                kept.append(it)
+            node.intents = kept
         self.uir_version = "1"
         return self
 

@@ -309,7 +309,8 @@ class DescriptionAdapter:
             try:
                 ctx.log("UIR", f"描述→UIR: 调用大模型 ({ctx.ai_cfg['model']})")
                 obj = llm.chat_json(ctx.ai_cfg, _LLM_SYSTEM, f"页面描述:\n{desc}\n\n"
-                                    + (f"上一轮问题: {req.hints.get('feedback')}\n" if req.hints.get("feedback") else ""))
+                                    + (f"上一轮问题: {req.hints.get('feedback')}\n" if req.hints.get("feedback") else ""),
+                                    max_tokens=16384)
                 uir = UIR.from_dict(obj).normalize()
                 errs = uir.validate()
                 if errs:

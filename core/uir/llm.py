@@ -9,6 +9,7 @@ import base64
 import io
 import json
 import re
+import time
 from pathlib import Path
 
 import requests
@@ -55,8 +56,11 @@ def extract_json(text: str) -> dict:
 
 
 def chat_json(ai_cfg: dict, system: str, user_text: str, images=(),
-              temperature: float = 0.2, timeout: int = None) -> dict:
-    """同步调用, 返回解析后的 JSON 对象; 失败抛 RuntimeError。"""
+              temperature: float = 0.2, timeout: int = None, max_tokens: int = None) -> dict:
+    """同步调用, 返回解析后的 JSON 对象; 失败抛 RuntimeError。
+
+    预算阶梯 (b, 2b, 4b): 内容为空且思考 token 吃光预算 → 升档; 内容非空但 finish_reason=length
+    且 JSON 解析失败(UIR 节点树上百节点时 JSON 很长, 被截断) → 同样升档重试, 而不是直接回落。"""
     content = [{"type": "text", "text": user_text}]
     for p in images or ():
         p = Path(p)
@@ -64,6 +68,19 @@ def chat_json(ai_cfg: dict, system: str, user_text: str, images=(),
             content.append(_image_part(p, config.AI_VISION_MAX_IMAGE_EDGE))
 
     def _call(budget: int):
+        # 瞬时网络错误(SSL EOF / 连接重置 / 读超时)重试 2 次, 退避 2s/4s: 一次抖动不应让整轮回落
+        last = None
+        for attempt in range(3):
+            try:
+                return _call_once(budget)
+            except (requests.exceptions.SSLError, requests.exceptions.ConnectionError,
+                    requests.exceptions.Timeout, requests.exceptions.ChunkedEncodingError) as exc:
+                last = exc
+                if attempt < 2:
+                    time.sleep(2 * (attempt + 1))
+        raise RuntimeError(f"上游网络错误(已重试 3 次): {type(last).__name__}: {str(last)[:160]}")
+
+    def _call_once(budget: int):
         resp = requests.post(
             f"{ai_cfg['base_url']}/chat/completions",
             headers={"Authorization": f"Bearer {ai_cfg['api_key']}"},
@@ -77,20 +94,26 @@ def chat_json(ai_cfg: dict, system: str, user_text: str, images=(),
         except ValueError:
             raise RuntimeError(f"上游返回非 JSON(HTTP {resp.status_code}): {resp.text[:160]!r}")
 
+    base = int(max_tokens or config.AI_PATCH_MAX_TOKENS)
     text, last_err = "", None
-    for budget in (config.AI_PATCH_MAX_TOKENS, config.AI_PATCH_MAX_TOKENS * 2):
+    for budget in (base, base * 2, base * 4):
         payload = _call(budget)
         choice = (payload.get("choices") or [{}])[0]
         text = ((choice.get("message") or {}).get("content") or "").strip()
-        if text:
-            break
+        finish = choice.get("finish_reason")
         usage = payload.get("usage") or {}
+        if text:
+            try:
+                return extract_json(text)
+            except (ValueError, RuntimeError) as exc:
+                if finish == "length":
+                    last_err = RuntimeError(f"输出被截断(max_tokens={budget}, finish_reason=length), 已升档重试")
+                    continue
+                raise RuntimeError(f"上游 JSON 不可解析: {exc}") from exc
         comp = usage.get("completion_tokens") or 0
         reasoning = (usage.get("completion_tokens_details") or {}).get("reasoning_tokens") or 0
-        if choice.get("finish_reason") == "length" and reasoning and reasoning * 2 >= comp:
+        if finish == "length" and reasoning and reasoning * 2 >= comp:
             last_err = RuntimeError(f"推理模型思考 token 耗尽补全预算(max_tokens={budget}), 已升档重试")
             continue
-        raise RuntimeError(f"上游返回空内容(finish_reason={choice.get('finish_reason')}, usage={usage})")
-    if not text:
-        raise last_err or RuntimeError("上游返回空内容")
-    return extract_json(text)
+        raise RuntimeError(f"上游返回空内容(finish_reason={finish}, usage={usage})")
+    raise last_err or RuntimeError("上游返回空内容")
