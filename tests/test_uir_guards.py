@@ -23,7 +23,7 @@ from core.uir import settings  # noqa: E402
 from core.uir.model import UIR, Node, Tokens, ROLES  # noqa: E402
 from core.uir.registry import list_inputs, list_outputs, get_output  # noqa: E402
 from core.uir.adapters.description import build_from_description, detect_archetype  # noqa: E402
-from core.uir.adapters.vision import segment  # noqa: E402
+from core.uir.adapters.vision import segment, merge_fill  # noqa: E402
 from core.uir.adapters.web_dom import from_clone_workspace  # noqa: E402
 from core.uir.targets.html_css import render_html, HtmlCssTarget  # noqa: E402
 from core.uir.generate import is_generate_task  # noqa: E402
@@ -169,6 +169,39 @@ class DeterministicFloor(unittest.TestCase):
         for mod in ("vision", "description"):
             code = (ROOT / f"core/uir/adapters/{mod}.py").read_text(encoding="utf-8")
             self.assertIn('not req.hints.get("force_tier0")', code)
+
+
+class SkeletonFill(unittest.TestCase):
+    """B 路线: 模型只填充确定性骨架 —— 几何/底色不可被模型改动, 文字按阅读顺序落入文字行, 未知 id 忽略。"""
+
+    def test_merge_keeps_geometry_fills_text(self):
+        im = Image.new("RGB", (640, 480), "#ffffff")
+        d = ImageDraw.Draw(im)
+        d.rectangle([0, 0, 640, 60], fill="#1f2937")
+        d.rectangle([40, 120, 600, 170], fill="#2563eb")
+        for y in range(220, 300, 18):
+            d.rectangle([40, y, 600, y + 8], fill="#111827")
+        with tempfile.TemporaryDirectory() as dd:
+            p = Path(dd) / "a.png"
+            im.save(p)
+            skel = segment(p)
+            before = {n.id: (dict(n.box), n.role) for n in skel.root.children}
+            n_blocks = len(skel.root.children)
+            fill = {"blocks": [{"id": "b1", "role": "header", "texts": ["品牌"]},
+                               {"id": "b2", "role": "button", "texts": ["立即登录"], "text_color": "#ffffff"},
+                               {"id": f"b{n_blocks}", "role": "text", "texts": ["第一行", "第二行", "第三行"]},
+                               {"id": "b999", "role": "button", "texts": ["幽灵"]}]}
+            out = merge_fill(skel, fill)
+            self.assertEqual(out.meta["llm_mode"], "skeleton_fill")
+            self.assertGreaterEqual(out.meta["filled"], 1)
+            for n in out.root.children:
+                b0, _ = before[n.id]
+                for k in ("position", "w", "h", "bg"):      # 几何与底色不变
+                    self.assertEqual(n.box.get(k), b0.get(k), k)
+            texts = [c.content.get("text") for n in out.root.walk() for c in [n] if c.content.get("text")]
+            self.assertTrue(any(t in ("立即登录", "品牌", "第一行") for t in texts))
+            self.assertFalse(any(t == "幽灵" for t in texts))
+            self.assertEqual(out.validate(), [])
 
 
 class RegistryAndDispatch(unittest.TestCase):

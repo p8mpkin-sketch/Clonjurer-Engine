@@ -316,15 +316,116 @@ def skeleton_hint(uir: UIR, limit: int = 48) -> str:
     return "\n".join(lines)
 
 
+_FILL_SYSTEM = (
+    "你是 UI 文案与控件识别专家。引擎已经用确定性版面分析把截图切成了编号区块(几何、底色都已确定, 你不得改动)。"
+    "你的任务只有一件: 对每个区块, 说出它是什么(role)以及里面的真实文字(逐字抄录截图)。只输出一个 JSON 对象: "
+    "{\"blocks\":[{\"id\":\"b3\",\"role\":\"text|button|input|image|nav|header|footer|card|list_item|badge|box\","
+    "\"texts\":[\"该区块内按阅读顺序的每一行文字\"],\"text_color\":\"#hex(可选)\"}]}。"
+    "规则: id 必须来自给定清单; texts 一行一个元素, 没有文字就给 []; 按钮/输入框的文字也放 texts[0]; "
+    "图片/图表/插画区块 role=image 且 texts=[]; 不要输出清单之外的区块, 不要输出位置或尺寸。"
+)
+
+
+def merge_fill(skel: UIR, fill: dict) -> UIR:
+    """把模型的逐块填充(role/texts/text_color)合并进确定性骨架。
+
+    不变量: 几何、底色、文字行的位置/字号一律来自骨架, 模型只改「这是什么」和「写了什么」。
+    文字行按阅读顺序替换占位文本(多余行保留占位, 多出文字忽略); 控件角色(button/input)落在区块上
+    并保留文字行作为可见标签(不再另画一个居中标签, 否则重复文字破坏边缘); 图片区块不动。纯函数, 可测。"""
+    blocks = {b.get("id"): b for b in (fill or {}).get("blocks", []) if isinstance(b, dict)}
+    filled = 0
+    for idx, node in enumerate(skel.root.children, start=1):
+        b = blocks.get(f"b{idx}")
+        if not b:
+            continue
+        role = str(b.get("role") or "").strip()
+        texts = [str(t).strip() for t in (b.get("texts") or []) if str(t).strip()]
+        color = b.get("text_color") if isinstance(b.get("text_color"), str) and b["text_color"].startswith("#") else None
+        bands = [c for c in node.children if c.role == "text"]
+        if node.role == "image" or role == "image":
+            continue
+        for band, text in zip(bands, texts):          # 文字行: 原位替换
+            band.content["text"] = text
+            if color:
+                band.box["color"] = color
+            filled += 1
+        if role == "button":
+            node.role = "button"
+            node.intents = [{"on": "click", "do": "submit-form"}]
+            node.content = {} if bands else {"text": texts[0] if texts else ""}
+            node.text_ref = node.text_ref or (bands[0].text_ref if bands else "t0")
+            node.box.setdefault("radius", 6)
+            if color:
+                node.box["color"] = color
+            filled += 1
+        elif role == "input":
+            # 输入框保留区块几何与标签行, 以意图标记(渲染为可聚焦容器, 不换成会丢掉子节点的 <input>)
+            node.role = "box"
+            node.intents = [{"on": "click", "do": "input"}]
+            node.box.setdefault("border", {"w": 1, "color": "#d1d5db"})
+            filled += 1
+        elif role in ("nav", "header", "footer", "card", "list_item", "badge"):
+            node.role = role
+        elif not bands and texts and node.role == "box":
+            node.role = "text"
+            node.content = {"text": " ".join(texts)}
+            node.text_ref = "t0"
+            node.box["overflow"] = "hidden"
+            if color:
+                node.box["color"] = color
+            filled += 1
+    skel.meta.update({"tier": "llm", "llm_mode": "skeleton_fill", "filled": filled})
+    return skel
+
+
+_READ_SYSTEM = ("你是 OCR。逐字抄录截图中所有可见文字(按阅读顺序, 一行一个元素), 不要翻译、不要概括、不要补全。"
+                "只输出 JSON: {\"lines\":[\"...\"]}。")
+
+
+def read_screenshot_text(ai_cfg: dict, image_path, max_lines: int = 400) -> str:
+    """模型读图得到参考文本(截图没有 DOM 文本, 这是评分 v3 文本通道唯一可得的参考)。失败抛异常。"""
+    obj = llm.chat_json(ai_cfg, _READ_SYSTEM, "请抄录这张界面截图里的全部可见文字。", images=[image_path], max_tokens=16384)
+    lines = [str(x).strip() for x in (obj.get("lines") or []) if str(x).strip()]
+    return "\n".join(lines[:max_lines])
+
+
+def _skeleton_list(skel: UIR, limit: int = 120) -> str:
+    lines = []
+    for idx, n in enumerate(skel.root.children, start=1):
+        pos, b = n.box.get("position") or {}, n.box
+        bands = sum(1 for c in n.children if c.role == "text")
+        lines.append(f"b{idx}: top {pos.get('top', 0)} left {pos.get('left', 0)} w {b.get('w')} h {b.get('h')}"
+                     + (f" 文字行 {bands}" if bands else "") + (" [图片区]" if n.role == "image" else ""))
+        if idx >= limit:
+            break
+    return "\n".join(lines)
+
+
 @register_input("screenshot")
 class ScreenshotAdapter:
     def to_uir(self, req: GenRequest, ctx: BuildContext) -> UIR:
         img = req.image_path
         with Image.open(img) as im:
             W, H = im.size
+        llm_mode = (req.meta or {}).get("llm_mode") or "skeleton_fill"
+        if ctx.ai_cfg and not ctx.expired() and not req.hints.get("force_tier0") and llm_mode == "skeleton_fill":
+            depth = int(req.hints.get("seg_depth") or settings.SEG_MAX_DEPTH)
+            skel = segment(img, max_depth=depth, asset_dir=(ctx.ws / "static" / "img") if ctx.ws else None)
+            try:
+                ctx.log("UIR", f"截图→UIR(骨架填充): 确定性骨架 {len(skel.root.children)} 块, 调用 {ctx.ai_cfg['model']} 逐块填充")
+                user = (f"截图尺寸 {W}×{H}。区块清单(像素坐标):\n{_skeleton_list(skel)}\n\n"
+                        "请对每个区块给出 role 与 texts。")
+                fill = llm.chat_json(ctx.ai_cfg, _FILL_SYSTEM, user, images=[img], max_tokens=16384)
+                uir = merge_fill(skel, fill)
+                ctx.log("UIR", f"骨架填充完成: 填入 {uir.meta.get('filled')} 处文字/控件, {uir.root.count()} 节点")
+                return uir
+            except Exception as exc:
+                ctx.log("UIR", f"骨架填充不可用, 回落纯确定性: {type(exc).__name__}: {str(exc)[:160]}")
+                skel.meta["tier"] = "deterministic"
+                return skel
         if ctx.ai_cfg and not ctx.expired() and not req.hints.get("force_tier0"):
             try:
-                ctx.log("UIR", f"截图→UIR: 调用多模态模型 ({ctx.ai_cfg['model']}), {W}×{H}")
+                ctx.log("UIR", f"截图→UIR(自由生成): 调用多模态模型 ({ctx.ai_cfg['model']}), {W}×{H}")
                 hint_txt = ""
                 if req.hints.get("regions"):
                     hint_txt = "\n上一轮像素差分线索(参考图 vs 产物):\n- " + "\n- ".join(req.hints["regions"])

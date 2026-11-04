@@ -110,7 +110,8 @@ class GenerateEngine:
         source = Path(self.spec["source_path"]) if self.spec.get("source_path") else None
         return GenRequest(kind=kind, image_path=image, description=self.spec.get("description") or "",
                           viewport=vp, hints=hints, source_path=source,
-                          meta={"task_id": self.task_id, "layout": self.spec.get("layout", "")})
+                          meta={"task_id": self.task_id, "layout": self.spec.get("layout", ""),
+                                "llm_mode": self.spec.get("llm_mode") or "skeleton_fill"})
 
     def _execute(self) -> dict:
         budget = int(self.spec.get("time_budget") or settings.GENERATE_TIME_BUDGET)
@@ -130,9 +131,23 @@ class GenerateEngine:
         ref_text = ""
         if kind == "screenshot" and self.spec.get("reference_text"):
             ref_text = str(self.spec["reference_text"])[:20000]
+        elif kind == "screenshot" and ai_cfg and target.shootable:
+            # 截图没有 DOM 文本 → 评分 v3 的文本通道原本被关掉(权重重分配), 结果"文字纹理代理"与真实文字
+            # 在像素口径下不可区分(实测同几何只换文字反而 -10 分)。先让模型读一遍图作为参考文本, 地板轮与
+            # 填充轮在同一参考下打三通道分, 真实文字才会被奖励。参考文本来源在报告里标明为 model-read。
+            try:
+                self._request({})  # 确保 original_preview.png 已就位
+                from core.uir.adapters.vision import read_screenshot_text
+                ref_text = read_screenshot_text(ai_cfg, ref_png)
+                self.log("GEN", f"参考文本: 模型读图 {len(ref_text.splitlines())} 行 / {len(ref_text)} 字, 文本通道启用")
+            except Exception as exc:
+                self.log("GEN", f"模型读图失败, 文本通道不启用: {type(exc).__name__}: {str(exc)[:120]}")
+                ref_text = ""
+        if ref_text:
             (self.ws / "original_text.txt").write_text(ref_text, encoding="utf-8")
 
         report = {"kind": kind, "target": target_name, "tier": None, "rounds": [], "final_score": None,
+                  "reference_text": ("provided" if self.spec.get("reference_text") else ("model-read" if ref_text else "none")),
                   "scoring": "v3-segmented" if kind == "screenshot" else "desc-self-v1",
                   "target_score": target_score, "budget": budget, "ai_model": (ai_cfg or {}).get("model")}
         best, hints = None, {}

@@ -129,7 +129,7 @@ def _summary(results):
 
 def _md(results, summary, stamp, args):
     lines = [f"# L1 生成用例跑分 {stamp}", "",
-             f"- rounds={args.rounds} budget={args.budget}s target={settings.GENERATE_TARGET_SCORE} holdout={'on' if args.holdout else 'off'}",
+             f"- rounds={args.rounds} budget={args.budget}s target={settings.GENERATE_TARGET_SCORE} holdout={'on' if args.holdout else 'off'} llm_mode={args.llm_mode}",
              f"- AI Key: {'已配置' if config.AI_API_KEY else '未配置(全部走确定性 Tier 0)'}", ""]
     for name, key in (("语料内(tuned)", "tuned"), ("留出集(holdout, 只看不调)", "holdout")):
         g = summary.get(key)
@@ -155,6 +155,8 @@ def main():
     ap.add_argument("--rounds", type=int, default=settings.GENERATE_MAX_ROUNDS)
     ap.add_argument("--budget", type=int, default=settings.GENERATE_TIME_BUDGET)
     ap.add_argument("--only", default="")
+    ap.add_argument("--llm-mode", default="skeleton_fill", choices=["skeleton_fill", "free"],
+                    help="截图路线的 Tier 1 模式: 骨架填充(默认) / 模型自由生成 UIR")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
     doc = json.loads((HERE / "cases.json").read_text(encoding="utf-8"))
@@ -185,7 +187,7 @@ def main():
         ref = make_archetype_reference(pool, arch, refs_dir / f"{arch}.png")
         print(f"== {cid} (截图回环, 参考 {ref.name})", flush=True)
         r = run_one(db, pool, {"kind": "screenshot", "image_path": str(ref), "max_rounds": args.rounds,
-                               "time_budget": args.budget}, args.verbose)
+                               "time_budget": args.budget, "llm_mode": args.llm_mode}, args.verbose)
         r.update({"id": cid, "group": "shot", "holdout": False})
         results.append(r)
         print(f"   -> {r['status']} score={r['score']} ({r['scoring']}) rounds={r['rounds']} {r['elapsed']}s {r['error']}", flush=True)
@@ -199,7 +201,7 @@ def main():
                 continue
             print(f"== {h['id']} (真实截图 {h['note']})", flush=True)
             r = run_one(db, pool, {"kind": "screenshot", "image_path": str(src), "max_rounds": args.rounds,
-                                   "time_budget": args.budget}, args.verbose)
+                                   "time_budget": args.budget, "llm_mode": args.llm_mode}, args.verbose)
             r.update({"id": h["id"], "group": "shot", "holdout": True})
             results.append(r)
             print(f"   -> {r['status']} score={r['score']} rounds={r['rounds']} {r['elapsed']}s {r['error']}", flush=True)
