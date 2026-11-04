@@ -6,6 +6,8 @@ name: app-build
 #   Android: Flutter 目标 → release APK → apksigner 签名/校验 → 模拟器安装启动截图(跨渲染器, 分数只记录)
 #   macOS:   Electron 目标 → .app → codesign(+公证) → 启动经 CDP 截图, 与同一份 HTML 比较(门槛 min_score)
 #   Windows: Electron 目标 → .exe → Authenticode → 实机启动经 CDP 截图, 与同一份 HTML 比较(门槛 min_score)
+# 壳可切换(输入 android_target / desktop_target, 取值见 ci_build.py BUILD_TARGETS), 不写死 Flutter / Electron;
+# 签名按产物类型(APK / .app / .exe)做, 与壳无关。
 # 签名证书全部来自 repo secrets(名字见 core/uir/toolchain.py 签名说明); 未配置时自动退回
 # debug / ad-hoc / 不签, 产物文件名带 -unsigned, 运行摘要的「签名」列写明原因。
 on:
@@ -14,8 +16,7 @@ on:
     paths:
       - ".github/workflows/build.yml"
       - "core/uir/toolchain.py"
-      - "core/uir/targets/electron.py"
-      - "core/uir/targets/flutter.py"
+      - "core/uir/targets/**"
       - "engine_bench/build/**"
   workflow_dispatch:
     inputs:
@@ -27,6 +28,14 @@ on:
         description: "桌面冒烟截图 vs 参考 HTML 的最低分"
         required: false
         default: "90"
+      android_target:
+        description: "Android 壳(engine_bench/build/ci_build.py BUILD_TARGETS 里 kind=apk 的目标)"
+        required: false
+        default: "flutter"
+      desktop_target:
+        description: "桌面壳(BUILD_TARGETS 里 kind=desktop 的目标)"
+        required: false
+        default: "electron"
       flutter_version:
         description: "Flutter 版本(留空=stable 最新)"
         required: false
@@ -41,6 +50,8 @@ concurrency:
 env:
   CASE: ${{ github.event.inputs.case || 'd_login' }}
   MIN_SCORE: ${{ github.event.inputs.min_score || '90' }}
+  ANDROID_TARGET: ${{ github.event.inputs.android_target || 'flutter' }}
+  DESKTOP_TARGET: ${{ github.event.inputs.desktop_target || 'electron' }}
   PYTHONUTF8: "1"
   PYTHONIOENCODING: "utf-8"
 
@@ -64,19 +75,22 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: subosito/flutter-action@v2
+        if: env.ANDROID_TARGET == 'flutter'
         with:
           channel: stable
           flutter-version: ${{ github.event.inputs.flutter_version }}
           cache: true
-      - name: 渲染样本 UIR → Flutter / Electron / HTML
-        run: python engine_bench/build/ci_build.py render --case "$CASE" --out build_ci
+      - name: 渲染样本 UIR → Android 壳工程 + 参考 HTML
+        run: python engine_bench/build/ci_build.py render --case "$CASE" --targets "$ANDROID_TARGET" --out build_ci
       - name: 构建 release APK 并签名
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: python engine_bench/build/ci_build.py apk --app "$PWD/build_ci/flutter/flutter_app" --release --report reports/apk.json
+        run: |
+          python engine_bench/build/ci_build.py build --target "$ANDROID_TARGET" --render build_ci/render.json --report reports/apk.json
+          python -c "import json;print('APK_PATH=' + json.load(open('reports/apk.json'))['artifact'])" >> "$GITHUB_ENV"
       - name: 开启 KVM(模拟器加速)
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -91,21 +105,21 @@ jobs:
           profile: pixel_6
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: bash engine_bench/build/android_smoke.sh build_ci/flutter/flutter_app/build/app/outputs/flutter-apk/app-release.apk shots/android
+          script: bash engine_bench/build/android_smoke.sh "$APK_PATH" shots/android
       - name: 模拟器截图 vs 参考 HTML(跨渲染器, 只记录)
         if: always()
         run: |
           if [ -f shots/android/android.png ]; then
             d=$(cat shots/android/density.txt 2>/dev/null || echo 160)
             python engine_bench/build/ci_build.py score --shot shots/android/android.png \
-              --ref build_ci/web/index.html --scale "$(python -c "print(int('$d')/160)")" --out reports/android_score.json
+              --ref "$(python -c "import json;print(json.load(open('build_ci/render.json'))['web'])")" --scale "$(python -c "print(int('$d')/160)")" --out reports/android_score.json
           fi
       - name: 产物改名(未签名带 -unsigned)
         if: always()
         run: |
           mkdir -p dist
-          apk=build_ci/flutter/flutter_app/build/app/outputs/flutter-apk/app-release.apk
-          if [ -f "$apk" ]; then
+          apk="${APK_PATH:-}"
+          if [ -n "$apk" ] && [ -f "$apk" ]; then
             sfx=$(python -c "import json;print('' if json.load(open('reports/apk.json')).get('signed') else '-unsigned')")
             cp "$apk" "dist/clonjurer-${CASE}-android${sfx}.apk"
           fi
@@ -170,8 +184,8 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -k "$kp" "$kc" > /dev/null
           security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
           rm -f "$RUNNER_TEMP/cert.p12"
-      - name: 渲染样本 UIR → Electron / HTML
-        run: python engine_bench/build/ci_build.py render --case "$CASE" --out build_ci
+      - name: 渲染样本 UIR → 桌面壳工程 + 参考 HTML
+        run: python engine_bench/build/ci_build.py render --case "$CASE" --targets "$DESKTOP_TARGET" --out build_ci
       - name: 打包并签名
         env:
           APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
@@ -181,7 +195,7 @@ jobs:
           WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
           WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: |
-          python engine_bench/build/ci_build.py desktop --app "$PWD/build_ci/electron/electron_app" \
+          python engine_bench/build/ci_build.py build --target "$DESKTOP_TARGET" --render build_ci/render.json \
             --platform ${{ matrix.platform }} --arch ${{ matrix.arch }} --report reports/desktop-${{ matrix.platform }}.json
       - name: 实机启动冒烟(CDP 截图 vs 参考 HTML)
         run: |

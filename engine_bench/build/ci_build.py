@@ -1,13 +1,13 @@
 """三平台构建 CI 的驱动脚本(ROADMAP_95.md §3.3, .github/workflows/build.yml 调用)。
 
 样本取 engine_bench/gen_cases/cases.json 的描述用例(确定性路线, 不调模型), 渲染成
-Flutter / Electron 工程 + html_css 参考页, 再调用 core.uir.toolchain 构建签名, 最后做启动冒烟:
-桌面包带 --remote-debugging-port 启动, 经 CDP 截图, 与同一份 HTML 在 Playwright Chromium 下的
+BUILD_TARGETS 里选定的壳工程(默认 Flutter / Electron) + html_css 参考页, 再调用 core.uir.toolchain 构建签名, 最后做启动冒烟:
+Chromium 内核的桌面壳带 --remote-debugging-port 启动, 经 CDP 截图, 与同一份 HTML 在 Playwright Chromium 下的
 渲染按评分 v3 同口径比较(同为 Chromium, 应接近逐值)。所有子命令都把结果写成 JSON, 便于汇总。
 
-    python engine_bench/build/ci_build.py render  --case d_login --out build_ci
-    python engine_bench/build/ci_build.py apk     --app build_ci/flutter/flutter_app --report r.json
-    python engine_bench/build/ci_build.py desktop --app build_ci/electron/electron_app --platform win32 --report r.json
+    python engine_bench/build/ci_build.py render --case d_login --targets flutter,electron --out build_ci
+    python engine_bench/build/ci_build.py build  --target flutter  --render build_ci/render.json --report r.json
+    python engine_bench/build/ci_build.py build  --target electron --render build_ci/render.json --platform win32 --report r.json
     python engine_bench/build/ci_build.py smoke-desktop --report r.json --ref build_ci/web/index.html \
         --shots shots --min-score 90
     python engine_bench/build/ci_build.py summary r1.json r2.json ...   # Markdown 汇总(写入运行摘要)
@@ -47,40 +47,55 @@ def _case(case_id):
     raise SystemExit(f"未知用例 {case_id!r}; 可选: {', '.join(c['id'] for c in cases)}")
 
 
+# 构建目标表: CI 只认这张表, 不写死某个壳。新增壳(如原生 WebView 的 Android 壳、Tauri 桌面壳)=
+# 注册一个 OutputTarget + toolchain 里一个同签名的 build 函数 + 这里加一行; workflow 用输入切换, 不用改。
+#   kind:  apk → build(app_dir, release=...); desktop → build(app_dir, platforms, arch)
+#   smoke: cdp   = 带 --remote-debugging-port 启动, CDP 截图与参考 HTML 比较(Chromium 内核的壳)
+#          alive = 只验证启动后进程存活(系统 WebView 类壳没有通用 CDP, 不出分)
+#          emulator = 由 android_smoke.sh 在模拟器里验证
+BUILD_TARGETS = {
+    "flutter": {"kind": "apk", "app_dir": "flutter_app", "build": "build_apk", "smoke": "emulator"},
+    "electron": {"kind": "desktop", "app_dir": "electron_app", "build": "build_desktop", "smoke": "cdp"},
+}
+
+
+def _target(name):
+    if name not in BUILD_TARGETS:
+        raise SystemExit(f"未知构建目标 {name!r}; 可选: {', '.join(sorted(BUILD_TARGETS))}")
+    return BUILD_TARGETS[name]
+
+
 def cmd_render(args):
     from core.uir.adapters.description import build_from_description
-    from core.uir.targets.electron import ElectronTarget
-    from core.uir.targets.flutter import FlutterTarget
-    from core.uir.targets.html_css import HtmlCssTarget
+    from core.uir.registry import get_output
     c = _case(args.case)
     w, h = (int(v) for v in args.viewport.lower().split("x"))
     u = build_from_description(c["text"], {"width": w, "height": h})
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    (out / "uir.json").write_text(u.to_json(),
-                                  encoding="utf-8")
-    web = HtmlCssTarget().render(u, out / "web")
-    ele = ElectronTarget().render(u, out / "electron")
-    flu = FlutterTarget().render(u, out / "flutter")
-    _write(out / "render.json", {"case": c["id"], "viewport": [w, h], "web": str(web.entry_file),
-                                 "electron": str(out / "electron" / "electron_app"),
-                                 "flutter": str(out / "flutter" / "flutter_app"), "window": ele.meta.get("window"),
-                                 "flutter_meta": flu.meta})
+    (out / "uir.json").write_text(u.to_json(), encoding="utf-8")
+    web = get_output("html_css").render(u, out / "web")   # 参考页: 冒烟截图的比较基准
+    info = {"case": c["id"], "viewport": [w, h], "web": str(web.entry_file.resolve()), "targets": {}}
+    for name in [t for t in args.targets.split(",") if t]:
+        spec = _target(name)
+        res = get_output(name).render(u, out / name)
+        info["targets"][name] = {"app": str((out / name / spec["app_dir"]).resolve()), "meta": res.meta}
+    _write(out / "render.json", info)
     return 0
 
 
-def cmd_apk(args):
+def cmd_build(args):
     from core.uir import toolchain
-    res = toolchain.build_apk(args.app, release=args.release)
-    _write(args.report, {"kind": "apk", **res})
-    return 0 if res.get("ok") else 1
-
-
-def cmd_desktop(args):
-    from core.uir import toolchain
-    plats = [p for p in args.platform.split(",") if p] or None
-    res = toolchain.build_desktop(args.app, plats, args.arch or None)
-    _write(args.report, {"kind": "desktop", **res})
+    spec = _target(args.target)
+    app = args.app or json.loads(Path(args.render).read_text(encoding="utf-8"))["targets"][args.target]["app"]
+    build = getattr(toolchain, spec["build"], None)
+    if build is None:
+        res = {"ok": False, "gap": f"toolchain 缺 {spec['build']}()"}
+    elif spec["kind"] == "apk":
+        res = build(app, release=not args.debug)
+    else:
+        res = build(app, [p for p in args.platform.split(",") if p] or None, args.arch or None)
+    _write(args.report, {"kind": spec["kind"], "target": args.target, "smoke": spec["smoke"], **res})
     return 0 if res.get("ok") else 1
 
 
@@ -116,11 +131,40 @@ def _kill_tree(proc):
 
 def _shot_page(page, out_png):
     page.wait_for_load_state("load")
+    # 经典滚动条(桌面窗口)与 headless 的覆盖式滚动条宽度不同, 会让长页布局宽度差 15px 而整体错位;
+    # 两侧都隐藏滚动条, 只比较页面内容
+    page.add_style_tag(content="::-webkit-scrollbar{display:none!important;width:0!important;height:0!important}")
     with suppress(Exception):
         page.evaluate("() => document.fonts && document.fonts.ready")
     page.wait_for_timeout(500)
     page.screenshot(path=str(out_png), full_page=True)
     return page.evaluate("() => ({w: innerWidth, h: innerHeight, text: document.body ? document.body.innerText : ''})")
+
+
+def smoke_alive(art, shots, wait_s=15.0):
+    """无 CDP 的壳: 启动 → 等待 → 进程仍存活即通过(不出分)。"""
+    shots = Path(shots)
+    shots.mkdir(parents=True, exist_ok=True)
+    tag = f"{art['platform']}-{art['arch']}"
+    r = {"platform": art["platform"], "arch": art["arch"], "launched": False, "alive": False, "mode": "alive"}
+    binary = _launch_binary(art)
+    if not binary:
+        r["error"] = "产物里找不到可执行文件"
+        return r
+    kw = {"start_new_session": True} if os.name != "nt" else {"creationflags": 0x00000200}
+    log_path = shots / f"app-{tag}.log"
+    with open(log_path, "wb") as lf:
+        cmd = [binary] + (["--no-sandbox"] if sys.platform.startswith("linux") else [])
+        proc = subprocess.Popen(cmd, stdout=lf, stderr=subprocess.STDOUT, **kw)
+        r["launched"] = True
+        time.sleep(wait_s)
+        r["alive"] = proc.poll() is None
+        if not r["alive"]:
+            r["error"] = f"启动后退出(exit {proc.returncode})"
+        _kill_tree(proc)
+    with suppress(Exception):
+        r["app_log_tail"] = log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-20:]
+    return r
 
 
 def smoke_one(art, ref_html, shots, settle_s=3.0, boot_timeout=90):
@@ -200,9 +244,14 @@ def cmd_smoke_desktop(args):
     rep = json.loads(Path(args.report).read_text(encoding="utf-8"))
     plats = [p for p in args.platform.split(",") if p]
     arts = [a for a in rep.get("artifacts", []) if not plats or a["platform"] in plats]
-    results = [smoke_one(a, args.ref, args.shots, boot_timeout=args.boot_timeout) for a in arts]
-    ok = bool(results) and all(x.get("launched") and x.get("alive") and isinstance(x.get("score"), (int, float))
-                               and x["score"] >= args.min_score for x in results)
+    mode = rep.get("smoke", "cdp")
+    if mode == "alive":
+        results = [smoke_alive(a, args.shots) for a in arts]
+        ok = bool(results) and all(x.get("launched") and x.get("alive") for x in results)
+    else:
+        results = [smoke_one(a, args.ref, args.shots, boot_timeout=args.boot_timeout) for a in arts]
+        ok = bool(results) and all(x.get("launched") and x.get("alive") and isinstance(x.get("score"), (int, float))
+                                   and x["score"] >= args.min_score for x in results)
     _write(args.out or Path(args.shots) / "smoke.json",
            {"kind": "smoke-desktop", "ok": ok, "min_score": args.min_score, "results": results})
     return 0 if ok else 1
@@ -243,15 +292,17 @@ def cmd_summary(args):
             continue
         d = json.loads(p.read_text(encoding="utf-8"))
         kind = d.get("kind", "?")
+        name = f"{p.name}" + (f" ({d['target']})" if d.get("target") else "")
         ok = "✅" if d.get("ok") else "❌ " + str(d.get("gap") or d.get("error") or "")
         if kind == "apk":
             art = f"{Path(d.get('artifact') or '-').name} {_mb(d.get('bytes'))}"
-            lines.append(f"| {p.name} | {ok} | {art} | {d.get('signing', '-')} | - |")
+            lines.append(f"| {name} | {ok} | {art} | {d.get('signing', '-')} | - |")
         elif kind == "desktop":
             art = "; ".join(f"{a['platform']}-{a['arch']} {_mb(a.get('dir_bytes'))}" for a in d.get("artifacts", []))
-            lines.append(f"| {p.name} | {ok} | {art or '-'} | {d.get('signing', '-')} | - |")
+            lines.append(f"| {name} | {ok} | {art or '-'} | {d.get('signing', '-')} | - |")
         elif kind == "smoke-desktop":
             sm = "; ".join(f"{x['platform']}: " + (f"{x['score']:.1f}" if isinstance(x.get("score"), (int, float))
+                                                   else "启动存活" if x.get("mode") == "alive" and x.get("alive")
                                                    else x.get("error", "未出分")) for x in d.get("results", []))
             lines.append(f"| {p.name} | {ok} | - | - | {sm} (门槛 {d.get('min_score')}) |")
         elif kind == "score":
@@ -270,16 +321,16 @@ def main(argv=None):
     r = sub.add_parser("render")
     r.add_argument("--case", default="d_login")
     r.add_argument("--viewport", default="420x760")
+    r.add_argument("--targets", default="flutter,electron", help="逗号分隔, 取自 BUILD_TARGETS")
     r.add_argument("--out", required=True)
-    a = sub.add_parser("apk")
-    a.add_argument("--app", required=True)
-    a.add_argument("--release", action="store_true")
-    a.add_argument("--report", required=True)
-    d = sub.add_parser("desktop")
-    d.add_argument("--app", required=True)
-    d.add_argument("--platform", default="")
-    d.add_argument("--arch", default="")
-    d.add_argument("--report", required=True)
+    b = sub.add_parser("build")
+    b.add_argument("--target", required=True, help="BUILD_TARGETS 里的名字")
+    b.add_argument("--render", default="", help="render 子命令写的 render.json(给出时自动取工程目录)")
+    b.add_argument("--app", default="", help="直接指定工程目录(覆盖 --render)")
+    b.add_argument("--debug", action="store_true", help="apk 类: 出 debug 包(默认 release)")
+    b.add_argument("--platform", default="")
+    b.add_argument("--arch", default="")
+    b.add_argument("--report", required=True)
     s = sub.add_parser("smoke-desktop")
     s.add_argument("--report", required=True, help="desktop 子命令的报告")
     s.add_argument("--ref", required=True, help="html_css 参考页 index.html")
@@ -296,7 +347,7 @@ def main(argv=None):
     m = sub.add_parser("summary")
     m.add_argument("reports", nargs="*")
     args = ap.parse_args(argv)
-    return {"render": cmd_render, "apk": cmd_apk, "desktop": cmd_desktop, "smoke-desktop": cmd_smoke_desktop,
+    return {"render": cmd_render, "build": cmd_build, "smoke-desktop": cmd_smoke_desktop,
             "score": cmd_score, "summary": cmd_summary}[args.cmd](args)
 
 

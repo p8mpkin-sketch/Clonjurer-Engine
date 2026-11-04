@@ -354,6 +354,8 @@ class OutputTarget(Protocol):
 - **CI**(`.github/workflows/build.yml`, `app-build`): 手动 + 每晚北京时间 03:00 + 只改构建链(toolchain / Flutter·Electron 目标 / 本 workflow)的 PR, 不进引擎 PR 闸门。样本 = `gen_cases/cases.json` 描述用例(确定性路线, 不调模型)。
   - android(ubuntu): Flutter → release APK → 签名校验 → android-emulator-runner(API 34)安装、启动、进程存活、`screencap`; 截图与参考 HTML 按 dp 视口比较, **跨渲染器只记录不设门槛**(L2 跨目标评分的第一个数据点)。
   - desktop(macos-latest arm64 / windows-latest x64): Electron 打包 → 签名 → **实机启动**: 带 `--remote-debugging-port` 启动产物, 经 CDP 截图, 与同一份 HTML 在 Playwright Chromium 下同视口渲染比较, 低于 `min_score`(默认 90)即红。Windows 这一步是 .exe 第一次在真实 Windows 上启动验证。
+  - **壳可切换**: workflow 输入 `android_target` / `desktop_target`(默认 flutter / electron)取自 `engine_bench/build/ci_build.py` 的 `BUILD_TARGETS` 表。将来换原生 WebView 的 Android 壳或 Tauri 桌面壳 = 注册 OutputTarget + toolchain 里同签名的 build 函数 + 表里加一行, workflow 与签名都不用改(签名按产物类型 APK / .app / .exe 做, 与壳无关)。冒烟方式也随表: Chromium 内核的壳走 CDP 截图比分, 系统 WebView 类的壳退为「启动存活」(不出分)。
+  - 冒烟比较时两侧都隐藏滚动条(桌面窗口的经典滚动条占 15px, 会让长页整体错位: 实测落地页 35.5 → 100.0)。5 个描述用例 linux 包冒烟均 100.0。
   - 产物按签名状态命名(`clonjurer-<用例>-<平台>-<架构>[-unsigned].zip/.apk`), 报告与截图上传, `summary` 作业把构建/签名/冒烟汇总进运行摘要。
 - **本地验证(云端容器, Linux)**: render → `@electron/packager` linux-x64 + win32-x64 → Xvfb 下启动 linux 包经 CDP 截图, 与参考 HTML 比较 100.0; 用临时自签名 pfx 走 osslsigncode 给 win32 .exe 签名成功(容器内时间戳服务不可达, 退回无时间戳并如实标注)。未在本地验证: Flutter/APK 签名(容器无 Flutter/Android SDK, 由伪 apksigner 单测覆盖)、macOS codesign/公证、Windows 上 signtool 与实机启动 —— 都要等 CI 首跑。
 - 缺口: 未签名时 macOS 会被 Gatekeeper 拦、Windows 会弹 SmartScreen; 仍无安装器(dmg/msi); APK 冒烟分数只记录; macOS / Windows runner 分钟数按 GitHub 计费倍率消耗(macOS 10×, Windows 2×)。
