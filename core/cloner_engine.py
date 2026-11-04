@@ -1710,6 +1710,55 @@ ASSET_RESOURCE_TYPES = {"stylesheet", "script", "image", "font", "media", "other
 _LIVE_BODY_TYPES = {"stylesheet", "script", "image", "font"}   # media 多为分段流(206), 不复用
 
 # 瞬时 Playwright 会话错误特征: 与稳定克隆失败不同源, 值得换会话重跑一次
+# 环境受阻识别: 目标站对爬虫的风控/限流/人机验证/登录墙。分两种:
+#  - 基准页本身就是拦截页(Cloudflare 质询、"访问过于频繁"): 基准都不是真页面, 分数没有意义;
+#  - 基准截图正常, 但采集过程中页面被风控脚本整页替换成拦截页(jd 高频跑分后的"内容太火爆"),
+#    采集到的 DOM/快照就是拦截页, 两轨都塌(21 分)。
+# 两种都不是引擎缺陷, 但混进均分会把引擎能力和环境波动搅在一起, 所以单独标记、不计入均分。
+# 只认通用风控话术(各家 WAF/CDN/大站通用), 不按域名特判。
+_BLOCK_STRONG = re.compile(
+    r"访问(?:过于|太)?频繁|内容太火爆|当前页面异常|网络环境(?:存在)?异常|请求过于频繁|"
+    r"安全验证|人机验证|滑动验证|拖动(?:下方)?滑块|请完成(?:下方)?验证|"
+    r"Just a moment\.\.\.|Checking (?:if the site connection is secure|your browser)|"
+    r"Attention Required|unusual traffic|are you a robot|verify (?:that )?you are (?:a )?human|"
+    r"Access Denied|Too Many Requests|Request blocked|Pardon Our Interruption", re.I)
+# 弱话术: 正常页面也常见(登录页本身就有"验证码"), 只在采集侧新出现、且整页文字很少时才算
+_BLOCK_WEAK = re.compile(r"请稍后(?:再试|重试)|系统繁忙|请(?:先)?登录后|登录后(?:查看|访问)|验证码|切换账号|captcha", re.I)
+_BLOCK_MAX_CHARS = 600
+
+
+def _short_text(text: str) -> str:
+    """空白折叠成单空格(英文话术要靠空格匹配); 长度另按去空白计。"""
+    return re.sub(r"\s+", " ", text or "").strip()
+
+
+def _text_len(text: str) -> int:
+    return len(text.replace(" ", ""))
+
+
+def detect_blocked_page(original_text: str, captured_text: str = "") -> str:
+    """返回环境受阻原因(空串 = 未受阻)。
+
+    original_text: 基准截图时刻的可见文本; captured_text: 采集/回放出来的页面可见文本。
+    """
+    orig = _short_text(original_text)
+    cap = _short_text(captured_text)
+    if orig and _text_len(orig) <= _BLOCK_MAX_CHARS:
+        m = _BLOCK_STRONG.search(orig)
+        if m:
+            return f"基准页即拦截页({m.group(0)})"
+    if cap and _text_len(cap) <= _BLOCK_MAX_CHARS and _text_len(cap) * 3 < max(_text_len(orig), 1):
+        # 强话术: 采集文本骤缩到拦截页量级即可判(原站局部模块也可能带同样话术, 不要求基准里没有);
+        # 弱话术: 必须是采集侧新出现的
+        m = _BLOCK_STRONG.search(cap)
+        if m:
+            return f"采集中途被风控替换({m.group(0)})"
+        m = _BLOCK_WEAK.search(cap)
+        if m and m.group(0).lower() not in orig.lower():
+            return f"采集中途被风控替换({m.group(0)})"
+    return ""
+
+
 class TargetUnreachable(RuntimeError):
     """目标站网络层不可达(DNS/连接/超时): 不是引擎缺陷, 不重试、单独计数。"""
 
@@ -3711,6 +3760,10 @@ class ClonerEngine:
         stats["fidelity_score"] = fidelity if isinstance(fidelity, (int, float)) else None
         stats["dominant_track"] = "interactive"
         stats["score_baseline"] = "pristine"   # 基准截图取自 DOM 改动前(v4.5 起)
+        blocked = self._detect_blocked()
+        if blocked:
+            stats["baseline_blocked"] = blocked
+            self.log("WARN", f"环境受阻: {blocked}; 本任务分数不反映引擎能力")
         if isinstance(fidelity, (int, float)) and \
                 (not isinstance(score, (int, float)) or fidelity > score):
             score = fidelity
@@ -3719,6 +3772,22 @@ class ClonerEngine:
                   similarity_score=score, stats_json=json.dumps(stats, ensure_ascii=False),
                   zip_path=str(zip_path))
         self.db.increment_completed(self.task["batch_id"])
+
+    def _detect_blocked(self) -> str:
+        def _read(name):
+            f = self.ws / name
+            try:
+                return f.read_text(encoding="utf-8", errors="replace") if f.is_file() else ""
+            except OSError:
+                return ""
+        orig = _read("original_text.txt")
+        if not orig:
+            return ""
+        # 看采集快照(保真轨文本 = 采集时刻的 DOM): 快照里已是拦截页才算环境受阻。
+        # 只有交互轨回放变成拦截页(回放时活体请求被风控)是交付物缺陷, 不在此豁免;
+        # 没有保真轨时退回交互轨文本
+        captured = _read("fidelity_text.txt") or _read("cloned_text.txt")
+        return detect_blocked_page(orig, captured)
 
     # ------------------------------------------------------------------
     @staticmethod

@@ -103,3 +103,33 @@ class RuntimeEvidence(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BlockedPageDetect(unittest.TestCase):
+    """环境受阻(风控/限流/人机验证)单独标记, 不混进引擎均分。"""
+
+    REAL = "京东\n搜索\n" + "\n".join(f"频道{i}/商品类目{i}/推荐内容{i}" for i in range(80))
+
+    def test_baseline_is_block_page(self):
+        orig = "全部频道\n内容太火爆了，请稍后再试\n登录领限时福利\n当前页面异常\n刷新\n切换账号"
+        self.assertIn("基准页即拦截页", ce.detect_blocked_page(orig, orig))
+        self.assertIn("基准页即拦截页", ce.detect_blocked_page("Just a moment...\nChecking your browser", ""))
+
+    def test_capture_replaced_midway(self):
+        # 原站局部模块也带同样话术(基准里有), 但采集文本骤缩成拦截页: 仍判受阻
+        orig = self.REAL + "\n内容太火爆了，请稍后再试"
+        cap = "全部频道\n内容太火爆了，请稍后再试\n当前页面异常\n刷新\n切换账号"
+        self.assertIn("采集中途被风控替换", ce.detect_blocked_page(orig, cap))
+
+    def test_normal_pages_not_flagged(self):
+        self.assertEqual(ce.detect_blocked_page(self.REAL, self.REAL), "")
+        # 登录页本身带"验证码": 基准里就有, 不算受阻
+        login = "账号登录\n手机号\n验证码\n获取验证码\n登录"
+        self.assertEqual(ce.detect_blocked_page(login, login), "")
+        # 采集文本少但没有风控话术(静态小站): 不算受阻
+        self.assertEqual(ce.detect_blocked_page(self.REAL, "Example Domain"), "")
+
+    def test_weak_phrase_needs_new_and_shrunk(self):
+        cap = "系统繁忙，请稍后再试"
+        self.assertIn("采集中途被风控替换", ce.detect_blocked_page(self.REAL, cap))
+        self.assertEqual(ce.detect_blocked_page(self.REAL + "\n系统繁忙，请稍后再试", cap), "")
