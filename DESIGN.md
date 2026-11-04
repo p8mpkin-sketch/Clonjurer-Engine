@@ -340,3 +340,20 @@ class OutputTarget(Protocol):
 - **桌面**: Go + 系统 WebView(`core/shell_templates/desktop_go`; macOS WKWebView 经 cgo 本机构建, Windows WebView2 纯 Go 在 macOS 上交叉编译), 站点 `go:embed` 进单个可执行文件, 本地服务器只听 127.0.0.1(Info.plist 只放行本地网络)。构建 `toolchain.build_go_desktop`; 依赖版本钉死在模板 go.mod。Electron 壳代码保留为备选, 默认不用。
 - 实测(同一 example.com 克隆): APK 43MB → **25KB**; macOS 114MB → **2.5MB**(zip); Windows 151MB → **2.9MB**(zip, exe 7.4MB)。27MB 资源的门户克隆: APK 24MB、macOS 34.5MB, 即「站点本身 + 极小壳」; 模拟器与本机窗口截图均正常渲染。
 - 缺口: Windows 包需系统自带 WebView2 运行时(Win10/11 通常已带, 缺失时弹窗提示); Windows 包未在实机运行; 桌面壳外链在窗口内打开(未拦截到系统浏览器); Android 壳的上游反代只支持 GET/HEAD(WebView 拦截拿不到请求体); Linux 桌面壳未实现; 签名同前。
+
+### 9.14 签名与三平台构建 CI(2026-11-05)
+
+落地 ROADMAP_95.md §3.3 的第一版, 不改任何生成/克隆逻辑:
+- **签名步骤**(`core/uir/toolchain.py`, 纯增量): `build_apk` / `build_desktop` 构建后自动签名并校验, 结果写回报告: `signing`(给人看的标签, 未签名一律以「未签名」开头)、`signed`(布尔)、`signing_detail`(状态/校验/证书)。
+  - APK: 有 keystore 时 `apksigner sign`(口令走 `env:` 传参) → `apksigner verify --print-certs`; 无 keystore 保留 Flutter 模板的 debug 签名, 状态 `unsigned-debug`; 校验出的证书仍是 Android Debug 时不标已签名。
+  - macOS: 有 `APPLE_SIGN_IDENTITY` 时 Developer ID + hardened runtime(带 Electron 所需 JIT entitlements), 再有 Apple 账号则 `notarytool` 公证 + `stapler` 装订; 否则 ad-hoc 签名(本机可运行, Gatekeeper 下需右键打开)。非 macOS 宿主不签。
+  - Windows: 有 pfx 时 Windows 宿主用 `signtool`, 其他宿主用 `osslsigncode`(交叉打包); 时间戳服务不可达时退回无时间戳签名并标注; 自签名证书校验不过时标「证书链未受信任」。无证书不签。
+  - 证书只从环境变量读(base64 解到 0600 临时文件, 用完即删), 口令在日志与返回的日志尾里打码; `CLONER_SIGN=0` 整体跳过。secret 名见 ROADMAP_95.md §8 末尾。
+  - 「交付形态」应用壳(`core/app_shell.py`, 克隆任务的桌面/Android 包)同样经 `build_desktop` / `build_apk`, 因此自动得到同一套签名与标注, 无需另接。
+  - 顺带: `npm install` 后若 Electron 二进制缺失(postinstall 被跳过/中断)显式补拉一次, 避免打出空壳。
+- **CI**(`.github/workflows/build.yml`, `app-build`): 手动 + 每晚北京时间 03:00, 不进 PR 闸门。样本 = `gen_cases/cases.json` 描述用例(确定性路线, 不调模型)。
+  - android(ubuntu): Flutter → release APK → 签名校验 → android-emulator-runner(API 34)安装、启动、进程存活、`screencap`; 截图与参考 HTML 按 dp 视口比较, **跨渲染器只记录不设门槛**(L2 跨目标评分的第一个数据点)。
+  - desktop(macos-latest arm64 / windows-latest x64): Electron 打包 → 签名 → **实机启动**: 带 `--remote-debugging-port` 启动产物, 经 CDP 截图, 与同一份 HTML 在 Playwright Chromium 下同视口渲染比较, 低于 `min_score`(默认 90)即红。Windows 这一步是 .exe 第一次在真实 Windows 上启动验证。
+  - 产物按签名状态命名(`clonjurer-<用例>-<平台>-<架构>[-unsigned].zip/.apk`), 报告与截图上传, `summary` 作业把构建/签名/冒烟汇总进运行摘要。
+- **本地验证(云端容器, Linux)**: render → `@electron/packager` linux-x64 + win32-x64 → Xvfb 下启动 linux 包经 CDP 截图, 与参考 HTML 比较 100.0; 用临时自签名 pfx 走 osslsigncode 给 win32 .exe 签名成功(容器内时间戳服务不可达, 退回无时间戳并如实标注)。未在本地验证: Flutter/APK 签名(容器无 Flutter/Android SDK, 由伪 apksigner 单测覆盖)、macOS codesign/公证、Windows 上 signtool 与实机启动 —— 都要等 CI 首跑。
+- 缺口: 未签名时 macOS 会被 Gatekeeper 拦、Windows 会弹 SmartScreen; 仍无安装器(dmg/msi); APK 冒烟分数只记录; macOS / Windows runner 分钟数按 GitHub 计费倍率消耗(macOS 10×, Windows 2×)。

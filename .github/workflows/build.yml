@@ -1,0 +1,229 @@
+name: app-build
+
+# 三平台安装包构建 + 签名 + 启动冒烟(ROADMAP_95.md §3.3, DESIGN.md §9.14)。
+# 样本: engine_bench/gen_cases/cases.json 的描述用例(确定性路线, 不调模型) → UIR →
+#   Android: Flutter 目标 → release APK → apksigner 签名/校验 → 模拟器安装启动截图(跨渲染器, 分数只记录)
+#   macOS:   Electron 目标 → .app → codesign(+公证) → 启动经 CDP 截图, 与同一份 HTML 比较(门槛 min_score)
+#   Windows: Electron 目标 → .exe → Authenticode → 实机启动经 CDP 截图, 与同一份 HTML 比较(门槛 min_score)
+# 签名证书全部来自 repo secrets(名字见 core/uir/toolchain.py 签名说明); 未配置时自动退回
+# debug / ad-hoc / 不签, 产物文件名带 -unsigned, 运行摘要的「签名」列写明原因。
+on:
+  workflow_dispatch:
+    inputs:
+      case:
+        description: "描述用例 id(engine_bench/gen_cases/cases.json)"
+        required: false
+        default: "d_login"
+      min_score:
+        description: "桌面冒烟截图 vs 参考 HTML 的最低分"
+        required: false
+        default: "90"
+      flutter_version:
+        description: "Flutter 版本(留空=stable 最新)"
+        required: false
+        default: ""
+  schedule:
+    - cron: "0 19 * * *"   # 北京时间 03:00(语料跑分 02:30 之后)
+
+concurrency:
+  group: app-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CASE: ${{ github.event.inputs.case || 'd_login' }}
+  MIN_SCORE: ${{ github.event.inputs.min_score || '90' }}
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: "utf-8"
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Python 依赖与 Chromium(参考页渲染/评分)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ github.event.inputs.flutter_version }}
+          cache: true
+      - name: 渲染样本 UIR → Flutter / Electron / HTML
+        run: python engine_bench/build/ci_build.py render --case "$CASE" --out build_ci
+      - name: 构建 release APK 并签名
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: python engine_bench/build/ci_build.py apk --app "$PWD/build_ci/flutter/flutter_app" --release --report reports/apk.json
+      - name: 开启 KVM(模拟器加速)
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: 模拟器冒烟(安装 → 启动 → 存活 → 截图)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash engine_bench/build/android_smoke.sh build_ci/flutter/flutter_app/build/app/outputs/flutter-apk/app-release.apk shots/android
+      - name: 模拟器截图 vs 参考 HTML(跨渲染器, 只记录)
+        if: always()
+        run: |
+          if [ -f shots/android/android.png ]; then
+            d=$(cat shots/android/density.txt 2>/dev/null || echo 160)
+            python engine_bench/build/ci_build.py score --shot shots/android/android.png \
+              --ref build_ci/web/index.html --scale "$(python -c "print(int('$d')/160)")" --out reports/android_score.json
+          fi
+      - name: 产物改名(未签名带 -unsigned)
+        if: always()
+        run: |
+          mkdir -p dist
+          apk=build_ci/flutter/flutter_app/build/app/outputs/flutter-apk/app-release.apk
+          if [ -f "$apk" ]; then
+            sfx=$(python -c "import json;print('' if json.load(open('reports/apk.json')).get('signed') else '-unsigned')")
+            cp "$apk" "dist/clonjurer-${CASE}-android${sfx}.apk"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android
+          path: |
+            dist/
+            shots/
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reports-android
+          path: reports/
+          if-no-files-found: ignore
+
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: darwin
+            arch: arm64
+          - os: windows-latest
+            platform: win32
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Python 依赖与 Chromium(参考页渲染/评分)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m playwright install chromium
+      - name: 导入 Developer ID 证书到临时钥匙串(仅 macOS 且配置了 secret)
+        if: matrix.platform == 'darwin'
+        env:
+          APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+        run: |
+          if [ -z "$APPLE_CERT_P12_BASE64" ]; then echo "未配置 Apple 证书, 走 ad-hoc 签名"; exit 0; fi
+          kc="$RUNNER_TEMP/build.keychain-db"; kp=$(uuidgen)
+          echo "$APPLE_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$kp" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$kp" "$kc"
+          security import "$RUNNER_TEMP/cert.p12" -P "$APPLE_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$kc"
+          security set-key-partition-list -S apple-tool:,apple: -k "$kp" "$kc" > /dev/null
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/cert.p12"
+      - name: 渲染样本 UIR → Electron / HTML
+        run: python engine_bench/build/ci_build.py render --case "$CASE" --out build_ci
+      - name: 打包并签名
+        env:
+          APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          python engine_bench/build/ci_build.py desktop --app "$PWD/build_ci/electron/electron_app" \
+            --platform ${{ matrix.platform }} --arch ${{ matrix.arch }} --report reports/desktop-${{ matrix.platform }}.json
+      - name: 实机启动冒烟(CDP 截图 vs 参考 HTML)
+        run: |
+          python engine_bench/build/ci_build.py smoke-desktop --report reports/desktop-${{ matrix.platform }}.json \
+            --ref build_ci/web/index.html --shots shots/${{ matrix.platform }} --min-score "$MIN_SCORE" \
+            --out reports/smoke-${{ matrix.platform }}.json
+      - name: 打包产物(未签名带 -unsigned)
+        if: always()
+        run: |
+          mkdir -p dist
+          python - <<'PY'
+          import json, os, pathlib, shutil, sys
+          sys.path.insert(0, ".")
+          from core.uir import toolchain
+          rep = pathlib.Path("reports/desktop-${{ matrix.platform }}.json")
+          if not rep.is_file():
+              sys.exit(0)
+          for a in json.loads(rep.read_text(encoding="utf-8")).get("artifacts", []):
+              sfx = "" if a.get("signed") else "-unsigned"
+              name = f"clonjurer-{os.environ['CASE']}-{a['platform']}-{a['arch']}{sfx}.zip"
+              toolchain.zip_dir(a["dir"], pathlib.Path("dist") / name)
+              print("产物", name, a.get("signing"))
+          PY
+      - name: 清理临时钥匙串
+        if: always() && matrix.platform == 'darwin'
+        run: security delete-keychain "$RUNNER_TEMP/build.keychain-db" 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: desktop-${{ matrix.platform }}
+          path: |
+            dist/
+            shots/
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reports-${{ matrix.platform }}
+          path: reports/
+          if-no-files-found: ignore
+
+  summary:
+    needs: [android, desktop]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: reports-*
+          path: reports
+          merge-multiple: true
+      - name: 汇总到运行摘要
+        run: python3 engine_bench/build/ci_build.py summary reports/*.json

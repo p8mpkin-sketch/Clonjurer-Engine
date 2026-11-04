@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import time
+from contextlib import suppress
 from pathlib import Path
 
 _FLUTTER_CANDIDATES = ("/opt/homebrew/bin/flutter", "/usr/local/bin/flutter",
@@ -46,13 +47,20 @@ def find_android_sdk():
     return None
 
 
-def _run(cmd, cwd, env, log, timeout):
-    log(f"$ {' '.join(cmd)}")
+def _run(cmd, cwd, env, log, timeout, redact=()):
+    shown = " ".join(cmd)
+    for sec in redact:  # 签名口令等只进子进程, 不进日志
+        if sec:
+            shown = shown.replace(sec, "***")
+    log(f"$ {shown}")
     t = time.monotonic()
     p = subprocess.run(cmd, cwd=str(cwd), env=env, capture_output=True, text=True, timeout=timeout)
-    tail = (p.stdout + p.stderr).strip().splitlines()[-15:]
+    tail = "\n".join((p.stdout + p.stderr).strip().splitlines()[-15:])
+    for sec in redact:
+        if sec:
+            tail = tail.replace(sec, "***")
     log(f"  → exit {p.returncode} ({time.monotonic() - t:.0f}s)")
-    return p.returncode, "\n".join(tail)
+    return p.returncode, tail
 
 
 def _print(msg):
@@ -75,6 +83,210 @@ def zip_dir(src, dest) -> Path:
     else:  # pragma: no cover - 无 zip 命令时退化(符号链接会被展开)
         shutil.make_archive(str(dest.with_suffix("")), "zip", str(src.parent), src.name)
     return dest
+
+
+# ---------------------------------------------------------------------------
+# 签名(ROADMAP_95.md §3.3)。证书一律来自环境变量(CI 里是 repo secret, 本机可 export), 不入库;
+# 缺证书时退回 debug / ad-hoc / 不签, 并在 label 里写明「未签名」, signed=False, 上层据此标注产物。
+#   Android: ANDROID_KEYSTORE_BASE64 或 ANDROID_KEYSTORE_PATH, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS,
+#            ANDROID_KEY_PASSWORD(缺省同 keystore 口令)
+#   macOS:   APPLE_SIGN_IDENTITY(钥匙串里已导入的 Developer ID Application 证书名; CI 由 workflow 导入
+#            APPLE_CERT_P12_BASE64 / APPLE_CERT_PASSWORD), 公证另需 APPLE_ID, APPLE_APP_PASSWORD, APPLE_TEAM_ID
+#   Windows: WINDOWS_CERT_PFX_BASE64 或 WINDOWS_CERT_PFX_PATH, WINDOWS_CERT_PASSWORD,
+#            WINDOWS_TIMESTAMP_URL(可选)
+#   CLONER_SIGN=0 整体跳过签名(产物照常标未签名)。
+# ---------------------------------------------------------------------------
+_ELECTRON_ENTITLEMENTS = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>com.apple.security.cs.allow-jit</key><true/>
+<key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+</dict></plist>
+"""
+
+
+def _sig(status, label, signed=False, verified=None, **extra) -> dict:
+    return {"status": status, "label": label, "signed": signed, "verified": verified, **extra}
+
+
+def _signing_enabled() -> bool:
+    return os.environ.get("CLONER_SIGN", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def _secret_file(b64_env, path_env, suffix):
+    """证书文件: *_PATH 指向现成文件, 或 *_BASE64 解码到 0600 临时文件(调用方用完删除)。返回 (路径, 是否临时)。"""
+    pth = os.environ.get(path_env, "").strip()
+    if pth and Path(pth).expanduser().is_file():
+        return Path(pth).expanduser(), False
+    b64 = os.environ.get(b64_env, "").strip()
+    if not b64:
+        return None, False
+    import base64
+    import tempfile
+    fd, tmp = tempfile.mkstemp(suffix=suffix)
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(base64.b64decode(b64))
+    os.chmod(tmp, 0o600)
+    return Path(tmp), True
+
+
+def _build_tool(sdk, name):
+    """Android build-tools 里最新版本的工具(apksigner 等); 找不到时退回 PATH。"""
+    if sdk:
+        exts = (".bat", ".exe", "") if os.name == "nt" else ("",)
+        for d in sorted(Path(sdk, "build-tools").glob("*"), key=lambda p: [int(x) if x.isdigit() else 0
+                                                                          for x in p.name.split(".")],
+                        reverse=True):
+            for ext in exts:
+                if (d / (name + ext)).is_file():
+                    return str(d / (name + ext))
+    return _which(name)
+
+
+def sign_apk(apk, sdk=None, log=_print, timeout=600) -> dict:
+    """有 keystore 时用 apksigner 重签(v1~v3), 否则保留 Flutter 模板的 debug 签名; 两种情况都 verify。"""
+    apk = Path(apk)
+    apksigner = _build_tool(sdk or find_android_sdk(), "apksigner")
+    ks, tmp = (_secret_file("ANDROID_KEYSTORE_BASE64", "ANDROID_KEYSTORE_PATH", ".jks")
+               if _signing_enabled() else (None, False))
+    status, label = "unsigned-debug", "未签名(debug keystore, 仅供测试安装)"
+    try:
+        if ks and apksigner and os.environ.get("ANDROID_KEYSTORE_PASSWORD") and os.environ.get("ANDROID_KEY_ALIAS"):
+            env = dict(os.environ)
+            env.setdefault("ANDROID_KEY_PASSWORD", env["ANDROID_KEYSTORE_PASSWORD"])
+            # 口令走 env: 传参, 不出现在命令行与日志里
+            rc, out = _run([apksigner, "sign", "--ks", str(ks), "--ks-pass", "env:ANDROID_KEYSTORE_PASSWORD",
+                            "--ks-key-alias", env["ANDROID_KEY_ALIAS"], "--key-pass", "env:ANDROID_KEY_PASSWORD",
+                            str(apk)], apk.parent, env, log, timeout)
+            if rc:
+                return _sig("sign-failed", "未签名(apksigner 签名失败, 仍为 debug 签名)", log=out)
+            status, label = "signed", "已签名(release keystore)"
+        elif ks and not apksigner:
+            label = "未签名(有 keystore 但缺 apksigner, 仍为 debug 签名)"
+    finally:
+        if tmp and ks:
+            with suppress(OSError):
+                ks.unlink()
+    if not apksigner:
+        return _sig(status, label, verified=None, gap="缺 apksigner(Android build-tools)")
+    rc, out = _run([apksigner, "verify", "--print-certs", str(apk)], apk.parent, os.environ.copy(), log, timeout)
+    cert = next((ln.split(":", 1)[1].strip() for ln in out.splitlines() if "certificate DN" in ln), None)
+    if status == "signed" and cert and "Android Debug" in cert:
+        status, label = "unsigned-debug", "未签名(签名证书仍是 Android Debug)"
+    return _sig(status, label, signed=status == "signed", verified=rc == 0, cert=cert)
+
+
+def sign_macos_app(app, log=_print, timeout=1800) -> dict:
+    """Developer ID 签名(hardened runtime + Electron 所需 JIT entitlements), 有 Apple 账号时再公证+装订;
+    无证书时 ad-hoc 签名(本机可运行, Gatekeeper 下需右键打开)。非 macOS 宿主不签。"""
+    app = Path(app)
+    codesign = _which("codesign")
+    if host_platform() != "darwin" or not codesign:
+        return _sig("unsigned", "未签名(非 macOS 宿主无法 codesign)")
+    ident = os.environ.get("APPLE_SIGN_IDENTITY", "").strip() if _signing_enabled() else ""
+    if ident:
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".plist", delete=False) as fh:
+            fh.write(_ELECTRON_ENTITLEMENTS)
+        try:
+            rc, out = _run([codesign, "--force", "--deep", "--timestamp", "--options", "runtime",
+                            "--entitlements", fh.name, "--sign", ident, str(app)], app.parent, os.environ.copy(),
+                           log, timeout)
+        finally:
+            with suppress(OSError):
+                os.unlink(fh.name)
+        if rc:
+            return _sig("sign-failed", "未签名(codesign Developer ID 失败)", log=out)
+        status, label = "signed", "已签名(Developer ID, 未公证)"
+    else:
+        rc, out = _run([codesign, "--force", "--deep", "--sign", "-", str(app)], app.parent, os.environ.copy(),
+                       log, timeout)
+        status, label = "adhoc", "未签名(ad-hoc, 无 Developer ID; 首次打开需右键→打开)"
+    vrc, vout = _run([codesign, "--verify", "--deep", "--strict", str(app)], app.parent, os.environ.copy(),
+                     log, timeout)
+    res = _sig(status, label, signed=status == "signed", verified=vrc == 0, notarized=False)
+    aid, apw, team = (os.environ.get(k, "").strip() for k in ("APPLE_ID", "APPLE_APP_PASSWORD", "APPLE_TEAM_ID"))
+    if status == "signed" and aid and apw and team and _which("xcrun") and _which("ditto"):
+        z = app.with_suffix(".notarize.zip")
+        _run([_which("ditto"), "-c", "-k", "--keepParent", str(app), str(z)], app.parent, os.environ.copy(),
+             log, timeout)
+        nrc, nout = _run([_which("xcrun"), "notarytool", "submit", str(z), "--apple-id", aid, "--password", apw,
+                          "--team-id", team, "--wait"], app.parent, os.environ.copy(), log, timeout, redact=(apw,))
+        with suppress(OSError):
+            z.unlink()
+        if nrc == 0 and "Accepted" in nout:
+            src, _ = _run([_which("xcrun"), "stapler", "staple", str(app)], app.parent, os.environ.copy(), log, timeout)
+            res.update(notarized=src == 0, label="已签名并公证(Developer ID)" if src == 0 else res["label"])
+        else:
+            res["notarize_log"] = nout
+    return res
+
+
+def _signtool():
+    if os.name != "nt":  # 其他系统上同名的 signtool(如 NSS 工具)不是 Authenticode 签名器
+        return None
+    p = _which("signtool")
+    if p:
+        return p
+    kits = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"), "Windows Kits", "10", "bin")
+    cands = sorted(kits.glob("*/x64/signtool.exe"), reverse=True)
+    return str(cands[0]) if cands else None
+
+
+def sign_windows_exe(exe, log=_print, timeout=600) -> dict:
+    """Authenticode 签名: Windows 宿主用 signtool, 其他宿主用 osslsigncode(交叉打包场景)。无证书时不签。"""
+    exe = Path(exe)
+    pfx, tmp = (_secret_file("WINDOWS_CERT_PFX_BASE64", "WINDOWS_CERT_PFX_PATH", ".pfx")
+                if _signing_enabled() else (None, False))
+    pw = os.environ.get("WINDOWS_CERT_PASSWORD", "")
+    ts = os.environ.get("WINDOWS_TIMESTAMP_URL", "").strip() or "http://timestamp.digicert.com"
+    if not pfx:
+        return _sig("unsigned", "未签名(无 Authenticode 证书, SmartScreen 会提示未知发布者)")
+    try:
+        st, osl = _signtool(), _which("osslsigncode")
+        if not (st or osl):
+            return _sig("unsigned", "未签名(有证书但缺 signtool/osslsigncode)", gap="缺 signtool/osslsigncode")
+        stamped = True
+        for tsa in (ts, None):  # 时间戳服务不可达时退回无时间戳签名(证书过期后签名随之失效, 标注出来)
+            if st:
+                cmd = [st, "sign", "/f", str(pfx), "/p", pw, "/fd", "SHA256"] + (
+                    ["/tr", tsa, "/td", "SHA256"] if tsa else []) + [str(exe)]
+                rc, out = _run(cmd, exe.parent, os.environ.copy(), log, timeout, redact=(pw,))
+            else:
+                signed = exe.with_name(exe.name + ".signed")
+                with suppress(OSError):
+                    signed.unlink()
+                rc, out = _run([osl, "sign", "-pkcs12", str(pfx), "-pass", pw, "-h", "sha256"]
+                               + (["-ts", tsa] if tsa else []) + ["-in", str(exe), "-out", str(signed)],
+                               exe.parent, os.environ.copy(), log, timeout, redact=(pw,))
+                if rc == 0:
+                    os.replace(signed, exe)
+            if rc == 0:
+                stamped = bool(tsa)
+                break
+        verify = [st, "verify", "/pa", str(exe)] if st else [osl, "verify", "-in", str(exe)]
+    finally:
+        if tmp:
+            with suppress(OSError):
+                pfx.unlink()
+    if rc:
+        return _sig("sign-failed", "未签名(Authenticode 签名失败)", log=out)
+    vrc, vout = _run(verify, exe.parent, os.environ.copy(), log, timeout)
+    # 自签名证书链不受信任时 verify 非 0: 已签名但未受信, 如实标注
+    label = "已签名(Authenticode)" if vrc == 0 else "已签名(Authenticode, 证书链未受信任/自签名)"
+    if not stamped:
+        label = label[:-1] + ", 无时间戳)"
+    return _sig("signed", label, signed=True, verified=vrc == 0, timestamped=stamped)
+
+
+def sign_desktop_artifact(plat, exe, log=_print, timeout=1800) -> dict:
+    if not exe:
+        return _sig("unsigned", "未签名(找不到可执行文件)")
+    if plat == "darwin":
+        return sign_macos_app(exe, log=log, timeout=timeout)
+    if plat == "win32":
+        return sign_windows_exe(exe, log=log, timeout=timeout)
+    return _sig("unsigned", "未签名(Linux 包不做代码签名)")
 
 
 def _patch_android(app_dir: Path, log):
@@ -134,10 +346,10 @@ def build_apk(app_dir, release=False, log=_print, timeout=1800, org="com.clonjur
     apk = app_dir / "build" / "app" / "outputs" / "flutter-apk" / f"app-{mode}.apk"
     if rc_b or not apk.is_file():
         return {"ok": False, "gap": f"flutter build apk --{mode} 失败", "log": out}
-    signing = "debug keystore(Flutter 模板默认)"  # 正式发布需自备 keystore + key.properties
+    sig = sign_apk(apk, sdk, log=log, timeout=timeout)
     return {"ok": True, "artifact": str(apk), "bytes": apk.stat().st_size, "mode": mode,
             "analyze_ok": rc == 0, "analyze_tail": analyze, "test_ok": (rc_t == 0) if rc_t is not None else None,
-            "test_tail": test, "signing": signing}
+            "test_tail": test, "signing": sig["label"], "signed": sig["signed"], "signing_detail": sig}
 
 
 def _latest(parent: Path, pattern: str):
@@ -298,6 +510,10 @@ def build_desktop(app_dir, platforms=None, arch=None, log=_print, timeout=1800) 
         rc, out = _run([npm, "install", "--no-audit", "--no-fund"], app_dir, os.environ.copy(), log, timeout)
         if rc:
             return {"ok": False, "gap": "npm install 失败(网络/镜像)", "log": out}
+    ele = app_dir / "node_modules" / "electron"
+    if ele.is_dir() and not (ele / "path.txt").is_file() and _which("node"):
+        # postinstall 被跳过/中断时 electron 二进制缺失, 打包会产出空壳: 显式补拉一次
+        _run([_which("node"), "install.js"], ele, os.environ.copy(), log, timeout)
     built, fails = [], {}
     for plat in platforms:
         # 交叉打包(如 macOS 上出 Windows 包)默认 x64: 目标机器主流架构, 而不是宿主架构
@@ -317,10 +533,13 @@ def build_desktop(app_dir, platforms=None, arch=None, log=_print, timeout=1800) 
                 exe = next((p for p in d.iterdir() if p.is_file() and os.access(p, os.X_OK)
                             and p.suffix == "" and not p.name.startswith("chrome")), None)
             size = sum(f.stat().st_size for f in d.rglob("*") if f.is_file() and not f.is_symlink())
+            sig = sign_desktop_artifact(plat, exe, log=log, timeout=timeout)
             built.append({"platform": plat, "arch": a, "dir": str(d), "executable": str(exe) if exe else None,
-                          "exe_bytes": (exe.stat().st_size if exe and exe.is_file() else None), "dir_bytes": size})
+                          "exe_bytes": (exe.stat().st_size if exe and exe.is_file() else None), "dir_bytes": size,
+                          "signing": sig["label"], "signed": sig["signed"], "signing_detail": sig})
+    labels = "; ".join(f"{b['platform']}: {b['signing']}" for b in built)
     return {"ok": bool(built) and not fails, "artifacts": built, "failures": fails,
-            "signing": "未签名(macOS 未公证 / Windows 无 Authenticode)"}
+            "signing": labels or "未签名(无产物)", "signed": bool(built) and all(b["signed"] for b in built)}
 
 
 def main(argv=None):
