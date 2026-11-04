@@ -29,15 +29,45 @@ def resolve_ai_cfg(task_cfg: dict = None):
     return {"base_url": base_url.rstrip("/"), "api_key": api_key, "model": model}
 
 
-def _image_part(path: Path, max_edge: int) -> dict:
-    with Image.open(path) as img:
-        img = img.convert("RGB")
-        img.thumbnail((max_edge, max_edge))
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
+MAX_TILES = 6          # 超长页最多切几段送模型(再长的尾部不读, 与评分覆盖区一致)
+TILE_MAX_H = 1600      # 每段(按宽缩放后)的最大高度
+
+
+def _b64_png(img: Image.Image) -> dict:
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
     return {"type": "image_url",
-            "image_url": {"url": "data:image/png;base64,"
-                                 + base64.b64encode(buf.getvalue()).decode("ascii")}}
+            "image_url": {"url": "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")}}
+
+
+def image_parts(path, max_width: int = None, max_tiles: int = MAX_TILES, tile_h: int = TILE_MAX_H):
+    """截图 → 一个或多个图片 part, 外加每段覆盖的原图 y 区间。
+
+    按「宽」缩放而不是按最长边: 整页截图常是 1920×7000, 按最长边缩到 1280 后只剩 ~350px 宽,
+    模型读不出字(实测直接回答"分辨率过低无法辨认")。缩放后高度超过 tile_h 的页面纵向切段,
+    每段单独一张图, 并返回各段在原图坐标系的 [y0, y1)。"""
+    max_width = int(max_width or config.AI_VISION_MAX_IMAGE_EDGE)
+    with Image.open(path) as im:
+        im = im.convert("RGB")
+        W, H = im.size
+        scale = min(1.0, max_width / W)
+        work = im.resize((max(1, int(W * scale)), max(1, int(H * scale))), Image.BILINEAR) if scale < 1 else im.copy()
+    parts, ranges = [], []
+    wh = work.size[1]
+    n = min(max_tiles, max(1, -(-wh // tile_h)))
+    step = -(-wh // n)
+    for k in range(n):
+        y0, y1 = k * step, min(wh, (k + 1) * step)
+        if y1 <= y0:
+            break
+        parts.append(_b64_png(work.crop((0, y0, work.size[0], y1))))
+        ranges.append((round(y0 * H / wh), H if y1 >= wh else round(y1 * H / wh)))
+    return parts, ranges, (W, H)
+
+
+def _image_part(path: Path, max_edge: int) -> dict:
+    """单图(短页)兼容入口。"""
+    return image_parts(path, max_edge, max_tiles=1, tile_h=10 ** 9)[0][0]
 
 
 def extract_json(text: str) -> dict:
@@ -62,10 +92,18 @@ def chat_json(ai_cfg: dict, system: str, user_text: str, images=(),
     预算阶梯 (b, 2b, 4b): 内容为空且思考 token 吃光预算 → 升档; 内容非空但 finish_reason=length
     且 JSON 解析失败(UIR 节点树上百节点时 JSON 很长, 被截断) → 同样升档重试, 而不是直接回落。"""
     content = [{"type": "text", "text": user_text}]
+    notes = []
     for p in images or ():
         p = Path(p)
-        if p.is_file():
-            content.append(_image_part(p, config.AI_VISION_MAX_IMAGE_EDGE))
+        if not p.is_file():
+            continue
+        parts, ranges, (W, H) = image_parts(p)
+        content.extend(parts)
+        if len(parts) > 1:
+            notes.append(f"图 {p.name} 共 {W}×{H}px, 因过长按纵向切成 {len(parts)} 段依次给出, 各段覆盖原图 y 区间: "
+                         + ", ".join(f"第{k + 1}段 [{a},{b})" for k, (a, b) in enumerate(ranges)))
+    if notes:
+        content[0]["text"] = user_text + "\n\n" + "\n".join(notes)
 
     def _call(budget: int):
         # 瞬时网络错误(SSL EOF / 连接重置 / 读超时)重试 2 次, 退避 2s/4s: 一次抖动不应让整轮回落

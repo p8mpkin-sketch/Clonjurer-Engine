@@ -1,0 +1,315 @@
+== d_login (描述)
+  [GEN] 生成任务 #1 启动: kind=description target=html_css
+  [GEN] 适配器 description → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [UIR] 描述→UIR(确定性原型 login): 16 节点
+  [SIMILARITY] 第 1 轮评分 89.3 (结构 0.917 / 边缘 None / 文本 0.87), 16 节点, 0.8s
+  [GEN] 已达目标分 85.0, 停止迭代
+  [INFO] 生成任务 #1 完成, 耗时 0.8s, 最终评分 89.3
+   -> completed score=89.3 (desc-self-v1) 0.8s 
+== d_landing (描述)
+  [GEN] 生成任务 #2 启动: kind=description target=html_css
+  [GEN] 适配器 description → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [UIR] 描述→UIR(确定性原型 landing): 52 节点
+  [SIMILARITY] 第 1 轮评分 88.6 (结构 1.0 / 边缘 None / 文本 0.773), 52 节点, 0.5s
+  [GEN] 已达目标分 85.0, 停止迭代
+  [INFO] 生成任务 #2 完成, 耗时 0.5s, 最终评分 88.6
+   -> completed score=88.6 (desc-self-v1) 0.5s 
+== d_dashboard (描述)
+  [GEN] 生成任务 #3 启动: kind=description target=html_css
+  [GEN] 适配器 description → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [UIR] 描述→UIR(确定性原型 dashboard): 80 节点
+  [SIMILARITY] 第 1 轮评分 85.7 (结构 1.0 / 边缘 None / 文本 0.714), 80 节点, 0.5s
+  [GEN] 已达目标分 85.0, 停止迭代
+  [INFO] 生成任务 #3 完成, 耗时 0.5s, 最终评分 85.7
+   -> completed score=85.7 (desc-self-v1) 0.5s 
+== d_list (描述)
+  [GEN] 生成任务 #4 启动: kind=description target=html_css
+  [GEN] 适配器 description → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [UIR] 描述→UIR(确定性原型 list): 84 节点
+  [SIMILARITY] 第 1 轮评分 87.9 (结构 1.0 / 边缘 None / 文本 0.758), 84 节点, 0.5s
+  [GEN] 已达目标分 85.0, 停止迭代
+  [INFO] 生成任务 #4 完成, 耗时 0.5s, 最终评分 87.9
+   -> completed score=87.9 (desc-self-v1) 0.5s 
+== d_article (描述)
+  [GEN] 生成任务 #5 启动: kind=description target=html_css
+  [GEN] 适配器 description → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [UIR] 描述→UIR(确定性原型 article): 52 节点
+  [SIMILARITY] 第 1 轮评分 91.5 (结构 1.0 / 边缘 None / 文本 0.829), 52 节点, 0.5s
+  [GEN] 已达目标分 85.0, 停止迭代
+  [INFO] 生成任务 #5 完成, 耗时 0.5s, 最终评分 91.5
+   -> completed score=91.5 (desc-self-v1) 0.5s 
+== s_login (截图回环, 参考 login.png)
+  [GEN] 生成任务 #6 启动: kind=screenshot target=html_css
+  [GEN] 适配器 screenshot → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [GEN] 参考文本: 模型读图 13 行 / 114 字, 文本通道启用
+  [UIR] 截图→UIR(确定性版面分析, 深度 4, 最小面积 0.0015, 沟槽 ≥6px, 图片回填 0 块/0.0): 24 节点, 色板 8 色, 1440×900
+  [SIMILARITY] 第 1 轮评分 49.3 (结构 0.663 / 边缘 0.538 / 文本 0.0), 24 节点, 0.5s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 15 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 12 处文字/控件, 24 节点
+  [SIMILARITY] 第 2 轮评分 59.8 (结构 0.628 / 边缘 0.379 / 文本 0.851), 24 节点, 20.1s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 15 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 14 处文字/控件, 24 节点
+  [GEN] 第 3 轮未提升(59.8 → 57.5), 回滚到最优轮
+  [SIMILARITY] 第 3 轮评分 57.5 (结构 0.597 / 边缘 0.311 / 文本 0.915), 24 节点, 24.6s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 15 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 14 处文字/控件, 24 节点
+  [GEN] 第 4 轮未提升(59.8 → 58.0), 回滚到最优轮
+  [SIMILARITY] 第 4 轮评分 58.0 (结构 0.608 / 边缘 0.352 / 文本 0.852), 24 节点, 15.0s
+  [INFO] 生成任务 #6 完成, 耗时 71.9s, 最终评分 59.8
+   -> completed score=59.8 (v3-segmented) rounds=4 71.9s 
+== s_landing (截图回环, 参考 landing.png)
+  [GEN] 生成任务 #7 启动: kind=screenshot target=html_css
+  [GEN] 适配器 screenshot → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [GEN] 参考文本: 模型读图 28 行 / 297 字, 文本通道启用
+  [UIR] 截图→UIR(确定性版面分析, 深度 4, 最小面积 0.0015, 沟槽 ≥6px, 图片回填 0 块/0.0): 54 节点, 色板 8 色, 1440×1223
+  [SIMILARITY] 第 1 轮评分 32.2 (结构 0.417 / 边缘 0.377 / 文本 0.0), 54 节点, 0.6s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 37 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 27 处文字/控件, 54 节点
+  [SIMILARITY] 第 2 轮评分 46.4 (结构 0.383 / 边缘 0.355 / 文本 0.831), 54 节点, 7.4s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 37 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 27 处文字/控件, 54 节点
+  [SIMILARITY] 第 3 轮评分 48.0 (结构 0.411 / 边缘 0.361 / 文本 0.831), 54 节点, 11.9s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 37 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 27 处文字/控件, 54 节点
+  [GEN] 第 4 轮未提升(48.0 → 46.4), 回滚到最优轮
+  [SIMILARITY] 第 4 轮评分 46.4 (结构 0.383 / 边缘 0.355 / 文本 0.831), 54 节点, 10.1s
+  [INFO] 生成任务 #7 完成, 耗时 34.5s, 最终评分 48.0
+   -> completed score=48.0 (v3-segmented) rounds=4 34.5s 
+== s_dashboard (截图回环, 参考 dashboard.png)
+  [GEN] 生成任务 #8 启动: kind=screenshot target=html_css
+  [GEN] 适配器 screenshot → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [GEN] 参考文本: 模型读图 54 行 / 387 字, 文本通道启用
+  [UIR] 截图→UIR(确定性版面分析, 深度 4, 最小面积 0.0015, 沟槽 ≥6px, 图片回填 0 块/0.0): 119 节点, 色板 8 色, 1440×1022
+  [SIMILARITY] 第 1 轮评分 33.5 (结构 0.5 / 边缘 0.282 / 文本 0.0), 119 节点, 0.6s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 64 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 48 处文字/控件, 119 节点
+  [SIMILARITY] 第 2 轮评分 49.3 (结构 0.485 / 边缘 0.283 / 文本 0.827), 119 节点, 19.2s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 64 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 48 处文字/控件, 119 节点
+  [GEN] 第 3 轮未提升(49.3 → 49.2), 回滚到最优轮
+  [SIMILARITY] 第 3 轮评分 49.2 (结构 0.485 / 边缘 0.281 / 文本 0.827), 119 节点, 25.5s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 64 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 46 处文字/控件, 119 节点
+  [GEN] 第 4 轮未提升(49.3 → 48.8), 回滚到最优轮
+  [SIMILARITY] 第 4 轮评分 48.8 (结构 0.484 / 边缘 0.282 / 文本 0.809), 119 节点, 173.7s
+  [INFO] 生成任务 #8 完成, 耗时 240.3s, 最终评分 49.3
+   -> completed score=49.3 (v3-segmented) rounds=4 240.3s 
+== s_list (截图回环, 参考 list.png)
+  [GEN] 生成任务 #9 启动: kind=screenshot target=html_css
+  [GEN] 适配器 screenshot → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [GEN] 参考文本: 模型读图 51 行 / 497 字, 文本通道启用
+  [UIR] 截图→UIR(确定性版面分析, 深度 4, 最小面积 0.0015, 沟槽 ≥6px, 图片回填 0 块/0.0): 114 节点, 色板 8 色, 1440×1122
+  [SIMILARITY] 第 1 轮评分 34.0 (结构 0.481 / 边缘 0.33 / 文本 0.0), 114 节点, 0.5s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 72 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 34 处文字/控件, 114 节点
+  [SIMILARITY] 第 2 轮评分 47.8 (结构 0.482 / 边缘 0.376 / 文本 0.622), 114 节点, 78.5s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 72 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 42 处文字/控件, 114 节点
+  [GEN] 第 3 轮未提升(47.8 → 45.5), 回滚到最优轮
+  [SIMILARITY] 第 3 轮评分 45.5 (结构 0.458 / 边缘 0.333 / 文本 0.631), 114 节点, 139.6s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 72 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 36 处文字/控件, 114 节点
+  [SIMILARITY] 第 4 轮评分 51.3 (结构 0.465 / 边缘 0.333 / 文本 0.903), 114 节点, 30.8s
+  [INFO] 生成任务 #9 完成, 耗时 253.7s, 最终评分 51.3
+   -> completed score=51.3 (v3-segmented) rounds=4 253.7s 
+== s_article (截图回环, 参考 article.png)
+  [GEN] 生成任务 #10 启动: kind=screenshot target=html_css
+  [GEN] 适配器 screenshot → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [GEN] 参考文本: 模型读图 36 行 / 500 字, 文本通道启用
+  [UIR] 截图→UIR(确定性版面分析, 深度 4, 最小面积 0.0015, 沟槽 ≥6px, 图片回填 0 块/0.0): 66 节点, 色板 8 色, 1440×1176
+  [SIMILARITY] 第 1 轮评分 30.2 (结构 0.406 / 边缘 0.33 / 文本 0.0), 66 节点, 0.5s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 49 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 29 处文字/控件, 66 节点
+  [SIMILARITY] 第 2 轮评分 52.8 (结构 0.424 / 边缘 0.439 / 文本 0.921), 66 节点, 19.5s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 49 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 27 处文字/控件, 66 节点
+  [GEN] 第 3 轮未提升(52.8 → 52.6), 回滚到最优轮
+  [SIMILARITY] 第 3 轮评分 52.6 (结构 0.424 / 边缘 0.437 / 文本 0.912), 66 节点, 162.8s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 49 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 20 处文字/控件, 66 节点
+  [GEN] 第 4 轮未提升(52.8 → 50.8), 回滚到最优轮
+  [SIMILARITY] 第 4 轮评分 50.8 (结构 0.421 / 边缘 0.409 / 文本 0.877), 66 节点, 4.6s
+  [INFO] 生成任务 #10 完成, 耗时 215.4s, 最终评分 52.8
+   -> completed score=52.8 (v3-segmented) rounds=4 215.4s 
+== h_ant (真实截图 ant.design)
+  [GEN] 生成任务 #11 启动: kind=screenshot target=html_css
+  [GEN] 适配器 screenshot → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [GEN] 参考文本: 模型读图 141 行 / 1931 字, 文本通道启用
+  [UIR] 截图→UIR(确定性版面分析, 深度 4, 最小面积 0.0015, 沟槽 ≥6px, 图片回填 1 块/0.004): 268 节点, 色板 8 色, 1920×3953
+  [SIMILARITY] 第 1 轮评分 31.8 (结构 0.265 / 边缘 0.619 / 文本 0.0), 268 节点, 0.8s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 104 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 137 处文字/控件, 273 节点
+  [SIMILARITY] 第 2 轮评分 34.5 (结构 0.212 / 边缘 0.508 / 文本 0.433), 273 节点, 202.2s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 101 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 109 处文字/控件, 268 节点
+  [SIMILARITY] 第 3 轮评分 34.7 (结构 0.23 / 边缘 0.552 / 文本 0.329), 268 节点, 110.3s
+  [GEN] 时间预算耗尽, 停止迭代
+  [INFO] 生成任务 #11 完成, 耗时 342.4s, 最终评分 34.7
+   -> completed score=34.7 rounds=3 342.4s 
+== h_gitee (真实截图 gitee.com)
+  [GEN] 生成任务 #12 启动: kind=screenshot target=html_css
+  [GEN] 适配器 screenshot → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [GEN] 参考文本: 模型读图 82 行 / 544 字, 文本通道启用
+  [UIR] 截图→UIR(确定性版面分析, 深度 4, 最小面积 0.0015, 沟槽 ≥6px, 图片回填 1 块/0.059): 379 节点, 色板 8 色, 1920×6820
+  [SIMILARITY] 第 1 轮评分 33.5 (结构 0.375 / 边缘 0.493 / 文本 0.0), 379 节点, 1.2s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 127 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 89 处文字/控件, 379 节点
+  [SIMILARITY] 第 2 轮评分 36.5 (结构 0.338 / 边缘 0.405 / 文本 0.373), 379 节点, 78.8s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 127 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 85 处文字/控件, 379 节点
+  [GEN] 第 3 轮未提升(36.5 → 36.4), 回滚到最优轮
+  [SIMILARITY] 第 3 轮评分 36.4 (结构 0.339 / 边缘 0.405 / 文本 0.367), 379 节点, 85.0s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 127 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 90 处文字/控件, 379 节点
+  [GEN] 第 4 轮未提升(36.5 → 36.4), 回滚到最优轮
+  [SIMILARITY] 第 4 轮评分 36.4 (结构 0.34 / 边缘 0.401 / 文本 0.367), 379 节点, 201.7s
+  [INFO] 生成任务 #12 完成, 耗时 394.3s, 最终评分 36.5
+   -> completed score=36.5 rounds=4 394.3s 
+== h_runoob (真实截图 runoob.com)
+  [GEN] 生成任务 #13 启动: kind=screenshot target=html_css
+  [GEN] 适配器 screenshot → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [GEN] 参考文本: 模型读图 400 行 / 4248 字, 文本通道启用
+  [UIR] 截图→UIR(确定性版面分析, 深度 4, 最小面积 0.0015, 沟槽 ≥6px, 图片回填 0 块/0.0): 401 节点, 色板 8 色, 1920×7577
+  [SIMILARITY] 第 1 轮评分 32.0 (结构 0.365 / 边缘 0.458 / 文本 0.0), 401 节点, 1.0s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 133 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 165 处文字/控件, 401 节点
+  [GEN] 第 2 轮未提升(32.0 → 25.6), 回滚到最优轮
+  [SIMILARITY] 第 2 轮评分 25.6 (结构 0.29 / 边缘 0.341 / 文本 0.041), 401 节点, 66.8s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 133 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 0 处文字/控件, 401 节点
+  [GEN] 第 3 轮未提升(32.0 → 32.0), 回滚到最优轮
+  [SIMILARITY] 第 3 轮评分 32.0 (结构 0.365 / 边缘 0.458 / 文本 0.0), 401 节点, 15.3s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 133 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 172 处文字/控件, 401 节点
+  [GEN] 第 4 轮未提升(32.0 → 25.5), 回滚到最优轮
+  [SIMILARITY] 第 4 轮评分 25.5 (结构 0.292 / 边缘 0.346 / 文本 0.026), 401 节点, 157.9s
+  [INFO] 生成任务 #13 完成, 耗时 355.7s, 最终评分 32.0
+   -> completed score=32.0 rounds=4 355.7s 
+== h_apple (真实截图 apple.com.cn)
+  [GEN] 生成任务 #14 启动: kind=screenshot target=html_css
+  [GEN] 适配器 screenshot → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [GEN] 参考文本: 模型读图 109 行 / 1142 字, 文本通道启用
+  [UIR] 截图→UIR(确定性版面分析, 深度 4, 最小面积 0.0015, 沟槽 ≥6px, 图片回填 0 块/0.0): 133 节点, 色板 8 色, 1920×4627
+  [SIMILARITY] 第 1 轮评分 15.2 (结构 0.133 / 边缘 0.285 / 文本 0.0), 133 节点, 0.8s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 36 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 69 处文字/控件, 133 节点
+  [SIMILARITY] 第 2 轮评分 18.3 (结构 0.115 / 边缘 0.205 / 文本 0.323), 133 节点, 74.6s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 36 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 68 处文字/控件, 133 节点
+  [SIMILARITY] 第 3 轮评分 18.6 (结构 0.122 / 边缘 0.237 / 文本 0.269), 133 节点, 54.2s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 36 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 70 处文字/控件, 133 节点
+  [SIMILARITY] 第 4 轮评分 19.4 (结构 0.116 / 边缘 0.221 / 文本 0.349), 133 节点, 85.2s
+  [INFO] 生成任务 #14 完成, 耗时 240.5s, 最终评分 19.4
+   -> completed score=19.4 rounds=4 240.5s 
+== h_huawei (真实截图 huawei.com)
+  [GEN] 生成任务 #15 启动: kind=screenshot target=html_css
+  [GEN] 适配器 screenshot → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [GEN] 参考文本: 模型读图 97 行 / 1020 字, 文本通道启用
+  [UIR] 截图→UIR(确定性版面分析, 深度 4, 最小面积 0.0015, 沟槽 ≥6px, 图片回填 0 块/0.0): 173 节点, 色板 8 色, 1920×4547
+  [SIMILARITY] 第 1 轮评分 22.2 (结构 0.238 / 边缘 0.342 / 文本 0.0), 173 节点, 0.8s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 71 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 46 处文字/控件, 173 节点
+  [SIMILARITY] 第 2 轮评分 30.7 (结构 0.223 / 边缘 0.315 / 文本 0.505), 173 节点, 54.0s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 71 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 40 处文字/控件, 173 节点
+  [SIMILARITY] 第 3 轮评分 30.8 (结构 0.219 / 边缘 0.314 / 文本 0.524), 173 节点, 38.8s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 71 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 34 处文字/控件, 173 节点
+  [SIMILARITY] 第 4 轮评分 31.5 (结构 0.226 / 边缘 0.319 / 文本 0.533), 173 节点, 45.1s
+  [INFO] 生成任务 #15 完成, 耗时 163.4s, 最终评分 31.5
+   -> completed score=31.5 rounds=4 163.4s 
+== h_163 (真实截图 163.com)
+  [GEN] 生成任务 #16 启动: kind=screenshot target=html_css
+  [GEN] 适配器 screenshot → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [GEN] 参考文本: 模型读图 226 行 / 2055 字, 文本通道启用
+  [UIR] 截图→UIR(确定性版面分析, 深度 4, 最小面积 0.0015, 沟槽 ≥6px, 图片回填 3 块/0.097): 383 节点, 色板 8 色, 1920×8401
+  [SIMILARITY] 第 1 轮评分 40.3 (结构 0.457 / 边缘 0.581 / 文本 0.0), 383 节点, 1.4s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 87 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 16 处文字/控件, 383 节点
+  [GEN] 第 2 轮未提升(40.3 → 37.4), 回滚到最优轮
+  [SIMILARITY] 第 2 轮评分 37.4 (结构 0.427 / 边缘 0.526 / 文本 0.014), 383 节点, 34.6s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 87 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 4 处文字/控件, 383 节点
+  [GEN] 第 3 轮未提升(40.3 → 40.1), 回滚到最优轮
+  [SIMILARITY] 第 3 轮评分 40.1 (结构 0.453 / 边缘 0.575 / 文本 0.01), 383 节点, 176.4s
+  [GEN] 时间预算耗尽, 停止迭代
+  [INFO] 生成任务 #16 完成, 耗时 262.2s, 最终评分 40.3
+   -> completed score=40.3 rounds=3 262.2s 
+== h_sohu (真实截图 sohu.com)
+  [GEN] 生成任务 #17 启动: kind=screenshot target=html_css
+  [GEN] 适配器 screenshot → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [GEN] 参考文本: 模型读图 1 行 / 24 字, 文本通道启用
+  [UIR] 截图→UIR(确定性版面分析, 深度 4, 最小面积 0.0015, 沟槽 ≥6px, 图片回填 1 块/0.053): 401 节点, 色板 8 色, 1920×9018
+  [SIMILARITY] 第 1 轮评分 37.6 (结构 0.448 / 边缘 0.505 / 文本 0.0), 401 节点, 1.5s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 43 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 218 处文字/控件, 401 节点
+  [GEN] 第 2 轮未提升(37.6 → 30.1), 回滚到最优轮
+  [SIMILARITY] 第 2 轮评分 30.1 (结构 0.384 / 边缘 0.36 / 文本 0.003), 401 节点, 49.8s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 43 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 0 处文字/控件, 401 节点
+  [GEN] 第 3 轮未提升(37.6 → 37.6), 回滚到最优轮
+  [SIMILARITY] 第 3 轮评分 37.6 (结构 0.448 / 边缘 0.505 / 文本 0.0), 401 节点, 8.7s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 43 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 0 处文字/控件, 401 节点
+  [GEN] 第 4 轮未提升(37.6 → 37.6), 回滚到最优轮
+  [SIMILARITY] 第 4 轮评分 37.6 (结构 0.448 / 边缘 0.505 / 文本 0.0), 401 节点, 13.1s
+  [INFO] 生成任务 #17 完成, 耗时 77.2s, 最终评分 37.6
+   -> completed score=37.6 rounds=4 77.2s 
+== h_douban (真实截图 douban.com)
+  [GEN] 生成任务 #18 启动: kind=screenshot target=html_css
+  [GEN] 适配器 screenshot → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [GEN] 参考文本: 模型读图 21 行 / 70 字, 文本通道启用
+  [UIR] 截图→UIR(确定性版面分析, 深度 4, 最小面积 0.0015, 沟槽 ≥6px, 图片回填 0 块/0.0): 401 节点, 色板 8 色, 1920×5935
+  [SIMILARITY] 第 1 轮评分 34.0 (结构 0.396 / 边缘 0.474 / 文本 0.0), 401 节点, 1.0s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 87 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 216 处文字/控件, 401 节点
+  [GEN] 第 2 轮未提升(34.0 → 31.0), 回滚到最优轮
+  [SIMILARITY] 第 2 轮评分 31.0 (结构 0.348 / 边缘 0.375 / 文本 0.114), 401 节点, 33.7s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 87 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 215 处文字/控件, 401 节点
+  [GEN] 第 3 轮未提升(34.0 → 30.5), 回滚到最优轮
+  [SIMILARITY] 第 3 轮评分 30.5 (结构 0.35 / 边缘 0.366 / 文本 0.103), 401 节点, 88.5s
+  [UIR] 截图→UIR(骨架填充): 确定性骨架 87 块, 调用 deepseek-flash 逐块填充
+  [UIR] 骨架填充完成: 填入 221 处文字/控件, 401 节点
+  [GEN] 第 4 轮未提升(34.0 → 29.2), 回滚到最优轮
+  [SIMILARITY] 第 4 轮评分 29.2 (结构 0.344 / 边缘 0.354 / 文本 0.067), 401 节点, 70.0s
+  [INFO] 生成任务 #18 完成, 耗时 223.6s, 最终评分 34.0
+   -> completed score=34.0 rounds=4 223.6s 
+
+# L1 生成用例跑分 20261104_234504
+
+- rounds=3 budget=240s target=85.0 holdout=on llm_mode=skeleton_fill
+- AI Key: 已配置
+
+## 语料内(tuned): 10/10 完成 · 像素分均值 52.2 (≥85: 0/5) · 描述自评均值 88.6 (≥85: 5/5) · 合计 ≥85: 5/10 · 耗时均值 81.9s p90 240.3s
+
+| 用例 | 组 | 口径 | 分数 | 结构 | 边缘 | 文本 | 层级 | 轮次 | 节点 | 耗时 | 错误 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| s_landing | shot | v3-segmented | 48.0 | 0.383 | 0.355 | 0.831 | deterministic | 4 | 54 | 34.5s |  |
+| s_dashboard | shot | v3-segmented | 49.3 | 0.484 | 0.282 | 0.809 | deterministic | 4 | 119 | 240.3s |  |
+| s_list | shot | v3-segmented | 51.3 | 0.465 | 0.333 | 0.903 | deterministic | 4 | 114 | 253.7s |  |
+| s_article | shot | v3-segmented | 52.8 | 0.421 | 0.409 | 0.877 | deterministic | 4 | 66 | 215.4s |  |
+| s_login | shot | v3-segmented | 59.8 | 0.608 | 0.352 | 0.852 | deterministic | 4 | 24 | 71.9s |  |
+| d_dashboard | desc | desc-self-v1 | 85.7 | 1.0 | None | 0.714 | deterministic | 1 | 80 | 0.5s |  |
+| d_list | desc | desc-self-v1 | 87.9 | 1.0 | None | 0.758 | deterministic | 1 | 84 | 0.5s |  |
+| d_landing | desc | desc-self-v1 | 88.6 | 1.0 | None | 0.773 | deterministic | 1 | 52 | 0.5s |  |
+| d_login | desc | desc-self-v1 | 89.3 | 0.917 | None | 0.87 | deterministic | 1 | 16 | 0.8s |  |
+| d_article | desc | desc-self-v1 | 91.5 | 1.0 | None | 0.829 | deterministic | 1 | 52 | 0.5s |  |
+
+## 留出集(holdout, 只看不调): 8/8 完成 · 像素分均值 33.2 (≥85: 0/8) · 描述自评均值 None (≥85: 0/0) · 合计 ≥85: 0/8 · 耗时均值 257.4s p90 355.7s
+
+| 用例 | 组 | 口径 | 分数 | 结构 | 边缘 | 文本 | 层级 | 轮次 | 节点 | 耗时 | 错误 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| h_apple | shot | v3-segmented | 19.4 | 0.116 | 0.221 | 0.349 | deterministic | 4 | 133 | 240.5s |  |
+| h_huawei | shot | v3-segmented | 31.5 | 0.226 | 0.319 | 0.533 | deterministic | 4 | 173 | 163.4s |  |
+| h_runoob | shot | v3-segmented | 32.0 | 0.292 | 0.346 | 0.026 | deterministic | 4 | 401 | 355.7s |  |
+| h_douban | shot | v3-segmented | 34.0 | 0.344 | 0.354 | 0.067 | deterministic | 4 | 401 | 223.6s |  |
+| h_ant | shot | v3-segmented | 34.7 | 0.23 | 0.552 | 0.329 | deterministic | 3 | 268 | 342.4s |  |
+| h_gitee | shot | v3-segmented | 36.5 | 0.34 | 0.401 | 0.367 | deterministic | 4 | 379 | 394.3s |  |
+| h_sohu | shot | v3-segmented | 37.6 | 0.448 | 0.505 | 0.0 | deterministic | 4 | 401 | 77.2s |  |
+| h_163 | shot | v3-segmented | 40.3 | 0.453 | 0.575 | 0.01 | deterministic | 3 | 383 | 262.2s |  |
+
+
+隔离目录: /var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_yc5wvp6z
+exit=0

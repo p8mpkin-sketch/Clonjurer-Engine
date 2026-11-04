@@ -85,8 +85,10 @@ def run_one(db, pool, spec, verbose) -> dict:
     rp = config.WORKSPACE_ROOT / str(tid) / "generate_report.json"
     if rp.is_file():
         rep = json.loads(rp.read_text(encoding="utf-8"))
+    best_round = next((x for x in (rep.get("rounds") or []) if x.get("round") == rep.get("best_round")), None)
     return {"task_id": tid, "status": task.get("status"), "score": task.get("similarity_score"),
-            "scoring": rep.get("scoring"), "tier": rep.get("tier"), "rounds": len(rep.get("rounds") or []),
+            "scoring": rep.get("scoring"), "tier": (best_round or {}).get("tier") or rep.get("tier"),
+            "ref_text": rep.get("reference_text"), "rounds": len(rep.get("rounds") or []),
             "best_round": rep.get("best_round"), "nodes": (rep.get("uir_stats") or {}).get("nodes"),
             "elapsed": round(time.monotonic() - t0, 1), "error": err,
             "detail": {k: (rep.get("rounds") or [{}])[-1].get(k) for k in ("structure", "edge", "text")},
@@ -139,11 +141,11 @@ def _md(results, summary, stamp, args):
                      f" · 描述自评均值 {g['desc_mean']} (≥85: {g['desc_ge85']}/{g['desc_n']}) · 合计 ≥85: {g['ge85_total']}/{g['completed']}"
                      f" · 耗时均值 {g['elapsed_mean']}s p90 {g['elapsed_p90']}s")
         lines.append("")
-        lines.append("| 用例 | 组 | 口径 | 分数 | 结构 | 边缘 | 文本 | 层级 | 轮次 | 节点 | 耗时 | 错误 |")
-        lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|")
+        lines.append("| 用例 | 组 | 口径 | 参考文本 | 分数 | 结构 | 边缘 | 文本 | 最优层级 | 轮次 | 节点 | 耗时 | 错误 |")
+        lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
         for r in sorted([x for x in results if bool(x.get("holdout")) == (key == "holdout")], key=lambda x: (x.get("score") or 0)):
             d = r.get("detail") or {}
-            lines.append(f"| {r['id']} | {r['group']} | {r.get('scoring') or '-'} | {r.get('score')} | {d.get('structure')} | {d.get('edge')} | {d.get('text')} "
+            lines.append(f"| {r['id']} | {r['group']} | {r.get('scoring') or '-'} | {r.get('ref_text') or '-'} | {r.get('score')} | {d.get('structure')} | {d.get('edge')} | {d.get('text')} "
                          f"| {r.get('tier')} | {r.get('rounds')} | {r.get('nodes')} | {r.get('elapsed')}s | {r.get('error') or ''} |")
         lines.append("")
     return "\n".join(lines)

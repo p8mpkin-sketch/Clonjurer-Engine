@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT))
 
 from PIL import Image, ImageDraw  # noqa: E402
 
-from core.uir import settings  # noqa: E402
+from core.uir import settings, llm  # noqa: E402
 from core.uir.model import UIR, Node, Tokens, ROLES  # noqa: E402
 from core.uir.registry import list_inputs, list_outputs, get_output  # noqa: E402
 from core.uir.adapters.description import build_from_description, detect_archetype  # noqa: E402
@@ -202,6 +202,31 @@ class SkeletonFill(unittest.TestCase):
             self.assertTrue(any(t in ("立即登录", "品牌", "第一行") for t in texts))
             self.assertFalse(any(t == "幽灵" for t in texts))
             self.assertEqual(out.validate(), [])
+
+
+class LongPageTiling(unittest.TestCase):
+    """送模型的图按宽缩放, 超长页纵向切段并返回原图 y 区间; 短页仍是一张图。"""
+
+    def test_tall_page_is_tiled_by_width(self):
+        with tempfile.TemporaryDirectory() as d:
+            tall, short = Path(d) / "tall.png", Path(d) / "short.png"
+            Image.new("RGB", (1920, 7000), "#ffffff").save(tall)
+            Image.new("RGB", (1440, 900), "#ffffff").save(short)
+            parts, ranges, (W, H) = llm.image_parts(tall, max_width=1280)
+            self.assertEqual((W, H), (1920, 7000))
+            self.assertGreater(len(parts), 1)
+            self.assertLessEqual(len(parts), llm.MAX_TILES)
+            self.assertEqual(ranges[0][0], 0)
+            self.assertEqual(ranges[-1][1], 7000)
+            for (a, b), (c, _) in zip(ranges, ranges[1:]):
+                self.assertEqual(b, c)                      # 段与段首尾相接, 不重叠不漏
+            parts2, ranges2, _ = llm.image_parts(short, max_width=1280)
+            self.assertEqual(len(parts2), 1)
+            self.assertEqual(ranges2, [(0, 900)])
+            # 解码第一段确认是按宽缩放(宽 1280), 而不是按最长边缩成窄条
+            import base64, io as _io
+            raw = base64.b64decode(parts[0]["image_url"]["url"].split(",", 1)[1])
+            self.assertEqual(Image.open(_io.BytesIO(raw)).size[0], 1280)
 
 
 class RegistryAndDispatch(unittest.TestCase):

@@ -1,0 +1,139 @@
+{
+  "stamp": "20261104_195403",
+  "args": {
+    "holdout": true,
+    "rounds": 2,
+    "budget": 240,
+    "only": "h_ant,h_douban,s_login,d_dashboard",
+    "verbose": true
+  },
+  "summary": {
+    "n": 4,
+    "completed": 4,
+    "failed": 0,
+    "pixel_mean": 48.2,
+    "pixel_ge85": 0,
+    "pixel_n": 3,
+    "desc_mean": 85.7,
+    "desc_ge85": 1,
+    "desc_n": 1,
+    "ge85_total": 1,
+    "elapsed_mean": 192.1,
+    "elapsed_p90": 346.4,
+    "tuned": {
+      "n": 2,
+      "completed": 2,
+      "failed": 0,
+      "pixel_mean": 61.3,
+      "pixel_ge85": 0,
+      "pixel_n": 1,
+      "desc_mean": 85.7,
+      "desc_ge85": 1,
+      "desc_n": 1,
+      "ge85_total": 1,
+      "elapsed_mean": 25.7,
+      "elapsed_p90": 0.8
+    },
+    "holdout": {
+      "n": 2,
+      "completed": 2,
+      "failed": 0,
+      "pixel_mean": 41.7,
+      "pixel_ge85": 0,
+      "pixel_n": 2,
+      "desc_mean": null,
+      "desc_ge85": 0,
+      "desc_n": 0,
+      "ge85_total": 0,
+      "elapsed_mean": 358.4,
+      "elapsed_p90": 346.4
+    }
+  },
+  "results": [
+    {
+      "task_id": 1,
+      "status": "completed",
+      "score": 85.7,
+      "scoring": "desc-self-v1",
+      "tier": "deterministic",
+      "rounds": 1,
+      "best_round": 1,
+      "nodes": 80,
+      "elapsed": 0.8,
+      "error": "",
+      "detail": {
+        "structure": 1.0,
+        "edge": null,
+        "text": 0.714
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_s9tp6m69/workspaces/1",
+      "id": "d_dashboard",
+      "group": "desc",
+      "holdout": false
+    },
+    {
+      "task_id": 2,
+      "status": "completed",
+      "score": 61.3,
+      "scoring": "v3-segmented",
+      "tier": "deterministic",
+      "rounds": 3,
+      "best_round": 1,
+      "nodes": 24,
+      "elapsed": 50.6,
+      "error": "",
+      "detail": {
+        "structure": 0.605,
+        "edge": 0.348,
+        "text": 1.0
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_s9tp6m69/workspaces/2",
+      "id": "s_login",
+      "group": "shot",
+      "holdout": false
+    },
+    {
+      "task_id": 3,
+      "status": "completed",
+      "score": 40.7,
+      "scoring": "v3-segmented",
+      "tier": "deterministic",
+      "rounds": 3,
+      "best_round": 1,
+      "nodes": 268,
+      "elapsed": 370.5,
+      "error": "",
+      "detail": {
+        "structure": 0.078,
+        "edge": 0.402,
+        "text": 1.0
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_s9tp6m69/workspaces/3",
+      "id": "h_ant",
+      "group": "shot",
+      "holdout": true
+    },
+    {
+      "task_id": 4,
+      "status": "completed",
+      "score": 42.7,
+      "scoring": "v3-segmented",
+      "tier": "deterministic",
+      "rounds": 3,
+      "best_round": 1,
+      "nodes": 401,
+      "elapsed": 346.4,
+      "error": "",
+      "detail": {
+        "structure": 0.396,
+        "edge": 0.474,
+        "text": 1.0
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_s9tp6m69/workspaces/4",
+      "id": "h_douban",
+      "group": "shot",
+      "holdout": true
+    }
+  ],
+  "iso_dir": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_s9tp6m69"
+}
