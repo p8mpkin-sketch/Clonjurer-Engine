@@ -57,6 +57,9 @@ BASELINE_EAGER_MAX = 40           # 基准截图前转 eager 的懒加载图上�
 BASELINE_IMG_STALL_MS = 4000      # 等待期间连续这么久无一张到齐即放行
 HOST_FAIL_TRIP = 3                # 单主机网络层失败(SSL/超时/连接)达此次数即熔断
 MAX_ASSETS_PER_TASK = 400          # 单任务最大静态资源条目数
+RENDER_ASSET_RESERVE = 300         # 名额外预留给"浏览器实际加载过/克隆渲染实际请求"的资源:
+                                   # 静态提取先把名额用满(苹果 @font-face 每字重 woff/woff2/ttf 三份,
+                                   # 上百个从不加载的字体), 首屏视频这类真用到的反被挤掉
 MAX_MOCK_ENTRIES = 300             # 单任务最大录制 API 条目数
 MAX_MOCK_BODY_BYTES = 2 * 1024 * 1024  # 单个录制响应体上限(2MB)
 MAX_TAPE_BODY_BYTES = 512 * 1024       # VCR 磁带单条响应体上限(512KB)

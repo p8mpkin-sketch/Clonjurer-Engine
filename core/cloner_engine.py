@@ -1978,6 +1978,39 @@ HTML_INTERCEPT_TYPES = ("text/html", "application/xhtml+xml")
 # 视为静态资产的 Playwright resource_type 集合(活体采集/离线评分共用)
 ASSET_RESOURCE_TYPES = {"stylesheet", "script", "image", "font", "media", "other"}
 _LIVE_BODY_TYPES = {"stylesheet", "script", "image", "font"}   # media 多为分段流(206), 不复用
+# 脚本 fetch/xhr 取回的静态媒体(MSE 推流的 webm/mp4 分段、WebGL 场景/贴图、序列帧):
+# 资源类型是 fetch/xhr 而非 media/image, 旧口径既不采集也不在评分时报缺失 —— 苹果类
+# 产品页的滚动叙事视频整段在克隆里 404。按扩展名/内容类型认作资产
+RUNTIME_ASSET_EXT_RE = re.compile(
+    r"\.(?:mp4|m4v|webm|mov|m4s|m4a|mp3|aac|ogg|ogv|ts|m3u8|mpd|"
+    r"png|jpe?g|gif|webp|avif|svg|ktx2?|basis|hdr|exr|glb|gltf|bin|drc|usdz|lsd|wasm|"
+    r"woff2?|ttf|otf)$", re.I)
+RUNTIME_ASSET_CTYPES = ("video/", "audio/", "image/", "model/", "font/",
+                        "application/vnd.apple.mpegurl", "application/dash+xml",
+                        "application/wasm")
+
+
+def _is_runtime_asset(url: str, ctype: str = "") -> bool:
+    """fetch/xhr 请求是否其实是静态资产(见 RUNTIME_ASSET_EXT_RE)。"""
+    ctype = (ctype or "").split(";")[0].strip().lower()
+    if ctype and ctype.startswith(RUNTIME_ASSET_CTYPES):
+        return True
+    return bool(RUNTIME_ASSET_EXT_RE.search(urlsplit(url).path or ""))
+
+
+_GENERIC_NAME_RE = re.compile(r"[0-9a-z]*[0-9][0-9a-z]*", re.I)
+
+
+def _distinctive_asset_name(name: str) -> bool:
+    """文件名能否跨路径/跨任务唯一指认字节(全局名字索引的前提)。
+
+    苹果类媒体目录里每段视频都叫 large.mp4 / small.webm, 名字索引按基名命中会把
+    同页所有视频回补成同一段(airpods 首屏舞者视频变成耳机视频)。只认带内容哈希/
+    版本串(含数字的 ≥6 位字母数字段)的长名; 通用名交给回源。"""
+    stem = os.path.splitext(name or "")[0]
+    if len(stem) < 10:
+        return False
+    return any(len(t) >= 6 for t in _GENERIC_NAME_RE.findall(stem))
 
 # 瞬时 Playwright 会话错误特征: 与稳定克隆失败不同源, 值得换会话重跑一次
 # 环境受阻识别: 目标站对爬虫的风控/限流/人机验证/登录墙。分两种:
@@ -3800,6 +3833,11 @@ class ClonerEngine:
             if rescued:
                 self.log("SMART-DL", f"活体差集回补: 追加 {rescued} 个浏览器实际加载过的资源")
 
+            mirrored = self._mirror_runtime_paths(results)
+            if mirrored:
+                self.log("SMART-DL", f"运行时路径镜像: {mirrored} 个脚本拼址加载的资源按原路径落盘"
+                                     f"(MSE 视频/场景/贴图, 字面替换改写不到)")
+
             # ---- Mock 响应体资产收割: API 下发的图片/资源是静态提取盲区 ----
             harvested = self._harvest_mock_assets(ctx, mock_entries, results, origin)
             if harvested:
@@ -3885,6 +3923,8 @@ class ClonerEngine:
                              f"仍有 {len(failed_local) + len(remote_missing)} 个本地缺失资源"
                              f"(回补轮数已用尽): {sorted(failed_local | {urlsplit(u).path for u in remote_missing})[:6]}")
                     break
+                self.log("SMART-DL", f"本轮缺失 {missing_n}: "
+                                     f"{sorted(failed_local)[:8]} / 外联 {len(remote_missing)}")
                 tp = time.monotonic()
                 new, shadows = self._failed_backfill(ctx, failed_local,
                                                     remote_missing, results, origin)
@@ -4706,9 +4746,19 @@ class ClonerEngine:
             if response.status >= 400:
                 return
             request = response.request
-            if request.resource_type not in ASSET_RESOURCE_TYPES:
+            rtype = request.resource_type
+            if rtype in ("fetch", "xhr") and response.url.startswith(("http://", "https://")):
+                ctype = ""
+                with suppress(Exception):
+                    ctype = response.headers.get("content-type", "")
+                if _is_runtime_asset(response.url, ctype):
+                    self._live_seen.setdefault(response.url, "runtime")
+                    if response.status == 200 and len(self._live_resp) < config.LIVE_BODY_MAX:
+                        self._live_resp.setdefault(response.url, response)
                 return
-            self._live_seen[response.url] = request.resource_type
+            if rtype not in ASSET_RESOURCE_TYPES:
+                return
+            self._live_seen[response.url] = rtype
             if response.status == 200 and request.resource_type in _LIVE_BODY_TYPES \
                     and len(self._live_resp) < config.LIVE_BODY_MAX \
                     and response.url.startswith(("http://", "https://")):
@@ -5105,8 +5155,9 @@ class ClonerEngine:
         # 已取回响应体的不占回补名额(本地读取, 不走网络); 名额只限需要真回源的
         missing.sort(key=lambda u: u not in self._live_bodies)
         net_left = config.LIVE_HARVEST_MAX
+        cap = config.MAX_ASSETS_PER_TASK + config.RENDER_ASSET_RESERVE
         for url in missing:
-            if len(results) >= config.MAX_ASSETS_PER_TASK:
+            if len(results) >= cap:
                 break
             if url not in self._live_bodies:
                 if net_left <= 0:
@@ -5139,6 +5190,39 @@ class ClonerEngine:
                     if child["ok"]:
                         results[child["url"]] = self._store(child)
         return added
+
+    def _mirror_runtime_paths(self, results: dict) -> int:
+        """脚本运行时拼出地址加载的资源(fetch/xhr 取的媒体分段、WebGL 场景、视频)按原站
+        路径镜像落盘。这些地址不以字面量出现在 HTML/CSS/JS 里, 本地化替换改写不到, 克隆
+        里脚本照原路径请求只能 404; 同源的落到工作空间同路径, 沙盒与交付工程都直接命中。"""
+        host = urlsplit(self._target).netloc
+        n = 0
+        for url, kind in list(self._live_seen.items()):
+            if kind not in ("runtime", "media"):
+                continue
+            parts = urlsplit(url)
+            if parts.netloc != host:
+                continue
+            info = results.get(url)
+            if info is None:
+                continue
+            rel = parts.path.lstrip("/")
+            if not rel or rel.endswith("/") or rel.startswith(("static/", "frames/")) \
+                    or ".." in rel.split("/"):
+                continue
+            target = self.ws / rel
+            if target.is_file():
+                continue
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    os.link(info["abs_path"], target)
+                except OSError:
+                    target.write_bytes(info["abs_path"].read_bytes())
+                n += 1
+            except OSError:
+                continue
+        return n
 
     _HASH_TOKEN_RE = re.compile(r"(?:^|\.)([0-9a-f]{8,16})(?:\.[A-Za-z0-9]{1,6})?$")
 
@@ -5187,6 +5271,8 @@ class ClonerEngine:
                 url, ctx.request, referer=self._target))
             if not out["ok"]:
                 dead.add(url)
+                if urlsplit(url).netloc == page_netloc:
+                    self.log("SMART-DL", f"回源失败({str(out.get('error'))[:60]}): {url[:110]}")
             return out
 
         def write_shadow(url: str, content: bytes) -> bool:
@@ -5210,7 +5296,7 @@ class ClonerEngine:
             if url in results or any(v in results
                                      for v in self._variants(url, page_netloc)):
                 continue
-            if len(results) + len(new) >= config.MAX_ASSETS_PER_TASK:
+            if len(results) + len(new) >= config.MAX_ASSETS_PER_TASK + config.RENDER_ASSET_RESERVE:
                 break
             out = _fetch(url)
             if out is not None and out["ok"]:
@@ -5250,7 +5336,7 @@ class ClonerEngine:
                 continue
             # 全局资产名索引: 同名文件曾被任何任务抓过(CAS 在池) —— 直接取
             # 字节落盘。源站失效(302/下线/毒化)时这是唯一救赎路径。
-            known_sha = self.db.find_asset_name(base)
+            known_sha = self.db.find_asset_name(base) if _distinctive_asset_name(base) else None
             if known_sha:
                 src = None
                 with suppress(OSError):
@@ -5290,7 +5376,7 @@ class ClonerEngine:
                     except OSError:
                         pass
                     break
-                if len(results) + len(new) >= config.MAX_ASSETS_PER_TASK:
+                if len(results) + len(new) >= config.MAX_ASSETS_PER_TASK + config.RENDER_ASSET_RESERVE:
                     break
                 out = _fetch(url)
                 if out is None:
@@ -5915,7 +6001,9 @@ class ClonerEngine:
 
             def _on_resp(resp):
                 try:
-                    if resp.request.resource_type not in ASSET_RESOURCE_TYPES:
+                    rt = resp.request.resource_type
+                    if rt not in ASSET_RESOURCE_TYPES and not (
+                            rt in ("fetch", "xhr") and _is_runtime_asset(resp.url)):
                         return
                     if resp.status >= 400:
                         failed_local.add(urlsplit(resp.url).path or "/")
@@ -5934,10 +6022,15 @@ class ClonerEngine:
 
             def _on_fail(req):
                 try:
-                    if req.resource_type not in ASSET_RESOURCE_TYPES:
+                    if req.resource_type not in ASSET_RESOURCE_TYPES and not (
+                            req.resource_type in ("fetch", "xhr") and _is_runtime_asset(req.url)):
                         return
                     url = req.url
                     if url.startswith(base):
+                        # 媒体元素换源/暂停时主动取消在途请求(ERR_ABORTED), 文件其实在:
+                        # 记成缺失只会让修复循环误判"缺失不降"而提前收敛
+                        if req.resource_type == "media" and "ABORTED" in str(req.failure or ""):
+                            return
                         failed_local.add(urlsplit(url).path or "/")
                 except Exception:
                     return
