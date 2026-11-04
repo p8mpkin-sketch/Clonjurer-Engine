@@ -305,3 +305,7 @@ class OutputTarget(Protocol):
 4. **跨目标评分**: Electron 产物被像素评分覆盖(同一 HTML); Flutter 渲染仍无评分接入, 现阶段验收为 analyze + test + 可构建 + 模拟器截图人工核对。
 5. **Windows 实机**: .exe 只验证了文件格式, 未在 Windows 上运行。
 6. **L3 采集侧**: 桌面 a11y 输入适配器(macOS AX / UIA)仍未实现, 本次只落地输出侧。
+
+**前端接入(同日)**: 生成面板「输出目标」新增 Electron, 新增「构建安装包」(选 Flutter 自动选 APK, 选 Electron 自动选桌面包); 生成任务 `spec.build=apk|desktop` 在打包后构建(不占生成预算), 产物放 `exports/`, 任务行出现 APK / macOS .app / Windows .exe 下载按钮(`GET /api/v4/generate/<id>/artifact/<i>`, 只放行报告登记且位于导出目录的文件); 失败显示「构建缺口」。隔离实例 8894 端到端: 浏览器提交「商品列表 + Flutter + APK」→ 42.6 MB APK → 下载 → 模拟器启动渲染正常。
+自动冒烟测试在端到端里抓到并修复 Flutter 目标的通用布局缺陷: 无伸缩子项的横排改 `Wrap`(窄屏折行而非溢出); 网格改「等宽列 + 内容自适应行高 + 按最小列宽 140 减列」(固定 childAspectRatio 纵向溢出); `Expanded` 只由横排父级包裹(放进 Wrap/滚动竖排会抛 ParentData 异常); Android `0dp + layout_weight` 不再钉成宽 0; drawable 图片加 `errorBuilder` 回落占位。五类描述原型 + APK 夹具 + 实测 UIR 共 7 例 analyze / test 全过。
+仍缺: Electron 任务的「沙盒预览」不指向壳内页面(产物可下载、评分正常); Flutter 版式仍是近似(如顶栏导航折行与 Web 不同)。

@@ -32,7 +32,9 @@ def is_generate_task(task: dict) -> bool:
 
 def _snapshot(ws: Path) -> dict:
     snap = {}
-    for name in ("index.html", "uir.json", "cloned_preview.png", "cloned_text.txt"):
+    # 含 Electron 壳内页面: 回滚守卫对所有可截图目标的渲染产物一视同仁
+    for name in ("index.html", "uir.json", "cloned_preview.png", "cloned_text.txt",
+                 "electron_app/app/index.html", "electron_app/app/uir.json", "electron_app/app/static/css/app.css"):
         p = ws / name
         snap[name] = p.read_bytes() if p.is_file() else None
     css = ws / "static" / "css" / "app.css"
@@ -247,10 +249,15 @@ class GenerateEngine:
         if pages_map:
             zip_path = flask_generator.generate_project(self.task_id, "", self.ws, pages_map, [], False,
                                                         tracker_hook="", tracker_cfg=None)
-        else:   # 代码型产物(Flutter): 直接打包产物目录
+        else:   # 工程型产物(Flutter / Electron): 直接打包工程目录(源码, 不含构建产物)
             zip_path = config.EXPORTS_DIR / f"{self.task_id}.zip"
-            flask_generator.build_zip(self.ws / "flutter_app" if (self.ws / "flutter_app").is_dir() else self.ws,
-                                      zip_path, f"generated_{self.task_id}")
+            proj = next((self.ws / d for d in ("flutter_app", "electron_app") if (self.ws / d).is_dir()), self.ws)
+            flask_generator.build_zip(proj, zip_path, f"generated_{self.task_id}")
+        build_kind = str(self.spec.get("build") or "")
+        if build_kind:
+            # 构建安装包在生成预算之外(冷启动 Gradle 可达数分钟); 失败只记缺口, 不影响生成结果
+            self._stage("构建安装包", 92)
+            report["build"] = self._build_binaries(build_kind)
         report["final_score"] = best["score"]
         report["best_round"] = best["round"]
         report["uir_stats"] = best["uir_stats"]
@@ -269,6 +276,54 @@ class GenerateEngine:
         with suppress(Exception):
             self.db.increment_completed(self.db.get_task(self.task_id)["batch_id"])
         return report
+
+    def _build_binaries(self, build_kind: str) -> dict:
+        """apk: flutter_app → release APK; desktop: electron_app → 宿主平台包 + Windows x64 包。
+        产物复制/压缩到 EXPORTS_DIR, 报告里只记文件名与大小, 下载走 /api/v4/generate/<id>/artifact/<i>。"""
+        from core.uir import toolchain
+        blog = lambda m: self.log("BUILD", m)  # noqa: E731
+        out = config.EXPORTS_DIR
+        out.mkdir(parents=True, exist_ok=True)
+        try:
+            if build_kind == "apk":
+                app = self.ws / "flutter_app"
+                if not app.is_dir():
+                    return {"ok": False, "gap": "构建 APK 需要输出目标 flutter"}
+                res = toolchain.build_apk(app, release=True, log=blog)
+                if not res.get("ok"):
+                    return {"ok": False, "gap": res.get("gap"), "log": res.get("log", "")[-2000:]}
+                dest = out / f"{self.task_id}_app-release.apk"
+                shutil.copyfile(res["artifact"], dest)
+                arts = [{"platform": "android", "file": dest.name, "bytes": dest.stat().st_size, "label": "APK"}]
+                result = {"ok": True, "artifacts": arts, "signing": res.get("signing"),
+                          "analyze_ok": res.get("analyze_ok"), "test_ok": res.get("test_ok")}
+            elif build_kind == "desktop":
+                app = self.ws / "electron_app"
+                if not app.is_dir():
+                    return {"ok": False, "gap": "构建桌面包需要输出目标 electron"}
+                host = toolchain.host_platform()
+                plats = [host] + (["win32"] if host != "win32" else [])
+                res = toolchain.build_desktop(app, plats, log=blog)
+                arts = []
+                for a in res.get("artifacts", []):
+                    src = Path(a["dir"])
+                    dest = out / f"{self.task_id}_{src.name}.zip"
+                    toolchain.zip_dir(src, dest)
+                    label = {"darwin": "macOS .app", "win32": "Windows .exe", "linux": "Linux"}.get(a["platform"], a["platform"])
+                    arts.append({"platform": a["platform"], "arch": a["arch"], "file": dest.name,
+                                 "bytes": dest.stat().st_size, "label": f"{label} ({a['arch']})"})
+                result = {"ok": bool(arts), "artifacts": arts, "signing": res.get("signing"),
+                          "gap": res.get("gap") or ("; ".join(f"{k} 打包失败" for k in res.get("failures", {})) or None)}
+            else:
+                return {"ok": False, "gap": f"未知构建类型 {build_kind!r}"}
+        except Exception as exc:  # 工具链异常不拖垮生成任务
+            self.log("BUILD", f"构建异常: {type(exc).__name__}: {exc}")
+            return {"ok": False, "gap": f"构建异常: {type(exc).__name__}"}
+        for a in result.get("artifacts", []):
+            self.log("BUILD", f"产物 {a['label']}: {a['file']} ({a['bytes'] / 1048576:.1f} MB)")
+        if result.get("gap"):
+            self.log("BUILD", f"缺口: {result['gap']}")
+        return result
 
 
 def run_generation_task(task: dict, db, bus, pool):

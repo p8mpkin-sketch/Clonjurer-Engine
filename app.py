@@ -959,7 +959,7 @@ def v4_ai_batch_repair():
 def api_v4_generate():
     """multipart/form-data 或 JSON:
     kind=screenshot|description; description=文字; image=文件(截图); viewport=desktop|laptop|mobile;
-    target(默认 html_css); target_score / max_rounds / time_budget(可选); ai_api_key/ai_model/ai_base_url(可选)。
+    target(默认 html_css); build(可选: apk 需 target=flutter, desktop 需 target=electron); target_score / max_rounds / time_budget(可选); ai_api_key/ai_model/ai_base_url(可选)。
     建一个 mode=generate 的批次 + 1 个任务, target_url 带 uir:generate: 前缀交由调度器分流。"""
     from core.uir import settings as gen_settings
     from core.uir.registry import list_inputs, list_outputs
@@ -975,6 +975,14 @@ def api_v4_generate():
         return jsonify({"error": f"未知输出目标 {target!r}, 可用: {list_outputs()}"}), 400
     description = str(form.get("description") or "").strip()[:gen_settings.GEN_MAX_DESC_CHARS]
     spec = {"kind": kind, "target": target, "description": description}
+    build = str(form.get("build") or "").strip()
+    need = {"apk": "flutter", "desktop": "electron"}
+    if build and build not in need:
+        return jsonify({"error": f"build 仅支持 apk/desktop, 收到 {build!r}"}), 400
+    if build and need[build] != target:
+        return jsonify({"error": f"build={build} 需要输出目标 {need[build]}"}), 400
+    if build:
+        spec["build"] = build
     for key, lo, hi in (("target_score", 1, 100), ("max_rounds", 1, 12), ("time_budget", 10, 3600)):
         raw = form.get(key)
         if raw not in (None, ""):
@@ -1045,6 +1053,23 @@ def api_v4_generate_report(task_id):
     payload["uir_stats"] = payload.get("uir_stats") or {}
     payload["has_uir"] = uir.is_file()
     return jsonify(payload)
+
+
+@app.get("/api/v4/generate/<int:task_id>/artifact/<int:idx>")
+def api_v4_generate_artifact(task_id, idx):
+    """下载生成任务构建出的安装包(APK / macOS .app zip / Windows .exe zip), 只放行导出目录内、报告登记过的文件。"""
+    task = _task_or_404(task_id)
+    rep = _workspace_of(task) / "generate_report.json"
+    if not rep.is_file():
+        return jsonify({"error": "生成报告尚未产出"}), 404
+    arts = ((_parse_json(rep.read_text(encoding="utf-8")) or {}).get("build") or {}).get("artifacts") or []
+    if not 0 <= idx < len(arts):
+        return jsonify({"error": "没有这个构建产物"}), 404
+    name = Path(str(arts[idx].get("file") or "")).name
+    path = (config.EXPORTS_DIR / name).resolve()
+    if not name or path.parent != config.EXPORTS_DIR.resolve() or not path.is_file():
+        return jsonify({"error": "构建产物文件不存在"}), 404
+    return send_file(path, as_attachment=True, download_name=name)
 
 
 @app.get("/api/v4/theme")

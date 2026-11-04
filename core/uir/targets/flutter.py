@@ -111,11 +111,13 @@ class _Gen:
             st = self.text_style(node)
             w = f"Text({_dart_str(c.get('text', ''))}{', style: ' + st if st else ''})"
         elif role == "image":
+            ph = ("Container(color: const Color(0xFFE5E7EB), alignment: Alignment.center, "
+                  "child: const Icon(Icons.image_outlined, color: Color(0xFF9CA3AF)))")
             if c.get("drawable"):
-                w = f"Image.asset('assets/{c['drawable']}.png', fit: BoxFit.cover)"
+                # 资源搬运是缺口(§9.11): 引用的 drawable 可能未随工程打包, 加载失败时回落占位而不是抛异常
+                w = f"Image.asset('assets/{c['drawable']}.png', fit: BoxFit.cover, errorBuilder: (c, e, s) => {ph})"
             else:
-                w = ("Container(color: const Color(0xFFE5E7EB), alignment: Alignment.center, "
-                     "child: const Icon(Icons.image_outlined, color: Color(0xFF9CA3AF)))")
+                w = ph
         elif role == "icon":
             w = "const Icon(Icons.circle_outlined, size: 20)"
         elif role == "avatar":
@@ -152,20 +154,34 @@ class _Gen:
                 w = f"ElevatedButton(onPressed: () {{ {body} }}{style}, child: {label})"
                 B = {k: v for k, v in B.items() if k not in ("bg", "radius", "pad")}
         else:
-            kids = [self.widget(ch, depth + 1) for ch in node.children]
+            is_row = (L.get("mode") in (None, "flex")) and L.get("direction") == "row"
+            kids = [f"Expanded(child: {k})" if is_row and (ch.box or {}).get("grow") else k
+                    for ch, k in ((ch, self.widget(ch, depth + 1)) for ch in node.children)]
             if c.get("text"):
                 kids.insert(0, f"Text({_dart_str(c['text'])})")
             mode = L.get("mode") or ("flex" if kids else None)
             if mode == "grid":
+                # 网格 = 等宽列 + 内容自适应行高(对应 CSS grid 的 auto 行): 固定 childAspectRatio 的 GridView
+                # 在卡片内容比格子高时纵向溢出(冒烟测试实测捕获)。窄屏按最小列宽 140 减列, 与 Web 响应式一致。
                 cols = int(L.get("cols") or 2)
                 gap = self.px(L.get("gap")) or 0
-                w = (f"GridView.count(crossAxisCount: {cols}, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), "
-                     f"mainAxisSpacing: {gap:g}, crossAxisSpacing: {gap:g}, childAspectRatio: 1.2, children: [\n{ind}  "
-                     + f",\n{ind}  ".join(kids) + f",\n{ind}])")
+                cells = [f"SizedBox(width: cw, child: {k})" for k in kids]
+                w = (f"LayoutBuilder(builder: (context, cons) {{ final mw = cons.maxWidth.isFinite ? cons.maxWidth : 360.0; "
+                     f"final n = (mw / 140).floor().clamp(1, {cols}).toInt(); final cw = (mw - {gap:g} * (n - 1)) / n; "
+                     f"return Wrap(spacing: {gap:g}, runSpacing: {gap:g}, children: [\n{ind}  "
+                     + f",\n{ind}  ".join(cells) + f",\n{ind}]); }})")
             elif mode == "stack":
                 w = f"Stack(children: [\n{ind}  " + f",\n{ind}  ".join(kids) + f",\n{ind}])" if kids else "const SizedBox.shrink()"
             elif mode == "absolute":
                 w = kids[0] if kids else "const SizedBox.shrink()"
+            elif kids and L.get("direction") == "row" and not any((ch.box or {}).get("grow") for ch in node.children):
+                # 无伸缩子项的横排用 Wrap: 窄屏放不下时折行, 而不是 RenderFlex 溢出(Row 的子项按自然宽度排布,
+                # 网格卡片里「价格 + 按钮」在 100px 宽时必溢出; 冒烟测试实测捕获)。有 grow 子项才需要 Row+Expanded。
+                gap = self.px(L.get("gap")) or 0
+                wal = {"center": "center", "end": "end", "between": "spaceBetween", "around": "spaceAround"}.get(L.get("justify"), "start")
+                cal = {"center": "center", "end": "end"}.get(L.get("align") or "center", "start")
+                w = (f"Wrap(alignment: WrapAlignment.{wal}, crossAxisAlignment: WrapCrossAlignment.{cal}, "
+                     f"spacing: {gap:g}, runSpacing: {gap:g}, children: [\n{ind}  " + f",\n{ind}  ".join(kids) + f",\n{ind}])")
             elif kids:
                 row = L.get("direction") == "row"
                 gap = self.px(L.get("gap"))
@@ -206,6 +222,8 @@ class _Gen:
             args.append(f"margin: {mg}")
         for k, dk in (("w", "width"), ("h", "height")):
             v = B.get(k)
+            if k == "w" and v == 0 and B.get("grow"):
+                continue   # Android 习惯写法 0dp + layout_weight: 宽度交给 Expanded, 不能钉成 0
             if isinstance(v, (int, float)):
                 args.append(f"{dk}: {float(v):g}")
             elif v == "100%" and k == "w":
@@ -214,8 +232,7 @@ class _Gen:
             args.append(f"decoration: BoxDecoration({', '.join(deco)})")
         if args:
             w = f"Container({', '.join(args)}, child: {w})"
-        if B.get("grow"):
-            w = f"Expanded(child: {w})"
+        # grow → Expanded 由父级横排决定(Expanded 只能是 Row/Column 的直接子项; 竖排在滚动视图里高度无界, 不能伸缩)
         return w
 
     def main_dart(self) -> str:

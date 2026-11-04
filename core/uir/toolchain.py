@@ -58,6 +58,24 @@ def _print(msg):
     print(msg, flush=True)
 
 
+def host_platform() -> str:
+    return {"Darwin": "darwin", "Windows": "win32"}.get(_platform.system(), "linux")
+
+
+def zip_dir(src, dest) -> Path:
+    """把构建目录压成 zip, 保留符号链接(macOS .app 的 Framework 依赖 Versions/Current 链接, 展开会损坏签名结构)。"""
+    src, dest = Path(src), Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists():
+        dest.unlink()
+    z = shutil.which("zip")
+    if z:
+        subprocess.run([z, "-qry", str(dest), src.name], cwd=str(src.parent), check=True)
+    else:  # pragma: no cover - 无 zip 命令时退化(符号链接会被展开)
+        shutil.make_archive(str(dest.with_suffix("")), "zip", str(src.parent), src.name)
+    return dest
+
+
 def build_apk(app_dir, release=False, log=_print, timeout=1800) -> dict:
     """Flutter 工程(FlutterTarget 产物)→ APK。补齐 android/ 平台骨架时不覆盖已生成的 lib/。"""
     app_dir = Path(app_dir)
@@ -97,7 +115,7 @@ def build_desktop(app_dir, platforms=None, arch=None, log=_print, timeout=1800) 
         return {"ok": False, "gap": "缺工具链: Node.js/npm"}
     arch_given = arch
     arch = arch or ("arm64" if _platform.machine() in ("arm64", "aarch64") else "x64")
-    host = {"Darwin": "darwin", "Windows": "win32"}.get(_platform.system(), "linux")
+    host = host_platform()
     platforms = platforms or [host]
     if not (app_dir / "node_modules" / "electron").is_dir():
         rc, out = _run([npm, "install", "--no-audit", "--no-fund"], app_dir, os.environ.copy(), log, timeout)
