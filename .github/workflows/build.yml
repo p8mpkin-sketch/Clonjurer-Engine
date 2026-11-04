@@ -1,6 +1,7 @@
 name: app-build
 
 # 三平台安装包构建 + 签名 + 启动冒烟(ROADMAP_95.md §3.3, DESIGN.md §9.14)。
+# 触发: 手动、每晚, 以及改动构建链本身(toolchain / 目标 / 本 workflow)的 PR。
 # 样本: engine_bench/gen_cases/cases.json 的描述用例(确定性路线, 不调模型) → UIR →
 #   Android: Flutter 目标 → release APK → apksigner 签名/校验 → 模拟器安装启动截图(跨渲染器, 分数只记录)
 #   macOS:   Electron 目标 → .app → codesign(+公证) → 启动经 CDP 截图, 与同一份 HTML 比较(门槛 min_score)
@@ -8,6 +9,14 @@ name: app-build
 # 签名证书全部来自 repo secrets(名字见 core/uir/toolchain.py 签名说明); 未配置时自动退回
 # debug / ad-hoc / 不签, 产物文件名带 -unsigned, 运行摘要的「签名」列写明原因。
 on:
+  # 只在构建/签名链本身改动的 PR 上跑(macOS 分钟数按 10× 计费, 不跟引擎 PR 一起跑)
+  pull_request:
+    paths:
+      - ".github/workflows/build.yml"
+      - "core/uir/toolchain.py"
+      - "core/uir/targets/electron.py"
+      - "core/uir/targets/flutter.py"
+      - "engine_bench/build/**"
   workflow_dispatch:
     inputs:
       case:

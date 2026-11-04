@@ -351,7 +351,7 @@ class OutputTarget(Protocol):
   - 证书只从环境变量读(base64 解到 0600 临时文件, 用完即删), 口令在日志与返回的日志尾里打码; `CLONER_SIGN=0` 整体跳过。secret 名见 ROADMAP_95.md §8 末尾。
   - 「交付形态」应用壳(`core/app_shell.py`, 克隆任务的桌面/Android 包)同样经 `build_desktop` / `build_apk`, 因此自动得到同一套签名与标注, 无需另接。
   - 顺带: `npm install` 后若 Electron 二进制缺失(postinstall 被跳过/中断)显式补拉一次, 避免打出空壳。
-- **CI**(`.github/workflows/build.yml`, `app-build`): 手动 + 每晚北京时间 03:00, 不进 PR 闸门。样本 = `gen_cases/cases.json` 描述用例(确定性路线, 不调模型)。
+- **CI**(`.github/workflows/build.yml`, `app-build`): 手动 + 每晚北京时间 03:00 + 只改构建链(toolchain / Flutter·Electron 目标 / 本 workflow)的 PR, 不进引擎 PR 闸门。样本 = `gen_cases/cases.json` 描述用例(确定性路线, 不调模型)。
   - android(ubuntu): Flutter → release APK → 签名校验 → android-emulator-runner(API 34)安装、启动、进程存活、`screencap`; 截图与参考 HTML 按 dp 视口比较, **跨渲染器只记录不设门槛**(L2 跨目标评分的第一个数据点)。
   - desktop(macos-latest arm64 / windows-latest x64): Electron 打包 → 签名 → **实机启动**: 带 `--remote-debugging-port` 启动产物, 经 CDP 截图, 与同一份 HTML 在 Playwright Chromium 下同视口渲染比较, 低于 `min_score`(默认 90)即红。Windows 这一步是 .exe 第一次在真实 Windows 上启动验证。
   - 产物按签名状态命名(`clonjurer-<用例>-<平台>-<架构>[-unsigned].zip/.apk`), 报告与截图上传, `summary` 作业把构建/签名/冒烟汇总进运行摘要。
