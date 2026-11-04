@@ -1,5 +1,5 @@
 {
-  "_doc": "真实站点语料: 一类一策的回归面。expect 是对框架模式的先验假设(以 core/pattern_detector.py 的模式名为准), 跑分后用检出结果校正; tags 用于 --tag 过滤(cn=国内直连可达, global=需国际网络)。严禁为单个站点加特判, 低分站只能归因到模式类并泛化修复。",
+  "_doc": "真实站点语料: 一类一策的回归面。expect 是对框架模式的先验假设(以 core/pattern_detector.py 的模式名为准), 跑分后用检出结果校正; tags 用于 --tag 过滤(cn=国内直连可达, global=需国际网络)。严禁为单个站点加特判, 低分站只能归因到模式类并泛化修复。holdout=true 的是留出集: 只看不调(不得以它们为对象调参或写修复), 每轮与语料内分开报分, 用来度量泛化; 留出集的 expect 只能人工按技术栈标注, 不确定就留空, 严禁用检出结果回填。",
   "sites": [
     {"url": "https://example.com/",            "expect": "M-STATIC 纯静态",        "tags": ["global", "static"]},
     {"url": "https://www.runoob.com/",         "expect": "M-WordPress CMS",        "tags": ["cn", "wordpress"]},
@@ -26,6 +26,14 @@
     {"url": "https://www.jd.com/",             "expect": "M-React SPA",       "tags": ["cn", "webpack"]},
     {"url": "https://www.aliyun.com/",         "expect": "M-React SPA",       "tags": ["cn", "webpack"]},
     {"url": "https://www.mi.com/",             "expect": "M-Nuxt SSR",             "tags": ["cn", "nuxt"]},
-    {"url": "https://www.huawei.com/cn/",      "expect": "M-Webpack水合MPA",        "tags": ["cn", "jquery"]}
+    {"url": "https://www.huawei.com/cn/",      "expect": "M-Webpack水合MPA",        "tags": ["cn", "jquery"]},
+    {"url": "https://www.bilibili.com/",       "expect": "M-Vue/Vite SPA",         "tags": ["cn", "holdout", "vue"],    "holdout": true},
+    {"url": "https://www.douban.com/",         "expect": "",                       "tags": ["cn", "holdout"],           "holdout": true},
+    {"url": "https://www.sohu.com/",           "expect": "",                       "tags": ["cn", "holdout"],           "holdout": true},
+    {"url": "https://www.163.com/",            "expect": "",                       "tags": ["cn", "holdout"],           "holdout": true},
+    {"url": "https://gitee.com/",              "expect": "",                       "tags": ["cn", "holdout"],           "holdout": true},
+    {"url": "https://tailwindcss.com/",        "expect": "M-Next SSR",             "tags": ["global", "holdout", "next"], "holdout": true},
+    {"url": "https://github.com/",             "expect": "",                       "tags": ["global", "holdout"],       "holdout": true},
+    {"url": "https://developer.mozilla.org/zh-CN/", "expect": "",                  "tags": ["global", "holdout"],       "holdout": true}
   ]
 }

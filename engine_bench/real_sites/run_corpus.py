@@ -202,9 +202,11 @@ def run(args):
             "task_id": t["id"], "url": task.get("target_url"), "status": status,
             "expect": meta.get("expect", ""), "detected": detected,
             "pattern_hit": bool(meta.get("expect")) and detected == meta.get("expect"),
+            "holdout": bool(meta.get("holdout")),
             "confidence": stats.get("pattern_confidence"),
             "features": stats.get("pattern_features") or [],
             "score": task.get("similarity_score"),
+            "blocked": stats.get("baseline_blocked") or None,
             "interactive": stats.get("interactive_score"),
             "fidelity": stats.get("fidelity_score"),
             "track": stats.get("dominant_track"),
@@ -237,15 +239,34 @@ def run(args):
     print(f"均分 {_fmt(s['mean'])}  交互轨均分 {_fmt(s['interactive_mean'])}  中位 {_fmt(s['median'])}"
           f"  完成 {s['completed']}/{s['total']}(不可达 {s['unreachable']})"
           f"  识别命中 {s['pattern_hits']}/{s['pattern_checked']}"
-          f"  耗时 p50 {_fmt(s['p50_elapsed'])}s / p90 {_fmt(s['p90_elapsed'])}s")
+          f"  耗时 p50 {_fmt(s['p50_elapsed'])}s / p90 {_fmt(s['p90_elapsed'])}s"
+          + (f"  环境受阻 {s['blocked']}" if s.get("blocked") else ""))
+    for name, key in (("语料内", "tuned"), ("留出集", "holdout")):
+        g = s.get(key)
+        if g:
+            print(f"  {name} {g['total']} 站: 均分 {_fmt(g['mean'])}  交互轨 {_fmt(g['interactive_mean'])}"
+                  f"  最低 {_fmt(g['min'])}  p50 {_fmt(g['p50_elapsed'])}s")
     return 0 if s["completed"] == s["total"] else 2
 
 
 def _summary(results):
-    scores = [r["score"] for r in results if isinstance(r["score"], (int, float))]
+    out = _summary_one(results)
+    # 语料内(已反复调优) 与 留出集(只看不调) 分开报: 两者差距就是过拟合程度
+    tuned = [r for r in results if not r.get("holdout")]
+    held = [r for r in results if r.get("holdout")]
+    if held:
+        out["tuned"] = _summary_one(tuned) if tuned else None
+        out["holdout"] = _summary_one(held)
+    return out
+
+
+def _summary_one(results):
+    scores = [r["score"] for r in results
+              if isinstance(r["score"], (int, float)) and not r.get("blocked")]
     elapsed = [r["elapsed_s"] for r in results if isinstance(r["elapsed_s"], (int, float))]
     checked = [r for r in results if r["expect"]]
-    inter = [r["interactive"] for r in results if isinstance(r.get("interactive"), (int, float))]
+    inter = [r["interactive"] for r in results
+             if isinstance(r.get("interactive"), (int, float)) and not r.get("blocked")]
 
     def pct(xs, q):
         xs = sorted(xs)
@@ -268,6 +289,8 @@ def _summary(results):
         "ge90": sum(1 for x in scores if x >= 90),
         "unreachable": sum(1 for r in results if r.get("failure") == "unreachable"),
         "engine_failed": sum(1 for r in results if r.get("failure") == "engine"),
+        # 基准页是登录墙/风控/验证码: 环境受阻, 分数不反映引擎能力, 不计入均分
+        "blocked": sum(1 for r in results if r.get("blocked")),
         "p50_elapsed": pct(elapsed, 0.5),
         "p90_elapsed": pct(elapsed, 0.9),
     }
@@ -315,7 +338,16 @@ def _report(out, prev_name, prev):
              f" ≥90 分 {s.get('ge90')} 站; 交互轨均分 {_fmt(s.get('interactive_mean'))}",
              f"- 识别命中: {s['pattern_hits']}/{s['pattern_checked']}",
              f"- 耗时: 平均 {_fmt(s['mean_elapsed'])}s, p50 {_fmt(s.get('p50_elapsed'))}s,"
-             f" p90 {_fmt(s.get('p90_elapsed'))}s; 保真轨胜出 {s['fidelity_dominant']} 站", ""]
+             f" p90 {_fmt(s.get('p90_elapsed'))}s; 保真轨胜出 {s['fidelity_dominant']} 站"
+             + (f"; 环境受阻 {s['blocked']} 站(不计入均分)" if s.get("blocked") else ""), ""]
+    for name, key in (("语料内(已调优)", "tuned"), ("留出集(只看不调)", "holdout")):
+        g = s.get(key)
+        if g:
+            lines.append(f"- **{name}** {g['total']} 站: 均分 {_fmt(g['mean'])}, 交互轨 {_fmt(g['interactive_mean'])},"
+                         f" 最低 {_fmt(g['min'])}, 识别 {g['pattern_hits']}/{g['pattern_checked']},"
+                         f" p50 {_fmt(g['p50_elapsed'])}s / p90 {_fmt(g['p90_elapsed'])}s")
+    if s.get("holdout"):
+        lines.append("")
     if prev_name:
         lines.append(f"对比上一轮 `{prev_name}`: Δ 列为分数增减。")
         lines.append("")
@@ -334,6 +366,10 @@ def _report(out, prev_name, prev):
         slowest = max(st, key=st.get) + f" {st[max(st, key=st.get)]}s" if st else "-"
         hit = "✓" if r["pattern_hit"] else ("✗" if r["expect"] else "·")
         err = r["error"].replace("|", "/").replace("\n", " ")[:80] if r["status"] != "completed" else ""
+        if r.get("blocked"):
+            err = f"环境受阻: {r['blocked']}"
+        if r.get("holdout"):
+            hit += "ᴴ"
         lines.append(f"| {r['task_id']} | {r['url']} | {r['expect'] or '-'} | {r['detected'] or '-'} | {hit}"
                      f" | {_fmt(r['score'])} | {delta} | {_fmt(r['interactive'])} | {_fmt(r['fidelity'])}"
                      f" | {r['track'] or '-'} | {_fmt(r['elapsed_s'])} | {slowest} | {err} |")
