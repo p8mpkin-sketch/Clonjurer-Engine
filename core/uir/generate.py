@@ -219,6 +219,10 @@ class GenerateEngine:
             if score >= target_score:
                 self.log("GEN", f"已达目标分 {target_score}, 停止迭代")
                 break
+            if uir.meta.get("llm_mode") == "skeleton_fill":
+                # 骨架是确定性的, 再填一遍是同一个问题(实测第 2 次填充分数不变, 白花 60s+)
+                self.log("GEN", "骨架填充已完成一轮, 不重复填充")
+                break
             # 下一轮线索: 像素差分区域(截图) / 自评反馈(描述); 确定性 Tier 0 加深切分粒度
             hints = {"score": score, "structure": detail.get("structure"), "edge": detail.get("edge"),
                      "last_render": str(self.ws / "cloned_preview.png") if kind == "screenshot" else None}

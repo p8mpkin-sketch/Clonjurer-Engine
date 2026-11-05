@@ -28,7 +28,7 @@ CONTAINER_ROLES = {"box", "nav", "list", "list_item", "card", "header", "footer"
 # 叶子类角色: 不应有子节点(有也只渲染内容)
 LEAF_ROLES = {"text", "image", "icon", "input", "divider", "badge", "avatar"}
 
-_COLOR_RE = re.compile(r"^(#[0-9a-fA-F]{3,8}|rgba?\(|hsla?\(|transparent$|[a-z]+$)")
+_COLOR_RE = re.compile(r"^(#[0-9a-fA-F]{3,8}|rgba?\(|hsla?\(|(?:linear|radial)-gradient\(|transparent$|[a-z]+$)")
 
 
 @dataclass

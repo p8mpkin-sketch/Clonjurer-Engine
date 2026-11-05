@@ -326,6 +326,15 @@ _FILL_SYSTEM = (
 )
 
 
+def fill_blocks(skel: UIR) -> list:
+    """骨架里交给模型逐块回答的区块。v1: 顶层全部区块; v2: 只取含文字行的区块(v2 顶层还有大量
+    底色/分割线色块, 列给模型只会浪费输出预算)。merge_fill 与清单生成共用, 编号一致。"""
+    kids = list(skel.root.children)
+    if skel.meta.get("seg") != "v2":
+        return kids
+    return [n for n in kids if any(c.role == "text" for c in n.walk() if c is not n)]
+
+
 def merge_fill(skel: UIR, fill: dict) -> UIR:
     """把模型的逐块填充(role/texts/text_color)合并进确定性骨架。
 
@@ -334,14 +343,14 @@ def merge_fill(skel: UIR, fill: dict) -> UIR:
     并保留文字行作为可见标签(不再另画一个居中标签, 否则重复文字破坏边缘); 图片区块不动。纯函数, 可测。"""
     blocks = {b.get("id"): b for b in (fill or {}).get("blocks", []) if isinstance(b, dict)}
     filled = 0
-    for idx, node in enumerate(skel.root.children, start=1):
+    for idx, node in enumerate(fill_blocks(skel), start=1):
         b = blocks.get(f"b{idx}")
         if not b:
             continue
         role = str(b.get("role") or "").strip()
         texts = [str(t).strip() for t in (b.get("texts") or []) if str(t).strip()]
         color = b.get("text_color") if isinstance(b.get("text_color"), str) and b["text_color"].startswith("#") else None
-        bands = [c for c in node.children if c.role == "text"]
+        bands = [c for c in node.walk() if c.role == "text" and c is not node]
         if node.role == "image" or role == "image":
             continue
         for band, text in zip(bands, texts):          # 文字行: 原位替换
@@ -426,14 +435,54 @@ def read_screenshot_text(ai_cfg: dict, image_path, max_lines: int = 400, workers
 
 def _skeleton_list(skel: UIR, limit: int = 120) -> str:
     lines = []
-    for idx, n in enumerate(skel.root.children, start=1):
+    for idx, n in enumerate(fill_blocks(skel), start=1):
         pos, b = n.box.get("position") or {}, n.box
-        bands = sum(1 for c in n.children if c.role == "text")
+        bands = sum(1 for c in n.walk() if c.role == "text" and c is not n)
         lines.append(f"b{idx}: top {pos.get('top', 0)} left {pos.get('left', 0)} w {b.get('w')} h {b.get('h')}"
                      + (f" 文字行 {bands}" if bands else "") + (" [图片区]" if n.role == "image" else ""))
         if idx >= limit:
             break
     return "\n".join(lines)
+
+
+def fill_by_tiles(ai_cfg: dict, skel: UIR, image_path, workers: int = 16, per_req: int = 60) -> dict:
+    """骨架逐块填充按截图纵向分段并行: 每段只带该段图片与落在该段里的区块(按区块顶边归段,
+    单段区块过多再拆请求)。此前整页 ~400 块一个请求串行生成 2~3 分钟; 分段后墙钟 ≈ 最慢一段,
+    且每个请求看到的是该段的原分辨率切片。单个请求失败只丢那几块, 全部失败才抛。"""
+    from concurrent.futures import ThreadPoolExecutor
+    parts, ranges, (W, H) = llm.image_parts(image_path)
+    blocks = fill_blocks(skel)
+    jobs = []
+    for k, (y0, y1) in enumerate(ranges):
+        mine = [(i, n) for i, n in enumerate(blocks, start=1)
+                if y0 <= int((n.box.get("position") or {}).get("top", 0)) < y1
+                or (k == len(ranges) - 1 and int((n.box.get("position") or {}).get("top", 0)) >= y1)]
+        for c in range(0, len(mine), per_req):
+            jobs.append((k, mine[c:c + per_req]))
+
+    def one(job):
+        k, chunk = job
+        y0, y1 = ranges[k]
+        listing = []
+        for i, n in chunk:
+            pos, b = n.box.get("position") or {}, n.box
+            bands = sum(1 for c in n.walk() if c.role == "text" and c is not n)
+            listing.append(f"b{i}: top {pos.get('top', 0)} left {pos.get('left', 0)} w {b.get('w')} h {b.get('h')}"
+                           + (f" 文字行 {bands}" if bands else ""))
+        user = (f"整页截图 {W}×{H}px; 附图是其中 y 区间 [{y0},{y1}) 的一段(按宽缩放, 坐标仍按原图)。"
+                f"区块清单(原图像素坐标):\n" + "\n".join(listing) + "\n\n请对每个区块给出 role 与 texts。")
+        return llm.chat_json(ai_cfg, _FILL_SYSTEM, user, parts=[parts[k]], max_tokens=8192).get("blocks") or []
+
+    out, errors = [], []
+    with ThreadPoolExecutor(max_workers=max(1, min(workers, len(jobs) or 1))) as ex:
+        for f in [ex.submit(one, j) for j in jobs]:
+            try:
+                out.extend(b for b in f.result() if isinstance(b, dict))
+            except Exception as exc:
+                errors.append(exc)
+    if jobs and len(errors) == len(jobs):
+        raise errors[0]
+    return {"blocks": out}
 
 
 @register_input("screenshot")
@@ -446,13 +495,11 @@ class ScreenshotAdapter:
         if ctx.ai_cfg and ctx.expired() and not req.hints.get("force_tier0"):
             ctx.log("UIR", f"时间预算已耗尽(剩余 {ctx.remaining():.0f}s), 本轮跳过模型, 走确定性版面分析")
         if ctx.ai_cfg and not ctx.expired() and not req.hints.get("force_tier0") and llm_mode == "skeleton_fill":
-            depth = int(req.hints.get("seg_depth") or settings.SEG_MAX_DEPTH)
-            skel = segment(img, max_depth=depth, asset_dir=(ctx.ws / "static" / "img") if ctx.ws else None)
+            from core.uir.adapters.layout import segment_v2
+            skel = segment_v2(img, asset_dir=(ctx.ws / "static" / "img") if ctx.ws else None)
             try:
                 ctx.log("UIR", f"截图→UIR(骨架填充): 确定性骨架 {len(skel.root.children)} 块, 调用 {ctx.ai_cfg['model']} 逐块填充")
-                user = (f"截图尺寸 {W}×{H}。区块清单(像素坐标):\n{_skeleton_list(skel)}\n\n"
-                        "请对每个区块给出 role 与 texts。")
-                fill = llm.chat_json(ctx.ai_cfg, _FILL_SYSTEM, user, images=[img], max_tokens=16384)
+                fill = fill_by_tiles(ctx.ai_cfg, skel, img)
                 uir = merge_fill(skel, fill)
                 ctx.log("UIR", f"骨架填充完成: 填入 {uir.meta.get('filled')} 处文字/控件, {uir.root.count()} 节点")
                 return uir
