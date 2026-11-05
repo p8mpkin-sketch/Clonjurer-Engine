@@ -155,6 +155,7 @@ AI_API_BASE_URL = os.environ.get("CLONER_AI_BASE_URL", "https://api.deepseek.com
 AI_API_KEY = os.environ.get("CLONER_AI_KEY", "")
 AI_MODEL = os.environ.get("CLONER_AI_MODEL", "deepseek-v4.1")
 AI_REQUEST_TIMEOUT = 90        # 单次大模型请求超时(秒)
+AI_CALL_WALL_LIMIT = 180       # 单次 chat_json 墙钟上限(含重试/升档; 上游 keep-alive 时读超时不触发)
 AI_PATCH_MAX_TOKENS = 8192     # AI 补丁补全预算基档(推理模型的思考 token 计入, 耗尽时自动×2 重试)
 AI_REPAIR_TRIGGER_SCORE = 85.0  # 视觉闭环触发门限: 诚实评分低于此值才调用大模型
 AI_REPAIR_TARGET_SCORE = 90.0   # 修复循环的目标分: 达标即停
