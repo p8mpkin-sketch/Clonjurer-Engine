@@ -445,7 +445,8 @@ def _skeleton_list(skel: UIR, limit: int = 120) -> str:
     return "\n".join(lines)
 
 
-def fill_by_tiles(ai_cfg: dict, skel: UIR, image_path, workers: int = 16, per_req: int = 60) -> dict:
+def fill_by_tiles(ai_cfg: dict, skel: UIR, image_path, workers: int = 32, per_req: int = 25,
+                  time_left: float = None) -> dict:
     """骨架逐块填充按截图纵向分段并行: 每段只带该段图片与落在该段里的区块(按区块顶边归段,
     单段区块过多再拆请求)。此前整页 ~400 块一个请求串行生成 2~3 分钟; 分段后墙钟 ≈ 最慢一段,
     且每个请求看到的是该段的原分辨率切片。单个请求失败只丢那几块, 全部失败才抛。"""
@@ -473,13 +474,21 @@ def fill_by_tiles(ai_cfg: dict, skel: UIR, image_path, workers: int = 16, per_re
                 f"区块清单(原图像素坐标):\n" + "\n".join(listing) + "\n\n请对每个区块给出 role 与 texts。")
         return llm.chat_json(ai_cfg, _FILL_SYSTEM, user, parts=[parts[k]], max_tokens=8192).get("blocks") or []
 
+    from concurrent.futures import wait
     out, errors = [], []
-    with ThreadPoolExecutor(max_workers=max(1, min(workers, len(jobs) or 1))) as ex:
-        for f in [ex.submit(one, j) for j in jobs]:
+    ex = ThreadPoolExecutor(max_workers=max(1, min(workers, len(jobs) or 1)))
+    try:
+        futs = [ex.submit(one, j) for j in jobs]
+        # 预算内收回多少用多少: 没回来的段保持确定性占位(merge_fill 对缺失 id 不动)
+        done, pending = wait(futs, timeout=None if time_left is None else max(5.0, time_left))
+        for f in done:
             try:
                 out.extend(b for b in f.result() if isinstance(b, dict))
             except Exception as exc:
                 errors.append(exc)
+        errors.extend(TimeoutError("段填充超出时间预算") for _ in pending)
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
     if jobs and len(errors) == len(jobs):
         raise errors[0]
     return {"blocks": out}
@@ -499,7 +508,7 @@ class ScreenshotAdapter:
             skel = segment_v2(img, asset_dir=(ctx.ws / "static" / "img") if ctx.ws else None)
             try:
                 ctx.log("UIR", f"截图→UIR(骨架填充): 确定性骨架 {len(skel.root.children)} 块, 调用 {ctx.ai_cfg['model']} 逐块填充")
-                fill = fill_by_tiles(ctx.ai_cfg, skel, img)
+                fill = fill_by_tiles(ctx.ai_cfg, skel, img, time_left=ctx.remaining())
                 uir = merge_fill(skel, fill)
                 ctx.log("UIR", f"骨架填充完成: 填入 {uir.meta.get('filled')} 处文字/控件, {uir.root.count()} 节点")
                 return uir
