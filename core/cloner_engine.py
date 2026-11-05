@@ -799,6 +799,10 @@ class ClonerEngine:
                         best = self._snapshot_round(round_i, detail, results)
                 if not failed_local and not remote_missing:
                     break
+                if detail is not None and detail["score"] >= config.REPAIR_STOP_SCORE:
+                    # 已到顶(缺失的多是结账/埋点等不可见请求): 再回补一轮只花 20s 回源 + 一次渲染
+                    self.log("RENDER", f"还原度 {detail['score']} 已达 {config.REPAIR_STOP_SCORE}, 不再回补")
+                    break
                 # 无进展即停: 上一轮回补之后缺失数没减少、分数也没涨 —— 回补已无能为力
                 # (缺失资源上游本就 404/鉴权, 或带时间戳/随机参数每轮都"不同"),
                 # 再跑只是重复本地化+渲染(真实语料里 wordpress/runoob/wix 都是 6 轮
@@ -2283,6 +2287,21 @@ class ClonerEngine:
         b_fail = {}
         # 已取回响应体的不占回补名额(本地读取, 不走网络); 名额只限需要真回源的
         missing.sort(key=lambda u: u not in self._live_bodies)
+        # 没有现成响应体的: 信标不回源; 第三方先并发直连预取(同 _failed_backfill), 直连拿不到的再串行走会话
+        missing = [u for u in missing if u in self._live_bodies or not beacon_like(u)]
+        net_urls = [u for u in missing if u not in self._live_bodies][:config.LIVE_HARVEST_MAX]
+        third = {u for u in net_urls if urlsplit(u).netloc != page_netloc}
+        prefetched = {}
+        if third:
+            ex = ThreadPoolExecutor(max_workers=8, thread_name_prefix="live-prefetch")
+            try:
+                futs = {ex.submit(self.downloader.fetch_direct, u, self._target): u for u in third}
+                done, _ = _wait_futures(list(futs), timeout=config.BACKFILL_BUDGET)
+                for f in done:
+                    with suppress(Exception):
+                        prefetched[futs[f]] = f.result()
+            finally:
+                ex.shutdown(wait=False, cancel_futures=True)
         net_left = config.LIVE_HARVEST_MAX
         cap = config.MAX_ASSETS_PER_TASK + config.RENDER_ASSET_RESERVE
         for url in missing:
@@ -2296,6 +2315,12 @@ class ClonerEngine:
             if b_fail.get(host, 0) >= config.HOST_FAIL_TRIP:
                 continue
             pre = self._live_bodies.get(url)
+            if pre is None and url in third:
+                got = prefetched.get(url)
+                if got is not None and got.get("ok"):
+                    pre = got
+                elif got is not None and "HTTP 4" not in str(got.get("error")):
+                    continue       # 直连超时/连不上: 会话也救不回, 不串行空等
             out = dict(pre) if pre is not None else self.downloader.fetch_via_browser(
                 url, ctx.request, referer=self._target)
             out = self._normalize_out(out)
