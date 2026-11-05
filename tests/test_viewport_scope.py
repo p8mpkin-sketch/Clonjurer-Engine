@@ -336,3 +336,47 @@ class ViewportSizeAttrs(unittest.TestCase):
                 self.assertEqual(page.evaluate("document.getElementById('icon').getBoundingClientRect().width"), 24)
             finally:
                 b.close()
+
+
+CANVAS_LOAD_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<style>body{margin:0}canvas{display:block}</style></head><body>
+<canvas id="cv"></canvas><div id="after">下文</div>
+<script>
+var c = document.getElementById('cv');
+c.setAttribute('width', String(innerWidth)); c.setAttribute('height', innerWidth >= 1000 ? '300' : '520');
+</script></body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class LoadTimeSizeAttrs(unittest.TestCase):
+    def test_canvas_size_written_only_at_load(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 1440, "height": 800})
+                page.set_content(CANVAS_LOAD_PAGE)
+                for tag, w in (("d", 1440), ("t", 768), ("m", 390), ("b", 1440)):
+                    page.set_viewport_size({"width": w, "height": 800})
+                    page.evaluate(ce.CV_QUIET_JS, 100)
+                    page.evaluate(ce.CV_RECORD_JS, tag)
+                loads = {}
+                for tag, w in (("t", 768), ("m", 390)):
+                    p2 = b.new_page(viewport={"width": w, "height": 800})
+                    p2.set_content(CANVAS_LOAD_PAGE)
+                    loads[tag] = p2.evaluate(ce.CV_PATHS_JS)
+                    p2.close()
+                out = page.evaluate(ce.CV_EMIT_JS, loads)
+                self.assertGreaterEqual(out["reload"], 1)
+                self.assertEqual(page.evaluate("document.getElementById('cv').getBoundingClientRect().height"), 300)
+                html = page.content()
+            finally:
+                b.close()
+            html = ce.scope_viewport_css(html, 1000, 0)
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 390, "height": 800})
+                page.set_content(html.replace("<script>", "<script type='x'>"))
+                self.assertEqual(page.evaluate("document.getElementById('cv').getBoundingClientRect().height"), 520)
+            finally:
+                b.close()

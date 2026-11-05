@@ -534,7 +534,7 @@ CV_PATHS_JS = r"""() => {
   const out = {}, pathOf = """ + CV_PATH_FN + r""";
   const els = Array.from(document.body ? document.body.querySelectorAll('*') : []).slice(0, 20000);
   for (const e of els) out[pathOf(e)] = [e.tagName, String(e.className && e.className.baseVal !== undefined ? e.className.baseVal : e.className || ''), e.getAttribute('style') || '',
-    Array.from(e.children, c => c.tagName).join(',').slice(0, 400)];
+    Array.from(e.children, c => c.tagName).join(',').slice(0, 400), (""" + CV_ATTR_FN + r""")(e)];
   return out;
 }"""
 
@@ -699,7 +699,8 @@ CV_EMIT_JS = r"""
   m.els.forEach((el, i) => {
     const sdRaw = m.snaps.d[i], sd = S('d', i);
     if (!el.isConnected) return;
-    const reloadDiff = m.paths && tags.some(t => loads[t] && loads[t][m.paths[i]] && loads[t][m.paths[i]][2] !== sdRaw);
+    const full = L => L[2] + (L[4] ? ';' + L[4] : '');   // 窄屏首载: style + 尺寸属性(加载时按宽度只写一次的 canvas/svg 尺寸)
+    const reloadDiff = m.paths && tags.some(t => loads[t] && loads[t][m.paths[i]] && full(loads[t][m.paths[i]]) !== sd);
     if (!reloadDiff && tags.every(t => S(t, i) === sd)) return;
     if (S('b', i) !== sd && tags.every(t => S(t, i) === S('b', i))) return;
     const D = parse(sd), B = parse(S('b', i)), V = {}, Draw = parse(sdRaw);
@@ -708,8 +709,8 @@ CV_EMIT_JS = r"""
       const L = loads[t] && m.paths ? loads[t][m.paths[i]] : null;
       if (!L || L[0] !== el.tagName) return;
       const cls = String(el.className && el.className.baseVal !== undefined ? el.className.baseVal : el.className || '');
-      if (L[1] !== cls || L[2] === sdRaw) return;
-      const LV = parse(L[2]);
+      if (L[1] !== cls || full(L) === sd) return;
+      const LV = parse(full(L));
       const keys = new Set(Object.keys(D).concat(Object.keys(LV)));
       for (const p of keys) {
         if (!GEOM.test(p)) continue;
