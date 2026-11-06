@@ -687,31 +687,31 @@ RESPONSIVE_META = ('<meta name="viewport" '
                    'content="width=device-width, initial-scale=1.0">')
 
 RESPONSIVE_CSS = """<style data-clone-preview="responsive">
-/* 移动端适配兜底(桌面不受影响)。
-   策略: 不强改老站桌面布局(会裁掉内容), 而是
+/* 移动端适配兜底: 只对原站无 viewport meta 的定宽老站注入(桌面不受影响)。
    1) 视口按设备宽渲染(viewport meta 已注入);
-   2) 响应式站点自然收缩;
-   3) 固定宽度老站可横向平移查看而不破版。 */
+   2) 固定宽度老站可横向平移查看而不破版(只设在 html 上: 设在 body 上会让 body
+      变成滚动容器, 文档高度塌成一屏)。 */
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 @media screen and (max-width: 768px) {
-  html, body { overflow-x: auto !important; }
-  img, video { max-width: 100% !important; height: auto !important; }
+  html { overflow-x: auto !important; }
+  img, video { max-width: 100% !important; }
+  img { height: auto; }
   iframe { max-width: 100% !important; }  /* 不动 height: 登录 iframe 依赖定高 */
   input, select, textarea { font-size: 16px !important; }
   table { max-width: 100%; }
 }
-@media screen and (max-width: 359px) {
-  body { font-size: 14px !important; }
-}
 </style>"""
+
+_VIEWPORT_META_RE = re.compile(r"<meta\b[^>]*\bname\s*=\s*[\"']?viewport\b", re.I)
 
 
 def _inject_responsive(html: str) -> str:
-    """视口 meta + 移动端兜底 CSS。已有 viewport meta 则不覆盖(尊重原站)。"""
-    if "viewport" not in html[:4000]:
-        match = re.search(r"<head[^>]*>", html, re.I)
-        at = match.end() if match else 0
-        html = html[:at] + RESPONSIVE_META + html[at:]
+    """原站已有 viewport meta → 原样返回(它自己的媒体查询就是权威); 否则补 meta + 兜底 CSS。"""
+    if _VIEWPORT_META_RE.search(html):
+        return html
+    match = re.search(r"<head[^>]*>", html, re.I)
+    at = match.end() if match else 0
+    html = html[:at] + RESPONSIVE_META + html[at:]
     match = re.search(r"</head\s*>", html, re.I)
     if match:
         at = match.start()
@@ -719,6 +719,7 @@ def _inject_responsive(html: str) -> str:
     else:
         html = html + RESPONSIVE_CSS
     return html
+
 
 OUTER_HTML_JS = r"""
 () => ('<!DOCTYPE html>\n' + document.documentElement.outerHTML)
@@ -1137,8 +1138,16 @@ def compute_visual_similarity(image_a: Path, image_b: Path, diff_path: Path = No
     score = 0.5*分段块级NCC + 0.3*分段边缘IoU + 0.2*文本F2(原站无文本时重分配)。
     """
     with Image.open(image_a) as ia, Image.open(image_b) as ib:
-        ra = _fit_width(ia.convert("RGB"))
-        rb = _fit_width(ib.convert("RGB"))
+        # 口径冻结(2026-11-04): 同宽两图先在原始分辨率补到同高再缩放(见引擎 _src_pad_heights)
+        (wa, ha), (wb, hb) = ia.size, ib.size
+        pa = pb = max(ha, hb) if wa == wb else None
+        ca, cb = ia.convert("RGB"), ib.convert("RGB")
+        if pa and pa > ha:
+            ca = _pad_to(ca, pa)
+        if pb and pb > hb:
+            cb = _pad_to(cb, pb)
+        ra = _fit_width(ca)
+        rb = _fit_width(cb)
     h_a, h_b = ra.size[1], rb.size[1]
     height = max(h_a, h_b)
     seg_count = max(1, -(-height // SCORE_SEGMENT))
@@ -1456,16 +1465,45 @@ def os_ext(path: str) -> str:
 # ---------------------------------------------------------------------------
 # srcset / image-set 解析
 # ---------------------------------------------------------------------------
+_SRCSET_URL_RE = re.compile(r"[\s,]*([^\s]+)")
+
+
 def _srcset_entries(value: str):
+    """按 HTML 规范切 srcset: URL 是一段非空白(内部逗号属于 URL, 只剥尾逗号),
+    描述符读到括号外的逗号为止。按逗号粗切会把 WordPress/Jetpack 的
+    `?resize=150,100 150w` 切成 `?resize=150` 与 `100 150w`, 改写后留下
+    `x.jpg,100` 这种 404 候选, 整张图在克隆里裂掉。"""
     entries = []
-    for part in re.split(r"\s*,\s*", (value or "").strip()):
-        tokens = part.split()
-        if not tokens:
+    text = value or ""
+    pos, n = 0, len(text)
+    while pos < n:
+        m = _SRCSET_URL_RE.match(text, pos)
+        if not m:
+            break
+        url = m.group(1)
+        pos = m.end()
+        desc = ""
+        if url.endswith(","):
+            url = url.rstrip(",")
+        else:
+            depth, start = 0, pos
+            while pos < n:
+                ch = text[pos]
+                if ch == "(":
+                    depth += 1
+                elif ch == ")":
+                    depth = max(0, depth - 1)
+                elif ch == "," and depth == 0:
+                    break
+                pos += 1
+            desc = text[start:pos]
+            pos += 1
+        if not url:
             continue
-        url = tokens[0]
         width = 1
-        if len(tokens) > 1:
-            digits = tokens[1].lower().rstrip("wx")
+        tokens = desc.split()
+        if tokens:
+            digits = tokens[0].lower().rstrip("wx")
             if digits.isdigit():
                 width = int(digits) or 1
         entries.append((url, width))
@@ -2825,6 +2863,8 @@ class ClonerEngine:
             for variant in self._variants(url, page_netloc):
                 pairs[variant] = info["local"]
         for candidate, best in srcset_map.items():
+            if candidate in results:   # 口径冻结 2026-11-04: 已落地的候选用自身文件
+                continue
             info = results.get(best)
             if info is None:
                 continue
@@ -3033,11 +3073,19 @@ class ClonerEngine:
 
     @staticmethod
     def _variants(url: str, page_netloc: str):
-        parts = urlsplit(url)
-        candidates = {url, f"{parts.scheme}://{parts.netloc}{parts.path}",
-                      f"//{parts.netloc}{parts.path}"}
-        if parts.netloc == page_netloc and parts.path.startswith("/"):
-            candidates.add(parts.path)
+        _p = urlsplit(url)
+        scheme, netloc, path = _p.scheme, _p.netloc, _p.path
+        candidates = {url, f"{scheme}://{netloc}{path}", f"//{netloc}{path}"}
+        if netloc == page_netloc and path.startswith("/"):
+            candidates.add(path)
+        if "?" in url and netloc:
+            rest = url[url.find("//") :] if "//" in url else ""
+            if rest.startswith("//"):
+                candidates.add(rest)
+                if netloc == page_netloc and path.startswith("/"):
+                    i = rest.find("/", 2)
+                    if i > 0:
+                        candidates.add(rest[i:])
         return {c for c in candidates
                 if c and len(c) > 5 and c.startswith(("http", "//", "/"))}
 

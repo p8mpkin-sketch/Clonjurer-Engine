@@ -1,0 +1,247 @@
+"""通用 UI 重建引擎(UIR)护栏(DESIGN.md §9):
+
+- Schema/模型: 闭集校验、normalize 补 id、令牌引用 + 原值覆盖双层解析;
+- Web 零回归闸门: 克隆产物 → UIR(web_dom) → HtmlCss 直通回吐, 与克隆直出逐字节相同
+  (同一对图评分必然逐值一致);
+- HtmlCss 目标: 无外链回源、脚本/事件属性被剥离、交互意图翻成运行时;
+- 描述适配器: 五类通用原型可判定且产出合法 UIR; 不含任何站点特判;
+- 视觉适配器 Tier 0: 版面切分确定性(同图两次结果相同)、节点上限;
+- 调度分流: target_url 前缀判定, 与克隆任务互不干扰。
+"""
+import json
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from PIL import Image, ImageDraw  # noqa: E402
+
+from core.uir import settings, llm  # noqa: E402
+from core.uir.model import UIR, Node, Tokens, ROLES  # noqa: E402
+from core.uir.registry import list_inputs, list_outputs, get_output  # noqa: E402
+from core.uir.adapters.description import build_from_description, detect_archetype  # noqa: E402
+from core.uir.adapters.vision import segment, merge_fill  # noqa: E402
+from core.uir.adapters.web_dom import from_clone_workspace  # noqa: E402
+from core.uir.targets.html_css import render_html, HtmlCssTarget  # noqa: E402
+from core.uir.generate import is_generate_task  # noqa: E402
+
+
+class ModelGuards(unittest.TestCase):
+    def test_normalize_and_validate(self):
+        u = UIR(root=Node(role="box", children=[Node(role="text"), Node(role="weird")]))
+        u.normalize()
+        ids = [n.id for n in u.root.walk()]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertEqual(u.root.children[1].role, "box")  # 非法角色归并为 box
+        self.assertEqual(u.validate(), [])
+
+    def test_closed_sets(self):
+        raw = UIR(root=Node(id="b", role="button", intents=[{"on": "click", "do": "launch-rocket"}]))
+        self.assertTrue(any("交互意图非法" in e for e in raw.validate()))      # 未归一化: 闭集校验拒绝
+        u = UIR(root=Node(role="button", intents=[{"on": "click", "do": "launch-rocket"}, {"on": "tap", "do": "focus"}],
+                          layout={"mode": "row"})).normalize()
+        self.assertEqual([i["do"] for i in u.root.intents], ["none", "input"])  # 归一化: 漂移词收敛到闭集
+        self.assertEqual(u.root.intents[1]["on"], "click")
+        self.assertEqual(u.root.layout, {"mode": "flex", "direction": "row"})
+        self.assertEqual(u.validate(), [])
+        u2 = UIR(root=Node(role="text", text_ref="t9")).normalize()
+        self.assertTrue(any("text_ref 未定义" in e for e in u2.validate()))
+
+    def test_token_ref_or_raw(self):
+        t = Tokens(color={"c0": "#123456"}, space={"s2": 8})
+        self.assertEqual(t.resolve("color", "c0"), "#123456")
+        self.assertEqual(t.resolve("color", "#fff"), "#fff")      # 原值覆盖
+        self.assertEqual(t.resolve("space", 12), 12)
+        self.assertEqual(t.resolve("space", None, 0), 0)
+
+    def test_roundtrip_json(self):
+        u = build_from_description("登录页")
+        again = UIR.from_json(u.to_json())
+        self.assertEqual(again.to_dict(), u.to_dict())
+
+    def test_schema_roles_match_model(self):
+        schema = json.loads((ROOT / "core/uir/schema.json").read_text(encoding="utf-8"))
+        self.assertEqual(set(schema["definitions"]["node"]["properties"]["role"]["enum"]), set(ROLES))
+
+
+class WebZeroRegression(unittest.TestCase):
+    def test_passthrough_is_byte_identical(self):
+        with tempfile.TemporaryDirectory() as d:
+            ws, out = Path(d) / "ws", Path(d) / "out"
+            ws.mkdir()
+            doc = ("<!DOCTYPE html><html lang=\"zh\"><head><title>T</title><style data-cssom>.a{color:#ff0000}</style>"
+                   "</head><body><div class=\"a\" id=\"x\">hi<img src=\"static/img/a.png\"></div><p>世界</p></body></html>")
+            (ws / "index.html").write_text(doc, encoding="utf-8")
+            u = from_clone_workspace(ws)
+            self.assertEqual(u.meta["source_kind"], "web_dom")
+            self.assertEqual(u.validate(), [])
+            r = HtmlCssTarget().render(u, out)
+            self.assertTrue(r.meta.get("passthrough"))
+            self.assertEqual((out / "index.html").read_bytes(), (ws / "index.html").read_bytes())
+            self.assertEqual(len(u.root.children), 2)
+            self.assertEqual(u.root.children[0].raw["tag"], "div")
+
+
+class HtmlTargetGuards(unittest.TestCase):
+    def test_no_remote_refs_and_no_scripts(self):
+        u = UIR(root=Node(role="box", children=[
+            Node(role="image", content={"src": "https://evil.example/x.png"}),
+            Node(role="box", raw={"tag": "script", "attrs": {"src": "//cdn/x.js", "onload": "alert(1)"}, "inner_html": "x"}),
+            Node(role="link", content={"href": "#", "text": "go"}, intents=[{"on": "click", "do": "navigate"}]),
+        ])).normalize()
+        page, css = render_html(u)
+        self.assertNotIn("https://evil.example", page)
+        self.assertNotIn("<script src", page)
+        self.assertNotIn("onload", page)
+        self.assertIn("uir-ph", page)          # 外链图退化为占位
+        self.assertIn("data-intent", page)     # 意图落到运行时
+        self.assertNotIn("http", css)
+
+    def test_tokens_to_css_vars_and_layout(self):
+        u = build_from_description("仪表盘 后台")
+        page, css = render_html(u)
+        self.assertIn(":root{", css)
+        self.assertIn("display:grid", css)
+        self.assertIn("display:flex", css)
+        self.assertIn('rel="stylesheet" href="static/css/app.css"', page)
+
+
+class DescriptionGuards(unittest.TestCase):
+    def test_archetypes(self):
+        cases = {"登录页有验证码": "login", "产品官网落地页 hero": "landing", "后台仪表盘 KPI": "dashboard",
+                 "电商商品列表": "list", "博客文章正文": "article", "随便一个页面": "landing"}
+        for desc, arch in cases.items():
+            self.assertEqual(detect_archetype(desc), arch, desc)
+            u = build_from_description(desc)
+            self.assertEqual(u.validate(), [], desc)
+            self.assertGreaterEqual(u.root.count(), 10, desc)
+
+    def test_slots_from_description(self):
+        u = build_from_description("蓝色登录页, 品牌叫 云帆, 标题「欢迎回来」, 有短信验证码")
+        texts = [n.content.get("text") for n in u.root.walk() if n.content.get("text")]
+        self.assertIn("欢迎回来", texts)
+        self.assertTrue(any(i.get("do") == "countdown" for n in u.root.walk() for i in n.intents))
+        self.assertEqual(u.tokens.color["c2"], "#2563eb")
+
+    def test_no_site_specific_branches(self):
+        src = (ROOT / "core/uir/adapters/description.py").read_text(encoding="utf-8")
+        for banned in ("jd.com", "taobao", "baidu", "apple.com", "bilibili"):
+            self.assertNotIn(banned, src)
+
+
+class VisionTier0Guards(unittest.TestCase):
+    def _img(self):
+        im = Image.new("RGB", (640, 480), "#ffffff")
+        d = ImageDraw.Draw(im)
+        d.rectangle([0, 0, 640, 60], fill="#1f2937")
+        d.rectangle([40, 100, 300, 300], fill="#2563eb")
+        d.rectangle([340, 100, 600, 300], fill="#f3f4f6")
+        for y in range(340, 440, 16):
+            d.rectangle([40, y, 600, y + 6], fill="#111827")
+        return im
+
+    def test_deterministic_and_bounded(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "a.png"
+            self._img().save(p)
+            u1, u2 = segment(p, asset_dir=Path(d) / "static" / "img"), segment(p, asset_dir=Path(d) / "static" / "img")
+            self.assertEqual(u1.to_dict(), u2.to_dict())
+            self.assertLessEqual(u1.meta.get("picture_area", 0), 0.40)   # 图片回填面积封顶, 整页不退化为一张图
+            self.assertLessEqual(u1.root.count(), settings.SEG_MAX_NODES + 1)
+            self.assertEqual(u1.validate(), [])
+            self.assertEqual(u1.meta["viewport"], {"w": 640, "h": 480})
+            self.assertGreaterEqual(u1.root.count(), 4)   # 至少切出顶栏/两块/文本带
+            page, css = render_html(u1)
+            self.assertIn("position:absolute", css)
+
+
+class DeterministicFloor(unittest.TestCase):
+    """有 Key 时第 1 轮必须是确定性地板(force_tier0), 之后才轮到 LLM; 无 Key 时不加地板轮。"""
+
+    def test_floor_round_planned(self):
+        src = (ROOT / "core/uir/generate.py").read_text(encoding="utf-8")
+        self.assertIn("floor_round = 1 if ai_cfg and target.shootable else 0", src)
+        self.assertIn('hints = dict(hints, force_tier0=True)', src)
+        # 适配器契约: force_tier0 命中时不得调用大模型
+        for mod in ("vision", "description"):
+            code = (ROOT / f"core/uir/adapters/{mod}.py").read_text(encoding="utf-8")
+            self.assertIn('not req.hints.get("force_tier0")', code)
+
+
+class SkeletonFill(unittest.TestCase):
+    """B 路线: 模型只填充确定性骨架 —— 几何/底色不可被模型改动, 文字按阅读顺序落入文字行, 未知 id 忽略。"""
+
+    def test_merge_keeps_geometry_fills_text(self):
+        im = Image.new("RGB", (640, 480), "#ffffff")
+        d = ImageDraw.Draw(im)
+        d.rectangle([0, 0, 640, 60], fill="#1f2937")
+        d.rectangle([40, 120, 600, 170], fill="#2563eb")
+        for y in range(220, 300, 18):
+            d.rectangle([40, y, 600, y + 8], fill="#111827")
+        with tempfile.TemporaryDirectory() as dd:
+            p = Path(dd) / "a.png"
+            im.save(p)
+            skel = segment(p)
+            before = {n.id: (dict(n.box), n.role) for n in skel.root.children}
+            n_blocks = len(skel.root.children)
+            fill = {"blocks": [{"id": "b1", "role": "header", "texts": ["品牌"]},
+                               {"id": "b2", "role": "button", "texts": ["立即登录"], "text_color": "#ffffff"},
+                               {"id": f"b{n_blocks}", "role": "text", "texts": ["第一行", "第二行", "第三行"]},
+                               {"id": "b999", "role": "button", "texts": ["幽灵"]}]}
+            out = merge_fill(skel, fill)
+            self.assertEqual(out.meta["llm_mode"], "skeleton_fill")
+            self.assertGreaterEqual(out.meta["filled"], 1)
+            for n in out.root.children:
+                b0, _ = before[n.id]
+                for k in ("position", "w", "h", "bg"):      # 几何与底色不变
+                    self.assertEqual(n.box.get(k), b0.get(k), k)
+            texts = [c.content.get("text") for n in out.root.walk() for c in [n] if c.content.get("text")]
+            self.assertTrue(any(t in ("立即登录", "品牌", "第一行") for t in texts))
+            self.assertFalse(any(t == "幽灵" for t in texts))
+            self.assertEqual(out.validate(), [])
+
+
+class LongPageTiling(unittest.TestCase):
+    """送模型的图按宽缩放, 超长页纵向切段并返回原图 y 区间; 短页仍是一张图。"""
+
+    def test_tall_page_is_tiled_by_width(self):
+        with tempfile.TemporaryDirectory() as d:
+            tall, short = Path(d) / "tall.png", Path(d) / "short.png"
+            Image.new("RGB", (1920, 7000), "#ffffff").save(tall)
+            Image.new("RGB", (1440, 900), "#ffffff").save(short)
+            parts, ranges, (W, H) = llm.image_parts(tall, max_width=1280)
+            self.assertEqual((W, H), (1920, 7000))
+            self.assertGreater(len(parts), 1)
+            self.assertLessEqual(len(parts), llm.MAX_TILES)
+            self.assertEqual(ranges[0][0], 0)
+            self.assertEqual(ranges[-1][1], 7000)
+            for (a, b), (c, _) in zip(ranges, ranges[1:]):
+                self.assertEqual(b, c)                      # 段与段首尾相接, 不重叠不漏
+            parts2, ranges2, _ = llm.image_parts(short, max_width=1280)
+            self.assertEqual(len(parts2), 1)
+            self.assertEqual(ranges2, [(0, 900)])
+            # 解码第一段确认是按宽缩放(宽 1280), 而不是按最长边缩成窄条
+            import base64, io as _io
+            raw = base64.b64decode(parts[0]["image_url"]["url"].split(",", 1)[1])
+            self.assertEqual(Image.open(_io.BytesIO(raw)).size[0], 1280)
+
+
+class RegistryAndDispatch(unittest.TestCase):
+    def test_registry(self):
+        self.assertIn("screenshot", list_inputs())
+        self.assertIn("description", list_inputs())
+        self.assertIn("web_dom", list_inputs())
+        self.assertIn("html_css", list_outputs())
+        self.assertTrue(get_output("html_css").shootable)
+
+    def test_dispatch_prefix(self):
+        self.assertTrue(is_generate_task({"target_url": settings.TARGET_URL_PREFIX + "description:x"}))
+        self.assertFalse(is_generate_task({"target_url": "https://example.com/"}))
+        self.assertFalse(is_generate_task({}))
+
+
+if __name__ == "__main__":
+    unittest.main()

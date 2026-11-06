@@ -31,6 +31,8 @@ import io
 import csv
 import io
 import json
+import os
+import base64
 import re
 import shutil
 import subprocess
@@ -40,6 +42,7 @@ import zipfile
 from contextlib import suppress
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests as upstream_http
 from flask import (Flask, Response, abort, jsonify, render_template, request,
@@ -189,6 +192,8 @@ def _sanitize_config(raw) -> dict:
         # 仿真交互层自定义: 登录提示文案(留空=默认池) 与 登录后跳转(留空=不跳转)
         "sim_login_message": str(raw.get("sim_login_message") or "").strip()[:120],
         "sim_login_redirect": str(raw.get("sim_login_redirect") or "").strip()[:500],
+        # 交付形态: "" = 网站工程(Flask ZIP, 默认); desktop = 桌面应用(.app + .exe); apk = Android 应用
+        "package": str(raw.get("package") or "") if str(raw.get("package") or "") in ("desktop", "apk") else "",
     }
 
 
@@ -818,7 +823,7 @@ def trigger_ai_repair(task_id):
                 detail = json.loads(detail_file.read_text(encoding="utf-8"))
         engine = cloner_engine.ClonerEngine(task_id, db, bus, pool)
         engine.cfg = cfg
-        engine._target = batch["target_url"]
+        engine.bind_target(batch["target_url"])   # 目录型 URL: 补丁要落到影子页
 
         def log(stage, message):
             bus.publish(task_id, stage, message)
@@ -828,7 +833,9 @@ def trigger_ai_repair(task_id):
             with pool.context(viewport={"width": 1920, "height": 1080}) as ctx:
                 render_and_score = engine._make_render_and_score(ctx)
                 report = ai_vision_repair.run_vision_repair(
-                    ws, ai_cfg, detail, log, render_and_score)
+                    ws, ai_cfg, detail, log, render_and_score,
+                    page_file=engine._main_page_file(),
+                    region_cells=engine._region_cells())
             final = report.get("final_score")
             if final is not None:
                 db.update_task(task_id, similarity_score=final)
@@ -860,7 +867,7 @@ def _run_ai_repair_once(task_row: dict, ai_cfg: dict) -> dict:
             detail = json.loads(detail_file.read_text(encoding="utf-8"))
     engine = cloner_engine.ClonerEngine(task_id, db, bus, pool)
     engine.cfg = cfg
-    engine._target = task_row["target_url"]
+    engine.bind_target(task_row["target_url"])
 
     def log(stage, message):
         bus.publish(task_id, stage, message)
@@ -869,7 +876,8 @@ def _run_ai_repair_once(task_row: dict, ai_cfg: dict) -> dict:
     with pool.context(viewport={"width": 1920, "height": 1080}) as ctx:
         render_and_score = engine._make_render_and_score(ctx)
         report = ai_vision_repair.run_vision_repair(
-            ws, ai_cfg, detail, log, render_and_score)
+            ws, ai_cfg, detail, log, render_and_score,
+            page_file=engine._main_page_file(), region_cells=engine._region_cells())
     final = report.get("final_score")
     if final is not None:
         db.update_task(task_id, similarity_score=final)
@@ -946,6 +954,138 @@ def v4_ai_batch_repair():
                     "task_ids": [t["id"] for t in queue]}), 202
 
 
+# ---------------------------------------------------------------------------
+# 通用 UI 重建引擎 · L1 生成(截图/描述 → UIR → HTML/CSS), 走现有任务调度与产物链路
+# ---------------------------------------------------------------------------
+@app.post("/api/v4/generate")
+def api_v4_generate():
+    """multipart/form-data 或 JSON:
+    kind=screenshot|description; description=文字; image=文件(截图); viewport=desktop|laptop|mobile;
+    target(默认 html_css); build(可选: apk 需 target=flutter, desktop 需 target=electron); target_score / max_rounds / time_budget(可选); ai_api_key/ai_model/ai_base_url(可选)。
+    建一个 mode=generate 的批次 + 1 个任务, target_url 带 uir:generate: 前缀交由调度器分流。"""
+    from core.uir import settings as gen_settings
+    from core.uir.registry import list_inputs, list_outputs
+    if request.content_type and request.content_type.startswith("multipart/"):
+        form, files = request.form, request.files
+    else:
+        form, files = (request.get_json(silent=True) or {}), {}
+    kind = str(form.get("kind") or "description").strip()
+    if kind not in ("screenshot", "description"):
+        return jsonify({"error": f"kind 仅支持 screenshot/description, 可用适配器: {list_inputs()}"}), 400
+    target = str(form.get("target") or "html_css").strip()
+    if target not in list_outputs():
+        return jsonify({"error": f"未知输出目标 {target!r}, 可用: {list_outputs()}"}), 400
+    description = str(form.get("description") or "").strip()[:gen_settings.GEN_MAX_DESC_CHARS]
+    spec = {"kind": kind, "target": target, "description": description}
+    build = str(form.get("build") or "").strip()
+    need = {"apk": "flutter", "desktop": "electron"}
+    if build and build not in need:
+        return jsonify({"error": f"build 仅支持 apk/desktop, 收到 {build!r}"}), 400
+    if build and need[build] != target:
+        return jsonify({"error": f"build={build} 需要输出目标 {need[build]}"}), 400
+    if build:
+        spec["build"] = build
+    for key, lo, hi in (("target_score", 1, 100), ("max_rounds", 1, 12), ("time_budget", 10, 3600)):
+        raw = form.get(key)
+        if raw not in (None, ""):
+            try:
+                spec[key] = max(lo, min(hi, float(raw) if key == "target_score" else int(float(raw))))
+            except (TypeError, ValueError):
+                return jsonify({"error": f"{key} 非法"}), 400
+    vp_name = form.get("viewport")
+    if vp_name in config.VIEWPORTS:
+        spec["viewport"] = {"width": config.VIEWPORTS[vp_name]["width"], "height": config.VIEWPORTS[vp_name]["height"]}
+    if kind == "screenshot":
+        up = files.get("image") if files else None
+        data_b64 = form.get("image_base64")
+        gen_settings.GEN_INPUTS_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = f"{int(time.time() * 1000)}_{os.getpid()}"
+        dest = gen_settings.GEN_INPUTS_DIR / f"{stamp}.png"
+        try:
+            if up is not None and up.filename:
+                raw = up.read()
+            elif data_b64:
+                raw = base64.b64decode(str(data_b64).split(",", 1)[-1])
+            else:
+                return jsonify({"error": "截图输入需上传 image 文件或 image_base64"}), 400
+            if len(raw) > gen_settings.GEN_MAX_IMAGE_BYTES:
+                return jsonify({"error": "截图超过体积上限"}), 400
+            from PIL import Image as _PILImage
+            import io as _io
+            with _PILImage.open(_io.BytesIO(raw)) as im:
+                im = im.convert("RGB")
+                if im.size[0] < 64 or im.size[1] < 64:
+                    return jsonify({"error": "截图尺寸过小"}), 400
+                im.save(dest, format="PNG")
+        except Exception as exc:
+            return jsonify({"error": f"截图不可解析: {type(exc).__name__}"}), 400
+        spec["image_path"] = str(dest)
+        spec["reference_text"] = str(form.get("reference_text") or "")[:20000]
+    elif not description:
+        return jsonify({"error": "描述输入不能为空"}), 400
+    label = (description[:40] if description else f"截图 {time.strftime('%m-%d %H:%M')}")
+    package = str(form.get("package") or "").strip()
+    if package and package not in ("desktop", "apk"):
+        return jsonify({"error": f"package 仅支持 desktop/apk, 收到 {package!r}"}), 400
+    if package and target != "html_css":
+        return jsonify({"error": "交付形态 desktop/apk 装壳需要输出目标 html_css(Flutter 原生 APK 用 build=apk)"}), 400
+    cfg = {"mode": "generate", "gen": spec, "similarity": True, "package": package,
+           "ai_api_key": str(form.get("ai_api_key") or "").strip()[:4096],
+           "ai_base_url": str(form.get("ai_base_url") or "").strip()[:4096],
+           "ai_model": str(form.get("ai_model") or "").strip()[:200]}
+    project_id = form.get("project_id")
+    project_id = int(project_id) if str(project_id or "").isdigit() else None
+    if project_id is not None and db.get_project(project_id) is None:
+        return jsonify({"error": f"项目 #{project_id} 不存在"}), 400
+    name = str(form.get("name") or "").strip() or f"生成 · {label}"
+    target_url = f"{gen_settings.TARGET_URL_PREFIX}{kind}:{label}"
+    batch_id = db.create_batch(name, [(target_url, "generated")], cfg, project_id)
+    task = db.list_tasks(batch_id=batch_id, limit=1)
+    task_id = task[0]["id"] if task else None
+    scheduler.start()
+    bus.publish(None, "SCHED", f"生成批次 #{batch_id} 已入队 ({kind} → {target})")
+    _audit("generate.create", f"生成批次 #{batch_id}「{name}」({kind} → {target})")
+    return jsonify({"batch_id": batch_id, "task_id": task_id, "name": name, "kind": kind, "target": target}), 201
+
+
+@app.get("/api/v4/generate/<int:task_id>/report")
+def api_v4_generate_report(task_id):
+    task = _task_or_404(task_id)
+    ws = _workspace_of(task)
+    rep = ws / "generate_report.json"
+    if not rep.is_file():
+        return jsonify({"error": "生成报告尚未产出"}), 404
+    payload = _parse_json(rep.read_text(encoding="utf-8"))
+    uir = ws / "uir.json"
+    payload["uir_stats"] = payload.get("uir_stats") or {}
+    payload["has_uir"] = uir.is_file()
+    return jsonify(payload)
+
+
+@app.get("/api/tasks/<int:task_id>/artifact/<int:idx>")
+@app.get("/api/v4/generate/<int:task_id>/artifact/<int:idx>")
+def api_task_artifact(task_id, idx):
+    """下载任务构建出的安装包(APK / macOS .app zip / Windows .exe zip), 只放行导出目录内、报告登记过的文件。
+    来源: 交付形态后置构建(build_report.json, 克隆与生成任务通用) 或 界面生成的原生目标构建(generate_report.build)。"""
+    task = _task_or_404(task_id)
+    ws = _workspace_of(task)
+    arts = []
+    for rep, key in ((ws / "build_report.json", None), (ws / "generate_report.json", "build")):
+        if rep.is_file():
+            data = _parse_json(rep.read_text(encoding="utf-8")) or {}
+            arts = (data.get(key) if key else data or {}) or {}
+            arts = arts.get("artifacts") or []
+            if arts:
+                break
+    if not 0 <= idx < len(arts):
+        return jsonify({"error": "没有这个构建产物"}), 404
+    name = Path(str(arts[idx].get("file") or "")).name
+    path = (config.EXPORTS_DIR / name).resolve()
+    if not name or path.parent != config.EXPORTS_DIR.resolve() or not path.is_file():
+        return jsonify({"error": "构建产物文件不存在"}), 404
+    return send_file(path, as_attachment=True, download_name=name)
+
+
 @app.get("/api/v4/theme")
 def v4_theme_get():
     user = _current_user()
@@ -1002,13 +1142,16 @@ def v4_ai_playground_repair():
                 with suppress(ValueError, OSError):
                     detail = json.loads(detail_file.read_text(encoding="utf-8"))
             engine = cloner_engine.ClonerEngine(task_id, db, bus, pool)
+            engine.bind_target(task["target_url"])
             ai_cfg = {"base_url": config.AI_API_BASE_URL, "api_key": key,
                       "model": config.AI_MODEL, "user_prompt": prompt}
             with pool.context(viewport={"width": 1920, "height": 1080}) as ctx:
                 report = ai_vision_repair.run_vision_repair(
                     ws, ai_cfg, detail,
                     lambda stage, msg: bus.publish(task_id, stage, msg),
-                    engine._make_render_and_score(ctx))
+                    engine._make_render_and_score(ctx),
+                    page_file=engine._main_page_file(),
+                    region_cells=engine._region_cells())
             final = report.get("final_score")
             if final is not None:
                 db.update_task(task_id, similarity_score=final)
@@ -1750,10 +1893,10 @@ def preview(task_id, subpath=""):
     site = _load_site_meta(ws)
     routes = site.get("routes", {})
     if subpath == "":
-        return send_from_directory(ws, routes.get("/", "index.html"))
+        return _pv_cookie(send_from_directory(ws, routes.get("/", "index.html")), task_id)
     normalized = "/" + subpath.strip("/")
     if normalized in routes:
-        return send_from_directory(ws, routes[normalized])
+        return _pv_cookie(send_from_directory(ws, routes[normalized]), task_id)
     target = (ws / subpath).resolve()
     if str(target).startswith(str(ws.resolve())) and target.is_file():
         return send_from_directory(ws, subpath)
@@ -1775,6 +1918,14 @@ def _parse_json(text: str) -> dict:
         return {}
 
 
+def _pv_cookie(resp, task_id):
+    """预览页面响应带上当前任务号: 样式表里的根路径引用(字体/背景图)的 Referer 是样式表
+    自身地址(/static/css/...), 不含 /preview/<id>, Referer 兜底认不出任务 —— 用它补位。"""
+    with suppress(Exception):
+        resp.set_cookie("clone_pv", str(task_id), path="/", samesite="Lax", httponly=True)
+    return resp
+
+
 @app.errorhandler(404)
 def not_found(_error):
     # Referer 智能沙盒路由兜底: 预览 iframe 内逃逸到根路径的静态资源 / Mock API
@@ -1782,8 +1933,16 @@ def not_found(_error):
     # 自动转发至对应工作空间。
     referer = request.headers.get("Referer", "")
     match = PREVIEW_REFERER_RE.search(referer)
-    if match and not request.path.startswith("/preview/"):
-        task = db.get_task(int(match.group(1)))
+    task_ref = match.group(1) if match else None
+    if task_ref is None and request.method == "GET" and referer \
+            and urlsplit(referer).netloc == request.host \
+            and not request.path.startswith(("/api/", "/preview/")):
+        # 同源、Referer 是克隆页里的子资源(样式表)而非平台页: 退到最近打开的预览任务
+        cookie_id = request.cookies.get("clone_pv", "")
+        if cookie_id.isdigit() and not urlsplit(referer).path.rstrip("/") in ("", "/index.html"):
+            task_ref = cookie_id
+    if task_ref and not request.path.startswith("/preview/"):
+        task = db.get_task(int(task_ref))
         if task is not None:
             resp = _serve_from_task(task, request.path)
             if resp is not None:

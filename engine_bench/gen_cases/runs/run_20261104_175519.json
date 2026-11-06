@@ -1,0 +1,84 @@
+{
+  "stamp": "20261104_175519",
+  "args": {
+    "holdout": false,
+    "rounds": 2,
+    "budget": 240,
+    "only": "s_login,s_landing",
+    "verbose": true
+  },
+  "summary": {
+    "n": 2,
+    "completed": 2,
+    "failed": 0,
+    "pixel_mean": 57.7,
+    "pixel_ge85": 0,
+    "pixel_n": 2,
+    "desc_mean": null,
+    "desc_ge85": 0,
+    "desc_n": 0,
+    "ge85_total": 0,
+    "elapsed_mean": 54.8,
+    "elapsed_p90": 43.5,
+    "tuned": {
+      "n": 2,
+      "completed": 2,
+      "failed": 0,
+      "pixel_mean": 57.7,
+      "pixel_ge85": 0,
+      "pixel_n": 2,
+      "desc_mean": null,
+      "desc_ge85": 0,
+      "desc_n": 0,
+      "ge85_total": 0,
+      "elapsed_mean": 54.8,
+      "elapsed_p90": 43.5
+    },
+    "holdout": null
+  },
+  "results": [
+    {
+      "task_id": 1,
+      "status": "completed",
+      "score": 75.2,
+      "scoring": "v3-segmented",
+      "tier": "llm",
+      "rounds": 2,
+      "best_round": 1,
+      "nodes": 12,
+      "elapsed": 66.1,
+      "error": "",
+      "detail": {
+        "structure": 0.601,
+        "edge": 0.32,
+        "text": 1.0
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_bah1i8ry/workspaces/1",
+      "id": "s_login",
+      "group": "shot",
+      "holdout": false
+    },
+    {
+      "task_id": 2,
+      "status": "completed",
+      "score": 40.1,
+      "scoring": "v3-segmented",
+      "tier": "deterministic",
+      "rounds": 2,
+      "best_round": 1,
+      "nodes": 54,
+      "elapsed": 43.5,
+      "error": "",
+      "detail": {
+        "structure": 0.305,
+        "edge": 0.268,
+        "text": 1.0
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_bah1i8ry/workspaces/2",
+      "id": "s_landing",
+      "group": "shot",
+      "holdout": false
+    }
+  ],
+  "iso_dir": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_bah1i8ry"
+}

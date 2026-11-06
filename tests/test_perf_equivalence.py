@@ -185,11 +185,18 @@ class PatternDetectEquivalence(unittest.TestCase):
                     b"REACT.PRODUCTION.min", b"ReactDOM", b"__NEXT_DATA__", b"next/dist", b"__NUXT__",
                     b"nuxt", b"zone.js", b"ng-version", b"@angular/core", b"jquery", b"webpackJsonp",
                     b"__webpack_require__", b"__vite__", b"vite/preload", b"x" * 50, b"function(){}",
-                    b"\xc4\xb0nit", b"JQUERY", b"Vue.js vX", b"vue.js v9"]
+                    b"\xc4\xb0nit", b"JQUERY", b"Vue.js vX", b"vue.js v9",
+                    b"__sveltekit", b"svelte/internal", b"astro-island", b"__remixContext",
+                    b"solid-js", b"_$HY", b"@builder.io/qwik", b"ember-source", b"/wp-content/",
+                    b"cdn.shopify.com", b"parastorage.com", b"SVELTE-", b"Astro:"]
         doms = ['<div data-v-1a2b3c4d>', '<div id="__next">', '<app-root ng-version="1">', '<iframe src=x>',
                 '<video >', 'initGeetest', '<script data-clone-preview="x">react-dom</script>', '<p>plain</p>',
                 'data-reactroot', 'md-theme-default', '__INITIAL_STATE__', '_nghost-abc',
-                '<İframe>', 'ng-verſion', 'DATA-V-APP', '<VIDEO>', '_NGHOST-\u212a', '中文<p>']
+                '<İframe>', 'ng-verſion', 'DATA-V-APP', '<VIDEO>', '_NGHOST-\u212a', '中文<p>',
+                'data-sveltekit-reload', '<div class="card svelte-1a2b3c">', '<astro-island uid="x">',
+                'data-astro-cid-abc', '__remixContext', '<div data-hk="0-1">', '<div q:container="paused">',
+                'id="ember123"', '/wp-content/themes/', 'cdn.shopify.com', 'static.parastorage.com',
+                '<div class="svelte-">']
         rnd = random.Random(11)
         for i in range(200):
             with tempfile.TemporaryDirectory() as tmp:
@@ -297,3 +304,104 @@ class CssAndSrcsetEquivalence(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CalibrationPrimeEquivalence(unittest.TestCase):
+    """评分顺带预热校准网格缓存: 校准结果必须与基线自行解码逐值一致。"""
+
+    def test_primed_cells_match_baseline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            for i, (wa, ha, wb, hb) in enumerate([(1440, 900, 1440, 900), (1440, 3000, 1440, 2600),
+                                                   (1280, 2000, 1280, 2000), (375, 812, 375, 812)]):
+                a, b = tmp / f"a{i}.png", tmp / f"b{i}.png"
+                _page(i, wa, ha).save(a)
+                _page(i + 300, wb, hb, shift=2).save(b)
+                pc._STATS_CACHE.clear()
+                ce.compute_visual_similarity(a, b, prime_calibration=True)
+                # 克隆图网格已在缓存(预热生效), 且结果与基线一致
+                primed = any(k[1] == (wa, ha) for k in pc._STATS_CACHE)
+                # 原站过小(< 24×20 / 14×20 像素)时校准本就不跑, 预热也应跳过
+                self.assertEqual(primed, wa >= pc.GRID_X * 20 and ha >= pc.GRID_Y * 20, i)
+                self.assertEqual(pc.divergent_cells(a, b), B_PC.divergent_cells(a, b), i)
+                pc._STATS_CACHE.clear()
+                self.assertEqual(pc.divergent_cells(a, b), B_PC.divergent_cells(a, b), (i, "cold"))
+
+
+class DeferredDiffEquivalence(unittest.TestCase):
+    """延迟热力图(收敛后单独生成)与评分时同步生成的热力图逐像素一致。"""
+
+    def test_write_diff_preview_matches_inline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            for i, (ha, hb) in enumerate([(900, 900), (6000, 5000), (300, 2000)]):
+                a, b = tmp / f"a{i}.png", tmp / f"b{i}.png"
+                _page(i, 1440, ha).save(a)
+                _page(i + 40, 1440, hb, shift=3).save(b)
+                inline, deferred = tmp / f"inline{i}.png", tmp / f"deferred{i}.png"
+                old = B_CE.compute_visual_similarity(a, b, inline)
+                new = ce.compute_visual_similarity(a, b, None)   # 中间轮: 不写热力图
+                self.assertEqual(new, old)
+                self.assertFalse(deferred.exists())
+                ce.write_diff_preview(a, b, deferred)
+                with Image.open(inline) as x, Image.open(deferred) as y:
+                    self.assertEqual(x.size, y.size)
+                    self.assertEqual(x.convert("RGB").tobytes(), y.convert("RGB").tobytes())
+
+
+class AiVisionRepairGuards(unittest.TestCase):
+    """AI 视觉修复: 补丁消毒 + 复评不升即回滚。"""
+
+    def test_sanitize(self):
+        from core import ai_vision_repair as avr
+        css = avr.sanitize_css("a{background:url('https://x/a.png')} @import url(//c/x.css); "
+                               "b{width:expression(1)} c{background:url(/static/img/ok.png)}")
+        self.assertNotIn("https://", css)
+        self.assertNotIn("@import", css)
+        self.assertNotIn("expression(", css)
+        self.assertIn("url(/static/img/ok.png)", css)
+        html = avr.sanitize_html('<div onclick="x()"><script>1</script><img src="https://e/a.png">'
+                                 '<a href="/local">t</a></div>')
+        self.assertNotIn("<script", html)
+        self.assertNotIn("onclick", html)
+        self.assertNotIn("https://e", html)
+        self.assertIn('href="/local"', html)
+
+    def test_rollback_when_score_drops(self):
+        from core import ai_vision_repair as avr
+        import config
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp)
+            (ws / "static" / "css").mkdir(parents=True)
+            page = ws / "index.html"
+            page.write_text("<html><head></head><body><p>x</p></body></html>", encoding="utf-8")
+            _page(1, 600, 400).save(ws / "original_preview.png")
+            _page(2, 600, 400).save(ws / "cloned_preview.png")
+            (ws / "cloned_text.txt").write_text("x", encoding="utf-8")
+            patches = iter([
+                {"diagnosis": "d1", "css": "body{background:red}", "html_insert": []},
+                {"diagnosis": "d2", "css": "body{background:blue}",
+                 "html_insert": [{"selector": "body", "position": "beforeend", "html": "<div>ok</div>"}]},
+            ])
+            scores = iter([40.0, 70.0])
+            orig_chat, orig_rounds = avr._chat_vision, config.AI_REPAIR_MAX_ROUNDS
+            avr._chat_vision = lambda *a, **k: next(patches)
+            config.AI_REPAIR_MAX_ROUNDS = 2
+            try:
+                def render_and_score():
+                    (ws / "cloned_preview.png").write_bytes(b"\x89PNG-new")   # 复评会换截图
+                    return {"score": next(scores)}, set(), set()
+                report = avr.run_vision_repair(
+                    ws, {"model": "m", "base_url": "", "api_key": "k"}, {"score": 60.0},
+                    lambda *a: None, render_and_score, page_file=page)
+            finally:
+                avr._chat_vision, config.AI_REPAIR_MAX_ROUNDS = orig_chat, orig_rounds
+            self.assertTrue(report["rounds"][0]["rolled_back"])
+            self.assertFalse(report["rounds"][1]["rolled_back"])
+            self.assertEqual(report["final_score"], 70.0)
+            css = (ws / "static" / "css" / "ai_patch.css").read_text(encoding="utf-8")
+            self.assertNotIn("red", css)      # 第 1 轮(40 < 60)已回滚
+            self.assertIn("blue", css)        # 第 2 轮(70 > 60)保留
+            html = page.read_text(encoding="utf-8")
+            self.assertEqual(html.count(avr.AI_PATCH_LINK), 1)
+            self.assertIn("<div>ok</div>", html)

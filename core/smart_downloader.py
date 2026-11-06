@@ -60,7 +60,7 @@ class SmartDownloader:
             headers["Referer"] = referer
         try:
             resp = self._session.get(url, headers=headers,
-                                     timeout=config.REQUEST_TIMEOUT)
+                                     timeout=getattr(config, "REQUEST_CONNECT_READ", config.REQUEST_TIMEOUT))
         except requests.RequestException as exc:
             out["error"] = type(exc).__name__
             return out

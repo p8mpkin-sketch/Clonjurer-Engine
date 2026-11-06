@@ -1,0 +1,118 @@
+name: real-site-corpus
+
+# 真实站点语料跑分: 在 GitHub 托管 runner 上起一个平台实例(有国际网络), 跑
+# engine_bench/real_sites/run_corpus.py, 报告写进本次运行的摘要并上传明细。
+# 引擎改动的 PR 与每晚默认只跑 global 标签: runner 在美国, 国内站会拿到地区版/风控页
+# (实测 aliyun/jd/mi 与国内直连差异巨大), 国内站在 cz 本机实例上跑 --tag cn。
+# 手动触发可填 tag(留空=global, 可填 cn 等)或 sites(覆盖语料)。
+# 不作门槛(真实站点会变), 只做度量留档; 跟上一轮的对比看报告 Δ 列(本地 runs/)或下载两次产物比。
+on:
+  pull_request:
+    paths:
+      - "core/**"
+      - "config.py"
+      - "engine_bench/real_sites/**"
+      - ".github/workflows/corpus.yml"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "只跑带此标签的站(留空=global; cn=国内站)"
+        required: false
+        default: ""
+      sites:
+        description: "逗号分隔 URL, 覆盖语料(可选)"
+        required: false
+        default: ""
+  schedule:
+    - cron: "30 18 * * *"   # 北京时间 02:30
+
+jobs:
+  corpus:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 安装依赖与 Chromium
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+      - name: 启动平台实例(开放模式, 无用户)
+        run: |
+          mkdir -p logs
+          CLONER_PORT=8897 nohup python app.py > logs/app_ci.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:8897/api/auth/state && exit 0
+            sleep 1
+          done
+          echo "实例未就绪"; tail -50 logs/app_ci.log; exit 1
+      - name: 跑语料
+        run: |
+          python engine_bench/real_sites/run_corpus.py --base http://127.0.0.1:8897 \
+            --timeout 3600 --tag "${{ github.event.inputs.tag || 'global' }}" \
+            --sites "${{ github.event.inputs.sites }}" || echo "有站点未完成(报告照常产出)"
+      - name: 报告写入运行摘要
+        if: always()
+        run: |
+          f=$(ls -t engine_bench/real_sites/runs/REPORT_*.md 2>/dev/null | head -1)
+          if [ -n "$f" ]; then cat "$f" >> "$GITHUB_STEP_SUMMARY"; cat "$f"; fi
+          j=$(ls -t engine_bench/real_sites/runs/run_*.json 2>/dev/null | head -1)
+          # 明细也进日志: 产物存储域名在部分环境不可达, 日志总能读到
+          if [ -n "$j" ]; then echo "::group::run json"; cat "$j"; echo "::endgroup::"; fi
+          # 未出分/失败/低于 90 分站点的任务日志(engine.log)尾部进日志, 供远程归因
+          if [ -n "$j" ]; then
+            python - "$j" <<'PY'
+          import json, sys, pathlib
+          run = json.load(open(sys.argv[1], encoding="utf-8"))
+          for r in run.get("results", []):
+              if r.get("status") == "completed" and isinstance(r.get("score"), (int, float)) and r["score"] >= 90:
+                  continue
+              log = pathlib.Path("workspaces") / str(r.get("task_id")) / "engine.log"
+              print(f"::group::engine.log {r.get('url')} ({r.get('status')})")
+              keep = [l for l in (log.read_text(encoding="utf-8").splitlines() if log.is_file() else [])
+                      if not any(k in l for k in ("[CAS-", "跳过 http", "] 录制 "))]
+              print("\n".join(keep[-250:]) if keep else "(无 engine.log)")
+              print("::endgroup::")
+              # 文本差: 原站有而克隆缺的行(文本召回低时定位缺什么)
+              ot, ct = log.parent / "original_text.txt", log.parent / "cloned_text.txt"
+              if ot.is_file() and ct.is_file():
+                  have = set(l.strip() for l in ct.read_text(encoding="utf-8", errors="replace").splitlines())
+                  miss = [l.strip() for l in ot.read_text(encoding="utf-8", errors="replace").splitlines()
+                          if l.strip() and l.strip() not in have]
+                  print(f"::group::text-miss {r.get('task_id')} ({len(miss)} 行缺失)")
+                  print("\n".join(m[:160] for m in miss[:60]))
+                  print("::endgroup::")
+              # 预览缩略图(base64 JPEG)进日志: 产物下载在部分环境不可达, 远程看图归因
+              try:
+                  from PIL import Image
+                  import base64, io
+                  for name in ("original_preview.png", "cloned_preview.png", "fidelity_preview.png"):
+                      f = log.parent / name
+                      if not f.is_file():
+                          continue
+                      im = Image.open(f).convert("RGB")
+                      im = im.resize((480, max(1, round(im.height * 480 / im.width))))
+                      im = im.crop((0, 0, 480, min(im.height, 2400)))
+                      buf = io.BytesIO(); im.save(buf, "JPEG", quality=60)
+                      print(f"::group::shot {r.get('task_id')} {name}")
+                      b64 = base64.b64encode(buf.getvalue()).decode()
+                      for k in range(0, len(b64), 4000):
+                          print("SHOT64:" + b64[k:k + 4000])
+                      print("::endgroup::")
+              except Exception as exc:
+                  print(f"(缩略图失败: {exc})")
+          PY
+          fi
+      - name: 上传报告与实例日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: corpus-report
+          path: |
+            engine_bench/real_sites/runs/
+            logs/app_ci.log
+          if-no-files-found: ignore

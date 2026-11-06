@@ -1,0 +1,433 @@
+{
+  "stamp": "20261104_185121",
+  "args": {
+    "holdout": true,
+    "rounds": 3,
+    "budget": 240,
+    "only": "",
+    "verbose": true
+  },
+  "summary": {
+    "n": 18,
+    "completed": 18,
+    "failed": 0,
+    "pixel_mean": 33.1,
+    "pixel_ge85": 0,
+    "pixel_n": 13,
+    "desc_mean": 83.1,
+    "desc_ge85": 3,
+    "desc_n": 5,
+    "ge85_total": 3,
+    "elapsed_mean": 203.3,
+    "elapsed_p90": 338.9,
+    "tuned": {
+      "n": 10,
+      "completed": 10,
+      "failed": 0,
+      "pixel_mean": 48.9,
+      "pixel_ge85": 0,
+      "pixel_n": 5,
+      "desc_mean": 83.1,
+      "desc_ge85": 3,
+      "desc_n": 5,
+      "ge85_total": 3,
+      "elapsed_mean": 123.5,
+      "elapsed_p90": 203.0
+    },
+    "holdout": {
+      "n": 8,
+      "completed": 8,
+      "failed": 0,
+      "pixel_mean": 23.2,
+      "pixel_ge85": 0,
+      "pixel_n": 8,
+      "desc_mean": null,
+      "desc_ge85": 0,
+      "desc_n": 0,
+      "ge85_total": 0,
+      "elapsed_mean": 303.1,
+      "elapsed_p90": 378.3
+    }
+  },
+  "results": [
+    {
+      "task_id": 1,
+      "status": "completed",
+      "score": 87.0,
+      "scoring": "desc-self-v1",
+      "tier": "llm",
+      "rounds": 1,
+      "best_round": 1,
+      "nodes": 39,
+      "elapsed": 23.9,
+      "error": "",
+      "detail": {
+        "structure": 1.0,
+        "edge": null,
+        "text": 0.739
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_kvjemqkq/workspaces/1",
+      "id": "d_login",
+      "group": "desc",
+      "holdout": false
+    },
+    {
+      "task_id": 2,
+      "status": "completed",
+      "score": 88.6,
+      "scoring": "desc-self-v1",
+      "tier": "deterministic",
+      "rounds": 1,
+      "best_round": 1,
+      "nodes": 52,
+      "elapsed": 53.5,
+      "error": "",
+      "detail": {
+        "structure": 1.0,
+        "edge": null,
+        "text": 0.773
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_kvjemqkq/workspaces/2",
+      "id": "d_landing",
+      "group": "desc",
+      "holdout": false
+    },
+    {
+      "task_id": 3,
+      "status": "completed",
+      "score": 71.4,
+      "scoring": "desc-self-v1",
+      "tier": "llm",
+      "rounds": 3,
+      "best_round": 1,
+      "nodes": 111,
+      "elapsed": 87.8,
+      "error": "",
+      "detail": {
+        "structure": 1.0,
+        "edge": null,
+        "text": 0.429
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_kvjemqkq/workspaces/3",
+      "id": "d_dashboard",
+      "group": "desc",
+      "holdout": false
+    },
+    {
+      "task_id": 4,
+      "status": "completed",
+      "score": 87.9,
+      "scoring": "desc-self-v1",
+      "tier": "llm",
+      "rounds": 2,
+      "best_round": 2,
+      "nodes": 84,
+      "elapsed": 41.8,
+      "error": "",
+      "detail": {
+        "structure": 1.0,
+        "edge": null,
+        "text": 0.758
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_kvjemqkq/workspaces/4",
+      "id": "d_list",
+      "group": "desc",
+      "holdout": false
+    },
+    {
+      "task_id": 5,
+      "status": "completed",
+      "score": 80.5,
+      "scoring": "desc-self-v1",
+      "tier": "llm",
+      "rounds": 3,
+      "best_round": 3,
+      "nodes": 81,
+      "elapsed": 105.1,
+      "error": "",
+      "detail": {
+        "structure": 1.0,
+        "edge": null,
+        "text": 0.61
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_kvjemqkq/workspaces/5",
+      "id": "d_article",
+      "group": "desc",
+      "holdout": false
+    },
+    {
+      "task_id": 6,
+      "status": "completed",
+      "score": 75.0,
+      "scoring": "v3-segmented",
+      "tier": "llm",
+      "rounds": 3,
+      "best_round": 1,
+      "nodes": 15,
+      "elapsed": 134.6,
+      "error": "",
+      "detail": {
+        "structure": 0.839,
+        "edge": 0.601,
+        "text": 1.0
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_kvjemqkq/workspaces/6",
+      "id": "s_login",
+      "group": "shot",
+      "holdout": false
+    },
+    {
+      "task_id": 7,
+      "status": "completed",
+      "score": 44.0,
+      "scoring": "v3-segmented",
+      "tier": "llm",
+      "rounds": 3,
+      "best_round": 3,
+      "nodes": 48,
+      "elapsed": 186.8,
+      "error": "",
+      "detail": {
+        "structure": 0.43,
+        "edge": 0.455,
+        "text": 1.0
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_kvjemqkq/workspaces/7",
+      "id": "s_landing",
+      "group": "shot",
+      "holdout": false
+    },
+    {
+      "task_id": 8,
+      "status": "completed",
+      "score": 38.1,
+      "scoring": "v3-segmented",
+      "tier": "llm",
+      "rounds": 3,
+      "best_round": 1,
+      "nodes": 83,
+      "elapsed": 283.7,
+      "error": "",
+      "detail": {
+        "structure": 0.241,
+        "edge": 0.101,
+        "text": 1.0
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_kvjemqkq/workspaces/8",
+      "id": "s_dashboard",
+      "group": "shot",
+      "holdout": false
+    },
+    {
+      "task_id": 9,
+      "status": "completed",
+      "score": 40.6,
+      "scoring": "v3-segmented",
+      "tier": "llm",
+      "rounds": 3,
+      "best_round": 2,
+      "nodes": 83,
+      "elapsed": 203.0,
+      "error": "",
+      "detail": {
+        "structure": 0.249,
+        "edge": 0.282,
+        "text": 1.0
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_kvjemqkq/workspaces/9",
+      "id": "s_list",
+      "group": "shot",
+      "holdout": false
+    },
+    {
+      "task_id": 10,
+      "status": "completed",
+      "score": 46.8,
+      "scoring": "v3-segmented",
+      "tier": "llm",
+      "rounds": 3,
+      "best_round": 1,
+      "nodes": 51,
+      "elapsed": 114.6,
+      "error": "",
+      "detail": {
+        "structure": 0.382,
+        "edge": 0.538,
+        "text": 1.0
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_kvjemqkq/workspaces/10",
+      "id": "s_article",
+      "group": "shot",
+      "holdout": false
+    },
+    {
+      "task_id": 11,
+      "status": "completed",
+      "score": 17.7,
+      "scoring": "v3-segmented",
+      "tier": "llm",
+      "rounds": 2,
+      "best_round": 2,
+      "nodes": 235,
+      "elapsed": 378.3,
+      "error": "",
+      "detail": {
+        "structure": 0.062,
+        "edge": 0.351,
+        "text": 1.0
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_kvjemqkq/workspaces/11",
+      "id": "h_ant",
+      "group": "shot",
+      "holdout": true
+    },
+    {
+      "task_id": 12,
+      "status": "completed",
+      "score": 22.2,
+      "scoring": "v3-segmented",
+      "tier": "llm",
+      "rounds": 1,
+      "best_round": 1,
+      "nodes": 228,
+      "elapsed": 262.3,
+      "error": "",
+      "detail": {
+        "structure": 0.242,
+        "edge": 0.192,
+        "text": 1.0
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_kvjemqkq/workspaces/12",
+      "id": "h_gitee",
+      "group": "shot",
+      "holdout": true
+    },
+    {
+      "task_id": 13,
+      "status": "completed",
+      "score": 18.1,
+      "scoring": "v3-segmented",
+      "tier": "llm",
+      "rounds": 1,
+      "best_round": 1,
+      "nodes": 714,
+      "elapsed": 312.6,
+      "error": "",
+      "detail": {
+        "structure": 0.189,
+        "edge": 0.169,
+        "text": 1.0
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_kvjemqkq/workspaces/13",
+      "id": "h_runoob",
+      "group": "shot",
+      "holdout": true
+    },
+    {
+      "task_id": 14,
+      "status": "completed",
+      "score": 23.8,
+      "scoring": "v3-segmented",
+      "tier": "llm",
+      "rounds": 2,
+      "best_round": 2,
+      "nodes": 138,
+      "elapsed": 245.9,
+      "error": "",
+      "detail": {
+        "structure": 0.286,
+        "edge": 0.165,
+        "text": 1.0
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_kvjemqkq/workspaces/14",
+      "id": "h_apple",
+      "group": "shot",
+      "holdout": true
+    },
+    {
+      "task_id": 15,
+      "status": "completed",
+      "score": 19.2,
+      "scoring": "v3-segmented",
+      "tier": "llm",
+      "rounds": 2,
+      "best_round": 2,
+      "nodes": 148,
+      "elapsed": 395.2,
+      "error": "",
+      "detail": {
+        "structure": 0.153,
+        "edge": 0.25,
+        "text": 1.0
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_kvjemqkq/workspaces/15",
+      "id": "h_huawei",
+      "group": "shot",
+      "holdout": true
+    },
+    {
+      "task_id": 16,
+      "status": "completed",
+      "score": 20.3,
+      "scoring": "v3-segmented",
+      "tier": "llm",
+      "rounds": 3,
+      "best_round": 1,
+      "nodes": 197,
+      "elapsed": 338.9,
+      "error": "",
+      "detail": {
+        "structure": 0.211,
+        "edge": 0.167,
+        "text": 1.0
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_kvjemqkq/workspaces/16",
+      "id": "h_163",
+      "group": "shot",
+      "holdout": true
+    },
+    {
+      "task_id": 17,
+      "status": "completed",
+      "score": 47.1,
+      "scoring": "v3-segmented",
+      "tier": "deterministic",
+      "rounds": 3,
+      "best_round": 1,
+      "nodes": 401,
+      "elapsed": 245.7,
+      "error": "",
+      "detail": {
+        "structure": 0.448,
+        "edge": 0.505,
+        "text": 1.0
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_kvjemqkq/workspaces/17",
+      "id": "h_sohu",
+      "group": "shot",
+      "holdout": true
+    },
+    {
+      "task_id": 18,
+      "status": "completed",
+      "score": 17.4,
+      "scoring": "v3-segmented",
+      "tier": "llm",
+      "rounds": 1,
+      "best_round": 1,
+      "nodes": 196,
+      "elapsed": 246.2,
+      "error": "",
+      "detail": {
+        "structure": 0.186,
+        "edge": 0.157,
+        "text": 1.0
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_kvjemqkq/workspaces/18",
+      "id": "h_douban",
+      "group": "shot",
+      "holdout": true
+    }
+  ],
+  "iso_dir": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_kvjemqkq"
+}

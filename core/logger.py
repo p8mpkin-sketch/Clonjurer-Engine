@@ -75,13 +75,18 @@ class LogBus:
         self.publish(task_id, "ERROR", message, "ERROR")
 
     # ------------------------------------------------------------------
-    def stream(self, task_id=None):
-        """SSE 生成器: 过滤指定任务(系统级消息始终放行)。"""
+    def stream(self, task_id=None, replay: int = 300):
+        """SSE 生成器: 过滤指定任务(系统级消息始终放行)。
+
+        全任务流订阅时只回放最近 replay 条(前端也只保留 300 条),
+        避免连上即灌入整个环形队列(默认 5000 条)把页面卡死。"""
         last_seq = 0
-        if task_id is not None:
-            with self._cond:
-                if self._entries:
+        with self._cond:
+            if self._entries:
+                if task_id is not None:
                     last_seq = self._entries[-1]["seq"]  # 订阅时刻之后的日志
+                elif len(self._entries) > replay:
+                    last_seq = self._entries[-replay - 1]["seq"]
         while True:
             with self._cond:
                 fresh = [

@@ -121,6 +121,7 @@ class SyncBrowserPool:
         last_error = None
         for attempt in range(1, RESTART_ATTEMPTS + 1):
             self._teardown_thread_browser()
+            playwright = None
             try:
                 from playwright.sync_api import sync_playwright
 
@@ -134,6 +135,11 @@ class SyncBrowserPool:
                 return
             except Exception as exc:  # 启动失败: 退避后重试
                 last_error = exc
+                # launch 失败时 playwright 还没挂到线程上, 不停掉它的事件循环,
+                # 下一次 sync_playwright().start() 会报 "Sync API inside the asyncio loop"
+                if playwright is not None and getattr(self._local, "playwright", None) is not playwright:
+                    with suppress(Exception):
+                        playwright.stop()
                 self._teardown_thread_browser()
                 if attempt < RESTART_ATTEMPTS:
                     time.sleep(RESTART_BACKOFF_SECONDS * attempt)

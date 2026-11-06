@@ -1,0 +1,21 @@
+{
+  "_doc": "L1 生成用例语料(DESIGN.md §9.10)。tuned: 5 描述 + 5 截图(截图参考 = 对应原型页在 1440 宽的渲染截图, 即已知真值回环); holdout: 真实站点原站截图(取自本机已完成克隆任务的 original_preview.png, 只看不调)。描述用例无参考图, 用 desc-self 自评, 报分单列; 截图用例用评分 v3 像素口径, 与克隆侧同一函数。严禁为单个用例加特判。",
+  "description": [
+    {"id": "d_login",     "archetype": "login",     "text": "一个蓝色主题的登录页, 品牌叫 云帆, 标题「欢迎登录云帆控制台」, 有手机号、密码和短信验证码, 底部有注册入口"},
+    {"id": "d_landing",   "archetype": "landing",   "text": "SaaS 产品官网落地页, 品牌叫 Nimbus, 顶部导航, hero 区标题「让数据流动起来」, 6 个功能卡片, 底部深色 CTA 区和页脚"},
+    {"id": "d_dashboard", "archetype": "dashboard", "text": "后台数据仪表盘, 左侧深色导航, 顶部搜索与通知, 4 个 KPI 卡片, 一个流量趋势图和一个渠道占比图, 下方订单表格, 标题「运营概览」"},
+    {"id": "d_list",      "archetype": "list",      "text": "电商商品列表页, 品牌叫 好物优选, 顶部导航和分类筛选标签, 8 个商品卡片带价格和加入购物车按钮, 标题「今日精选」"},
+    {"id": "d_article",   "archetype": "article",   "text": "一篇博客文章页, 站点叫 字里行间, 文章标题「从截图到代码: 通用 UI 重建的工程取舍」, 有作者信息、题图、多段正文、小标题, 右侧相关阅读与热门标签"}
+  ],
+  "screenshot_from_archetype": ["login", "landing", "dashboard", "list", "article"],
+  "holdout_screenshots": [
+    {"id": "h_ant",    "workspace": 560, "note": "ant.design"},
+    {"id": "h_gitee",  "workspace": 559, "note": "gitee.com"},
+    {"id": "h_runoob", "workspace": 558, "note": "runoob.com"},
+    {"id": "h_apple",  "workspace": 557, "note": "apple.com.cn"},
+    {"id": "h_huawei", "workspace": 556, "note": "huawei.com"},
+    {"id": "h_163",    "workspace": 549, "note": "163.com"},
+    {"id": "h_sohu",   "workspace": 548, "note": "sohu.com"},
+    {"id": "h_douban", "workspace": 547, "note": "douban.com"}
+  ]
+}

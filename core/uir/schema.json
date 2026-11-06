@@ -1,0 +1,71 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "clonjurer://uir/v1",
+  "title": "UIR v1 — 通用 UI 中间表示",
+  "type": "object",
+  "required": ["uir_version", "root"],
+  "properties": {
+    "uir_version": {"const": "1"},
+    "meta": {
+      "type": "object",
+      "properties": {
+        "source_kind": {"enum": ["web_dom", "vision", "description", "apk_static", "a11y"]},
+        "viewport": {"type": "object", "properties": {"w": {"type": "integer"}, "h": {"type": "integer"}}},
+        "title": {"type": "string"},
+        "lang": {"type": "string"}
+      }
+    },
+    "tokens": {
+      "type": "object",
+      "properties": {
+        "color": {"type": "object", "additionalProperties": {"type": "string"}},
+        "font": {"type": "object", "additionalProperties": {"type": "object",
+                  "properties": {"family": {"type": "string"}, "fallback": {"type": "string"}}}},
+        "text_style": {"type": "object", "additionalProperties": {"type": "object",
+                  "properties": {"size": {"type": "number"}, "weight": {"type": "integer"},
+                                 "line": {"type": "number"}, "color": {"type": "string"},
+                                 "font": {"type": "string"}, "align": {"enum": ["left", "center", "right"]}}}},
+        "space": {"type": "object", "additionalProperties": {"type": "number"}},
+        "radius": {"type": "object", "additionalProperties": {"type": "number"}},
+        "shadow": {"type": "object", "additionalProperties": {"type": "string"}}
+      }
+    },
+    "root": {"$ref": "#/definitions/node"}
+  },
+  "definitions": {
+    "node": {
+      "type": "object",
+      "required": ["role"],
+      "properties": {
+        "id": {"type": "string"},
+        "role": {"enum": ["box", "text", "image", "icon", "button", "input", "link", "nav", "list",
+                          "list_item", "card", "header", "footer", "hero", "divider", "overlay",
+                          "badge", "avatar", "table", "form", "section"]},
+        "layout": {"type": "object", "properties": {
+          "mode": {"enum": ["flow", "flex", "grid", "stack", "absolute"]},
+          "direction": {"enum": ["row", "col"]},
+          "justify": {"enum": ["start", "center", "end", "between", "around"]},
+          "align": {"enum": ["start", "center", "end", "stretch"]},
+          "gap": {}, "wrap": {"type": "boolean"}, "cols": {"type": "integer"}}},
+        "box": {"type": "object", "properties": {
+          "w": {}, "h": {}, "pad": {"type": "array"}, "margin": {"type": "array"},
+          "bg": {"type": "string"}, "radius": {}, "border": {"type": "object"},
+          "shadow": {"type": "string"}, "opacity": {"type": "number"},
+          "position": {"type": "object"}}},
+        "text_ref": {"type": "string"},
+        "content": {"type": "object", "properties": {
+          "text": {"type": "string"}, "src": {"type": "string"}, "alt": {"type": "string"},
+          "icon": {"type": "string"}, "placeholder": {"type": "string"}, "href": {"type": "string"}}},
+        "intents": {"type": "array", "items": {"type": "object", "required": ["do"], "properties": {
+          "on": {"enum": ["click", "submit", "input", "change", "hover"]},
+          "do": {"enum": ["navigate", "toggle", "open-overlay", "submit-form", "countdown",
+                          "carousel-advance", "input", "none"]},
+          "target": {"type": "string"}, "meta": {"type": "object"}}}},
+        "children": {"type": "array", "items": {"$ref": "#/definitions/node"}},
+        "raw": {"type": "object", "properties": {
+          "tag": {"type": "string"}, "attrs": {"type": "object"}, "css": {"type": "string"},
+          "inner_html": {"type": "string"}}}
+      }
+    }
+  }
+}

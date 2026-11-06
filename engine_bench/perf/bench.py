@@ -165,6 +165,10 @@ def _normalize(name, out):
     if name.startswith("score_"):
         r, d = out
         return json.dumps(r, sort_keys=True, ensure_ascii=False), _diff_pixels(d)
+    if name == "compose_pairs":
+        # 等长键之间的先后由 set 迭代序(随 PYTHONHASHSEED)决定, 两侧都不稳定; 等长的不同键
+        # 互不为子串, 替换结果与其先后无关 —— 只比映射与"长者优先"序, 等长段内按键排
+        return sorted(out, key=lambda kv: (-len(kv[0]), kv[0]))
     return out
 
 

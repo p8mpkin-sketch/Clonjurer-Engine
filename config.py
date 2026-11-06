@@ -37,11 +37,33 @@ LOG_RING_SIZE = 5000               # SSE 日志环形队列容量
 # ---------------------------------------------------------------------------
 MAX_URLS_PER_BATCH = 50            # 单批次最多提交站点数
 MAX_PAGES_LIMIT = 20               # 同域名爬虫模式下最大子页面数
-REQUEST_TIMEOUT = 20               # 单个上游资源请求超时(秒)
+REQUEST_TIMEOUT = 20               # 单个上游资源请求超时(秒, 浏览器会话降级为总时长)
+REQUEST_CONNECT_READ = (6, 10)     # requests 直连: (连接, 读空闲) 超时; 读超时按无数据间隔计, 不限大文件总时长
 PAGELOAD_TIMEOUT = 45_000          # Playwright 页面导航超时(毫秒)
+REACHABILITY_PROBE_TIMEOUT = 12_000  # 首导航失败后的网络层可达性探测上限(毫秒)
+AUTO_SCROLL_SMOOTH = False       # 采集滚动改页内平滑连续滚动(400px/两帧): 防苹果类性能守卫把跳滚判成掉帧降级;
+                                 # 机器高负载下页面加载期本身就会降级, 语料未回归前默认关(见 DESIGN 动态形态一节)
+AUTO_SCROLL_BUDGET = 25          # 采集期自动滚动总时限(秒)
+SHOT_TIMEOUT = 30_000             # 单次截图上限(毫秒), 超时走限高退化
 NETWORK_IDLE_TIMEOUT = 9_000       # networkidle 等待上限(毫秒)
+NAV_QUIET_MS = 500                # 采集导航静置: 这么久没有新请求
+NAV_STALE_MS = 2_500              # 在途超过这么久的请求(长轮询/流式/卡死第三方)不再等
 MAX_ASSET_BYTES = 64 * 1024 * 1024     # 单个静态资源体积上限(64MB)
+BASELINE_IMG_WAIT_MS = 8000       # 基准截图前等待加载中可见图片的上限
+CLONE_VIDEO_WAIT_MS = 1500        # 克隆截图前等首屏 autoplay 视频出帧的上限
+CLONE_IMG_WAIT_MS = 2000          # 克隆截图前等懒加载图到齐的上限(资源都在本地, 通常百毫秒级)
+BASELINE_IMG_FROZEN_WAIT_MS = 5000  # 时间冻结后补等可见图的上限(版面已静止)
+BASELINE_TWEEN_SETTLE_MS = 800    # 时间冻结后让在飞的 JS 补间走完再停 rAF
+SCORE_MASK_ADS = True             # 评分时两侧第三方广告位遮成中灰(竞价创意随机, 不计分)
+BASELINE_EAGER_MAX = 40           # 基准截图前转 eager 的懒加载图上限(文档序)
+BASELINE_IMG_STALL_MS = 4000      # 等待期间连续这么久无一张到齐即放行
+HOST_FAIL_TRIP = 3                # 单主机网络层失败(SSL/超时/连接)达此次数即熔断
 MAX_ASSETS_PER_TASK = 400          # 单任务最大静态资源条目数
+CLONE_SCROLL_MAX_MS = 30000        # 克隆页懒加载滚动的完成时限(超时即判页面脚本卡死)
+CLONE_RESPONSIVE_MS = 8000         # 克隆页主线程看门狗: 加载后这么久执行不了一行脚本即判卡死
+RENDER_ASSET_RESERVE = 300         # 名额外预留给"浏览器实际加载过/克隆渲染实际请求"的资源:
+                                   # 静态提取先把名额用满(苹果 @font-face 每字重 woff/woff2/ttf 三份,
+                                   # 上百个从不加载的字体), 首屏视频这类真用到的反被挤掉
 MAX_MOCK_ENTRIES = 300             # 单任务最大录制 API 条目数
 MAX_MOCK_BODY_BYTES = 2 * 1024 * 1024  # 单个录制响应体上限(2MB)
 MAX_TAPE_BODY_BYTES = 512 * 1024       # VCR 磁带单条响应体上限(512KB)
@@ -98,13 +120,25 @@ STAT_BUCKETS = ("css", "js", "img", "font", "api")
 # ---------------------------------------------------------------------------
 # V4 工程修复参数(Tier 0, 无 AI 参与)
 # ---------------------------------------------------------------------------
+MEDIA_SHOT_MAX = 24           # 单页最多从基准截图回填的空白 Canvas/无帧视频数
 MAX_FRAME_PAGES = 6            # 单任务最多递归克隆的跨域 iframe 子页面数
 MAX_FRAME_DEPTH = 2            # iframe 递归深度上限(主页面为第 0 层)
 RENDER_REPAIR_ROUNDS = 6       # 视觉修复迭代轮数上限
+REPAIR_MIN_GAIN = 0.5          # 修复循环收敛判定: 缺失集合不变且分数涨幅低于此值即停
+FIDELITY_SKIP_ABOVE = 97.0    # 交互轨达到此分时不渲染保真轨(头条取优不受影响)
+VIEWPORT_VARIANT_MAX = 40      # 窄屏 DOM 变体: 结构不同的子树超过此数视为内容随机(推荐流), 不注入
+VIEWPORT_VARIANT_BYTES = 3_000_000   # 窄屏变体 HTML / 附带样式各自上限
+VIEWPORT_VARIANT_SETTLE = 4.0  # 窄屏首载页抽取变体前平滑滚动的时限(秒): 触发进视口才起播的入场动画
+STATIC_TRACK_MARGIN = 5.0     # 保真轨领先交互轨达此分差时, 试做"静态版"(剥离应用脚本)交付物
+                              # 并实测; 静态版也领先交互轨此分差才设为默认预览/导出
+BACKFILL_BUDGET = 20          # 单轮渲染缺失回补的回源时限(秒)
+REPAIR_STOP_SCORE = 99.5      # 修复循环: 还原度达到此值即停(缺失的只剩不可见请求时不再回补)
 REPAIR_TIME_BUDGET = 300       # 修复循环时间预算(秒): 快站快修, 慢站限时收敛(P0-A 速度调度)
 AI_TIME_BUDGET = 900           # 含 AI 修复的任务时间预算(秒): 超预算跳过 AI 轮       # 渲染驱动回补循环轮数(本地渲染->收集404->回源补抓);
                                # Vite/webpack 动态 chunk 是"entry->视图chunk->懒路由->
                                # 图片"多层依赖链, 每轮只能剥一层, 浅轮数补不到深层资源
+LIVE_BODY_MAX = 1500          # 活体响应体复用: 单任务最多留存的浏览器已加载资源数
+LIVE_BODY_BYTES = 256 * 1024 * 1024  # 活体响应体复用: 单任务留存总字节上限
 LIVE_HARVEST_MAX = 60          # 活体会话请求差集回补的单轮最大补抓数
 JS_REWRITE_MAX_BYTES = 8 * 1024 * 1024  # 参与本地化重写的单个 JS 文件体积上限
 
@@ -121,6 +155,7 @@ AI_API_BASE_URL = os.environ.get("CLONER_AI_BASE_URL", "https://api.deepseek.com
 AI_API_KEY = os.environ.get("CLONER_AI_KEY", "")
 AI_MODEL = os.environ.get("CLONER_AI_MODEL", "deepseek-v4.1")
 AI_REQUEST_TIMEOUT = 90        # 单次大模型请求超时(秒)
+AI_CALL_WALL_LIMIT = 180       # 单次 chat_json 墙钟上限(含重试/升档; 上游 keep-alive 时读超时不触发)
 AI_PATCH_MAX_TOKENS = 8192     # AI 补丁补全预算基档(推理模型的思考 token 计入, 耗尽时自动×2 重试)
 AI_REPAIR_TRIGGER_SCORE = 85.0  # 视觉闭环触发门限: 诚实评分低于此值才调用大模型
 AI_REPAIR_TARGET_SCORE = 90.0   # 修复循环的目标分: 达标即停

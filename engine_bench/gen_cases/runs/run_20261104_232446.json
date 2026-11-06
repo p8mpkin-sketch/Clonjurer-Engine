@@ -1,0 +1,98 @@
+{
+  "stamp": "20261104_232446",
+  "args": {
+    "holdout": true,
+    "rounds": 2,
+    "budget": 240,
+    "only": "s_login,h_ant",
+    "llm_mode": "skeleton_fill",
+    "verbose": true
+  },
+  "summary": {
+    "n": 2,
+    "completed": 2,
+    "failed": 0,
+    "pixel_mean": 51.0,
+    "pixel_ge85": 0,
+    "pixel_n": 2,
+    "desc_mean": null,
+    "desc_ge85": 0,
+    "desc_n": 0,
+    "ge85_total": 0,
+    "elapsed_mean": 149.7,
+    "elapsed_p90": 18.0,
+    "tuned": {
+      "n": 1,
+      "completed": 1,
+      "failed": 0,
+      "pixel_mean": 61.3,
+      "pixel_ge85": 0,
+      "pixel_n": 1,
+      "desc_mean": null,
+      "desc_ge85": 0,
+      "desc_n": 0,
+      "ge85_total": 0,
+      "elapsed_mean": 18.0,
+      "elapsed_p90": 18.0
+    },
+    "holdout": {
+      "n": 1,
+      "completed": 1,
+      "failed": 0,
+      "pixel_mean": 40.7,
+      "pixel_ge85": 0,
+      "pixel_n": 1,
+      "desc_mean": null,
+      "desc_ge85": 0,
+      "desc_n": 0,
+      "ge85_total": 0,
+      "elapsed_mean": 281.4,
+      "elapsed_p90": 281.4
+    }
+  },
+  "results": [
+    {
+      "task_id": 1,
+      "status": "completed",
+      "score": 61.3,
+      "scoring": "v3-segmented",
+      "tier": "deterministic",
+      "rounds": 3,
+      "best_round": 1,
+      "nodes": 24,
+      "elapsed": 18.0,
+      "error": "",
+      "detail": {
+        "structure": 0.601,
+        "edge": 0.347,
+        "text": 1.0
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_qgstcelq/workspaces/1",
+      "id": "s_login",
+      "group": "shot",
+      "holdout": false
+    },
+    {
+      "task_id": 2,
+      "status": "completed",
+      "score": 40.7,
+      "scoring": "v3-segmented",
+      "tier": "deterministic",
+      "rounds": 3,
+      "best_round": 1,
+      "nodes": 268,
+      "elapsed": 281.4,
+      "error": "",
+      "detail": {
+        "structure": 0.227,
+        "edge": 0.533,
+        "text": 1.0
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_qgstcelq/workspaces/2",
+      "id": "h_ant",
+      "group": "shot",
+      "holdout": true
+    }
+  ],
+  "iso_dir": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_qgstcelq"
+}

@@ -1,0 +1,237 @@
+== d_login (描述)
+  [GEN] 生成任务 #1 启动: kind=description target=html_css
+  [GEN] 适配器 description → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [UIR] 描述→UIR: 调用大模型 (deepseek-flash)
+  [SIMILARITY] 第 1 轮评分 87.0 (结构 1.0 / 边缘 None / 文本 0.739), 39 节点, 23.9s
+  [GEN] 已达目标分 85.0, 停止迭代
+  [INFO] 生成任务 #1 完成, 耗时 23.9s, 最终评分 87.0
+   -> completed score=87.0 (desc-self-v1) 23.9s 
+== d_landing (描述)
+  [GEN] 生成任务 #2 启动: kind=description target=html_css
+  [GEN] 适配器 description → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [UIR] 描述→UIR: 调用大模型 (deepseek-flash)
+  [UIR] 大模型 UIR 不可用, 回落确定性原型: RuntimeError: 上游 JSON 不可解析: Expecting ',' delimiter: line 1 column 8651 (char 8650)
+  [UIR] 描述→UIR(确定性原型 landing): 52 节点
+  [SIMILARITY] 第 1 轮评分 88.6 (结构 1.0 / 边缘 None / 文本 0.773), 52 节点, 53.5s
+  [GEN] 已达目标分 85.0, 停止迭代
+  [INFO] 生成任务 #2 完成, 耗时 53.5s, 最终评分 88.6
+   -> completed score=88.6 (desc-self-v1) 53.5s 
+== d_dashboard (描述)
+  [GEN] 生成任务 #3 启动: kind=description target=html_css
+  [GEN] 适配器 description → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [UIR] 描述→UIR: 调用大模型 (deepseek-flash)
+  [SIMILARITY] 第 1 轮评分 71.4 (结构 1.0 / 边缘 None / 文本 0.429), 111 节点, 21.2s
+  [UIR] 描述→UIR: 调用大模型 (deepseek-flash)
+  [GEN] 第 2 轮未提升(71.4 → 71.4), 回滚到最优轮
+  [SIMILARITY] 第 2 轮评分 71.4 (结构 1.0 / 边缘 None / 文本 0.429), 118 节点, 22.8s
+  [UIR] 描述→UIR: 调用大模型 (deepseek-flash)
+  [GEN] 第 3 轮未提升(71.4 → 71.4), 回滚到最优轮
+  [SIMILARITY] 第 3 轮评分 71.4 (结构 1.0 / 边缘 None / 文本 0.429), 106 节点, 43.8s
+  [INFO] 生成任务 #3 完成, 耗时 87.8s, 最终评分 71.4
+   -> completed score=71.4 (desc-self-v1) 87.8s 
+== d_list (描述)
+  [GEN] 生成任务 #4 启动: kind=description target=html_css
+  [GEN] 适配器 description → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [UIR] 描述→UIR: 调用大模型 (deepseek-flash)
+  [SIMILARITY] 第 1 轮评分 66.7 (结构 1.0 / 边缘 None / 文本 0.333), 84 节点, 21.7s
+  [UIR] 描述→UIR: 调用大模型 (deepseek-flash)
+  [UIR] 大模型 UIR 不可用, 回落确定性原型: RuntimeError: 上游 JSON 不可解析: Expecting ',' delimiter: line 1 column 10293 (char 10292)
+  [UIR] 描述→UIR(确定性原型 list): 84 节点
+  [SIMILARITY] 第 2 轮评分 87.9 (结构 1.0 / 边缘 None / 文本 0.758), 84 节点, 20.1s
+  [GEN] 已达目标分 85.0, 停止迭代
+  [INFO] 生成任务 #4 完成, 耗时 41.8s, 最终评分 87.9
+   -> completed score=87.9 (desc-self-v1) 41.8s 
+== d_article (描述)
+  [GEN] 生成任务 #5 启动: kind=description target=html_css
+  [GEN] 适配器 description → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [UIR] 描述→UIR: 调用大模型 (deepseek-flash)
+  [SIMILARITY] 第 1 轮评分 75.6 (结构 1.0 / 边缘 None / 文本 0.512), 70 节点, 44.0s
+  [UIR] 描述→UIR: 调用大模型 (deepseek-flash)
+  [SIMILARITY] 第 2 轮评分 78.0 (结构 1.0 / 边缘 None / 文本 0.561), 85 节点, 27.4s
+  [UIR] 描述→UIR: 调用大模型 (deepseek-flash)
+  [SIMILARITY] 第 3 轮评分 80.5 (结构 1.0 / 边缘 None / 文本 0.61), 81 节点, 33.7s
+  [INFO] 生成任务 #5 完成, 耗时 105.1s, 最终评分 80.5
+   -> completed score=80.5 (desc-self-v1) 105.1s 
+== s_login (截图回环, 参考 login.png)
+  [GEN] 生成任务 #6 启动: kind=screenshot target=html_css
+  [GEN] 适配器 screenshot → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1440×900
+  [SIMILARITY] 第 1 轮评分 75.0 (结构 0.836 / 边缘 0.62 / 文本 1.0), 15 节点, 42.8s
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1440×900
+  [GEN] 第 2 轮未提升(75.0 → 71.6), 回滚到最优轮
+  [SIMILARITY] 第 2 轮评分 71.6 (结构 0.815 / 边缘 0.568 / 文本 1.0), 14 节点, 70.3s
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1440×900
+  [GEN] 第 3 轮未提升(75.0 → 74.4), 回滚到最优轮
+  [SIMILARITY] 第 3 轮评分 74.4 (结构 0.839 / 边缘 0.601 / 文本 1.0), 13 节点, 21.4s
+  [INFO] 生成任务 #6 完成, 耗时 134.6s, 最终评分 75.0
+   -> completed score=75.0 (v3-segmented) rounds=3 134.6s 
+== s_landing (截图回环, 参考 landing.png)
+  [GEN] 生成任务 #7 启动: kind=screenshot target=html_css
+  [GEN] 适配器 screenshot → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1440×1223
+  [SIMILARITY] 第 1 轮评分 29.6 (结构 0.313 / 边缘 0.27 / 文本 1.0), 43 节点, 47.7s
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1440×1223
+  [SIMILARITY] 第 2 轮评分 40.2 (结构 0.376 / 边缘 0.442 / 文本 1.0), 47 节点, 70.8s
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1440×1223
+  [SIMILARITY] 第 3 轮评分 44.0 (结构 0.43 / 边缘 0.455 / 文本 1.0), 48 节点, 68.2s
+  [INFO] 生成任务 #7 完成, 耗时 186.8s, 最终评分 44.0
+   -> completed score=44.0 (v3-segmented) rounds=3 186.8s 
+== s_dashboard (截图回环, 参考 dashboard.png)
+  [GEN] 生成任务 #8 启动: kind=screenshot target=html_css
+  [GEN] 适配器 screenshot → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1440×1022
+  [SIMILARITY] 第 1 轮评分 38.1 (结构 0.475 / 边缘 0.241 / 文本 1.0), 83 节点, 73.4s
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1440×1022
+  [GEN] 第 2 轮未提升(38.1 → 10.7), 回滚到最优轮
+  [SIMILARITY] 第 2 轮评分 10.7 (结构 0.107 / 边缘 0.106 / 文本 1.0), 77 节点, 67.0s
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1440×1022
+  [GEN] 第 3 轮未提升(38.1 → 18.5), 回滚到最优轮
+  [SIMILARITY] 第 3 轮评分 18.5 (结构 0.241 / 边缘 0.101 / 文本 1.0), 85 节点, 143.2s
+  [INFO] 生成任务 #8 完成, 耗时 283.7s, 最终评分 38.1
+   -> completed score=38.1 (v3-segmented) rounds=3 283.7s 
+== s_list (截图回环, 参考 list.png)
+  [GEN] 生成任务 #9 启动: kind=screenshot target=html_css
+  [GEN] 适配器 screenshot → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1440×1122
+  [SIMILARITY] 第 1 轮评分 28.6 (结构 0.281 / 边缘 0.292 / 文本 1.0), 93 节点, 37.1s
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1440×1122
+  [SIMILARITY] 第 2 轮评分 40.6 (结构 0.424 / 边缘 0.378 / 文本 1.0), 83 节点, 152.1s
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1440×1122
+  [GEN] 第 3 轮未提升(40.6 → 26.2), 回滚到最优轮
+  [SIMILARITY] 第 3 轮评分 26.2 (结构 0.249 / 边缘 0.282 / 文本 1.0), 80 节点, 13.7s
+  [INFO] 生成任务 #9 完成, 耗时 203.0s, 最终评分 40.6
+   -> completed score=40.6 (v3-segmented) rounds=3 203.0s 
+== s_article (截图回环, 参考 article.png)
+  [GEN] 生成任务 #10 启动: kind=screenshot target=html_css
+  [GEN] 适配器 screenshot → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1440×1176
+  [SIMILARITY] 第 1 轮评分 46.8 (结构 0.468 / 边缘 0.468 / 文本 1.0), 51 节点, 22.2s
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1440×1176
+  [GEN] 第 2 轮未提升(46.8 → 38.9), 回滚到最优轮
+  [SIMILARITY] 第 2 轮评分 38.9 (结构 0.387 / 边缘 0.391 / 文本 1.0), 59 节点, 45.4s
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1440×1176
+  [GEN] 第 3 轮未提升(46.8 → 44.4), 回滚到最优轮
+  [SIMILARITY] 第 3 轮评分 44.4 (结构 0.382 / 边缘 0.538 / 文本 1.0), 51 节点, 47.0s
+  [INFO] 生成任务 #10 完成, 耗时 114.6s, 最终评分 46.8
+   -> completed score=46.8 (v3-segmented) rounds=3 114.6s 
+== h_ant (真实截图 ant.design)
+  [GEN] 生成任务 #11 启动: kind=screenshot target=html_css
+  [GEN] 适配器 screenshot → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1920×3953
+  [SIMILARITY] 第 1 轮评分 14.3 (结构 0.043 / 边缘 0.293 / 文本 1.0), 161 节点, 155.3s
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1920×3953
+  [SIMILARITY] 第 2 轮评分 17.7 (结构 0.062 / 边缘 0.351 / 文本 1.0), 235 节点, 222.7s
+  [GEN] 时间预算耗尽, 停止迭代
+  [INFO] 生成任务 #11 完成, 耗时 378.3s, 最终评分 17.7
+   -> completed score=17.7 rounds=2 378.3s 
+== h_gitee (真实截图 gitee.com)
+  [GEN] 生成任务 #12 启动: kind=screenshot target=html_css
+  [GEN] 适配器 screenshot → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1920×6820
+  [SIMILARITY] 第 1 轮评分 22.2 (结构 0.242 / 边缘 0.192 / 文本 1.0), 228 节点, 262.0s
+  [GEN] 时间预算耗尽, 停止迭代
+  [INFO] 生成任务 #12 完成, 耗时 262.3s, 最终评分 22.2
+   -> completed score=22.2 rounds=1 262.3s 
+== h_runoob (真实截图 runoob.com)
+  [GEN] 生成任务 #13 启动: kind=screenshot target=html_css
+  [GEN] 适配器 screenshot → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1920×7577
+  [SIMILARITY] 第 1 轮评分 18.1 (结构 0.189 / 边缘 0.169 / 文本 1.0), 714 节点, 312.2s
+  [GEN] 时间预算耗尽, 停止迭代
+  [INFO] 生成任务 #13 完成, 耗时 312.6s, 最终评分 18.1
+   -> completed score=18.1 rounds=1 312.6s 
+== h_apple (真实截图 apple.com.cn)
+  [GEN] 生成任务 #14 启动: kind=screenshot target=html_css
+  [GEN] 适配器 screenshot → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1920×4627
+  [SIMILARITY] 第 1 轮评分 19.4 (结构 0.215 / 边缘 0.163 / 文本 1.0), 133 节点, 179.5s
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1920×4627
+  [SIMILARITY] 第 2 轮评分 23.8 (结构 0.286 / 边缘 0.165 / 文本 1.0), 138 节点, 66.1s
+  [GEN] 时间预算耗尽, 停止迭代
+  [INFO] 生成任务 #14 完成, 耗时 245.9s, 最终评分 23.8
+   -> completed score=23.8 rounds=2 245.9s 
+== h_huawei (真实截图 huawei.com)
+  [GEN] 生成任务 #15 启动: kind=screenshot target=html_css
+  [GEN] 适配器 screenshot → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1920×4547
+  [SIMILARITY] 第 1 轮评分 17.7 (结构 0.127 / 边缘 0.252 / 文本 1.0), 131 节点, 224.8s
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1920×4547
+  [SIMILARITY] 第 2 轮评分 19.2 (结构 0.153 / 边缘 0.25 / 文本 1.0), 148 节点, 170.1s
+  [GEN] 时间预算耗尽, 停止迭代
+  [INFO] 生成任务 #15 完成, 耗时 395.2s, 最终评分 19.2
+   -> completed score=19.2 rounds=2 395.2s 
+== h_163 (真实截图 163.com)
+  [GEN] 生成任务 #16 启动: kind=screenshot target=html_css
+  [GEN] 适配器 screenshot → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1920×8401
+  [SIMILARITY] 第 1 轮评分 20.3 (结构 0.214 / 边缘 0.186 / 文本 1.0), 197 节点, 69.6s
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1920×8401
+  [GEN] 第 2 轮未提升(20.3 → 19.9), 回滚到最优轮
+  [SIMILARITY] 第 2 轮评分 19.9 (结构 0.204 / 边缘 0.192 / 文本 1.0), 192 节点, 125.4s
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1920×8401
+  [GEN] 第 3 轮未提升(20.3 → 19.4), 回滚到最优轮
+  [SIMILARITY] 第 3 轮评分 19.4 (结构 0.211 / 边缘 0.167 / 文本 1.0), 139 节点, 143.4s
+  [INFO] 生成任务 #16 完成, 耗时 338.9s, 最终评分 20.3
+   -> completed score=20.3 rounds=3 338.9s 
+== h_sohu (真实截图 sohu.com)
+  [GEN] 生成任务 #17 启动: kind=screenshot target=html_css
+  [GEN] 适配器 screenshot → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1920×9018
+  [UIR] 多模态 UIR 不可用, 回落确定性版面分析: RuntimeError: 上游 JSON 不可解析: Expecting ',' delimiter: line 1 column 15316 (char 15315)
+  [UIR] 截图→UIR(确定性版面分析, 深度 4, 最小面积 0.0015, 沟槽 ≥6px, 图片回填 1 块/0.053): 401 节点, 色板 8 色, 1920×9018
+  [SIMILARITY] 第 1 轮评分 47.1 (结构 0.448 / 边缘 0.505 / 文本 1.0), 401 节点, 67.0s
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1920×9018
+  [GEN] 第 2 轮未提升(47.1 → 20.0), 回滚到最优轮
+  [SIMILARITY] 第 2 轮评分 20.0 (结构 0.229 / 边缘 0.156 / 文本 1.0), 210 节点, 119.7s
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1920×9018
+  [UIR] 多模态 UIR 不可用, 回落确定性版面分析: RuntimeError: 上游 JSON 不可解析: Expecting property name enclosed in double quotes: line 1 column 14308 (char 14307)
+  [UIR] 截图→UIR(确定性版面分析, 深度 4, 最小面积 0.0015, 沟槽 ≥6px, 图片回填 1 块/0.053): 401 节点, 色板 8 色, 1920×9018
+  [GEN] 第 3 轮未提升(47.1 → 47.1), 回滚到最优轮
+  [SIMILARITY] 第 3 轮评分 47.1 (结构 0.448 / 边缘 0.505 / 文本 1.0), 401 节点, 58.4s
+  [INFO] 生成任务 #17 完成, 耗时 245.7s, 最终评分 47.1
+   -> completed score=47.1 rounds=3 245.7s 
+== h_douban (真实截图 douban.com)
+  [GEN] 生成任务 #18 启动: kind=screenshot target=html_css
+  [GEN] 适配器 screenshot → 目标 html_css; 预算 240s / 3 轮 / 目标分 85.0
+  [UIR] 截图→UIR: 调用多模态模型 (deepseek-flash), 1920×5935
+  [SIMILARITY] 第 1 轮评分 17.4 (结构 0.186 / 边缘 0.157 / 文本 1.0), 196 节点, 246.0s
+  [GEN] 时间预算耗尽, 停止迭代
+  [INFO] 生成任务 #18 完成, 耗时 246.2s, 最终评分 17.4
+   -> completed score=17.4 rounds=1 246.2s 
+
+# L1 生成用例跑分 20261104_185121
+
+- rounds=3 budget=240s target=85.0 holdout=on
+- AI Key: 已配置
+
+## 语料内(tuned): 10/10 完成 · 像素分均值 48.9 (≥85: 0/5) · 描述自评均值 83.1 (≥85: 3/5) · 合计 ≥85: 3/10 · 耗时均值 123.5s p90 203.0s
+
+| 用例 | 组 | 口径 | 分数 | 结构 | 边缘 | 文本 | 层级 | 轮次 | 节点 | 耗时 | 错误 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| s_dashboard | shot | v3-segmented | 38.1 | 0.241 | 0.101 | 1.0 | llm | 3 | 83 | 283.7s |  |
+| s_list | shot | v3-segmented | 40.6 | 0.249 | 0.282 | 1.0 | llm | 3 | 83 | 203.0s |  |
+| s_landing | shot | v3-segmented | 44.0 | 0.43 | 0.455 | 1.0 | llm | 3 | 48 | 186.8s |  |
+| s_article | shot | v3-segmented | 46.8 | 0.382 | 0.538 | 1.0 | llm | 3 | 51 | 114.6s |  |
+| d_dashboard | desc | desc-self-v1 | 71.4 | 1.0 | None | 0.429 | llm | 3 | 111 | 87.8s |  |
+| s_login | shot | v3-segmented | 75.0 | 0.839 | 0.601 | 1.0 | llm | 3 | 15 | 134.6s |  |
+| d_article | desc | desc-self-v1 | 80.5 | 1.0 | None | 0.61 | llm | 3 | 81 | 105.1s |  |
+| d_login | desc | desc-self-v1 | 87.0 | 1.0 | None | 0.739 | llm | 1 | 39 | 23.9s |  |
+| d_list | desc | desc-self-v1 | 87.9 | 1.0 | None | 0.758 | llm | 2 | 84 | 41.8s |  |
+| d_landing | desc | desc-self-v1 | 88.6 | 1.0 | None | 0.773 | deterministic | 1 | 52 | 53.5s |  |
+
+## 留出集(holdout, 只看不调): 8/8 完成 · 像素分均值 23.2 (≥85: 0/8) · 描述自评均值 None (≥85: 0/0) · 合计 ≥85: 0/8 · 耗时均值 303.1s p90 378.3s
+
+| 用例 | 组 | 口径 | 分数 | 结构 | 边缘 | 文本 | 层级 | 轮次 | 节点 | 耗时 | 错误 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| h_douban | shot | v3-segmented | 17.4 | 0.186 | 0.157 | 1.0 | llm | 1 | 196 | 246.2s |  |
+| h_ant | shot | v3-segmented | 17.7 | 0.062 | 0.351 | 1.0 | llm | 2 | 235 | 378.3s |  |
+| h_runoob | shot | v3-segmented | 18.1 | 0.189 | 0.169 | 1.0 | llm | 1 | 714 | 312.6s |  |
+| h_huawei | shot | v3-segmented | 19.2 | 0.153 | 0.25 | 1.0 | llm | 2 | 148 | 395.2s |  |
+| h_163 | shot | v3-segmented | 20.3 | 0.211 | 0.167 | 1.0 | llm | 3 | 197 | 338.9s |  |
+| h_gitee | shot | v3-segmented | 22.2 | 0.242 | 0.192 | 1.0 | llm | 1 | 228 | 262.3s |  |
+| h_apple | shot | v3-segmented | 23.8 | 0.286 | 0.165 | 1.0 | llm | 2 | 138 | 245.9s |  |
+| h_sohu | shot | v3-segmented | 47.1 | 0.448 | 0.505 | 1.0 | deterministic | 3 | 401 | 245.7s |  |
+
+
+隔离目录: /var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_kvjemqkq
+exit=0

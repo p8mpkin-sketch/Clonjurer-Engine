@@ -1,0 +1,252 @@
+{
+  "stamp": "20261104_170222",
+  "args": {
+    "holdout": false,
+    "rounds": 4,
+    "budget": 240,
+    "only": "",
+    "verbose": false
+  },
+  "summary": {
+    "n": 10,
+    "completed": 10,
+    "failed": 0,
+    "pixel_mean": 52.2,
+    "pixel_ge85": 0,
+    "pixel_n": 5,
+    "desc_mean": 88.6,
+    "desc_ge85": 5,
+    "desc_n": 5,
+    "ge85_total": 5,
+    "elapsed_mean": 1.4,
+    "elapsed_p90": 2.2,
+    "tuned": {
+      "n": 10,
+      "completed": 10,
+      "failed": 0,
+      "pixel_mean": 52.2,
+      "pixel_ge85": 0,
+      "pixel_n": 5,
+      "desc_mean": 88.6,
+      "desc_ge85": 5,
+      "desc_n": 5,
+      "ge85_total": 5,
+      "elapsed_mean": 1.4,
+      "elapsed_p90": 2.2
+    },
+    "holdout": null
+  },
+  "results": [
+    {
+      "task_id": 1,
+      "status": "completed",
+      "score": 89.3,
+      "scoring": "desc-self-v1",
+      "tier": "deterministic",
+      "rounds": 1,
+      "best_round": 1,
+      "nodes": 16,
+      "elapsed": 0.8,
+      "error": "",
+      "detail": {
+        "structure": 0.917,
+        "edge": null,
+        "text": 0.87
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_a6jhpbvf/workspaces/1",
+      "id": "d_login",
+      "group": "desc",
+      "holdout": false
+    },
+    {
+      "task_id": 2,
+      "status": "completed",
+      "score": 88.6,
+      "scoring": "desc-self-v1",
+      "tier": "deterministic",
+      "rounds": 1,
+      "best_round": 1,
+      "nodes": 52,
+      "elapsed": 0.5,
+      "error": "",
+      "detail": {
+        "structure": 1.0,
+        "edge": null,
+        "text": 0.773
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_a6jhpbvf/workspaces/2",
+      "id": "d_landing",
+      "group": "desc",
+      "holdout": false
+    },
+    {
+      "task_id": 3,
+      "status": "completed",
+      "score": 85.7,
+      "scoring": "desc-self-v1",
+      "tier": "deterministic",
+      "rounds": 1,
+      "best_round": 1,
+      "nodes": 80,
+      "elapsed": 0.5,
+      "error": "",
+      "detail": {
+        "structure": 1.0,
+        "edge": null,
+        "text": 0.714
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_a6jhpbvf/workspaces/3",
+      "id": "d_dashboard",
+      "group": "desc",
+      "holdout": false
+    },
+    {
+      "task_id": 4,
+      "status": "completed",
+      "score": 87.9,
+      "scoring": "desc-self-v1",
+      "tier": "deterministic",
+      "rounds": 1,
+      "best_round": 1,
+      "nodes": 84,
+      "elapsed": 0.5,
+      "error": "",
+      "detail": {
+        "structure": 1.0,
+        "edge": null,
+        "text": 0.758
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_a6jhpbvf/workspaces/4",
+      "id": "d_list",
+      "group": "desc",
+      "holdout": false
+    },
+    {
+      "task_id": 5,
+      "status": "completed",
+      "score": 91.5,
+      "scoring": "desc-self-v1",
+      "tier": "deterministic",
+      "rounds": 1,
+      "best_round": 1,
+      "nodes": 52,
+      "elapsed": 0.5,
+      "error": "",
+      "detail": {
+        "structure": 1.0,
+        "edge": null,
+        "text": 0.829
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_a6jhpbvf/workspaces/5",
+      "id": "d_article",
+      "group": "desc",
+      "holdout": false
+    },
+    {
+      "task_id": 6,
+      "status": "completed",
+      "score": 60.3,
+      "scoring": "v3-segmented",
+      "tier": "deterministic",
+      "rounds": 4,
+      "best_round": 3,
+      "nodes": 44,
+      "elapsed": 2.0,
+      "error": "",
+      "detail": {
+        "structure": 0.669,
+        "edge": 0.504,
+        "text": 1.0
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_a6jhpbvf/workspaces/6",
+      "id": "s_login",
+      "group": "shot",
+      "holdout": false
+    },
+    {
+      "task_id": 7,
+      "status": "completed",
+      "score": 52.2,
+      "scoring": "v3-segmented",
+      "tier": "deterministic",
+      "rounds": 4,
+      "best_round": 2,
+      "nodes": 60,
+      "elapsed": 2.3,
+      "error": "",
+      "detail": {
+        "structure": 0.52,
+        "edge": 0.524,
+        "text": 1.0
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_a6jhpbvf/workspaces/7",
+      "id": "s_landing",
+      "group": "shot",
+      "holdout": false
+    },
+    {
+      "task_id": 8,
+      "status": "completed",
+      "score": 52.2,
+      "scoring": "v3-segmented",
+      "tier": "deterministic",
+      "rounds": 4,
+      "best_round": 1,
+      "nodes": 93,
+      "elapsed": 2.2,
+      "error": "",
+      "detail": {
+        "structure": 0.633,
+        "edge": 0.322,
+        "text": 1.0
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_a6jhpbvf/workspaces/8",
+      "id": "s_dashboard",
+      "group": "shot",
+      "holdout": false
+    },
+    {
+      "task_id": 9,
+      "status": "completed",
+      "score": 47.8,
+      "scoring": "v3-segmented",
+      "tier": "deterministic",
+      "rounds": 4,
+      "best_round": 2,
+      "nodes": 163,
+      "elapsed": 2.1,
+      "error": "",
+      "detail": {
+        "structure": 0.51,
+        "edge": 0.429,
+        "text": 1.0
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_a6jhpbvf/workspaces/9",
+      "id": "s_list",
+      "group": "shot",
+      "holdout": false
+    },
+    {
+      "task_id": 10,
+      "status": "completed",
+      "score": 48.7,
+      "scoring": "v3-segmented",
+      "tier": "deterministic",
+      "rounds": 4,
+      "best_round": 1,
+      "nodes": 54,
+      "elapsed": 2.1,
+      "error": "",
+      "detail": {
+        "structure": 0.426,
+        "edge": 0.501,
+        "text": 1.0
+      },
+      "ws": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_a6jhpbvf/workspaces/10",
+      "id": "s_article",
+      "group": "shot",
+      "holdout": false
+    }
+  ],
+  "iso_dir": "/var/folders/p5/6l80y7pj2398fn3ymyjxgqb00000gn/T/gen_bench_a6jhpbvf"
+}
