@@ -2048,3 +2048,22 @@ def beacon_like(url: str) -> bool:
         return True
     ext = path.rsplit(".", 1)[-1].lower() if "." in path.rsplit("/", 1)[-1] else ""
     return ext in ("gif", "jpg", "jpeg", "png", "bin", "") and len(parts.query) >= 120
+
+
+# 重放去重守卫(交互轨通用): 冻结 DOM 已含页面脚本运行后的结果, 交互版再执行一遍同步脚本时,
+# 「插入型」脚本(insertAdjacentHTML / appendChild 追加组件、轮播复制幻灯片等)会把同样的内容再插一次,
+# 页面出现成段重复(example.com 交互轨 70.4 / 保真轨 100 即此类)。守卫在所有页面脚本之前挂钩 DOM
+# 插入 API, 只标记**解析期间(readyState=loading, 即同步经典脚本重放)由脚本新建并插入**的元素(移动已在
+# 文档中的节点不算; DOMContentLoaded 之后的异步/模块脚本插入一律不管——苹果类页面会先插新节点、稍后再
+# 移除旧节点, 提前去重会两边都丢, 实测 airpods-pro 交互轨 70.5→48); 若被标记元素在同一父节点
+# 下有相同(outerHTML, 忽略引擎自加的 data-cb/data-cv/data-cssom/data-clone-* 属性)且未被标记的兄弟——即冻结 DOM 里已有的同一份——则移除这份重放副本。
+# 框架水合/重渲染会先移除旧节点, 不会留下"旧的仍在"的孪生, 因而不受影响。
+REPLAY_DEDUPE_JS = r"""<script data-clone-preview="replay-dedupe">(function(){try{if(window.__cloneDedupe)return;window.__cloneDedupe=1;var M=[],mark=new WeakSet(),mo=new MutationObserver(function(){});mo.observe(document.documentElement,{childList:true,subtree:true});
+function take(was){var rs=mo.takeRecords();if(document.readyState!=='loading')return;for(var i=0;i<rs.length;i++){var a=rs[i].addedNodes;for(var j=0;j<a.length;j++){var n=a[j];if(n.nodeType===1&&!(was&&was.indexOf(n)>=0)&&!mark.has(n)){mark.add(n);if(M.length<4000)M.push(n);}}}}
+function wrap(P,k){var d=Object.getOwnPropertyDescriptor(P,k);if(!d||typeof d.value!=='function')return;var f=d.value;P[k]=function(){var was=[];for(var i=0;i<arguments.length;i++){var x=arguments[i];if(x&&x.nodeType===1&&x.isConnected)was.push(x);}mo.takeRecords();var r=f.apply(this,arguments);take(was);return r;};}
+function wrapSet(P,k){var d=Object.getOwnPropertyDescriptor(P,k);if(!d||!d.set)return;Object.defineProperty(P,k,{configurable:true,enumerable:d.enumerable,get:d.get,set:function(v){mo.takeRecords();d.set.call(this,v);take(null);}});}
+['appendChild','insertBefore','replaceChild'].forEach(function(k){wrap(Node.prototype,k);});
+['insertAdjacentHTML','insertAdjacentElement','append','prepend','after','before','replaceWith','replaceChildren'].forEach(function(k){wrap(Element.prototype,k);});
+wrapSet(Element.prototype,'innerHTML');wrapSet(Element.prototype,'outerHTML');
+var R=/ data-(?:cb|cv[\w-]*|cssom|clone[\w-]*)="[^"]*"/g;function sweep(){try{take(null);var n=0;for(var i=0;i<M.length;i++){var m=M[i];if(!m||!m.isConnected||!m.parentNode)continue;var t=m.tagName;if(t==='SCRIPT'||t==='HTML'||t==='HEAD'||t==='BODY')continue;var h=m.outerHTML;if(h.length<24||h.length>400000)continue;h=h.replace(R,'');var tc=m.textContent,s=m.parentNode.children;for(var j=0;j<s.length;j++){var e=s[j];if(e===m||mark.has(e)||e.tagName!==t||e.textContent!==tc)continue;if(e.outerHTML.replace(R,'')===h){m.remove();M[i]=null;n++;break;}}}if(n)window.__cloneDedupeRemoved=(window.__cloneDedupeRemoved||0)+n;}catch(e){}}
+window.__cloneDedupeSweep=sweep;document.addEventListener('DOMContentLoaded',function(){sweep();try{mo.disconnect();}catch(e){}});window.addEventListener('load',function(){sweep();setTimeout(sweep,800);setTimeout(sweep,2500);});}catch(e){}})();</script>"""

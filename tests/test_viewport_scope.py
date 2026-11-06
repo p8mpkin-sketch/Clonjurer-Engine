@@ -169,8 +169,57 @@ class LiveViewportScope(unittest.TestCase):
                 b.close()
 
 
-if __name__ == "__main__":
-    unittest.main()
+CLS_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<style>.big{font-size:40px}.small{font-size:18px}</style></head><body>
+<h2 id="h" class="big">Title</h2>
+<script>function f(){document.getElementById('h').className = innerWidth < 600 ? 'small' : 'big';}
+addEventListener('resize', f); f();</script></body></html>"""
+
+
+class ViewportClassSwap(unittest.TestCase):
+    """脚本按视口换 class(useMediaQuery 类): 克隆里没有脚本再换, 由分视口 class 运行时接管。"""
+
+    def test_class_follows_band_after_scope(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 1440, "height": 800})
+                page.set_content(CLS_PAGE)
+                page.evaluate(ce.CV_RECORD_JS, "d")
+                for tag, w in (("t", 768), ("m", 390)):
+                    page.set_viewport_size({"width": w, "height": 800})
+                    page.evaluate(ce.CV_QUIET_JS, 100)
+                    page.evaluate(ce.CV_RECORD_JS, tag)
+                page.set_viewport_size({"width": 1440, "height": 800})
+                page.evaluate(ce.CV_QUIET_JS, 100)
+                page.evaluate(ce.CV_RECORD_JS, "b")
+                loads = {}
+                for tag, w in (("t", 768), ("m", 390)):
+                    p2 = b.new_page(viewport={"width": w, "height": 800})
+                    p2.set_content(CLS_PAGE)
+                    loads[tag] = p2.evaluate(ce.CV_PATHS_JS)
+                    p2.close()
+                out = page.evaluate(ce.CV_EMIT_JS, loads)
+                self.assertEqual(out.get("cls"), 1)
+                self.assertEqual(page.evaluate("document.getElementById('h').className"), "big")
+                html = page.content()
+            finally:
+                b.close()
+            html = ce.scope_viewport_css(html, 1000, 0)
+            # 去掉站点自己的换 class 脚本, 只留引擎注入的运行时
+            html = html.replace("addEventListener('resize', f); f();", "")
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 390, "height": 800})
+                page.set_content(html)
+                self.assertEqual(page.evaluate("getComputedStyle(document.getElementById('h')).fontSize"), "18px")
+                page.set_viewport_size({"width": 1440, "height": 800})
+                page.wait_for_timeout(100)
+                self.assertEqual(page.evaluate("getComputedStyle(document.getElementById('h')).fontSize"), "40px")
+            finally:
+                b.close()
+
 
 
 class CalibInjection(unittest.TestCase):
@@ -380,3 +429,7 @@ class LoadTimeSizeAttrs(unittest.TestCase):
                 self.assertEqual(page.evaluate("document.getElementById('cv').getBoundingClientRect().height"), 520)
             finally:
                 b.close()
+
+
+if __name__ == "__main__":
+    unittest.main()

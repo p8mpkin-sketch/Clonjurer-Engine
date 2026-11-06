@@ -134,6 +134,7 @@ from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部
     FIRST_SEGMENT_WEIGHT,
     HTML_INTERCEPT_TYPES,
     INTERACTION_SIM_TEMPLATE,
+    REPLAY_DEDUPE_JS,
     JS_NAV_GUARD_SCRIPT,
     JS_NAV_OPEN_RE,
     JS_PARENT_LOC_RE,
@@ -1559,9 +1560,10 @@ class ClonerEngine:
             loads = self._collect_narrow_loads()
             try:
                 cv = page.evaluate(CV_EMIT_JS, loads) or {}
-                if cv.get("els"):
+                if cv.get("els") or cv.get("cls"):
                     self.log("RENDER", f"多视口内联样式: {cv['els']} 个元素, {cv.get('vw', 0)} 个按视口宽比例改写为 vw,"
-                                       f" {cv.get('banded', 0)} 个移入分视口样式表(其中窄屏首载补采 {cv.get('reload', 0)})")
+                                       f" {cv.get('banded', 0)} 个移入分视口样式表(其中窄屏首载补采 {cv.get('reload', 0)})"
+                                       f"; 分视口 class {cv.get('cls', 0)} 个")
                 try:
                     self._inject_dom_variants(page, loads)
                 except Exception as exc:
@@ -2029,6 +2031,17 @@ class ClonerEngine:
                         out = {"url": job["url"], "ok": False, "error": type(exc).__name__}
                     out = self._normalize_out(out)
                     if not out["ok"]:
+                        h0 = urlsplit(job["url"]).hostname or ""
+                        if (not out.get("status") and not job.get("retry") and h0 not in tripped
+                                and str(out.get("error") or "").endswith(("SSLError", "ConnectionError",
+                                                                          "ChunkedEncodingError"))):
+                            # 网络层瞬时错误(SSL EOF/连接重置)重排一次: 这类失败在代理/跨境链路上
+                            # 是随机的, 不重试的话该资源这一轮就缺失(kotlinlang 平板图 SSLError 后
+                            # 未本地化, 克隆里 <source> 指向 404, 平板分 95→51)
+                            seen.discard(job["url"])
+                            jobs.append(dict(job, retry=1))
+                            _pump()
+                            continue
                         self.log("WARN", f"跳过 {job['url']}: {out['error']}")
                         if out.get("status") and ctx is not None:
                             failed_for_browser.append(job)
@@ -2956,6 +2969,7 @@ class ClonerEngine:
             if bg_css:
                 localized = self._inject_after_head(localized, bg_css)
             localized = self._inject_after_head(localized, sim_script)
+            localized = self._inject_after_head(localized, REPLAY_DEDUPE_JS)
             return _utf8_charset(_inject_responsive(localized))
 
         html_pairs = _html_escaped_pairs(pairs)

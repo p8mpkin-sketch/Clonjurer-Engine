@@ -1,5 +1,6 @@
 """克隆引擎注入到浏览器页面的脚本与样式片段(自 core/cloner_engine.py 纯搬迁, 文本逐字不变)。"""
 # flake8: noqa
+import json
 # ---------------------------------------------------------------------------
 # 浏览器端注入脚本
 # ---------------------------------------------------------------------------
@@ -497,6 +498,10 @@ CV_RECORD_JS = r"""
     m.paths = m.els.map(__CV_PATH__);
   }
   m.snaps[tag] = m.els.map(e => e.getAttribute('style') || '');
+  // 脚本按视口切换的 class(React useMediaQuery / matchMedia 回调换 class): 样式表按 class 生效,
+  // 换视口后克隆里没有脚本再去换, 一并记录
+  m.cls = m.cls || {};
+  m.cls[tag] = m.els.map(e => e.getAttribute('class') || '');
   // 脚本按视口写的尺寸属性(svg/img/canvas 的 width/height 属性, 如按容器宽算出的 logo 尺寸)
   // 不在 style 里, 记成等价 CSS 一并参与分视口比较(CSS 宽高覆盖展示属性)
   m.attrs = m.attrs || {};
@@ -696,6 +701,33 @@ CV_EMIT_JS = r"""
   const tags = ['t', 'm'].filter(t => m.snaps[t]);
   const attrOf = __CV_ATTR__;
   const S = (t, i) => m.snaps[t][i] + ((m.attrs && m.attrs[t] && m.attrs[t][i]) ? ';' + m.attrs[t][i] : '');
+  // 分视口 class: 缩放快照里该视口 class 与桌面不同且还原后回到桌面值 → 该视口用缩放快照的 class;
+  // 缩放没变而窄屏首载页同路径同标签元素 class 不同 → 只在加载时按宽度决定 class, 用首载值
+  const C = m.cls || {}, swaps = [];
+  const STATE = /(^|[-_])(active|current|cur|hover|focus|open|opened|show|shown|visible|selected|prev|next|in-view|inview|exposure|loaded|scrolled|playing|dismissed|skipped|expanded|collapsed)([-_]|$)/i;
+  if (C.d && C.b) m.els.forEach((el, i) => {
+    if (!el.isConnected || el.closest('svg')) return;
+    const cd = C.d[i];
+    if (C.b[i] !== cd || (el.getAttribute('class') || '') !== cd) return;
+    const alt = {};
+    tags.forEach(t => {
+      // 两个独立来源一致才算「随视口」: 缩放快照与窄屏首载页同路径元素的 class 相同且都不同于桌面。
+      // 只有一方变化的多是时间/交互状态(轮播 active/current、hover、曝光埋点、展开态), 不归视口
+      const v = C[t] ? C[t][i] : cd;
+      const L = m.paths && loads[t] ? loads[t][m.paths[i]] : null;
+      if (v === cd || !L || L[0] !== el.tagName || L[1] !== v || /[<>"]/.test(v)) return;
+      const a = new Set(cd.split(/\s+/)), b = new Set(v.split(/\s+/));
+      const delta = [...a].filter(x => !b.has(x)).concat([...b].filter(x => !a.has(x)));
+      if (delta.some(x => STATE.test(x))) return;
+      alt[t] = v;
+    });
+    if (Object.keys(alt).length) swaps.push([el, alt]);
+  });
+  swaps.slice(0, 4000).forEach(([el, alt]) => {
+    for (const t of Object.keys(alt)) el.setAttribute('data-cv-cls-' + t, alt[t]);
+    el.setAttribute('data-cv-cls-d', el.getAttribute('class') || '');
+    out.cls = (out.cls || 0) + 1;
+  });
   m.els.forEach((el, i) => {
     const sdRaw = m.snaps.d[i], sd = S('d', i);
     if (!el.isConnected) return;
@@ -754,6 +786,14 @@ CV_EMIT_JS = r"""
       for (const k of ['d', 't', 'm']) if (rule[k].length) bands[k].push('[data-cv="' + i + '"]' + SPEC + '{' + rule[k].join(';') + '}');
     }
   });
+  if (out.cls) {
+    // 当前视口段由分视口样式表里的 --cv-band 告诉运行时(段边界落盘时才确定, 脚本不重复计算断点)
+    bands.d.push(':root{--cv-band:d}'); bands.t.push(':root{--cv-band:t}'); bands.m.push(':root{--cv-band:m}');
+    const sc = document.createElement('script');
+    sc.setAttribute('data-clone-preview', 'cv-cls');
+    sc.textContent = CV_CLS_RUNTIME;
+    (document.head || document.documentElement).appendChild(sc);
+  }
   if (bands.d.length + bands.t.length + bands.m.length) {
     const st = document.createElement('style');
     st.setAttribute('data-clone-vp', '');
@@ -767,6 +807,11 @@ CV_EMIT_JS = r"""
   return out;
 }
 """.replace("__CV_ATTR__", CV_ATTR_FN)
+
+# 分视口 class 运行时(随 CV_EMIT_JS 写入页面): 读 --cv-band 决定当前段, 把 data-cv-cls-<段> 换成 class;
+# 段没变不动 DOM。活体采集时段恒为 d(桌面), 不改变采集结果。
+CV_CLS_RUNTIME = r"""(function(){var cur=null;function apply(){try{var b=(getComputedStyle(document.documentElement).getPropertyValue('--cv-band')||'').trim()||'d';if(b===cur)return;cur=b;var es=document.querySelectorAll('[data-cv-cls-d]');for(var i=0;i<es.length;i++){var e=es[i],v=e.getAttribute('data-cv-cls-'+b);if(v===null)v=e.getAttribute('data-cv-cls-d');if(e.getAttribute('class')!==v)e.setAttribute('class',v);}}catch(x){}}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',apply);else apply();window.addEventListener('resize',apply);window.addEventListener('load',apply);})();"""
+CV_EMIT_JS = CV_EMIT_JS.replace("CV_CLS_RUNTIME", json.dumps(CV_CLS_RUNTIME))
 
 
 # 内联尺寸流式化(序列化前): 轮播/全宽块的脚本常把"容器当前宽度"写成内联 px
