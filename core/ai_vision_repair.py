@@ -91,10 +91,10 @@ def _downscale_copy(image_path: Path, max_edge: int) -> bytes:
     with Image.open(image_path) as img:
         img = img.convert("RGB")
         img.thumbnail((max_edge, max_edge))
-        buf = tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024)
-        img.save(buf, format="PNG")
-        buf.seek(0)
-        return buf.read()
+        with tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024) as buf:   # 关闭临时文件(曾泄漏句柄)
+            img.save(buf, format="PNG")
+            buf.seek(0)
+            return buf.read()
 
 
 def _chat_vision(ai_cfg: dict, original: Path, cloned: Path,

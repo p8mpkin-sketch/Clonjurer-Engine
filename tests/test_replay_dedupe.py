@@ -2,6 +2,7 @@
 import unittest
 
 from core.clone.support import REPLAY_DEDUPE_JS
+from tests._env import chromium_available, has_modules
 
 PAGE = """<!doctype html><html><head>GUARD</head><body>
 <div id="box"><p data-cb="f2-1">hello world paragraph</p><p>second paragraph text here</p></div>
@@ -11,6 +12,7 @@ PAGE = """<!doctype html><html><head>GUARD</head><body>
 </body></html>"""
 
 
+@unittest.skipUnless(chromium_available(), "需要 Playwright Chromium")
 class ReplayDedupe(unittest.TestCase):
     def test_sync_replay_removed_async_kept(self):
         from playwright.sync_api import sync_playwright
