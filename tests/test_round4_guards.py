@@ -114,6 +114,10 @@ class BlockedPageDetect(unittest.TestCase):
         orig = "全部频道\n内容太火爆了，请稍后再试\n登录领限时福利\n当前页面异常\n刷新\n切换账号"
         self.assertIn("基准页即拦截页", ce.detect_blocked_page(orig, orig))
         self.assertIn("基准页即拦截页", ce.detect_blocked_page("Just a moment...\nChecking your browser", ""))
+        # Cloudflare Turnstile 新版挑战页(人机勾选框在 iframe 里, 主文档只有提示语)
+        cf = ("www.npmjs.com\nPerforming security verification\nThis website uses a security service to protect "
+              "against malicious bots.\nRay ID: a562\nPerformance and Security by Cloudflare\nPrivacy")
+        self.assertIn("基准页即拦截页", ce.detect_blocked_page(cf, cf))
 
     def test_capture_replaced_midway(self):
         # 原站局部模块也带同样话术(基准里有), 但采集文本骤缩成拦截页: 仍判受阻
