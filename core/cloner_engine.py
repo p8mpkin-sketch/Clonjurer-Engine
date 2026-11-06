@@ -1145,6 +1145,8 @@ class ClonerEngine:
                 p2.wait_for_load_state("load", timeout=int(left * 1000))
                 p2.evaluate(CV_QUIET_JS, 300)
                 loads[tag] = p2.evaluate(CV_PATHS_JS) or {}
+                if self.cfg.get("viewport_variants", True):
+                    ClonerEngine._start_settle_narrow(p2)
             except Exception:
                 with suppress(Exception):
                     p2.close()
@@ -1157,13 +1159,27 @@ class ClonerEngine:
         self._cv_pages = []
 
     @staticmethod
+    def _start_settle_narrow(p2):
+        """非阻塞地在窄屏首载页里发起平滑滚动(页内 Promise 挂在 window.__cvSettle): 平板/手机两页
+        同时滚, 主页同时做 CV_EMIT 等步骤; 此前两页依次阻塞滚动, 有变体的站固化阶段多等 8~10s。"""
+        budget = max(1.0, float(getattr(config, "VIEWPORT_VARIANT_SETTLE", 4.0)))
+        with suppress(Exception):
+            p2.evaluate("([src, args]) => { window.__cvSettle = (0, eval)(src)(args).catch(() => 0); return 1; }",
+                        [ClonerEngine.AUTO_SCROLL_JS, [int(budget * 1000), 54000]])
+
+    @staticmethod
     def _settle_narrow_page(p2):
         """窄屏首载页在抽取变体子树前与主页同口径「到位」: 平滑滚到底再回顶(触发进视口才起播的
         入场动画 / 懒加载, 否则抽到的是 opacity:0 的初始态, 克隆窄屏整块空白), 再把动画相位写成
-        负 animation-delay(ANIM_PHASE_JS, 与主页基准后同一步)。时限内做不完就按当前态抽取。"""
+        负 animation-delay(ANIM_PHASE_JS, 与主页基准后同一步)。时限内做不完就按当前态抽取。
+        滚动已由 _start_settle_narrow 提前发起时这里只等它结束。"""
         budget = max(1.0, float(getattr(config, "VIEWPORT_VARIANT_SETTLE", 4.0)))
         with suppress(Exception):
-            p2.evaluate(ClonerEngine.AUTO_SCROLL_JS, [int(budget * 1000), 54000])
+            started = p2.evaluate("() => !!window.__cvSettle")
+            if started:
+                p2.evaluate("() => window.__cvSettle")
+            else:
+                p2.evaluate(ClonerEngine.AUTO_SCROLL_JS, [int(budget * 1000), 54000])
             p2.wait_for_timeout(400)
             p2.evaluate("window.scrollTo(0, 0)")
             p2.evaluate(CV_QUIET_JS, 300)
