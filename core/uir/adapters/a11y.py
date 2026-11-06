@@ -958,6 +958,9 @@ def tree_to_uir(tree: dict, screenshot=None, embed_images: bool = True) -> UIR:
               "sampled_colors": sampler is not None, "scale": tree.get("scale", 1.0)}
     meta = {"source_kind": "a11y", "title": prep.get("app", ""), "lang": "zh",
             "viewport": {"w": vw, "h": vh}, "report": report}
+    if prep["platform"] in ("android", "ios") and int(tree.get("window", [0, 0])[1]) == 0:
+        # 窗口从屏幕顶边开始(含状态栏区域): 采到的像素与坐标都是全屏的, 原生目标应全面屏绘制(不再让出状态栏)
+        meta["edge_to_edge"] = True
     return UIR(root=node, tokens=b.tokens, meta=meta).normalize()
 
 
