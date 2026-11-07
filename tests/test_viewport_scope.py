@@ -284,6 +284,36 @@ class ViewportAttrSwap(unittest.TestCase):
                 b.close()
 
 
+CANVAS_FREEZE_PAGE = """<style>.wf{width:100%;display:block}#box canvas{width:120px;height:40px}</style>
+<div id="w" style="width:390px"><canvas id="a" class="wf" width="600" height="300"></canvas></div>
+<div id="box"><canvas id="b" width="60" height="20"></canvas></div>
+<script>for (const id of ['a', 'b']) { const x = document.getElementById(id).getContext('2d'); x.fillStyle = 'red'; x.fillRect(0, 0, 600, 300); }</script>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class CanvasFreezeResponsive(unittest.TestCase):
+    """canvas 固化的 img 按宽高比随容器伸缩; 只靠 canvas 标签选择器定尺寸的回落成固定 px。"""
+
+    def test_frozen_canvas_keeps_ratio(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page()
+                page.set_content(CANVAS_FREEZE_PAGE)
+                alt = page.evaluate(ce.ALT_EXTRACT_JS, ["div:1"])
+                self.assertIn('class="wf"', alt["div:1"][0])
+                self.assertNotIn("390px", alt["div:1"][0].split("data-canvas-frozen", 1)[1])
+                page.evaluate(ce.DEEP_FREEZE_JS)
+                size = "id => { const r = document.getElementById(id).getBoundingClientRect(); return [r.width, r.height]; }"
+                self.assertEqual(page.evaluate(size, "a"), [390, 195])
+                self.assertEqual(page.evaluate(size, "b"), [120, 40])
+                page.evaluate("document.getElementById('w').style.width = '420px'")
+                self.assertEqual(page.evaluate(size, "a"), [420, 210])
+            finally:
+                b.close()
+
+
 class CalibInjection(unittest.TestCase):
     def test_put_calib_band_wrapped(self):
         eng = ce.ClonerEngine.__new__(ce.ClonerEngine)

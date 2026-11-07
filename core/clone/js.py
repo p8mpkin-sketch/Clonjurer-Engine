@@ -65,6 +65,34 @@ WAIT_SHEETS_JS = r"""
 })
 """
 
+# Canvas 固化成 <img>: 保留原 class/id/内联样式, width/height 属性取位图尺寸(给出固有宽高比), 未内联定高时
+# height:auto —— 响应式 canvas(class 给 w-full / calc 宽)在别的视口仍按比例伸缩。只有原地试放后尺寸与 canvas
+# 不符(样式靠 canvas 标签选择器等)才回落成采集视口下的固定 px(旧做法: 窄屏变体里写死 390 宽的 px,
+# 420/820 宽下逐图偏短、下文累积上移)
+CANVAS_IMG_FN = r"""(cv, data) => {
+  const img = document.createElement('img');
+  img.src = data;
+  img.setAttribute('data-canvas-frozen', 'true');
+  for (const a of ['class', 'id', 'style']) { const v = cv.getAttribute(a); if (v) img.setAttribute(a, v); }
+  if (cv.width && cv.height) { img.setAttribute('width', String(cv.width)); img.setAttribute('height', String(cv.height)); }
+  if (!cv.style.height) img.style.height = 'auto';
+  let fit = false;
+  try {
+    const r0 = cv.getBoundingClientRect(), st = cv.getAttribute('style');
+    cv.before(img);
+    cv.style.setProperty('display', 'none', 'important');
+    const r1 = img.getBoundingClientRect();
+    img.remove();
+    if (st === null) cv.removeAttribute('style'); else cv.setAttribute('style', st);
+    fit = Math.abs(r1.width - r0.width) <= 1 && Math.abs(r1.height - r0.height) <= 1;
+  } catch (e) {}
+  if (!fit) {
+    if (cv.clientWidth) img.style.width = cv.clientWidth + 'px';
+    if (cv.clientHeight) img.style.height = cv.clientHeight + 'px';
+  }
+  return img;
+}"""
+
 DEEP_FREEZE_JS = r"""
 () => {
   const result = { lazy: 0, css: 0, crossOriginSheets: 0, canvas: 0, forms: 0, revealed: 0 };
@@ -167,12 +195,7 @@ DEEP_FREEZE_JS = r"""
     try {
       const data = cv.toDataURL('image/png');
       if (data && data.length > 128) {
-        const img = document.createElement('img');
-        img.src = data;
-        img.setAttribute('data-canvas-frozen', 'true');
-        if (cv.clientWidth) img.style.width = cv.clientWidth + 'px';
-        if (cv.clientHeight) img.style.height = cv.clientHeight + 'px';
-        cv.replaceWith(img);
+        cv.replaceWith((__CANVAS_IMG__)(cv, data));
         result.canvas++;
       }
     } catch (err) {
@@ -200,7 +223,7 @@ DEEP_FREEZE_JS = r"""
   });
   return result;
 }
-"""
+""".replace("__CANVAS_IMG__", CANVAS_IMG_FN)
 
 # 表单激活: focus/blur 触发懒加载样式与占位符逻辑(不点击, 防止误提交/误导航)
 # 视觉媒体快照(纯净基准截图之后、DOM 改动之前执行):
@@ -643,14 +666,7 @@ ALT_EXTRACT_JS = r"""(paths) => {
       try {
         const data = cv.toDataURL('image/png'), dst = cvc[k];
         if (!dst || !data || data.length <= 128) return;
-        const img = document.createElement('img');
-        img.src = data;
-        img.setAttribute('data-canvas-frozen', 'true');
-        for (const a of ['class', 'id']) if (cv.getAttribute(a)) img.setAttribute(a, cv.getAttribute(a));
-        if (cv.getAttribute('style')) img.setAttribute('style', cv.getAttribute('style'));
-        if (cv.clientWidth) img.style.width = cv.clientWidth + 'px';
-        if (cv.clientHeight) img.style.height = cv.clientHeight + 'px';
-        dst.replaceWith(img);
+        dst.replaceWith((__CANVAS_IMG__)(cv, data));
       } catch (e) {}
     });
     c.querySelectorAll('script,noscript').forEach(x => x.remove());
@@ -675,7 +691,7 @@ ALT_EXTRACT_JS = r"""(paths) => {
     out[p] = [c.outerHTML, (el.innerText || '').trim().length, el.getElementsByTagName('*').length];
   }
   return out;
-}"""
+}""".replace("__CANVAS_IMG__", CANVAS_IMG_FN)
 
 # 主页同路径子树的体量(文本长度/元素数), 判断窄屏版是"换了结构"还是"还没加载完"
 SUBTREE_SIZE_JS = r"""(paths) => {
