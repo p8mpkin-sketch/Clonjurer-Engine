@@ -456,7 +456,7 @@ class CaptureMixin:
     def _start_narrow_loads(self, page, height):
         """同上下文另开平板/手机宽的页面重新加载目标页(只等到响应提交, 与主页后续采集并行):
         只在加载时按宽度写一次的内联样式, 缩放采不到, 要靠窄屏首载对照(见 CV_EMIT_JS)。"""
-        self._cv_pages, self._cv_loads = [], {}
+        self._cv_pages = []
         for tag, w in (("t", 768), ("m", 390)):
             p2 = None
             try:
@@ -471,31 +471,10 @@ class CaptureMixin:
                 self.log("WARN", f"窄屏首载对照({w}px)启动失败: {str(exc)[:120]}")
 
 
-    def _poke_narrow_loads(self):
-        """非阻塞检查点: 已加载完的窄屏首载页先抽取首载快照并发起到位滚动(与主页后续步骤并行)。"""
-        done = self.__dict__.setdefault("_cv_loads", {})
-        for tag, p2 in getattr(self, "_cv_pages", []) or []:
-            if tag in done:
-                continue
-            try:
-                if p2.evaluate("() => document.readyState") != "complete":
-                    continue
-                p2.evaluate(CV_QUIET_JS, 300)
-                done[tag] = p2.evaluate(CV_PATHS_JS) or {}
-                if self.cfg.get("viewport_variants", True):
-                    CaptureMixin._start_settle_narrow(p2)
-            except Exception:
-                continue
-
-
     def _collect_narrow_loads(self, budget_s=8.0):
         """收回窄屏首载页的内联样式表并关页; 预算内没加载完的放弃。"""
         loads, t0 = {}, time.monotonic()
-        early = self.__dict__.pop("_cv_loads", {}) or {}
         for tag, p2 in getattr(self, "_cv_pages", []) or []:
-            if tag in early:
-                loads[tag] = early[tag]
-                continue
             try:
                 left = max(0.5, budget_s - (time.monotonic() - t0))
                 p2.wait_for_load_state("load", timeout=int(left * 1000))
@@ -810,7 +789,6 @@ class CaptureMixin:
         self.log("RENDER", f"懒加载与滚动完成 {time.time() - t_nav:.1f}s")
         tp = self._phase("采集-懒加载滚动", tp)
         if screenshot:
-            self._poke_narrow_loads()
             self._probe_viewports(page)
             tp = self._phase("采集-多视口内联", tp)
         # 评分基准(纯净原站): 必须在任何引擎 DOM 改动(表单激活/DEEP_FREEZE/
@@ -829,6 +807,7 @@ class CaptureMixin:
             with suppress(Exception):
                 # 与克隆侧同口径: 克隆截图前懒加载图全部转 eager(见 _load_clone), 基准不转
                 # 就是"克隆满、基准空"(mi.com 轮播页尾整块空白 -5 分)
+                td = time.monotonic()
                 page.evaluate(BASELINE_EAGER_JS, config.BASELINE_EAGER_MAX)
                 pending = page.evaluate(IMG_PENDING_JS)
                 if pending:
@@ -873,7 +852,10 @@ class CaptureMixin:
                     page.wait_for_timeout(int(left * 1000))
                 _safe_eval(RAF_FREEZE_JS)
             try:
+                td = self._phase("细分·基准等图与冻结", td)
                 self._full_shot(page, self.ws / "original_preview.png", "原站")
+                with suppress(NameError):
+                    td = self._phase("细分·基准整页截图", td)
                 baseline_text = _safe_eval(TEXT_EXTRACT_JS)
                 with suppress(Exception):
                     page.evaluate(MARK_LOADED_IMGS_JS)
@@ -899,8 +881,6 @@ class CaptureMixin:
                 (self.ws / "layout_map.json").write_text(
                     json.dumps(stable, ensure_ascii=False), encoding="utf-8")
         tp = self._phase("采集-基准截图", tp)
-        if screenshot:
-            self._poke_narrow_loads()
         if screenshot and (self.ws / "original_preview.png").is_file():
             self._freeze_media_from_baseline(page)
         # 触屏(手机版)不做 focus/blur 激活: 移动页常把搜索框聚焦做成全屏搜索态(返回箭头 + 历史面板),
@@ -909,6 +889,7 @@ class CaptureMixin:
         if activated:
             self.log("RENDER", f"表单激活: focus/blur {activated} 个输入控件")
         with suppress(Exception):
+            td = time.monotonic()
             ws_ = page.evaluate(WAIT_SHEETS_JS, 4000) or {}
             if ws_.get("ms", 0) > 50 or ws_.get("pending") or ws_.get("fetched"):
                 self.log("RENDER", f"冻结前等样式表: {ws_.get('ms')}ms, 直取补副本 {ws_.get('fetched', 0)} 张,"
@@ -956,6 +937,7 @@ class CaptureMixin:
                 self.log("RENDER", f"内联尺寸流式化: 全宽 {fl.get('width', 0)} / 轨道 {fl.get('track', 0)}"
                                    f" / 位移 {fl.get('shift', 0)}(采集视口下不变, 换视口随容器伸缩)")
         with suppress(Exception):
+            td = self._phase("细分·冻结与字体烘焙", td)
             loads = self._collect_narrow_loads()
             try:
                 cv = page.evaluate(CV_EMIT_JS, loads) or {}
@@ -973,6 +955,7 @@ class CaptureMixin:
         # Chromium 对 MHTML 的回放默认禁脚本 —— 确定性由构造保证。
         if screenshot:
             try:
+                td = self._phase("细分·窄屏收回与变体", td)
                 cdp = ctx.new_cdp_session(page)
                 snap = cdp.send('Page.captureSnapshot', {'format': 'mhtml'})
                 (self.ws / 'capture.mhtml').write_text(snap['data'], encoding='utf-8')
@@ -992,6 +975,7 @@ class CaptureMixin:
             hidden_frames = int(_safe_eval(MARK_HIDDEN_FRAMES_JS) or 0)
         html = None
         try:
+            td = self._phase("细分·MHTML快照", td)
             shadow = _safe_eval(SHADOW_SERIALIZE_JS)
             if shadow and shadow.get("html"):
                 html = shadow["html"]
@@ -1033,6 +1017,8 @@ class CaptureMixin:
                 self.log("WARN", "原站基准快照回退为改动后截图(口径偏乐观)")
             except Exception as exc:
                 self.log("WARN", f"原站截图失败: {exc}")
+        with suppress(NameError):
+            self._phase("细分·序列化", td)
         tp = self._phase("采集-固化", tp)
         collected = _safe_eval(COLLECT_ASSETS_JS)
         iframes = _safe_eval(IFRAME_EXTRACT_JS)

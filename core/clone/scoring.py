@@ -739,8 +739,13 @@ class ScoringMixin:
                 self._fid_page = None
                 try:
                     if fpage is not None:
-                        # 下载期间已在后台加载(见 _prestart_fidelity)
+                        # 下载期间已在后台加载(见 _prestart_fidelity); 后台标签页不出帧、图片不解码,
+                        # 截图前切到前台再等几帧(否则偶发截到未绘制完的版面: 夹具上 93→52.9)
                         fpage.wait_for_load_state("load", timeout=30000)
+                        with suppress(Exception):
+                            fpage.bring_to_front()
+                        # 禁脚本页里页内定时器/rAF 不跑, 不能 await 页内 Promise(会永久挂起); 驱动侧等两三帧
+                        fpage.wait_for_timeout(150)
                     else:
                         fpage = ctx.new_page()
                         # 离线守卫: 归档内资源由 Chromium 直接供给(不经网络层),

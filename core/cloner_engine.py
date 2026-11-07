@@ -733,7 +733,7 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
             assets.add(origin.rstrip("/") + "/favicon.ico")
             # 保真轨(MHTML 禁脚本回放)只依赖采集产物: 下载期间浏览器空闲, 先在后台页里加载起来,
             # 评分时直接截图(旧实现在评分阶段才加载 + 固定 2s 静置, 每站串行 1.5~3s)
-            if self.cfg.get("similarity", True):
+            if self.cfg.get("similarity", True) and getattr(config, "FIDELITY_PRESTART", True):
                 self._prestart_fidelity(ctx)
             results = self._materialize(assets, origin, ctx=ctx)
             self.log("INFO", f"资源池落地完成: {len(results)} 个文件 "
