@@ -2067,3 +2067,101 @@ function wrapSet(P,k){var d=Object.getOwnPropertyDescriptor(P,k);if(!d||!d.set)r
 wrapSet(Element.prototype,'innerHTML');wrapSet(Element.prototype,'outerHTML');
 var R=/ data-(?:cb|cv[\w-]*|cssom|clone[\w-]*)="[^"]*"/g;function sweep(){try{take(null);var n=0;for(var i=0;i<M.length;i++){var m=M[i];if(!m||!m.isConnected||!m.parentNode)continue;var t=m.tagName;if(t==='SCRIPT'||t==='HTML'||t==='HEAD'||t==='BODY')continue;var h=m.outerHTML;if(h.length<24||h.length>400000)continue;h=h.replace(R,'');var tc=m.textContent,s=m.parentNode.children;for(var j=0;j<s.length;j++){var e=s[j];if(e===m||mark.has(e)||e.tagName!==t||e.textContent!==tc)continue;if(e.outerHTML.replace(R,'')===h){m.remove();M[i]=null;n++;break;}}}if(n)window.__cloneDedupeRemoved=(window.__cloneDedupeRemoved||0)+n;}catch(e){}}
 window.__cloneDedupeSweep=sweep;document.addEventListener('DOMContentLoaded',function(){sweep();try{mo.disconnect();}catch(e){}});window.addEventListener('load',function(){sweep();setTimeout(sweep,800);setTimeout(sweep,2500);});}catch(e){}})();</script>"""
+
+
+# ---------------------------------------------------------------------------
+# 手机版(按 UA 分发的站): 探测判定 + 克隆入口路由
+# ---------------------------------------------------------------------------
+# 很多站对手机 UA 返回另一套页面(跳 m./3g. 子域, 或同址下发移动模板), 真机打开原站看到的
+# 是手机版, 而桌面 UA 采集的克隆在手机上只能把桌面版挤窄。判定只看两个通用信号:
+# 落地地址不同, 或页面骨架(标签 + class 词集合)几乎不重合。响应式站(同一份 HTML 靠媒体
+# 查询切换)两侧骨架高度重合, 不会误判。
+_SIG_TAG_RE = re.compile(r"<([a-zA-Z][a-zA-Z0-9-]*)\b([^>]*)>")
+_SIG_CLASS_RE = re.compile(r"""\bclass\s*=\s*(?:"([^"]*)"|'([^']*)')""", re.I)
+_SIG_SKIP_TAGS = {"html", "head", "body", "meta", "link", "script", "style", "noscript", "br", "template"}
+
+
+def dom_signature(html: str, limit: int = 6000) -> set:
+    """页面骨架词集合: 标签名与 tag.class 词(前 limit 个元素), 文本与属性值不计。"""
+    out = set()
+    body = html or ""
+    m = re.search(r"<body\b", body, re.I)
+    if m:
+        body = body[m.start():]
+    for i, t in enumerate(_SIG_TAG_RE.finditer(body)):
+        if i >= limit:
+            break
+        tag = t.group(1).lower()
+        if tag in _SIG_SKIP_TAGS:
+            continue
+        out.add(tag)
+        c = _SIG_CLASS_RE.search(t.group(2) or "")
+        if c:
+            for w in (c.group(1) or c.group(2) or "").split():
+                if not re.search(r"\d{3,}|^(active|current|cur|on|show|hide|hover|selected)$", w):
+                    out.add(f"{tag}.{w}")
+    return out
+
+
+def _edition_url_key(url: str) -> tuple:
+    p = urlsplit(url or "")
+    host = (p.hostname or "").lower()
+    if host.startswith("www."):
+        host = host[4:]
+    return host, (p.path or "/").rstrip("/") or "/"
+
+
+def separate_phone_edition(desktop_url: str, desktop_html: str, phone_url: str, phone_html: str,
+                           threshold: float = 0.45):
+    """手机 UA 下是否是另一套页面。返回 (是否, 原因说明)。"""
+    if not phone_html or len(phone_html) < 200:
+        return False, "手机 UA 页为空"
+    if _edition_url_key(desktop_url) != _edition_url_key(phone_url):
+        return True, f"手机 UA 落地地址不同: {phone_url}"
+    a, b = dom_signature(desktop_html), dom_signature(phone_html)
+    if len(a) < 8 or len(b) < 8:
+        return False, "骨架过小, 不判定"
+    sim = len(a & b) / max(1, len(a | b))
+    if sim < threshold:
+        return True, f"同址下发不同模板(骨架重合 {sim:.2f} < {threshold})"
+    return False, f"同一套页面(骨架重合 {sim:.2f})"
+
+
+PHONE_EDITION_FILE = "index.m.html"
+# 克隆入口路由: 手机 UA 打开克隆时换到手机版(与原站按 UA 分发同口径); ?clone_edition=desktop 可强制看桌面版。
+# 平板(iPadOS 默认发桌面 UA、安卓平板不带 Mobile)与原站一样留在桌面版。
+EDITION_ROUTER_SCRIPT = (
+    '<script data-clone-preview="edition-router">(function(){try{var u=navigator.userAgent||"";'
+    'if(!/iPhone|iPod|Android.+Mobile|Windows Phone|Mobile.+Firefox|HarmonyOS.+Mobile|OpenHarmony.+Mobile/i.test(u))return;'
+    'if(/[?&]clone_edition=desktop/.test(location.search))return;'
+    'var p=location.pathname,i=p.lastIndexOf("/");'
+    'location.replace(p.slice(0,i+1)+"' + PHONE_EDITION_FILE + '"+location.search+location.hash);'
+    '}catch(e){}})();</script>'
+)
+
+
+def inject_edition_router(html: str) -> str:
+    """把入口路由插到 <head> 最前(早于时间冻结/SPA 伪装等注入, 先跳转再说); 已有则不重复。"""
+    if not html or 'data-clone-preview="edition-router"' in html:
+        return html
+    m = re.search(r"<head\b[^>]*>", html, re.I)
+    at = m.end() if m else 0
+    return html[:at] + EDITION_ROUTER_SCRIPT + html[at:]
+
+
+def merge_static_tree(src: Path, dst: Path) -> int:
+    """手机版资源并入主工作区(CAS 文件名, 同名即同内容): 只拷主工作区没有的文件。"""
+    import shutil
+    n = 0
+    if not src.is_dir():
+        return 0
+    for f in src.rglob("*"):
+        if not f.is_file():
+            continue
+        target = dst / f.relative_to(src)
+        if target.exists():
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(f, target)
+        n += 1
+    return n

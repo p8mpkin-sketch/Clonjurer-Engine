@@ -80,6 +80,16 @@ VIEWPORTS = {
     "mobile": {"width": 390, "height": 844, "device_scale_factor": 2},
 }
 
+# 手机版(按 UA 分发的站): 采集时的真机仿真口径。iOS Safari UA + 触屏 + 视口 meta 生效
+PHONE_USER_AGENT = (
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 "
+    "(KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1"
+)
+PHONE_DEVICE = {"is_mobile": True, "has_touch": True}
+MOBILE_EDITION = True            # 探测原站是否按手机 UA 分发另一套页面, 是则另克隆一份手机版
+MOBILE_EDITION_SIM = 0.45        # 手机 UA 页与桌面页 class/标签集合 Jaccard 低于此值视为另一套页面
+MOBILE_EDITION_PROBE_S = 12.0    # 探测页加载上限(秒)
+
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"

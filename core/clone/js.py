@@ -873,8 +873,22 @@ INLINE_FLUID_JS = r"""
 }
 """
 
+# 原文档 doctype 原样序列化: 渲染模式(标准 / 有限怪异 / 怪异)由它决定。XHTML 1.0 Transitional
+# 等带 system id 的老 doctype 走有限怪异模式(只含行内子元素的块不计自身行高 strut), 写死成
+# <!DOCTYPE html> 会让这类块变高、版面逐段下推(cgnpc 手机版栏目标题 19.8→26.4px); 没有 doctype
+# 的页面是怪异模式, 也不能补。
+DOCTYPE_FN = r"""(d) => {
+  const t = d && d.doctype;
+  if (!t) return '';
+  const q = v => '"' + String(v).replace(/"/g, '') + '"';
+  let s = '<!DOCTYPE ' + (t.name || 'html');
+  if (t.publicId) s += ' PUBLIC ' + q(t.publicId);
+  if (t.systemId) s += (t.publicId ? ' ' : ' SYSTEM ') + q(t.systemId);
+  return s + '>\n';
+}"""
+
 OUTER_HTML_JS = r"""
-() => ('<!DOCTYPE html>\n' + document.documentElement.outerHTML)
+() => ((""" + DOCTYPE_FN + r""")(document) + document.documentElement.outerHTML)
 """
 
 # Shadow DOM 声明式序列化: outerHTML 不含影子树(Web Components/Lit/Stencil 组件内容整块丢失)。
@@ -913,9 +927,9 @@ SHADOW_SERIALIZE_JS = r"""
   const esc = v => v.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
   const attrs = Array.from(de.attributes).map(a => ' ' + a.name + '="' + esc(a.value) + '"').join('');
   const inner = de.getHTML({serializableShadowRoots: true, shadowRoots: roots});
-  return {html: '<!DOCTYPE html>\n<html' + attrs + '>' + inner + '</html>', roots: roots.length, adopted: adopted};
+  return {html: (__DOCTYPE__)(document) + '<html' + attrs + '>' + inner + '</html>', roots: roots.length, adopted: adopted};
 }
-"""
+""".replace("__DOCTYPE__", DOCTYPE_FN)
 
 # 版面块图: 可见块级元素的结构路径(tag:nth-of-type 链) → 文档坐标矩形。
 # 原站侧在纯净基准截图后采集, 克隆侧在克隆截图后采集; 两侧按路径对齐,
@@ -1564,13 +1578,13 @@ IFRAME_EXTRACT_JS = r"""
         let m;
         while ((m = re.exec(s)) !== null) add(m[2]);
       });
-      out.push({ src: abs.href, html: '<!DOCTYPE html>\n' + doc.documentElement.outerHTML,
+      out.push({ src: abs.href, html: (__DOCTYPE__)(doc) + doc.documentElement.outerHTML,
                  urls: urls, srcsets: srcsets, rawRefs: rawRefs });
     } catch (e) { return; }
   });
   return out.slice(0, 5);
 }
-"""
+""".replace("__DOCTYPE__", DOCTYPE_FN)
 
 COLLECT_LINKS_JS = r"""
 () => {
