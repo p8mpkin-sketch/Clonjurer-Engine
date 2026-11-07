@@ -57,10 +57,12 @@ UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
 # 两侧同口径: 停动画/过渡, 滚动一遍触发懒加载, 回顶
 SETTLE_CSS = ("*,*::before,*::after{animation-play-state:paused!important;"
               "transition:none!important;caret-color:transparent!important}")
+# 每步等 320ms(与引擎采集滚动同节奏): 无限推荐流在快滚下来不及续页, 原站只量到首屏长度,
+# 而用户往下滑时流会续上(克隆里冻结的就是续上后的样子), 快滚会把这当成克隆"多出来"的内容
 SCROLL_JS = r"""
 async (maxH) => {
   const h = () => Math.min(document.documentElement.scrollHeight, maxH);
-  for (let y = 0; y < h(); y += innerHeight * 0.8) { scrollTo(0, y); await new Promise(r => setTimeout(r, 120)); }
+  for (let y = 0; y < h(); y += innerHeight * 0.8) { scrollTo(0, y); await new Promise(r => setTimeout(r, 320)); }
   scrollTo(0, 0); await new Promise(r => setTimeout(r, 400));
   return document.documentElement.scrollWidth;
 }
