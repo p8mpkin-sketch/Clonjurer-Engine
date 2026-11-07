@@ -144,7 +144,7 @@ STATIC_TRACK_MARGIN = 5.0     # 保真轨领先交互轨达此分差时, 试做"
 VIEWPORT_RELOAD_EARLY = True   # 窄屏首载对照页在主页导航提交后即发起(与主页采集并行), 而非多视口采集之后
 VIEWPORT_RELOAD_EARLY_MIN_CPUS = 8  # 核数低于此值不提前: CI(4 核)实测两页并行渲染抢 CPU, 主页懒加载/多视口采集反慢,
                                     # 语料均值 46s -> 57s(固化 148 -> 198s, 多视口内联 56 -> 104s 合计)
-FIDELITY_PRESTART = True       # 保真轨 MHTML 在下载阶段后台页预加载
+FIDELITY_PRESTART = False      # 保真轨 MHTML 在下载阶段后台页预加载(默认关: CI 同时段对照里预加载页常驻到评分结束, 怀疑抢 CPU, 待复核)
 CALIB_INPLACE_GATE = True      # 像素校准先在活页就地注入预评, 不升即不做整页重渲染
 SESSION_FETCH_BUDGET = 12      # 下载阶段浏览器会话降级(批量并发直连 + 风控类串行重试)的总时限(秒)
 BACKFILL_BUDGET = 20          # 单轮渲染缺失回补的回源时限(秒)
