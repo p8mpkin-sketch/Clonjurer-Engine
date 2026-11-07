@@ -176,6 +176,7 @@ CLS_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=de
 addEventListener('resize', f); f();</script></body></html>"""
 
 
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
 class ViewportClassSwap(unittest.TestCase):
     """脚本按视口换 class(useMediaQuery 类): 克隆里没有脚本再换, 由分视口 class 运行时接管。"""
 
