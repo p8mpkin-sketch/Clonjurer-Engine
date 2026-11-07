@@ -73,7 +73,8 @@ CANVAS_IMG_FN = r"""(cv, data) => {
   const img = document.createElement('img');
   img.src = data;
   img.setAttribute('data-canvas-frozen', 'true');
-  for (const a of ['class', 'id', 'style']) { const v = cv.getAttribute(a); if (v) img.setAttribute(a, v); }
+  // 原 canvas 的全部属性照搬(class/id/style 之外还有引擎此前打的 data-cb/data-cv 等, 烘焙/分视口规则靠它们命中)
+  for (const a of cv.attributes) if (a.name !== 'width' && a.name !== 'height') img.setAttribute(a.name, a.value);
   if (cv.width && cv.height) { img.setAttribute('width', String(cv.width)); img.setAttribute('height', String(cv.height)); }
   if (!cv.style.height) img.style.height = 'auto';
   // 站点基础样式只对 img 生效的规则(img{max-width:100%} / .img-fluid 等)不该作用在原本是 canvas 的位置:
@@ -90,11 +91,19 @@ CANVAS_IMG_FN = r"""(cv, data) => {
     const r1 = img.getBoundingClientRect();
     img.remove();
     if (st === null) cv.removeAttribute('style'); else cv.setAttribute('style', st);
-    fit = Math.abs(r1.width - r0.width) <= 1 && Math.abs(r1.height - r0.height) <= 1;
+    fit = r0.width > 0 && r0.height > 0 && Math.abs(r1.width - r0.width) <= 1 && Math.abs(r1.height - r0.height) <= 1;
   } catch (e) {}
   if (!fit) {
     if (cv.clientWidth) img.style.width = cv.clientWidth + 'px';
     if (cv.clientHeight) img.style.height = cv.clientHeight + 'px';
+    // 未渲染(隐藏面板/未激活 tab/窄屏页尚未布局)量不到尺寸: 用样式表给 canvas 的计算值(px 才可信)
+    if (!cv.clientWidth || !cv.clientHeight) {
+      try {
+        const cs = getComputedStyle(cv);
+        if (!cv.clientWidth && /^[\d.]+px$/.test(cs.width)) img.style.width = cs.width;
+        if (!cv.clientHeight && /^[\d.]+px$/.test(cs.height)) img.style.height = cs.height;
+      } catch (e) {}
+    }
   }
   return img;
 }"""

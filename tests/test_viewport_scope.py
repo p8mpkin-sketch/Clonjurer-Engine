@@ -288,7 +288,8 @@ CANVAS_FREEZE_PAGE = """<style>img{max-width:100%;height:auto}.wf{width:100%;dis
 <div id="w" style="width:390px"><canvas id="a" class="wf" width="600" height="300"></canvas></div>
 <div id="box"><canvas id="b" width="60" height="20"></canvas></div>
 <div style="width:300px"><canvas id="c" class="wide" width="680" height="200"></canvas></div>
-<script>for (const id of ['a', 'b', 'c']) { const x = document.getElementById(id).getContext('2d'); x.fillStyle = 'red'; x.fillRect(0, 0, 600, 300); }</script>"""
+<div id="tab" style="display:none"><canvas id="d" width="160" height="160"></canvas></div><style>#tab canvas{width:134px;height:134px}</style>
+<script>for (const id of ['a', 'b', 'c', 'd']) { const x = document.getElementById(id).getContext('2d'); x.fillStyle = 'red'; x.fillRect(0, 0, 600, 300); }</script>"""
 
 
 @unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
@@ -311,6 +312,8 @@ class CanvasFreezeResponsive(unittest.TestCase):
                 self.assertEqual(page.evaluate(size, "b"), [120, 40])
                 self.assertEqual(page.evaluate(size, "c"), [340, 100])   # 站点 img{max-width:100%} 不截短
                 self.assertNotIn("340px", page.evaluate("document.getElementById('c').getAttribute('style')"))
+                page.evaluate("document.getElementById('tab').style.display = 'block'")   # 隐藏面板里的: 按样式表 px 定尺寸
+                self.assertEqual(page.evaluate(size, "d"), [134, 134])
                 page.evaluate("document.getElementById('w').style.width = '420px'")
                 self.assertEqual(page.evaluate(size, "a"), [420, 210])
             finally:
