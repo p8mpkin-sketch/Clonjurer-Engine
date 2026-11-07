@@ -50,6 +50,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
+import requests
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageStat
 
 try:  # 评分向量化(可选依赖): 缺失时回落纯 Python 实现, 结果一致
@@ -448,6 +449,26 @@ class ClonerEngine:
                                                            log=self.log)
 
     # ------------------------------------------------------------------
+    def _start_phone_precheck(self, ua, ctx_headers):
+        """后台线程以桌面/手机两种 UA 直连取目标页 HTML(与主采集并行, 不占浏览器): 服务端按 UA
+        分发(跳转 / 下发不同模板)在这一步就能看出来, 绝大多数响应式站据此免掉浏览器探测。"""
+        def work():
+            res = {}
+            for tag, agent in (("d", ua), ("p", config.PHONE_USER_AGENT)):
+                try:
+                    headers = dict(ctx_headers or {})
+                    headers.update({"User-Agent": agent, "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+                                    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"})
+                    r = requests.get(self._target, headers=headers, timeout=(4, 6), allow_redirects=True)
+                    ctype = r.headers.get("Content-Type", "")
+                    res[tag] = (r.url, r.text[:2_000_000]) if r.ok and "html" in ctype else None
+                except Exception:   # noqa: BLE001 直连不通(风控/证书)就交给浏览器探测
+                    res[tag] = None
+            self._phone_precheck = res
+        self._phone_precheck = None
+        self._phone_precheck_thread = threading.Thread(target=work, daemon=True)
+        self._phone_precheck_thread.start()
+
     def _probe_phone_edition(self, ua_headers):
         """手机 UA + 触屏仿真加载目标页, 返回 (落地地址, DOM)。只等到 load(封顶), 不滚动。"""
         budget = float(getattr(config, "MOBILE_EDITION_PROBE_S", 12.0))
@@ -476,14 +497,30 @@ class ClonerEngine:
         if "iphone" in (ua or "").lower() or "android" in (ua or "").lower():
             return None   # 任务本身就用手机 UA 采集
         t0 = time.monotonic()
-        try:
-            phone_url, phone_html = self._probe_phone_edition(ctx_headers)
-        except Exception as exc:   # noqa: BLE001
-            self.log("RENDER", f"手机版探测失败, 跳过: {str(exc)[:120]}")
-            return None
-        separate, why = separate_phone_edition(
-            getattr(self, "_main_final_url", self._target), self._main_dom_html,
-            phone_url, phone_html, float(getattr(config, "MOBILE_EDITION_SIM", 0.45)))
+        thr = float(getattr(config, "MOBILE_EDITION_SIM", 0.45))
+        th = getattr(self, "_phone_precheck_thread", None)
+        if th is not None:
+            th.join(timeout=8)
+        pre = getattr(self, "_phone_precheck", None) or {}
+        separate, why, phone_url = False, "", None
+        if pre.get("d") and pre.get("p"):
+            (d_url, d_html), (p_url, p_html) = pre["d"], pre["p"]
+            separate, why = separate_phone_edition(d_url, d_html, p_url, p_html, thr)
+            why = "直连比对: " + why
+            phone_url = p_url
+            # 同一份 HTML 且页内没有 UA 嗅探脚本: 不会在浏览器里再分流, 免浏览器探测
+            if not separate and re.search(r"navigator\s*\.\s*userAgent", p_html):
+                pre = {}
+        if not (pre.get("d") and pre.get("p")):
+            try:
+                phone_url, phone_html = self._probe_phone_edition(ctx_headers)
+            except Exception as exc:   # noqa: BLE001
+                self.log("RENDER", f"手机版探测失败, 跳过: {str(exc)[:120]}")
+                return None
+            separate, why = separate_phone_edition(
+                getattr(self, "_main_final_url", self._target), self._main_dom_html,
+                phone_url, phone_html, thr)
+            why = "浏览器比对: " + why
         self.log("RENDER", f"手机版探测({time.monotonic() - t0:.1f}s): {why}")
         if not separate:
             return None
@@ -771,6 +808,8 @@ class ClonerEngine:
         ai_report = None
 
         device = dict(config.PHONE_DEVICE) if self.cfg.get("device") == "phone" else {}
+        if self.cfg.get("mobile_edition", config.MOBILE_EDITION) and not self._edition_child:
+            self._start_phone_precheck(ua, ctx_headers)
         with self.pool.context(
             viewport={"width": viewport["width"], "height": viewport["height"]},
             user_agent=ua, extra_headers=ctx_headers, **device,
