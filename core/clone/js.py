@@ -143,9 +143,8 @@ DEEP_FREEZE_JS = r"""
       // 副本紧跟原节点: 保持与其它样式表的层叠先后。全部追加到 head 末尾时, 某张表的副本缺失
       // (媒体条件不匹配的表最低优先级加载, 冻结时可能还没到)会让其它表的副本反压它的原链接规则
       const own = sheet.ownerNode;
-      // 只对 head 里的原节点就地插: body 里的(CSS-in-JS 运行时样式)副本挪进 body 会改变与冻结/入场
-      // 样式的先后(aliyun 案例卡停在入场动画中途), 仍追加 head 末尾
-      if (kind === 'true' && own && own.isConnected && own.parentNode === document.head) own.after(style);
+      // (body 里的原节点同样就地插: 副本与原表语义等价, 不改层叠; 窄屏变体的结构比对不计 <style>, 见 CV_PATHS_JS)
+      if (kind === 'true' && own && own.isConnected && own.parentNode) own.after(style);
       else head.appendChild(style);
       result.css++;
     } catch (err) {
@@ -584,10 +583,13 @@ CV_RECORD_JS = CV_RECORD_JS.replace("__CV_PATH__", CV_PATH_FN).replace("__CV_ATT
 
 # 窄屏重载页的内联样式表: {路径: [标签, class, style]}
 CV_PATHS_JS = r"""() => {
+  // 子元素结构签名不计样式/脚本类节点: 引擎就地插的 CSSOM 副本(<style data-cssom>)会让桌面页
+  // 与窄屏首载页同一容器的子元素序列不同, 被误判为"随视口换结构", 整页并列插入窄屏版(aliyun 首页 ×3)
+  const NONVIS = new Set(['STYLE', 'LINK', 'SCRIPT', 'NOSCRIPT', 'META', 'TEMPLATE']);
   const out = {}, pathOf = """ + CV_PATH_FN + r""";
   const els = Array.from(document.body ? document.body.querySelectorAll('*') : []).slice(0, 20000);
   for (const e of els) out[pathOf(e)] = [e.tagName, String(e.className && e.className.baseVal !== undefined ? e.className.baseVal : e.className || ''), e.getAttribute('style') || '',
-    Array.from(e.children, c => c.tagName).join(',').slice(0, 400), (""" + CV_ATTR_FN + r""")(e)];
+    Array.from(e.children, c => c.tagName).filter(t => !NONVIS.has(t)).join(',').slice(0, 400), (""" + CV_ATTR_FN + r""")(e)];
   return out;
 }"""
 
