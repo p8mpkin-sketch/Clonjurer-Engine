@@ -204,5 +204,41 @@ class WorkflowGuards(unittest.TestCase):
                 self.assertIn(d, ci.BUILD_TARGETS)
 
 
+class ToolchainModuleGuards(unittest.TestCase):
+    def test_no_duplicate_top_level_defs(self):
+        """合并分支时自动合并曾把 build_android_shell 等整段重复一份, 后一份(旧版)静默覆盖前一份。"""
+        import ast
+        tree = ast.parse((ROOT / "core" / "uir" / "toolchain.py").read_text(encoding="utf-8"))
+        names = [n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.ClassDef))]
+        names += [t.id for n in tree.body if isinstance(n, ast.Assign) for t in n.targets if isinstance(t, ast.Name)]
+        dup = sorted({x for x in names if names.count(x) > 1})
+        self.assertEqual(dup, [], f"toolchain.py 顶层重复定义: {dup}")
+
+    def test_android_shell_picks_stable_platform(self):
+        """runner 上同时有 android-36 与 android-37.2 时, targetSdk 必须取整数 API。"""
+        with tempfile.TemporaryDirectory() as d:
+            for name in ("android-34", "android-36", "android-37.2"):
+                Path(d, "platforms", name).mkdir(parents=True)
+                Path(d, "platforms", name, "android.jar").write_bytes(b"")
+            Path(d, "build-tools", "37.0.0").mkdir(parents=True)
+            app = Path(d, "app")
+            (app / "src").mkdir(parents=True)
+            (app / "assets").mkdir()
+            (app / "AndroidManifest.xml").write_text("<manifest/>")
+            seen = []
+
+            def fake_run(cmd, cwd, env, log, timeout, redact=()):
+                seen.append(cmd)
+                return 1, "stop"
+            with mock.patch.object(toolchain, "find_android_sdk", return_value=d), \
+                    mock.patch.object(toolchain, "_which", return_value="/usr/bin/javac"), \
+                    mock.patch("os.access", return_value=True), \
+                    mock.patch.object(toolchain, "_run", side_effect=fake_run):
+                toolchain.build_android_shell(app, log=lambda m: None)
+        link = seen[0]
+        self.assertEqual(link[link.index("--target-sdk-version") + 1], "36")
+        self.assertIn("android-36", link[link.index("-I") + 1])
+
+
 if __name__ == "__main__":
     unittest.main()
