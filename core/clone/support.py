@@ -691,7 +691,9 @@ _BLOCK_STRONG = re.compile(
     r"安全验证|人机验证|滑动验证|拖动(?:下方)?滑块|请完成(?:下方)?验证|"
     r"Just a moment\.\.\.|Checking (?:if the site connection is secure|your browser)|"
     r"Attention Required|unusual traffic|are you a robot|verify (?:that )?you are (?:a )?human|"
-    r"Access Denied|Too Many Requests|Request blocked|Pardon Our Interruption", re.I)
+    r"Access Denied|Too Many Requests|Request blocked|Pardon Our Interruption|"
+    # Cloudflare/Turnstile 新版挑战页: "Verify you are human" 在挑战 iframe 里, 主文档只有这几句
+    r"Performing security verification|Verifying you are human|Enable JavaScript and cookies to continue", re.I)
 # 弱话术: 正常页面也常见(登录页本身就有"验证码"), 只在采集侧新出现、且整页文字很少时才算
 _BLOCK_WEAK = re.compile(r"请稍后(?:再试|重试)|系统繁忙|请(?:先)?登录后|登录后(?:查看|访问)|验证码|切换账号|captcha", re.I)
 _BLOCK_MAX_CHARS = 600

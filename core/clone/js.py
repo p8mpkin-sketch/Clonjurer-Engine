@@ -540,6 +540,9 @@ CV_PATHS_JS = r"""() => {
   const els = Array.from(document.body ? document.body.querySelectorAll('*') : []).slice(0, 20000);
   for (const e of els) out[pathOf(e)] = [e.tagName, String(e.className && e.className.baseVal !== undefined ? e.className.baseVal : e.className || ''), e.getAttribute('style') || '',
     Array.from(e.children, c => c.tagName).join(',').slice(0, 400), (""" + CV_ATTR_FN + r""")(e)];
+  // 根元素只记 class(加载时按宽度给 <html>/<body> 打的 _mobile / is-mobile 类标记)
+  for (const [k, e] of [['@html', document.documentElement], ['@body', document.body]])
+    if (e) out[k] = [e.tagName, e.getAttribute('class') || '', '', '', ''];
   return out;
 }"""
 
@@ -720,6 +723,21 @@ CV_EMIT_JS = r"""
       const delta = [...a].filter(x => !b.has(x)).concat([...b].filter(x => !a.has(x)));
       if (delta.some(x => STATE.test(x))) return;
       alt[t] = v;
+    });
+    if (Object.keys(alt).length) swaps.push([el, alt]);
+  });
+  // <html>/<body>: 缩放快照不含根元素; 站点常在加载时按宽度给根元素打设备类(DevDocs 的 _mobile), resize 不再改,
+  // 只能看窄屏首载页。根元素上的轮播/曝光类状态极少, 仍排除状态类 token
+  [['@html', document.documentElement], ['@body', document.body]].forEach(([k, el]) => {
+    if (!el) return;
+    const cd = el.getAttribute('class') || '', alt = {};
+    tags.forEach(t => {
+      const L = loads[t] && loads[t][k];
+      if (!L || L[0] !== el.tagName || L[1] === cd || /[<>"]/.test(L[1])) return;
+      const a = new Set(cd.split(/\s+/)), b = new Set(L[1].split(/\s+/));
+      const delta = [...a].filter(x => !b.has(x)).concat([...b].filter(x => !a.has(x)));
+      if (delta.some(x => STATE.test(x))) return;
+      alt[t] = L[1];
     });
     if (Object.keys(alt).length) swaps.push([el, alt]);
   });

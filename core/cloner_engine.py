@@ -1194,7 +1194,7 @@ class ClonerEngine:
         pages = dict(getattr(self, "_cv_pages", []) or [])
         variants = {}                      # path -> {tag: html}
         for tag, other in loads.items():
-            diff = sorted(p for p, v in main.items() if p and p in other
+            diff = sorted(p for p, v in main.items() if p and not p.startswith("@") and p in other
                           and other[p][0] == v[0] and other[p][3] != v[3])
             top = []
             for p in diff:
