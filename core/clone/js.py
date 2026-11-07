@@ -143,7 +143,9 @@ DEEP_FREEZE_JS = r"""
       // 副本紧跟原节点: 保持与其它样式表的层叠先后。全部追加到 head 末尾时, 某张表的副本缺失
       // (媒体条件不匹配的表最低优先级加载, 冻结时可能还没到)会让其它表的副本反压它的原链接规则
       const own = sheet.ownerNode;
-      if (kind === 'true' && own && own.parentNode && own.isConnected) own.after(style);
+      // 只对 head 里的原节点就地插: body 里的(CSS-in-JS 运行时样式)副本挪进 body 会改变与冻结/入场
+      // 样式的先后(aliyun 案例卡停在入场动画中途), 仍追加 head 末尾
+      if (kind === 'true' && own && own.isConnected && own.parentNode === document.head) own.after(style);
       else head.appendChild(style);
       result.css++;
     } catch (err) {
