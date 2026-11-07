@@ -31,16 +31,36 @@ LAZY_JS = r"""
 WAIT_SHEETS_JS = r"""
 (capMs) => new Promise(res => {
   const t0 = performance.now();
-  const pending = () => Array.from(document.querySelectorAll('link[rel~="stylesheet" i][href]')).filter(l => {
+  const isPending = l => {
     if (l.disabled) return false;
     if (!l.sheet) return true;
     try { return !l.sheet.cssRules; } catch (e) { return false; }   // 跨域可读性无关加载
+  };
+  const links = Array.from(document.querySelectorAll('link[rel~="stylesheet" i][href]')).filter(isPending);
+  // 不指望浏览器的最低优先级队列: 同时直接 fetch 一份, 先到先用(到了就紧跟原链接插副本)
+  let fetched = 0;
+  const absolutize = (text, base) => text.replace(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^'")\s]+))\s*\)/g, (m, d, s1, b) => {
+    const q = d !== undefined ? '"' : (s1 !== undefined ? "'" : '');
+    const u = (d !== undefined ? d : (s1 !== undefined ? s1 : b)).trim();
+    if (/^(data:|blob:|about:|#|%23|https?:)/i.test(u)) return m;
+    try { return 'url(' + q + new URL(u, base).href + q + ')'; } catch (e) { return m; }
   });
+  const jobs = links.map(l => fetch(l.href, {credentials: 'include'}).then(r => r.ok ? r.text() : '').then(text => {
+    if (!text || !isPending(l) || !l.isConnected || /<\/?(html|body|style)\b/i.test(text)) return;
+    const media = (l.getAttribute('media') || '').trim();
+    const st = document.createElement('style');
+    st.setAttribute('data-cssom', 'fetched');
+    text = absolutize(text, l.href);
+    st.textContent = (media && media.toLowerCase() !== 'all') ? '@media ' + media + ' {\n' + text + '\n}\n' : text;
+    l.after(st);
+    fetched++;
+  }).catch(() => 0));
   const tick = () => {
-    const n = pending().length;
-    if (!n || performance.now() - t0 > capMs) res({pending: n, ms: Math.round(performance.now() - t0)});
+    const n = links.filter(l => isPending(l) && !(l.nextElementSibling && l.nextElementSibling.getAttribute('data-cssom') === 'fetched')).length;
+    if (!n || performance.now() - t0 > capMs) res({pending: n, fetched: fetched, ms: Math.round(performance.now() - t0)});
     else setTimeout(tick, 100);
   };
+  if (!links.length) return res({pending: 0, fetched: 0, ms: 0});
   tick();
 })
 """
@@ -94,6 +114,9 @@ DEEP_FREEZE_JS = r"""
     try {
       if (sheet.disabled) return;
       if (sheet.ownerNode && sheet.ownerNode.hasAttribute && sheet.ownerNode.hasAttribute('data-clone-bake')) return;
+      // 冻结前已 fetch 补过副本(WAIT_SHEETS_JS)的表不再重复
+      { const nx = sheet.ownerNode && sheet.ownerNode.nextElementSibling;
+        if (nx && nx.getAttribute && nx.getAttribute('data-cssom') === 'fetched') return; }
       const rules = sheet.cssRules;
       if (!rules || !rules.length) return;
       let text = '';

@@ -1718,8 +1718,9 @@ class ClonerEngine:
             self.log("RENDER", f"表单激活: focus/blur {activated} 个输入控件")
         with suppress(Exception):
             ws_ = page.evaluate(WAIT_SHEETS_JS, 4000) or {}
-            if ws_.get("ms", 0) > 50 or ws_.get("pending"):
-                self.log("RENDER", f"冻结前等样式表: {ws_.get('ms')}ms, 仍未到 {ws_.get('pending', 0)} 张")
+            if ws_.get("ms", 0) > 50 or ws_.get("pending") or ws_.get("fetched"):
+                self.log("RENDER", f"冻结前等样式表: {ws_.get('ms')}ms, 直取补副本 {ws_.get('fetched', 0)} 张,"
+                                   f" 仍未到 {ws_.get('pending', 0)} 张")
         counts = _safe_eval(DEEP_FREEZE_JS)
         if layout_stable:
             # DEEP_FREEZE 已停掉定时器: 此后页面脚本不再改 DOM, 回撤结果能留到序列化
