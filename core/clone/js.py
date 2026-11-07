@@ -65,6 +65,49 @@ WAIT_SHEETS_JS = r"""
 })
 """
 
+# Canvas 固化成 <img>: 保留原 class/id/内联样式, width/height 属性取位图尺寸(给出固有宽高比), 未内联定高时
+# height:auto —— 响应式 canvas(class 给 w-full / calc 宽)在别的视口仍按比例伸缩。只有原地试放后尺寸与 canvas
+# 不符(样式靠 canvas 标签选择器等)才回落成采集视口下的固定 px(旧做法: 窄屏变体里写死 390 宽的 px,
+# 420/820 宽下逐图偏短、下文累积上移)
+CANVAS_IMG_FN = r"""(cv, data) => {
+  const img = document.createElement('img');
+  img.src = data;
+  img.setAttribute('data-canvas-frozen', 'true');
+  // 原 canvas 的全部属性照搬(class/id/style 之外还有引擎此前打的 data-cb/data-cv 等, 烘焙/分视口规则靠它们命中)
+  for (const a of cv.attributes) if (a.name !== 'width' && a.name !== 'height') img.setAttribute(a.name, a.value);
+  if (cv.width && cv.height) { img.setAttribute('width', String(cv.width)); img.setAttribute('height', String(cv.height)); }
+  if (!cv.style.height) img.style.height = 'auto';
+  // 站点基础样式只对 img 生效的规则(img{max-width:100%} / .img-fluid 等)不该作用在原本是 canvas 的位置:
+  // 把 canvas 的计算值 min/max 尺寸内联到 img(vite 比容器宽 2.5rem 的 canvas 被 max-width:100% 截短)
+  try {
+    const cs = getComputedStyle(cv);
+    for (const k of ['max-width', 'min-width', 'max-height', 'min-height']) if (!cv.style.getPropertyValue(k)) img.style.setProperty(k, cs.getPropertyValue(k));
+  } catch (e) {}
+  let fit = false;
+  try {
+    const r0 = cv.getBoundingClientRect(), st = cv.getAttribute('style');
+    cv.before(img);
+    cv.style.setProperty('display', 'none', 'important');
+    const r1 = img.getBoundingClientRect();
+    img.remove();
+    if (st === null) cv.removeAttribute('style'); else cv.setAttribute('style', st);
+    fit = r0.width > 0 && r0.height > 0 && Math.abs(r1.width - r0.width) <= 1 && Math.abs(r1.height - r0.height) <= 1;
+  } catch (e) {}
+  if (!fit) {
+    if (cv.clientWidth) img.style.width = cv.clientWidth + 'px';
+    if (cv.clientHeight) img.style.height = cv.clientHeight + 'px';
+    // 未渲染(隐藏面板/未激活 tab/窄屏页尚未布局)量不到尺寸: 用样式表给 canvas 的计算值(px 才可信)
+    if (!cv.clientWidth || !cv.clientHeight) {
+      try {
+        const cs = getComputedStyle(cv);
+        if (!cv.clientWidth && /^[\d.]+px$/.test(cs.width)) img.style.width = cs.width;
+        if (!cv.clientHeight && /^[\d.]+px$/.test(cs.height)) img.style.height = cs.height;
+      } catch (e) {}
+    }
+  }
+  return img;
+}"""
+
 DEEP_FREEZE_JS = r"""
 () => {
   const result = { lazy: 0, css: 0, crossOriginSheets: 0, canvas: 0, forms: 0, revealed: 0 };
@@ -167,12 +210,7 @@ DEEP_FREEZE_JS = r"""
     try {
       const data = cv.toDataURL('image/png');
       if (data && data.length > 128) {
-        const img = document.createElement('img');
-        img.src = data;
-        img.setAttribute('data-canvas-frozen', 'true');
-        if (cv.clientWidth) img.style.width = cv.clientWidth + 'px';
-        if (cv.clientHeight) img.style.height = cv.clientHeight + 'px';
-        cv.replaceWith(img);
+        cv.replaceWith((__CANVAS_IMG__)(cv, data));
         result.canvas++;
       }
     } catch (err) {
@@ -200,7 +238,7 @@ DEEP_FREEZE_JS = r"""
   });
   return result;
 }
-"""
+""".replace("__CANVAS_IMG__", CANVAS_IMG_FN)
 
 # 表单激活: focus/blur 触发懒加载样式与占位符逻辑(不点击, 防止误提交/误导航)
 # 视觉媒体快照(纯净基准截图之后、DOM 改动之前执行):
@@ -646,14 +684,7 @@ ALT_EXTRACT_JS = r"""(paths) => {
       try {
         const data = cv.toDataURL('image/png'), dst = cvc[k];
         if (!dst || !data || data.length <= 128) return;
-        const img = document.createElement('img');
-        img.src = data;
-        img.setAttribute('data-canvas-frozen', 'true');
-        for (const a of ['class', 'id']) if (cv.getAttribute(a)) img.setAttribute(a, cv.getAttribute(a));
-        if (cv.getAttribute('style')) img.setAttribute('style', cv.getAttribute('style'));
-        if (cv.clientWidth) img.style.width = cv.clientWidth + 'px';
-        if (cv.clientHeight) img.style.height = cv.clientHeight + 'px';
-        dst.replaceWith(img);
+        dst.replaceWith((__CANVAS_IMG__)(cv, data));
       } catch (e) {}
     });
     c.querySelectorAll('script,noscript').forEach(x => x.remove());
@@ -678,7 +709,7 @@ ALT_EXTRACT_JS = r"""(paths) => {
     out[p] = [c.outerHTML, (el.innerText || '').trim().length, el.getElementsByTagName('*').length];
   }
   return out;
-}"""
+}""".replace("__CANVAS_IMG__", CANVAS_IMG_FN)
 
 # 主页同路径子树的体量(文本长度/元素数), 判断窄屏版是"换了结构"还是"还没加载完"
 SUBTREE_SIZE_JS = r"""(paths) => {
@@ -1001,8 +1032,17 @@ INLINE_FLUID_JS = r"""
         for (const c of slides) plan.push([c, 'width', (100 / k).toFixed(4) + '%']);
         out.track++;
       } else if (near(w, pw)) {
-        plan.push([el, 'width', '100%']);
-        out.width++;
+        // 父容器宽若由本元素撑出(父是 inline-block / 自动宽的 flex 项 / 浮动 / 绝对定位收缩包裹):
+        // 改 100% 成了循环百分比, 宽度退回由内容决定(ant.design 二维码 160px 容器被 img 撑到 186)。
+        // 临时把本元素缩到 1px 看父容器跟不跟着缩, 跟着缩的不改
+        const st = el.getAttribute('style');
+        el.style.setProperty('width', '1px', 'important');
+        const pw1 = inner(parent);
+        el.setAttribute('style', st);
+        if (near(pw1, pw)) {
+          plan.push([el, 'width', '100%']);
+          out.width++;
+        }
       }
     }
     // 位移: translate(-m × 单页宽) → 按自身宽度的百分比(单页宽 = 容器宽或首个子项宽)

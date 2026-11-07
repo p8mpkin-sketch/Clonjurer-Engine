@@ -321,6 +321,66 @@ class ViewportAttrSwap(unittest.TestCase):
                 b.close()
 
 
+CANVAS_FREEZE_PAGE = """<style>img{max-width:100%;height:auto}.wf{width:100%;display:block}.wide{width:calc(100% + 40px);display:block}#box canvas{width:120px;height:40px}</style>
+<div id="w" style="width:390px"><canvas id="a" class="wf" width="600" height="300"></canvas></div>
+<div id="box"><canvas id="b" width="60" height="20"></canvas></div>
+<div style="width:300px"><canvas id="c" class="wide" width="680" height="200"></canvas></div>
+<div id="tab" style="display:none"><canvas id="d" width="160" height="160"></canvas></div><style>#tab canvas{width:134px;height:134px}</style>
+<script>for (const id of ['a', 'b', 'c', 'd']) { const x = document.getElementById(id).getContext('2d'); x.fillStyle = 'red'; x.fillRect(0, 0, 600, 300); }</script>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class CanvasFreezeResponsive(unittest.TestCase):
+    """canvas 固化的 img 按宽高比随容器伸缩; 只靠 canvas 标签选择器定尺寸的回落成固定 px。"""
+
+    def test_frozen_canvas_keeps_ratio(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page()
+                page.set_content(CANVAS_FREEZE_PAGE)
+                alt = page.evaluate(ce.ALT_EXTRACT_JS, ["div:1"])
+                self.assertIn('class="wf"', alt["div:1"][0])
+                self.assertNotIn("390px", alt["div:1"][0].split("data-canvas-frozen", 1)[1])
+                page.evaluate(ce.DEEP_FREEZE_JS)
+                size = "id => { const r = document.getElementById(id).getBoundingClientRect(); return [r.width, r.height]; }"
+                self.assertEqual(page.evaluate(size, "a"), [390, 195])
+                self.assertEqual(page.evaluate(size, "b"), [120, 40])
+                self.assertEqual(page.evaluate(size, "c"), [340, 100])   # 站点 img{max-width:100%} 不截短
+                self.assertNotIn("340px", page.evaluate("document.getElementById('c').getAttribute('style')"))
+                page.evaluate("document.getElementById('tab').style.display = 'block'")   # 隐藏面板里的: 按样式表 px 定尺寸
+                self.assertEqual(page.evaluate(size, "d"), [134, 134])
+                page.evaluate("document.getElementById('w').style.width = '420px'")
+                self.assertEqual(page.evaluate(size, "a"), [420, 210])
+            finally:
+                b.close()
+
+
+FLUID_SELF_SIZED = """<div style="display:inline-block;padding:10px"><div id="fixed" style="width:160px;height:20px;padding:12px;box-sizing:border-box">
+<i style="display:block;width:134px;height:10px"></i></div></div>
+<div style="width:400px"><div id="full" style="width:400px;height:10px"></div></div>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class InlineFluidSelfSized(unittest.TestCase):
+    """父容器宽由本元素撑出时不改 100%(循环百分比); 父容器宽独立时照改。"""
+
+    def test_skip_when_parent_shrink_wraps(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page()
+                page.set_content(FLUID_SELF_SIZED)
+                out = page.evaluate(ce.INLINE_FLUID_JS)
+                self.assertEqual(out["width"], 1)
+                self.assertIn("160px", page.evaluate("document.getElementById('fixed').getAttribute('style')"))
+                self.assertIn("100%", page.evaluate("document.getElementById('full').getAttribute('style')"))
+            finally:
+                b.close()
+
+
 class CalibInjection(unittest.TestCase):
     def test_put_calib_band_wrapped(self):
         eng = ce.ClonerEngine.__new__(ce.ClonerEngine)
