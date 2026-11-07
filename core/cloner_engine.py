@@ -3212,6 +3212,27 @@ class ClonerEngine:
                            f"评分 {before}→{after}")
         return detail, clone_text
 
+    def _calib_inplace_score(self, page, css: str, original, orig_text: str):
+        """把候选覆盖样式注入活页(不重载)截图评分后撤掉; 失败返回 None(按旧路径重渲染)。"""
+        tmp = self.ws / "_calib_probe.png"
+        try:
+            page.evaluate("""(css) => { const s = document.createElement('style'); s.id = '__cl_calib_probe';
+                s.textContent = css; document.head.appendChild(s); }""", band_wrap(css, self._band_floor))
+            with suppress(Exception):
+                page.evaluate("() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))")
+            self._full_shot(page, tmp, "校准预评")
+            text = page.evaluate(TEXT_EXTRACT_JS) or ""
+            d = compute_visual_similarity(original, tmp, orig_text=orig_text, clone_text=text,
+                                          prime_calibration=False)
+            return (d or {}).get("score")
+        except Exception:
+            return None
+        finally:
+            with suppress(Exception):
+                page.evaluate("() => { const s = document.getElementById('__cl_calib_probe'); if (s) s.remove(); }")
+            with suppress(OSError):
+                tmp.unlink()
+
     def _calib_style(self, css: str) -> str:
         """校准覆盖是按采集视口测出来的尺寸/底色: 限定在采集视口断点区间内。"""
         return f'<style data-clone-calib>{band_wrap(css, self._band_floor)}</style>'
@@ -3739,6 +3760,15 @@ class ClonerEngine:
                                         cal_cells = []
                                 cal_css = pixel_calibrator.element_css(page, cal_cells) \
                                     if cal_cells else ""
+                                if cal_css and config.CALIB_INPLACE_GATE:
+                                    # 就地预评: 覆盖样式直接注入当前活页重截图评分, 不升就不付整页重渲染
+                                    # (真实任务日志 58 次像素校准 44 次回滚, 每次白付一次 加载+滚动+静置)
+                                    pre = self._calib_inplace_score(page, cal_css, original, orig_text)
+                                    if pre is not None and pre <= (detail.get('score') or 0):
+                                        self.log("RENDER", f"像素校准就地预评未提升"
+                                                 f"({detail.get('score')}→{pre}), 跳过重渲染")
+                                        self._calibrations = 2
+                                        cal_css = ""
                                 if cal_css:
                                     # 累积(第二轮在已校准页上测得的是新增差异格)并持久化,
                                     # 后续修复轮 _localize 重写页面时重新注入, 不被覆盖
