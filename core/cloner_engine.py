@@ -890,6 +890,10 @@ class ClonerEngine:
             # ---- CAS 并发下载 + CSS 递归解析(requests -> 浏览器会话降级) ----
             self._set(progress=30, stage="CAS并发下载")
             assets.add(origin.rstrip("/") + "/favicon.ico")
+            # 保真轨(MHTML 禁脚本回放)只依赖采集产物: 下载期间浏览器空闲, 先在后台页里加载起来,
+            # 评分时直接截图(旧实现在评分阶段才加载 + 固定 2s 静置, 每站串行 1.5~3s)
+            if self.cfg.get("similarity", True):
+                self._prestart_fidelity(ctx)
             results = self._materialize(assets, origin, ctx=ctx)
             self.log("INFO", f"资源池落地完成: {len(results)} 个文件 "
                              f"(浏览器会话救回 {self.downloader.browser_rescues} 个)")
@@ -1014,6 +1018,11 @@ class ClonerEngine:
                 detail = best["detail"]
                 score = detail["score"]
 
+            fp_left = getattr(self, "_fid_page", None)   # 交互轨已够高、保真轨没用上的预加载页
+            if fp_left is not None:
+                self._fid_page = None
+                with suppress(Exception):
+                    fp_left.close()
             if want_score and detail is not None:
                 self._write_final_diff()
                 with suppress(Exception):
@@ -2305,11 +2314,15 @@ class ClonerEngine:
 
             # L2: requests 被拒的资源用浏览器会话逐个降级重试(同线程, Playwright 线程亲和)
             if ctx is not None and failed_for_browser:
-                for job in failed_for_browser[:30]:
+                # 批量: 带会话 Cookie 并发直连, 风控类拒绝才串行走浏览器会话(旧实现 30 个逐个串行)
+                batch = failed_for_browser[:30]
+                got = self._session_fetch(ctx, [j["url"] for j in batch], referer=origin + "/")
+                for job in batch:
                     if len(results) >= config.MAX_ASSETS_PER_TASK:
                         break
-                    out = self.downloader.fetch_via_browser(
-                        job["url"], ctx.request, referer=job.get("referer") or origin + "/")
+                    out = got.get(job["url"])
+                    if out is None:
+                        continue
                     out = self._normalize_out(out)
                     if not out["ok"]:
                         continue
@@ -2349,6 +2362,76 @@ class ClonerEngine:
                 with suppress(OSError):
                     target.write_text(rewritten, encoding="utf-8")
         return results
+
+    @staticmethod
+    def _fidelity_guard(route):
+        """保真轨离线守卫: 归档内资源由 Chromium 直接供给(不经网络层), 归档外的引用一律中止。"""
+        try:
+            if route.request.url.startswith(("file:", "data:", "blob:", "cid:")):
+                route.continue_()
+            else:
+                route.abort()
+        except Exception:
+            with suppress(Exception):
+                route.abort()
+
+    def _prestart_fidelity(self, ctx):
+        """后台页非阻塞加载 capture.mhtml(只等到提交), 供 _render_fidelity 接手。"""
+        mh = self.ws / "capture.mhtml"
+        if self._fidelity_rendered or not mh.is_file() or getattr(self, "_fid_page", None) is not None:
+            return
+        fpage = None
+        try:
+            fpage = ctx.new_page()
+            fpage.route("**/*", ClonerEngine._fidelity_guard)
+            fpage.goto("file://" + str(mh), wait_until="commit", timeout=15000)
+            self._fid_page, self._fid_t0 = fpage, time.monotonic()
+        except Exception as exc:
+            with suppress(Exception):
+                if fpage is not None:
+                    fpage.close()
+            self._fid_page = None
+            self.log("WARN", f"保真轨预加载失败(评分时再加载): {str(exc)[:120]}")
+
+    @staticmethod
+    def _settle_static(page, t0: float, min_age_ms: int = 2000, cap_ms: int = 2000):
+        """禁脚本页(MHTML)截图前静置: 页内定时器不跑, DOM 静置探针等不到回调只会等满上限;
+        这里改为页龄 ≥ min_age(让 CSS 入场动画走完, 与旧的 2s 静置同口径)且图片/字体就绪即走。"""
+        end = time.monotonic() + cap_ms / 1000
+        while True:
+            age = (time.monotonic() - t0) * 1000
+            ready = False
+            with suppress(Exception):
+                ready = bool(page.evaluate(
+                    "() => document.readyState === 'complete' && (!document.fonts || document.fonts.status === 'loaded')"
+                    " && Array.from(document.images).every(i => i.complete)"))
+            if (ready and age >= min_age_ms) or time.monotonic() >= end:
+                return
+            page.wait_for_timeout(100)
+
+    def _session_fetch(self, ctx, urls, referer: str = None, budget: float = None) -> dict:
+        """批量会话补抓(见 SmartDownloader.fetch_session_many): 带活体 Cookie 并发直连, 风控类拒绝
+        才串行走浏览器会话。活体期浏览器确实加载成功过的 URL 直连失败(含同源网络层错误)也再试会话:
+        那是对非浏览器客户端的拒绝, 不是资源不存在。"""
+        cookies = []
+        if ctx is not None:
+            with suppress(Exception):
+                cookies = ctx.cookies()
+        live = getattr(self, "_live_seen", None) or {}
+        page_host = urlsplit(self._target).hostname or ""
+
+        def browser_ok(url, out):
+            st = out.get("status")
+            if st in smart_downloader._SESSION_RETRY_STATUS:
+                return True
+            if url in live:
+                return st is not None or (urlsplit(url).hostname or "") == page_host
+            return False
+
+        deadline = time.monotonic() + float(budget if budget is not None else config.SESSION_FETCH_BUDGET)
+        return self.downloader.fetch_session_many(
+            urls, ctx.request if ctx is not None else None, referer=referer or self._target,
+            cookies=cookies, deadline=deadline, browser_ok=browser_ok)
 
     def _fetch_asset(self, job: dict) -> dict:
         """L1 直连下载(线程池内执行, 禁止触碰 Playwright 对象)。"""
@@ -2465,12 +2548,15 @@ class ClonerEngine:
             if len(candidates) >= 30:
                 break
         added = 0
+        need = [u for u in candidates if u not in self._live_bodies]
+        fetched = self._session_fetch(ctx, need, budget=config.BACKFILL_BUDGET) if need else {}
         for url, raw in candidates.items():
             if len(results) >= config.MAX_ASSETS_PER_TASK:
                 break
             pre = self._live_bodies.get(url)
-            out = dict(pre) if pre is not None else self.downloader.fetch_via_browser(
-                url, ctx.request, referer=self._target)
+            out = dict(pre) if pre is not None else fetched.get(url)
+            if out is None:
+                continue
             out = self._normalize_out(out)
             if not out["ok"]:
                 continue
@@ -2508,52 +2594,26 @@ class ClonerEngine:
                 continue
             missing.append(url)
         added = 0
-        # 浏览器会话自有熔断(requests 被拒的主机浏览器可能仍可达, 不沿用下载阶段熔断):
-        # 串行回补里同一主机网络层连续失败即跳过余下, 免逐个空等超时
-        b_fail = {}
         # 已取回响应体的不占回补名额(本地读取, 不走网络); 名额只限需要真回源的
         missing.sort(key=lambda u: u not in self._live_bodies)
-        # 没有现成响应体的: 信标不回源; 第三方先并发直连预取(同 _failed_backfill), 直连拿不到的再串行走会话
+        # 没有现成响应体的: 信标不回源; 其余一次批量会话补抓(并发直连带 Cookie, 风控类再走会话),
+        # 旧实现同源 URL 逐个串行走浏览器会话(aliyun 活体回补 29s)
         missing = [u for u in missing if u in self._live_bodies or not beacon_like(u)]
         net_urls = [u for u in missing if u not in self._live_bodies][:config.LIVE_HARVEST_MAX]
-        third = {u for u in net_urls if urlsplit(u).netloc != page_netloc}
-        prefetched = {}
-        if third:
-            ex = ThreadPoolExecutor(max_workers=8, thread_name_prefix="live-prefetch")
-            try:
-                futs = {ex.submit(self.downloader.fetch_direct, u, self._target): u for u in third}
-                done, _ = _wait_futures(list(futs), timeout=config.BACKFILL_BUDGET)
-                for f in done:
-                    with suppress(Exception):
-                        prefetched[futs[f]] = f.result()
-            finally:
-                ex.shutdown(wait=False, cancel_futures=True)
-        net_left = config.LIVE_HARVEST_MAX
+        net_set = set(net_urls)
+        missing = [u for u in missing if u in self._live_bodies or u in net_set]
+        fetched = self._session_fetch(ctx, net_urls, budget=config.BACKFILL_BUDGET) if net_urls else {}
         cap = config.MAX_ASSETS_PER_TASK + config.RENDER_ASSET_RESERVE
+        css_children = []
         for url in missing:
             if len(results) >= cap:
                 break
-            if url not in self._live_bodies:
-                if net_left <= 0:
-                    break
-                net_left -= 1
-            host = urlsplit(url).hostname or ""
-            if b_fail.get(host, 0) >= config.HOST_FAIL_TRIP:
-                continue
             pre = self._live_bodies.get(url)
-            if pre is None and url in third:
-                got = prefetched.get(url)
-                if got is not None and got.get("ok"):
-                    pre = got
-                elif got is not None and "HTTP 4" not in str(got.get("error")):
-                    continue       # 直连超时/连不上: 会话也救不回, 不串行空等
-            out = dict(pre) if pre is not None else self.downloader.fetch_via_browser(
-                url, ctx.request, referer=self._target)
+            out = dict(pre) if pre is not None else fetched.get(url)
+            if out is None:
+                continue
             out = self._normalize_out(out)
             if not out["ok"]:
-                if not str(out.get("error") or "").startswith(("HTTP", "空响应体", "oversize",
-                                                               "content-type")):
-                    b_fail[host] = b_fail.get(host, 0) + 1
                 continue
             info = self._store(out)
             results[out["url"]] = info
@@ -2563,12 +2623,20 @@ class ClonerEngine:
                 for raw, absolute in parse_css_refs(text, out["url"]):
                     if absolute in results or absolute in self._live_seen:
                         continue
-                    pre = self._live_bodies.get(absolute)
-                    child = dict(pre) if pre is not None else self.downloader.fetch_via_browser(
-                        absolute, ctx.request, referer=out["url"])
-                    child = self._normalize_out(child)
-                    if child["ok"]:
-                        results[child["url"]] = self._store(child)
+                    css_children.append((absolute, out["url"]))
+        if css_children:
+            need = [a for a, _r in dict(css_children).items() if a not in self._live_bodies]
+            got = self._session_fetch(ctx, need, budget=config.BACKFILL_BUDGET / 2) if need else {}
+            for absolute, _ref in dict(css_children).items():
+                if absolute in results:
+                    continue
+                pre = self._live_bodies.get(absolute)
+                child = dict(pre) if pre is not None else got.get(absolute)
+                if child is None:
+                    continue
+                child = self._normalize_out(child)
+                if child["ok"]:
+                    results[child["url"]] = self._store(child)
         return added
 
     def _mirror_runtime_paths(self, results: dict) -> int:
@@ -2647,11 +2715,27 @@ class ClonerEngine:
         dead = self._backfill_dead
         skipped_beacons = 0
 
+        fetched = {}   # 本轮批量会话补抓的结果(并发直连带 Cookie, 风控类再走会话)
+
+        def _prefetch(urls):
+            want = [u for u in dict.fromkeys(urls) if u not in dead and u not in fetched]
+            left = deadline - time.monotonic()
+            if not want or left <= 0.2:
+                return
+            for u, out in self._session_fetch(ctx, want, budget=min(left, 10.0)).items():
+                fetched[u] = self._normalize_out(out)
+
         def _fetch(url):
-            if url in dead or time.monotonic() > deadline:
+            if url in dead:
                 return None
-            out = self._normalize_out(self.downloader.fetch_via_browser(
-                url, ctx.request, referer=self._target))
+            out = fetched.get(url)
+            if out is None:
+                if time.monotonic() > deadline:
+                    return None
+                _prefetch([url])
+                out = fetched.get(url)
+                if out is None:
+                    return None
             if not out["ok"]:
                 dead.add(url)
                 if urlsplit(url).netloc == page_netloc:
@@ -2686,27 +2770,25 @@ class ClonerEngine:
             todo.append(url)
         # 第三方外联先并发直连预取(CDN 图片/字体/脚本不依赖会话 Cookie): 此前逐个走浏览器会话串行回源,
         # 一个慢请求就吃掉整轮 20s 时限。直连失败的再按原路径走浏览器会话; 同源 URL 一律走会话。
-        pre = {}
-        third = [u for u in todo if urlsplit(u).netloc != page_netloc and u not in dead]
-        if third:
-            ex = ThreadPoolExecutor(max_workers=8, thread_name_prefix="backfill")
-            try:
-                futs = {ex.submit(self.downloader.fetch_direct, u, self._target): u for u in third}
-                done, _ = _wait_futures(list(futs), timeout=max(0.5, deadline - time.monotonic()))
-                for f in done:
-                    with suppress(Exception):
-                        pre[futs[f]] = self._normalize_out(f.result())
-            finally:
-                ex.shutdown(wait=False, cancel_futures=True)   # 没回来的直连不等, 不拖住本轮
+        # 外联缺失与本地 404 的回源候选一次批量并发补抓(旧实现: 第三方并发直连, 同源逐个串行走
+        # 浏览器会话, 本地 404 的候选路径也逐个串行 —— apple 一条不存在的 hls.js 候选白等 10s)
+        remote_cands = {}
+        for path in sorted(failed_local):
+            if path.startswith(("/preview/", "/frames/", "/api/")):
+                continue
+            base = path.rsplit("/", 1)[-1]
+            cands = [u for u in self._live_seen if urlsplit(u).path == path]
+            for cand in (origin.rstrip("/") + path, origin.rstrip("/") + "/assets/" + base):
+                if cand not in cands:
+                    cands.append(cand)
+            remote_cands[path] = cands
+        _prefetch(todo + [u for cands in remote_cands.values() for u in cands
+                          if u not in results and not any(
+                              v in results for v in self._variants(u, page_netloc))])
         for url in todo:
             if len(results) + len(new) >= config.MAX_ASSETS_PER_TASK + config.RENDER_ASSET_RESERVE:
                 break
-            out = pre.get(url)
-            if out is not None and not out["ok"] and "HTTP 4" not in str(out.get("error")):
-                dead.add(url)          # 第三方直连超时/连不上: 浏览器会话也救不回, 不再串行重试
-                continue
-            if out is None or not out["ok"]:
-                out = _fetch(url)
+            out = _fetch(url)
             if out is not None and out["ok"]:
                 new[out["url"]] = self._store(out)
                 self.log("SMART-DL", f"渲染缺失回补: {new[out['url']]['cat']}"
@@ -2761,11 +2843,7 @@ class ClonerEngine:
                         continue
                     except OSError:
                         pass
-            remote = [u for u in self._live_seen if urlsplit(u).path == path]
-            for cand in (origin.rstrip("/") + path,
-                         origin.rstrip("/") + "/assets/" + base):
-                if cand not in remote:
-                    remote.append(cand)
+            remote = remote_cands.get(path) or []
             for url in remote:
                 already = None
                 if url in results:
@@ -3433,16 +3511,6 @@ class ClonerEngine:
                     with suppress(Exception):
                         route.abort()
 
-            def _fidelity_guard(route):
-                try:
-                    if route.request.url.startswith(("file:", "data:", "blob:", "cid:")):
-                        route.continue_()
-                    else:
-                        route.abort()
-                except Exception:
-                    with suppress(Exception):
-                        route.abort()
-
             def _on_resp(resp):
                 try:
                     rt = resp.request.resource_type
@@ -3488,15 +3556,22 @@ class ClonerEngine:
                 with suppress(OSError):   # 防上一轮/重建残留截图被误评
                     (self.ws / 'fidelity_preview.png').unlink()
                 t_fid = time.monotonic()
-                fpage = ctx.new_page()
+                fpage, t0 = getattr(self, "_fid_page", None), getattr(self, "_fid_t0", t_fid)
+                self._fid_page = None
                 try:
-                    # 离线守卫: 归档内资源由 Chromium 直接供给(不经网络层),
-                    # 归档外的引用一律中止 —— 保真轨必须确定且不回源
-                    fpage.route("**/*", _fidelity_guard)
-                    fpage.goto('file://' + str(self.ws / 'capture.mhtml'),
-                               wait_until='load', timeout=30000)
+                    if fpage is not None:
+                        # 下载期间已在后台加载(见 _prestart_fidelity)
+                        fpage.wait_for_load_state("load", timeout=30000)
+                    else:
+                        fpage = ctx.new_page()
+                        # 离线守卫: 归档内资源由 Chromium 直接供给(不经网络层),
+                        # 归档外的引用一律中止 —— 保真轨必须确定且不回源
+                        fpage.route("**/*", ClonerEngine._fidelity_guard)
+                        t0 = time.monotonic()
+                        fpage.goto('file://' + str(self.ws / 'capture.mhtml'),
+                                   wait_until='load', timeout=30000)
                     with suppress(Exception):
-                        self._settle(fpage, cap_ms=2000)
+                        self._settle_static(fpage, t0)
                     self._full_shot(fpage, self.ws / 'fidelity_preview.png', "保真轨")
                     f_text = fpage.evaluate(TEXT_EXTRACT_JS)
                     (self.ws / 'fidelity_text.txt').write_text(

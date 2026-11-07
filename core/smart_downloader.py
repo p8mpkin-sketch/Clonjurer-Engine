@@ -15,6 +15,8 @@ V4 自适应反爬与智能回源下载器。
 另提供 URL 路径参数规范化(;jsessionid=... 等)供引擎全局使用:
   /css/xx.css;jsessionid=14_abc  ->  扩展名 .css 而非 ".css;jsessionid=..."
 """
+import time
+from concurrent.futures import ThreadPoolExecutor, wait as _wait_futures
 from urllib.parse import urlsplit
 
 import requests
@@ -23,6 +25,10 @@ import config
 
 # 视为"被源站拒绝"从而触发浏览器降级的 HTTP 状态码
 _BROWSER_FALLBACK_STATUS = {401, 403, 404, 405, 406, 429, 451, 500, 502, 503}
+# 批量会话补抓里值得再走浏览器会话串行重试的状态: 风控/鉴权/限流类(指纹或会话不同才被拒)。
+# 404/410/5xx 在带同一会话 Cookie 的直连下仍失败, 浏览器会话几乎从不救回 —— 只对活体
+# 确实加载成功过的 URL 才再试(那说明 404 是给非浏览器客户端的拒绝页)
+_SESSION_RETRY_STATUS = {401, 403, 405, 406, 412, 429, 451, 503}
 
 
 def strip_path_params(path: str) -> str:
@@ -118,6 +124,86 @@ class SmartDownloader:
         out.update(ok=True, content=content, content_type=content_type,
                    via="browser")
         return out
+
+    # ------------------------------------------------------------------
+    def fetch_session_many(self, urls, api_request_ctx, referer: str = "", cookies=None,
+                           deadline: float = None, browser_ok=None, workers: int = 12) -> dict:
+        """批量会话补抓: 先带活体会话 Cookie 并发直连, 只把被风控/鉴权拒绝的再串行走浏览器会话。
+
+        旧路径逐个 fetch_via_browser(Playwright 同步 API 只能串行, 单个 20s 超时): 活体差集/Mock 收割/
+        渲染缺失回补/下载降级四处各自串行, 实测单站白等 10~30s(aliyun 活体回补 29s、douban 降级 26s)。
+        并发直连带上同一 BrowserContext 的 Cookie 与 UA, 覆盖绝大多数「需要会话」的情形; 浏览器会话
+        只留给指纹类拒绝(403/429 等)。deadline(monotonic 秒)到点后未完成的直连放弃, 串行重试也不再发起。
+        browser_ok(url, out) -> bool: 直连失败后是否值得浏览器会话重试(默认按 _SESSION_RETRY_STATUS)。
+        返回 {url: out}; 时限内没拿到结果的 URL 给 error="会话补抓时限"。"""
+        urls = list(dict.fromkeys(u for u in urls if u))
+        res = {}
+        if not urls:
+            return res
+        sess = requests.Session()
+        sess.headers.update(self._session.headers)
+        for c in cookies or []:
+            try:
+                sess.cookies.set(c["name"], c.get("value") or "", domain=c.get("domain") or "",
+                                 path=c.get("path") or "/")
+            except Exception:   # noqa: BLE001 畸形 Cookie 跳过
+                continue
+
+        def one(url):
+            out = {"url": url, "ok": False, "content": b"", "content_type": "",
+                   "error": "", "ext": ".bin", "is_css": False, "via": "session"}
+            headers = dict(self.headers)
+            headers["Referer"] = referer or url.rsplit("/", 1)[0] + "/"
+            headers.setdefault("Accept", "*/*")
+            try:
+                resp = sess.get(url, headers=headers,
+                                timeout=getattr(config, "REQUEST_CONNECT_READ", config.REQUEST_TIMEOUT))
+            except requests.RequestException as exc:
+                out["error"] = type(exc).__name__
+                return out
+            if resp.status_code >= 400:
+                out["error"] = f"HTTP {resp.status_code}"
+                out["status"] = resp.status_code
+                return out
+            content = resp.content or b""
+            if not content:
+                out["error"] = "空响应体"
+                return out
+            if len(content) > config.MAX_ASSET_BYTES:
+                out["error"] = f"oversize ({len(content)} bytes)"
+                return out
+            ctype = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
+            out.update(ok=True, content=content, content_type=ctype, status=resp.status_code)
+            return out
+
+        ex = ThreadPoolExecutor(max_workers=max(1, min(workers, len(urls))), thread_name_prefix="sess-dl")
+        try:
+            futs = {ex.submit(one, u): u for u in urls}
+            left = None if deadline is None else max(0.2, deadline - time.monotonic())
+            done, _ = _wait_futures(list(futs), timeout=left)
+            for f in done:
+                try:
+                    res[futs[f]] = f.result()
+                except Exception as exc:   # noqa: BLE001
+                    res[futs[f]] = {"url": futs[f], "ok": False, "error": type(exc).__name__}
+        finally:
+            ex.shutdown(wait=False, cancel_futures=True)
+        if browser_ok is None:
+            browser_ok = lambda _u, o: o.get("status") in _SESSION_RETRY_STATUS  # noqa: E731
+        for url in urls:
+            out = res.get(url)
+            if out is not None and (out.get("ok") or not browser_ok(url, out)):
+                continue
+            if api_request_ctx is None or (deadline is not None and time.monotonic() > deadline):
+                if out is None:
+                    res[url] = {"url": url, "ok": False, "error": "会话补抓时限", "content": b""}
+                continue
+            self.browser_fallbacks += 1
+            retry = self.fetch_via_browser(url, api_request_ctx, referer=referer)
+            if retry.get("ok"):
+                self.browser_rescues += 1
+            res[url] = retry
+        return res
 
     # ------------------------------------------------------------------
     def fetch(self, url: str, referer: str = "", api_request_ctx=None) -> dict:
