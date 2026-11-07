@@ -658,6 +658,8 @@ class CaptureMixin:
         def _on_req(req):
             if req.resource_type in skip:
                 return
+            if beacon_like(req.url):
+                return   # 埋点/统计信标与渲染无关, 轮询类信标曾让首导航每站等满上限
             inflight[id(req)] = time.monotonic()
             last[0] = time.monotonic()
 
