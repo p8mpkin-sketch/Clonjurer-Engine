@@ -142,6 +142,8 @@ VIEWPORT_VARIANT_SETTLE = 4.0  # 窄屏首载页抽取变体前平滑滚动的�
 STATIC_TRACK_MARGIN = 5.0     # 保真轨领先交互轨达此分差时, 试做"静态版"(剥离应用脚本)交付物
                               # 并实测; 静态版也领先交互轨此分差才设为默认预览/导出
 VIEWPORT_RELOAD_EARLY = True   # 窄屏首载对照页在主页导航提交后即发起(与主页采集并行), 而非多视口采集之后
+VIEWPORT_RELOAD_EARLY_MIN_CPUS = 8  # 核数低于此值不提前: CI(4 核)实测两页并行渲染抢 CPU, 主页懒加载/多视口采集反慢,
+                                    # 语料均值 46s -> 57s(固化 148 -> 198s, 多视口内联 56 -> 104s 合计)
 FIDELITY_PRESTART = True       # 保真轨 MHTML 在下载阶段后台页预加载
 CALIB_INPLACE_GATE = True      # 像素校准先在活页就地注入预评, 不升即不做整页重渲染
 SESSION_FETCH_BUDGET = 12      # 下载阶段浏览器会话降级(批量并发直连 + 风控类串行重试)的总时限(秒)

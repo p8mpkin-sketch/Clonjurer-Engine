@@ -823,7 +823,8 @@ class CaptureMixin:
                 page.goto(url, wait_until="domcontentloaded", timeout=config.PAGELOAD_TIMEOUT)
             else:
                 raise
-        if screenshot and getattr(config, "VIEWPORT_RELOAD_EARLY", True):
+        if screenshot and getattr(config, "VIEWPORT_RELOAD_EARLY", True) \
+                and (os.cpu_count() or 1) >= getattr(config, "VIEWPORT_RELOAD_EARLY_MIN_CPUS", 8):
             # 窄屏首载对照页提前到主页导航提交后就发起: 与主页静置/懒加载滚动/多视口采集并行加载,
             # 固化阶段收回时多已加载完(旧实现在多视口采集后才发起, 固化阶段要等它们 load + 到位滚动)
             vp = page.viewport_size or {}
