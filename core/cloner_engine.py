@@ -280,9 +280,6 @@ from core.clone.support import (  # noqa: E402  手机版(按 UA 分发)
 )
 
 
-_EXT_SHAPE_RE = re.compile(r"^\.[a-z0-9]{1,10}$")
-
-
 class _EditionDB:
     """手机版子克隆用的库代理: 任务状态/进度/完成计数归主克隆, 子克隆只读与记 CAS。"""
 
@@ -2154,7 +2151,8 @@ class ClonerEngine:
         # 路径末段里的点不一定是扩展名(base64/签名令牌 ".hcuwe%2fql...%3d"): 不像扩展名的按
         # content-type 回落。否则本地文件名带 %2f/%3d, 服务端解码后找不到文件, 图片 404 退回
         # width/height 属性尺寸, 撑破窄屏栅格(手机横向溢出)
-        if path_ext and not _EXT_SHAPE_RE.match(path_ext):
+        # (只认带 % 或超长的: 更宽的形状规则曾让 cgnpc 窄屏样式表的 CSSOM 副本丢失, 见 PR 说明)
+        if path_ext and ("%" in path_ext or len(path_ext) > 12):
             path_ext = ""
         if not path_ext:
             path_ext = config.CONTENT_TYPE_FALLBACK.get(content_type, ".bin")

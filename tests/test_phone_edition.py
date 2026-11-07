@@ -73,6 +73,19 @@ class LocalNameShape(unittest.TestCase):
         self.assertEqual(out["ext"], ".css")
 
 
+class MaskRects(unittest.TestCase):
+    def test_out_of_frame_and_negative_rects_skipped(self):
+        from PIL import Image
+        from core.clone.support import _mask_rects
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "a.png"
+            Image.new("RGB", (100, 100), (255, 255, 255)).save(p)
+            _mask_rects(p, [(10, -50, 20, 20), (-40, 10, 20, 20), (5, 5, -3, 10), (10, 10, 20, 20)])
+            with Image.open(p) as im:
+                self.assertEqual(im.getpixel((15, 15)), (128, 128, 128))
+                self.assertEqual(im.getpixel((50, 50)), (255, 255, 255))
+
+
 class _Static(SimpleHTTPRequestHandler):
     def log_message(self, *a):
         pass

@@ -950,10 +950,10 @@ def _mask_rects(path, rects):
     draw = ImageDraw.Draw(out)
     w, h = out.size
     for x, y, rw, rh in rects:
-        if y >= h or x >= w:
+        x0, y0, x1, y1 = max(0, x), max(0, y), min(w, x + rw) - 1, min(h, y + rh) - 1
+        if x1 < x0 or y1 < y0:      # 越界/零面积(负尺寸、整块在截图上方或左侧)
             continue
-        draw.rectangle([max(0, x), max(0, y), min(w, x + rw) - 1, min(h, y + rh) - 1],
-                       fill=(128, 128, 128))
+        draw.rectangle([x0, y0, x1, y1], fill=(128, 128, 128))
     out.save(path)
 
 
