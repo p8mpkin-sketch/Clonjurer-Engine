@@ -1310,7 +1310,7 @@ class ClonerEngine:
             page.evaluate("window.scrollTo(0, 0)")
             page.evaluate(CV_RECORD_JS, "b")
             self.log("RENDER", f"多视口内联采集: {n} 个元素 × 平板/手机视口 {time.monotonic() - t0:.1f}s")
-            if self.cfg.get("viewport_reload", True):
+            if self.cfg.get("viewport_reload", True) and not getattr(self, "_cv_pages", None):
                 self._start_narrow_loads(page, height)
         except Exception as exc:
             with suppress(Exception):
@@ -1322,7 +1322,7 @@ class ClonerEngine:
     def _start_narrow_loads(self, page, height):
         """同上下文另开平板/手机宽的页面重新加载目标页(只等到响应提交, 与主页后续采集并行):
         只在加载时按宽度写一次的内联样式, 缩放采不到, 要靠窄屏首载对照(见 CV_EMIT_JS)。"""
-        self._cv_pages = []
+        self._cv_pages, self._cv_loads = [], {}
         for tag, w in (("t", 768), ("m", 390)):
             p2 = None
             try:
@@ -1336,10 +1336,30 @@ class ClonerEngine:
                         p2.close()
                 self.log("WARN", f"窄屏首载对照({w}px)启动失败: {str(exc)[:120]}")
 
+    def _poke_narrow_loads(self):
+        """非阻塞检查点: 已加载完的窄屏首载页先抽取首载快照并发起到位滚动(与主页后续步骤并行)。"""
+        done = self.__dict__.setdefault("_cv_loads", {})
+        for tag, p2 in getattr(self, "_cv_pages", []) or []:
+            if tag in done:
+                continue
+            try:
+                if p2.evaluate("() => document.readyState") != "complete":
+                    continue
+                p2.evaluate(CV_QUIET_JS, 300)
+                done[tag] = p2.evaluate(CV_PATHS_JS) or {}
+                if self.cfg.get("viewport_variants", True):
+                    ClonerEngine._start_settle_narrow(p2)
+            except Exception:
+                continue
+
     def _collect_narrow_loads(self, budget_s=8.0):
         """收回窄屏首载页的内联样式表并关页; 预算内没加载完的放弃。"""
         loads, t0 = {}, time.monotonic()
+        early = self.__dict__.pop("_cv_loads", {}) or {}
         for tag, p2 in getattr(self, "_cv_pages", []) or []:
+            if tag in early:
+                loads[tag] = early[tag]
+                continue
             try:
                 left = max(0.5, budget_s - (time.monotonic() - t0))
                 p2.wait_for_load_state("load", timeout=int(left * 1000))
@@ -1526,9 +1546,10 @@ class ClonerEngine:
         page.on("requestfinished", _on_done)
         page.on("requestfailed", _on_done)
         try:
+            # load 与静置共用一个上限(旧实现各给满 cap: load 拖满 9s 的慢站再白等 9s 静置, 首导航最长 18s)
+            deadline = time.monotonic() + cap_ms / 1000
             with suppress(Exception):
                 page.wait_for_load_state("load", timeout=cap_ms)
-            deadline = time.monotonic() + cap_ms / 1000
             while time.monotonic() < deadline:
                 now = time.monotonic()
                 live = sum(1 for t in inflight.values() if now - t < stale_s)
@@ -1585,6 +1606,13 @@ class ClonerEngine:
                 page.goto(url, wait_until="domcontentloaded", timeout=config.PAGELOAD_TIMEOUT)
             else:
                 raise
+        if screenshot and getattr(config, "VIEWPORT_RELOAD_EARLY", True):
+            # 窄屏首载对照页提前到主页导航提交后就发起: 与主页静置/懒加载滚动/多视口采集并行加载,
+            # 固化阶段收回时多已加载完(旧实现在多视口采集后才发起, 固化阶段要等它们 load + 到位滚动)
+            vp = page.viewport_size or {}
+            if (vp.get("width") or 0) >= 1024 and self.cfg.get("viewport_probe", True) \
+                    and self.cfg.get("viewport_reload", True):
+                self._start_narrow_loads(page, vp.get("height") or 0)
         if not self._wait_quiet(page, config.NETWORK_IDLE_TIMEOUT):
             self.log("RENDER", "网络静置等待超时, 继续后续固化流程")
         self.log("RENDER", f"页面就绪 {time.time() - t_nav:.1f}s")
@@ -1637,6 +1665,7 @@ class ClonerEngine:
         self.log("RENDER", f"懒加载与滚动完成 {time.time() - t_nav:.1f}s")
         tp = self._phase("采集-懒加载滚动", tp)
         if screenshot:
+            self._poke_narrow_loads()
             self._probe_viewports(page)
             tp = self._phase("采集-多视口内联", tp)
         # 评分基准(纯净原站): 必须在任何引擎 DOM 改动(表单激活/DEEP_FREEZE/
@@ -1725,6 +1754,8 @@ class ClonerEngine:
                 (self.ws / "layout_map.json").write_text(
                     json.dumps(stable, ensure_ascii=False), encoding="utf-8")
         tp = self._phase("采集-基准截图", tp)
+        if screenshot:
+            self._poke_narrow_loads()
         if screenshot and (self.ws / "original_preview.png").is_file():
             self._freeze_media_from_baseline(page)
         # 触屏(手机版)不做 focus/blur 激活: 移动页常把搜索框聚焦做成全屏搜索态(返回箭头 + 历史面板),
