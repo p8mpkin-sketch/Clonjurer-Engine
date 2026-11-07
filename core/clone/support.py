@@ -837,7 +837,7 @@ def text_f_score(orig_text: str, clone_text: str, beta: float = 2.0) -> tuple:
 
     旧口径只算召回 —— 克隆页多出的错误/残留文案(兜底壳、报错提示、未隐藏
     的模板)不扣分; F2 让多余内容受罚, 同时缺失内容仍是主要失分项。"""
-    return _f_from_counts(*_token_counts(orig_text, clone_text), beta)
+    return _f_from_counts(*_token_counts(orig_text, clone_text), beta)  # type: ignore[call-arg]
 
 
 def _f_from_counts(n_a: int, n_b: int, inter: int, beta: float = 2.0) -> tuple:
@@ -1658,7 +1658,7 @@ class _SandboxHandler(SimpleHTTPRequestHandler):
             self.send_header("X-VCR-Tape", "1")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            with suppress((BrokenPipeError, ConnectionResetError)):
+            with suppress((BrokenPipeError, ConnectionResetError)):  # type: ignore[arg-type]
                 self.wfile.write(body)
         except (BrokenPipeError, ConnectionResetError):
             pass

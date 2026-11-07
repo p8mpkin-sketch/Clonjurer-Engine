@@ -74,19 +74,19 @@ class Node:
     def to_dict(self) -> dict:
         out = {"id": self.id, "role": self.role}
         if self.layout:
-            out["layout"] = self.layout
+            out["layout"] = self.layout  # type: ignore[assignment]
         if self.box:
-            out["box"] = self.box
+            out["box"] = self.box  # type: ignore[assignment]
         if self.text_ref:
             out["text_ref"] = self.text_ref
         if self.content:
-            out["content"] = self.content
+            out["content"] = self.content  # type: ignore[assignment]
         if self.intents:
-            out["intents"] = self.intents
+            out["intents"] = self.intents  # type: ignore[assignment]
         if self.children:
-            out["children"] = [c.to_dict() for c in self.children]
+            out["children"] = [c.to_dict() for c in self.children]  # type: ignore[assignment]
         if self.raw:
-            out["raw"] = self.raw
+            out["raw"] = self.raw  # type: ignore[assignment]
         return out
 
     @classmethod

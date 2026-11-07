@@ -31,7 +31,7 @@ def _hex_color(v) -> str:
         return f"const Color(0xFF{m.group(1).upper()})"
     m = re.match(r"^#([0-9a-fA-F]{3})$", v)
     if m:
-        r, g, b = m.group(1)
+        r, g, b = m.group(1)  # type: ignore[str-unpack]
         return f"const Color(0xFF{(r*2+g*2+b*2).upper()})"
     m = re.match(r"^rgba?\((\d+),\s*(\d+),\s*(\d+)", v)
     if m:

@@ -811,7 +811,7 @@ class _Builder:
                             ("submit-form" if re.search(r"登录|提交|确定|保存|发送|submit|login|sign|save|ok\b", text, re.I)
                              else "navigate")}]
                 if chk is not None:
-                    content["checked"] = bool(chk)
+                    content["checked"] = bool(chk)  # type: ignore[assignment]
             elif role == "link":
                 intents = [{"on": "click", "do": "navigate"}]
             if (ink and ink["lines"] == 1) or (not ink and h < size * 1.9):

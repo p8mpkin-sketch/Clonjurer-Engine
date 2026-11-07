@@ -435,7 +435,7 @@ def read_screenshot_text(ai_cfg: dict, image_path, max_lines: int = 400, workers
         ex.shutdown(wait=False, cancel_futures=True)
     if all(r is None for r in results):
         raise errors[0] if errors else RuntimeError("读图无结果")
-    lines = [ln for r in results if r for ln in r]
+    lines = [ln for r in results if r for ln in r]  # type: ignore[attr-defined]
     text = "\n".join(lines[:max_lines])
     if not errors:
         if len(_READ_CACHE) > 64:

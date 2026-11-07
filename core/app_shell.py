@@ -540,7 +540,7 @@ def export_artifacts(kind: str, res: dict, task_id, log=print) -> dict:
     fails = res.get("failures") or {}
     gap = res.get("gap") or ("; ".join(f"{k} 打包失败" for k in fails) or None)
     for a in arts:
-        log(f"产物 {a['label']}: {a['file']} ({a['bytes'] / 1048576:.1f} MB)")
+        log(f"产物 {a['label']}: {a['file']} ({a['bytes'] / 1048576:.1f} MB)")  # type: ignore[operator]
     return {"ok": bool(arts), "artifacts": arts, "gap": gap, "signing": res.get("signing"),
             "analyze_ok": res.get("analyze_ok"), "test_ok": res.get("test_ok")}
 

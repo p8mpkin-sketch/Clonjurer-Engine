@@ -295,7 +295,7 @@ def _build_tree(directory: Path, counter: list) -> list:
         node = {"name": entry.name, "path": str(entry.relative_to(directory)),
                 "type": "dir" if entry.is_dir() else "file", "size": 0}
         if entry.is_dir():
-            node["children"] = _build_tree(entry, counter)
+            node["children"] = _build_tree(entry, counter)  # type: ignore[assignment]
         else:
             try:
                 node["size"] = entry.stat().st_size
@@ -322,7 +322,7 @@ def _regenerate_project(task: dict, ws: Path) -> Path:
     return flask_generator.generate_project(
         task["id"], site.get("upstream", ""), ws,
         site.get("routes", {}), mocks, bool(site.get("proxy_enabled", True)),
-        tracker_hook=bool(bake_cfg),
+        tracker_hook="1" if bake_cfg else "",
         tracker_cfg=bake_cfg,
     )
 
@@ -853,6 +853,7 @@ def trigger_ai_repair(task_id):
 
 def _run_ai_repair_once(task_row: dict, ai_cfg: dict) -> dict:
     """对单个任务执行一次 AI 视觉修复(阻塞, 供手动/批量复用)。返回报告。"""
+    from core import ai_vision_repair, cloner_engine   # 惰性导入: 曾漏导入, 手动 AI 修复恒 NameError
     task_id = task_row["id"]
     ws = _workspace_of(task_row)
     batch = db.get_batch(task_row["batch_id"])
