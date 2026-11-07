@@ -73,7 +73,8 @@ def host_platform() -> str:
 
 def zip_dir(src, dest) -> Path:
     """把构建目录压成 zip, 保留符号链接(macOS .app 的 Framework 依赖 Versions/Current 链接, 展开会损坏签名结构)。"""
-    src, dest = Path(src), Path(dest)
+    # zip 在 src.parent 下执行, 相对 dest 会被解析到那里(CI 里 dist/ 不存在 → zip 退出码 15), 先转绝对路径
+    src, dest = Path(src).resolve(), Path(dest).resolve()
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.exists():
         dest.unlink()
