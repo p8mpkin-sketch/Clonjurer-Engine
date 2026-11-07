@@ -972,6 +972,13 @@ class ClonerEngine:
                         best = self._snapshot_round(round_i, detail, results)
                 if not failed_local and not remote_missing:
                     break
+                if detail is not None and config.REPAIR_STRUCTURAL_ONLY and \
+                        not self._structural_missing(failed_local, remote_missing):
+                    # 缺失只剩图片/脚本/接口/媒体: 活体回补已把浏览器加载过的都取回, 余下多是运行时
+                    # 才拼出的埋点/备用资源; 再回补 + 整页重渲染历史上几乎不涨分、还常回退
+                    self.log("RENDER", f"本轮缺失 {len(failed_local) + len(remote_missing)} 个均非样式表/字体,"
+                                       f" 不再回补重渲染(交付与评分同为本轮产物)")
+                    break
                 if detail is not None and detail["score"] >= config.REPAIR_STOP_SCORE:
                     # 已到顶(缺失的多是结账/埋点等不可见请求): 再回补一轮只花 20s 回源 + 一次渲染
                     self.log("RENDER", f"还原度 {detail['score']} 已达 {config.REPAIR_STOP_SCORE}, 不再回补")
@@ -2409,6 +2416,16 @@ class ClonerEngine:
                 return
             page.wait_for_timeout(100)
 
+    _STRUCT_EXT = (".css", ".woff2", ".woff", ".ttf", ".otf", ".eot")
+
+    @classmethod
+    def _structural_missing(cls, failed_local, remote_missing) -> list:
+        """渲染缺失里的结构性资源(样式表/字体): 只有它们补回后才可能大幅改变版面。"""
+        out = [p for p in failed_local or () if urlsplit(p).path.lower().endswith(cls._STRUCT_EXT)]
+        out += [u for u in remote_missing or () if not beacon_like(u)
+                and urlsplit(u).path.lower().endswith(cls._STRUCT_EXT)]
+        return out
+
     def _session_fetch(self, ctx, urls, referer: str = None, budget: float = None) -> dict:
         """批量会话补抓(见 SmartDownloader.fetch_session_many): 带活体 Cookie 并发直连, 风控类拒绝
         才串行走浏览器会话。活体期浏览器确实加载成功过的 URL 直连失败(含同源网络层错误)也再试会话:
@@ -3664,6 +3681,8 @@ class ClonerEngine:
                     # 克隆 DOM 元素, 以原站格色生成覆盖 —— 注入后重渲染重评分一轮。
                     if detail is not None and (detail.get('score') or 0) < 99 \
                             and self._calibrations < 2 and failed_local \
+                            and (not config.REPAIR_STRUCTURAL_ONLY
+                                 or self._structural_missing(failed_local, remote_missing)) \
                             and not getattr(self, "_calib_deferred", False):
                         # 本轮还有本地资源 404/兜底壳: 差异格多半是待回补的图, 按缺图时的
                         # 截图上色会在资源到齐后变成色块 —— 让给下一轮(只让一次: 源站本身
