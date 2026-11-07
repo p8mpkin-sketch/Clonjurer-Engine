@@ -1711,7 +1711,9 @@ class ClonerEngine:
         tp = self._phase("采集-基准截图", tp)
         if screenshot and (self.ws / "original_preview.png").is_file():
             self._freeze_media_from_baseline(page)
-        activated = _safe_eval(FORM_ACTIVATE_JS)
+        # 触屏(手机版)不做 focus/blur 激活: 移动页常把搜索框聚焦做成全屏搜索态(返回箭头 + 历史面板),
+        # blur 后也不退回, 冻结进克隆(手机版首屏 logo/搜索框整块变样)
+        activated = 0 if self.cfg.get("device") == "phone" else _safe_eval(FORM_ACTIVATE_JS)
         if activated:
             self.log("RENDER", f"表单激活: focus/blur {activated} 个输入控件")
         with suppress(Exception):
