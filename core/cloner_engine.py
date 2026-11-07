@@ -66,6 +66,8 @@ from core import pixel_calibrator
 from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 import 路径不变
     AD_RECTS_JS,
     INTERSTITIAL_HIDE_JS,
+    ROOT_FONT_APPLY_JS,
+    ROOT_FONT_READ_JS,
     INTERSTITIAL_RESTORE_JS,
     ALT_EXTRACT_JS,
     ALT_INJECT_JS,
@@ -1316,6 +1318,39 @@ class ClonerEngine:
                 page.evaluate("window.__cvRec = null")
             self.log("WARN", f"多视口内联采集失败: {exc}")
 
+    def _probe_root_font(self, page):
+        """rem 基准随视口宽成正比(<html>/<body> 内联 font-size = 宽/N)时, 冻结后改写成 vw(见
+        ROOT_FONT_READ_JS)。证据: 活体页缩到 0.92 倍宽, 计算字号同比变化(±1.5%)才认; 只认内联写的
+        (样式表里的 vw/媒体查询本就随视口)。缩放在基准截图之前做完并还原。"""
+        self._root_fluid = {}
+        vp = page.viewport_size or {}
+        width, height = vp.get("width") or 0, vp.get("height") or 0
+        # 只在窄屏采集(手机版子克隆等)做: 桌面宽下按宽算的 rem 到了窄屏多半换公式/封顶, 改 vw 未必更近
+        if not width or width >= 1024 or not self.cfg.get("viewport_probe_root", True):
+            return
+        try:
+            a = page.evaluate(ROOT_FONT_READ_JS)
+            if not (a[1] or a[3]):
+                return
+            w2 = int(round(width * 0.92))
+            page.set_viewport_size({"width": w2, "height": height})
+            page.evaluate(CV_QUIET_JS, 250)
+            b = page.evaluate(ROOT_FONT_READ_JS)
+        except Exception as exc:   # noqa: BLE001 探测失败不影响采集
+            self.log("WARN", f"rem 基准探测失败: {str(exc)[:120]}")
+            return
+        finally:
+            with suppress(Exception):
+                if page.viewport_size and page.viewport_size.get("width") != width:
+                    page.set_viewport_size({"width": width, "height": height})
+                    page.evaluate(CV_QUIET_JS, 300)
+        for k, i in (("html", 1), ("body", 3)):
+            f1, f2 = a[i + 1], b[i + 1]
+            if a[i] and f1 > 0 and f2 > 0 and a[0] and b[0] and abs((f2 / f1) / (b[0] / a[0]) - 1) <= 0.015:
+                self._root_fluid[k] = f1 / a[0] * 100
+        if self._root_fluid:
+            self.log("RENDER", "rem 基准随视口宽: " + ", ".join(f"{k} {v:.3f}vw" for k, v in self._root_fluid.items()))
+
     def _start_narrow_loads(self, page, height):
         """同上下文另开平板/手机宽的页面重新加载目标页(只等到响应提交, 与主页后续采集并行):
         只在加载时按宽度写一次的内联样式, 缩放采不到, 要靠窄屏首载对照(见 CV_EMIT_JS)。"""
@@ -1635,6 +1670,7 @@ class ClonerEngine:
         tp = self._phase("采集-懒加载滚动", tp)
         if screenshot:
             self._probe_viewports(page)
+            self._probe_root_font(page)
             tp = self._phase("采集-多视口内联", tp)
         # 评分基准(纯净原站): 必须在任何引擎 DOM 改动(表单激活/DEEP_FREEZE/
         # 水合剥离/字体烘焙)之前截取 —— 否则评分比较的是"克隆 vs 引擎改过的
@@ -1735,6 +1771,10 @@ class ClonerEngine:
                 self.log("RENDER", f"冻结前等样式表: {ws_.get('ms')}ms, 直取补副本 {ws_.get('fetched', 0)} 张,"
                                    f" 仍未到 {ws_.get('pending', 0)} 张")
         counts = _safe_eval(DEEP_FREEZE_JS)
+        if getattr(self, "_root_fluid", None):
+            # 定时器已停, 页面脚本不会再改回 px
+            with suppress(Exception):
+                page.evaluate(ROOT_FONT_APPLY_JS, self._root_fluid)
         if layout_stable:
             # DEEP_FREEZE 已停掉定时器: 此后页面脚本不再改 DOM, 回撤结果能留到序列化
             with suppress(Exception):

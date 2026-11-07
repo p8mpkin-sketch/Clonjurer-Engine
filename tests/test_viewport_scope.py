@@ -378,6 +378,45 @@ class InterstitialHide(unittest.TestCase):
                 b.close()
 
 
+FLEXIBLE_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width"></head><body style="margin:0">
+<div id="col" style="max-width:10rem">内容</div>
+<script>function f(){document.documentElement.style.fontSize = (innerWidth / 10) + 'px';} addEventListener('resize', f); f();</script>
+</body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class RootFontFluid(unittest.TestCase):
+    """lib-flexible 类 rem 基准(内联 font-size = 宽/10): 窄屏采集时改写成 vw, 克隆在别的手机宽下跟着变。"""
+
+    def test_rem_base_to_vw(self):
+        from playwright.sync_api import sync_playwright
+        eng = ce.ClonerEngine.__new__(ce.ClonerEngine)
+        eng.cfg, logs = {}, []
+        eng.log = lambda level, msg: logs.append(msg)
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 390, "height": 800})
+                page.set_content(FLEXIBLE_PAGE)
+                eng._probe_root_font(page)
+                self.assertAlmostEqual(eng._root_fluid.get("html", 0), 10.0, places=3)
+                self.assertNotIn("body", eng._root_fluid)
+                self.assertEqual(page.viewport_size["width"], 390)
+                page.evaluate(ce.ROOT_FONT_APPLY_JS, eng._root_fluid)
+                html = page.content().replace("addEventListener('resize', f); f();", "")
+                page2 = b.new_page(viewport={"width": 420, "height": 800})
+                page2.set_content(html)
+                self.assertAlmostEqual(page2.evaluate("document.getElementById('col').getBoundingClientRect().width"), 420, delta=1)
+                # 桌面宽采集不做
+                eng2 = ce.ClonerEngine.__new__(ce.ClonerEngine)
+                eng2.cfg, eng2.log = {}, (lambda *a: None)
+                page.set_viewport_size({"width": 1440, "height": 800})
+                eng2._probe_root_font(page)
+                self.assertEqual(eng2._root_fluid, {})
+            finally:
+                b.close()
+
+
 class CalibInjection(unittest.TestCase):
     def test_put_calib_band_wrapped(self):
         eng = ce.ClonerEngine.__new__(ce.ClonerEngine)

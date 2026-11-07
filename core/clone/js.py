@@ -1851,3 +1851,23 @@ INTERSTITIAL_RESTORE_JS = r"""() => {
     if (!e.getAttribute('style')) e.removeAttribute('style');
   });
 }"""
+
+# rem 基准(lib-flexible 类脚本按 视口宽/N 写在 <html>/<body> 内联 font-size): 冻结后克隆里没有脚本重算,
+# 采集宽下的 px 被写死(手机版 390 采集 → 420 真机全站 rem 尺寸统一小 7%, 内容列 390 宽右侧留白)。
+# 读: 返回 [innerWidth, html 内联 px, html 计算 px, body 内联 px, body 计算 px]
+ROOT_FONT_READ_JS = r"""() => {
+  const px = v => { const m = /^([\d.]+)px$/.exec((v || '').trim()); return m ? parseFloat(m[1]) : 0; };
+  const h = document.documentElement, b = document.body;
+  return [innerWidth, px(h.style.fontSize), px(getComputedStyle(h).fontSize),
+          b ? px(b.style.fontSize) : 0, b ? px(getComputedStyle(b).fontSize) : 0];
+}"""
+# 写: {html: vw, body: vw} → 内联 font-size 改成 vw(保留优先级)
+ROOT_FONT_APPLY_JS = r"""(m) => {
+  let n = 0;
+  for (const [k, el] of [['html', document.documentElement], ['body', document.body]]) {
+    if (!el || !m[k]) continue;
+    el.style.setProperty('font-size', m[k].toFixed(4) + 'vw', el.style.getPropertyPriority('font-size'));
+    n++;
+  }
+  return n;
+}"""
