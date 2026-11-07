@@ -320,6 +320,30 @@ class CanvasFreezeResponsive(unittest.TestCase):
                 b.close()
 
 
+FLUID_SELF_SIZED = """<div style="display:inline-block;padding:10px"><div id="fixed" style="width:160px;height:20px;padding:12px;box-sizing:border-box">
+<i style="display:block;width:134px;height:10px"></i></div></div>
+<div style="width:400px"><div id="full" style="width:400px;height:10px"></div></div>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class InlineFluidSelfSized(unittest.TestCase):
+    """父容器宽由本元素撑出时不改 100%(循环百分比); 父容器宽独立时照改。"""
+
+    def test_skip_when_parent_shrink_wraps(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page()
+                page.set_content(FLUID_SELF_SIZED)
+                out = page.evaluate(ce.INLINE_FLUID_JS)
+                self.assertEqual(out["width"], 1)
+                self.assertIn("160px", page.evaluate("document.getElementById('fixed').getAttribute('style')"))
+                self.assertIn("100%", page.evaluate("document.getElementById('full').getAttribute('style')"))
+            finally:
+                b.close()
+
+
 class CalibInjection(unittest.TestCase):
     def test_put_calib_band_wrapped(self):
         eng = ce.ClonerEngine.__new__(ce.ClonerEngine)

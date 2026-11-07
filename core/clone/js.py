@@ -1014,8 +1014,17 @@ INLINE_FLUID_JS = r"""
         for (const c of slides) plan.push([c, 'width', (100 / k).toFixed(4) + '%']);
         out.track++;
       } else if (near(w, pw)) {
-        plan.push([el, 'width', '100%']);
-        out.width++;
+        // 父容器宽若由本元素撑出(父是 inline-block / 自动宽的 flex 项 / 浮动 / 绝对定位收缩包裹):
+        // 改 100% 成了循环百分比, 宽度退回由内容决定(ant.design 二维码 160px 容器被 img 撑到 186)。
+        // 临时把本元素缩到 1px 看父容器跟不跟着缩, 跟着缩的不改
+        const st = el.getAttribute('style');
+        el.style.setProperty('width', '1px', 'important');
+        const pw1 = inner(parent);
+        el.setAttribute('style', st);
+        if (near(pw1, pw)) {
+          plan.push([el, 'width', '100%']);
+          out.width++;
+        }
       }
     }
     // 位移: translate(-m × 单页宽) → 按自身宽度的百分比(单页宽 = 容器宽或首个子项宽)
