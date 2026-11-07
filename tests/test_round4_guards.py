@@ -133,3 +133,22 @@ class BlockedPageDetect(unittest.TestCase):
         cap = "系统繁忙，请稍后再试"
         self.assertIn("采集中途被风控替换", ce.detect_blocked_page(self.REAL, cap))
         self.assertEqual(ce.detect_blocked_page(self.REAL + "\n系统繁忙，请稍后再试", cap), "")
+
+
+class BeaconLike(unittest.TestCase):
+    def test_generic_beacon_shapes(self):
+        from core.cloner_engine import beacon_like
+        yes = ["https://track.example.net/se.gif?a=1",
+               "https://example.net/log/web?x=1",
+               "https://example.net/collect?v=2&tid=x",
+               "https://stat.example.org/pv.gif",
+               "https://cdn.example.org/p.gif?" + "a=1&" * 40]
+        no = ["https://cdn.example.org/assets/app.3f2a.js",
+              "https://cdn.example.org/img/banner.png",
+              "https://example.org/static/css/main.css?v=3",
+              "https://fonts.example.org/catalog/logo.woff2",
+              "https://example.org/blog/how-to-track-time.html"]
+        for u in yes:
+            self.assertTrue(beacon_like(u), u)
+        for u in no:
+            self.assertFalse(beacon_like(u), u)

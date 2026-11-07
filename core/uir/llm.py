@@ -18,6 +18,13 @@ from PIL import Image
 import config
 
 
+_NO_THINK_UNSUPPORTED = set()   # 不认 thinking 字段的上游(base_url)
+
+
+class DeadlineExceeded(RuntimeError):
+    """模型调用超过墙钟上限(含重试/升档)。"""
+
+
 def resolve_ai_cfg(task_cfg: dict = None):
     """任务级 > 环境/配置默认; 无 Key 返回 None(与 ClonerEngine._ai_config 同语义)。"""
     task_cfg = task_cfg or {}
@@ -86,8 +93,16 @@ def extract_json(text: str) -> dict:
 
 
 def chat_json(ai_cfg: dict, system: str, user_text: str, images=(),
-              temperature: float = 0.2, timeout: int = None, max_tokens: int = None, parts=()) -> dict:
+              temperature: float = 0.2, timeout: int = None, max_tokens: int = None, parts=(),
+              deadline: float = None, thinking: bool = True) -> dict:
     """同步调用, 返回解析后的 JSON 对象; 失败抛 RuntimeError。
+
+    deadline(time.monotonic() 绝对时刻)是整次调用(含重试与升档)的**墙钟上限**: 部分 OpenAI 兼容上游
+    在长生成期间持续发 keep-alive 空行, requests 的读超时永远不触发(实测单请求挂起 30 分钟以上),
+    所以响应体按流读取, 每收到一块就核对墙钟, 超时即断开并抛 DeadlineExceeded。
+
+    thinking=False: 抄录/逐块填充这类机械任务关闭推理模型的思考(请求带 thinking.type=disabled);
+    上游不认该字段(HTTP 400)时自动去掉重发, 并按 base_url 记住, 之后不再带。
 
     预算阶梯 (b, 2b, 4b): 内容为空且思考 token 吃光预算 → 升档; 内容非空但 finish_reason=length
     且 JSON 解析失败(UIR 节点树上百节点时 JSON 很长, 被截断) → 同样升档重试, 而不是直接回落。"""
@@ -105,6 +120,12 @@ def chat_json(ai_cfg: dict, system: str, user_text: str, images=(),
     if notes:
         content[0]["text"] = user_text + "\n\n" + "\n".join(notes)
 
+    if deadline is None:
+        deadline = time.monotonic() + float(getattr(config, "AI_CALL_WALL_LIMIT", 180))
+
+    def _left() -> float:
+        return deadline - time.monotonic()
+
     def _call(budget: int):
         # 瞬时网络错误(SSL EOF / 连接重置 / 读超时)重试 2 次, 退避 2s/4s: 一次抖动不应让整轮回落
         last = None
@@ -115,26 +136,55 @@ def chat_json(ai_cfg: dict, system: str, user_text: str, images=(),
                     requests.exceptions.Timeout, requests.exceptions.ChunkedEncodingError) as exc:
                 last = exc
                 if attempt < 2:
+                    if _left() < 2 * (attempt + 1) + 5:
+                        break
                     time.sleep(2 * (attempt + 1))
         raise RuntimeError(f"上游网络错误(已重试 3 次): {type(last).__name__}: {str(last)[:160]}")
 
     def _call_once(budget: int):
+        left = _left()
+        if left <= 1:
+            raise DeadlineExceeded("调用墙钟上限已到")
+        per = min(float(timeout or config.AI_REQUEST_TIMEOUT), max(1.0, left))
+        body_json = {"model": ai_cfg["model"], "temperature": temperature, "max_tokens": budget,
+                     "messages": [{"role": "system", "content": system},
+                                  {"role": "user", "content": content}]}
+        no_think = not thinking and ai_cfg.get("base_url") not in _NO_THINK_UNSUPPORTED
+        if no_think:
+            body_json["thinking"] = {"type": "disabled"}
         resp = requests.post(
             f"{ai_cfg['base_url']}/chat/completions",
             headers={"Authorization": f"Bearer {ai_cfg['api_key']}"},
-            json={"model": ai_cfg["model"], "temperature": temperature, "max_tokens": budget,
-                  "messages": [{"role": "system", "content": system},
-                               {"role": "user", "content": content}]},
-            timeout=timeout or config.AI_REQUEST_TIMEOUT)
-        resp.raise_for_status()
+            json=body_json, timeout=(min(15.0, per), per), stream=True)
+        if no_think and resp.status_code in (400, 422):
+            resp.close()
+            _NO_THINK_UNSUPPORTED.add(ai_cfg.get("base_url"))
+            return _call_once(budget)
         try:
-            return resp.json()
+            resp.raise_for_status()
+            chunks = []
+            raw = resp.raw
+            while True:
+                # read1: 有多少读多少(不凑满块), keep-alive 的单个空行也会返回, 才能逐块核对墙钟
+                chunk = raw.read1(65536, decode_content=True)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                if _left() <= 0:
+                    raise DeadlineExceeded("调用墙钟上限已到(上游仍在生成)")
+            body = b"".join(chunks)
+        finally:
+            resp.close()
+        try:
+            return json.loads(body.decode(resp.encoding or "utf-8", errors="replace"))
         except ValueError:
-            raise RuntimeError(f"上游返回非 JSON(HTTP {resp.status_code}): {resp.text[:160]!r}")
+            raise RuntimeError(f"上游返回非 JSON(HTTP {resp.status_code}): {body[:160]!r}")
 
     base = int(max_tokens or config.AI_PATCH_MAX_TOKENS)
     text, last_err = "", None
     for budget in (base, base * 2, base * 4):
+        if _left() <= 1:
+            raise last_err or DeadlineExceeded("调用墙钟上限已到")
         payload = _call(budget)
         choice = (payload.get("choices") or [{}])[0]
         text = ((choice.get("message") or {}).get("content") or "").strip()

@@ -131,23 +131,45 @@ class GenerateEngine:
 
         ref_png = self.ws / "original_preview.png"
         ref_text = ""
+        read_fut = None
         if kind == "screenshot" and self.spec.get("reference_text"):
             ref_text = str(self.spec["reference_text"])[:20000]
         elif kind == "screenshot" and ai_cfg and target.shootable:
             # 截图没有 DOM 文本 → 评分 v3 的文本通道原本被关掉(权重重分配), 结果"文字纹理代理"与真实文字
             # 在像素口径下不可区分(实测同几何只换文字反而 -10 分)。先让模型读一遍图作为参考文本, 地板轮与
             # 填充轮在同一参考下打三通道分, 真实文字才会被奖励。参考文本来源在报告里标明为 model-read。
+            # 读图与骨架填充都是纯模型等待, 二者并行发出(此前串行, 长页墙钟 = 读图 100s+ 与填充相加),
+            # 各自有墙钟上限; 地板轮评分时才取读图结果。
+            from concurrent.futures import ThreadPoolExecutor
+            from core.uir.adapters.vision import read_screenshot_text, prefetch_fill
+            self._request({})  # 确保 original_preview.png 已就位
+            ex = ThreadPoolExecutor(max_workers=1)
+            read_fut = ex.submit(read_screenshot_text, ai_cfg, ref_png, 400, 6, settings.GENERATE_READ_BUDGET)
+            ex.shutdown(wait=False)
+            if (self.spec.get("llm_mode") or "skeleton_fill") == "skeleton_fill" and get_input(kind).__class__.__name__ == "ScreenshotAdapter":
+                try:
+                    ctx.extra["prefetch_fill"] = prefetch_fill(ai_cfg, ref_png, settings.GENERATE_FILL_BUDGET)
+                except Exception as exc:
+                    self.log("GEN", f"骨架填充预取失败, 第 2 轮按需填充: {type(exc).__name__}: {str(exc)[:120]}")
+
+        def _resolve_ref_text():
+            nonlocal ref_text, read_fut
+            if read_fut is None:
+                return ref_text
+            fut, read_fut = read_fut, None
             try:
-                self._request({})  # 确保 original_preview.png 已就位
-                from core.uir.adapters.vision import read_screenshot_text
-                ref_text = read_screenshot_text(ai_cfg, ref_png)
+                ref_text = fut.result(timeout=settings.GENERATE_READ_BUDGET + 10)
                 self.log("GEN", f"参考文本: 模型读图 {len(ref_text.splitlines())} 行 / {len(ref_text)} 字, 文本通道启用")
             except Exception as exc:
                 self.log("GEN", f"模型读图失败, 文本通道不启用: {type(exc).__name__}: {str(exc)[:120]}")
                 ref_text = ""
+            if ref_text:
+                (self.ws / "original_text.txt").write_text(ref_text, encoding="utf-8")
+            report["reference_text"] = "provided" if self.spec.get("reference_text") else ("model-read" if ref_text else "none")
+            return ref_text
+
         if ref_text:
             (self.ws / "original_text.txt").write_text(ref_text, encoding="utf-8")
-        # 参考文本读图是评分前置, 不占生成预算(长页切 6 段读一遍可达 2~3 分钟, 否则后续轮全部静默跳过模型)
         ctx.deadline = time.monotonic() + budget
         deadline = ctx.deadline
 
@@ -197,7 +219,7 @@ class GenerateEngine:
             (self.ws / "cloned_text.txt").write_text(out_text, encoding="utf-8")
             if kind == "screenshot":
                 detail = render.score_against_reference(ref_png, self.ws / "cloned_preview.png",
-                                                        self.ws / "diff_preview.png", ref_text, out_text)
+                                                        self.ws / "diff_preview.png", _resolve_ref_text(), out_text)
             else:
                 detail = render.description_self_score(req.description, out_text, uir.stats())
             score = detail["score"]
@@ -219,6 +241,15 @@ class GenerateEngine:
             if score >= target_score:
                 self.log("GEN", f"已达目标分 {target_score}, 停止迭代")
                 break
+            if uir.meta.get("llm_mode") == "skeleton_fill":
+                # 骨架是确定性的, 填充是唯一的随机项。关思考后一轮填充 5~15s, 预算内多取几个候选(升温增加
+                # 多样性), 只保留评分净提升者; 填充轮数用尽即停(带思考时一轮 60s+, 当时只跑一轮)
+                fills = sum(1 for r in report["rounds"] if r.get("tier") == "llm")
+                if fills >= settings.GENERATE_FILL_ROUNDS or ctx.remaining() < 30:
+                    self.log("GEN", f"骨架填充已取 {fills} 个候选, 停止")
+                    break
+                hints = {"fill_temp": min(1.0, 0.2 + 0.35 * fills)}
+                continue
             # 下一轮线索: 像素差分区域(截图) / 自评反馈(描述); 确定性 Tier 0 加深切分粒度
             hints = {"score": score, "structure": detail.get("structure"), "edge": detail.get("edge"),
                      "last_render": str(self.ws / "cloned_preview.png") if kind == "screenshot" else None}

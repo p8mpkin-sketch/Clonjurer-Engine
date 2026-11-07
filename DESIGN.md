@@ -341,7 +341,21 @@ class OutputTarget(Protocol):
 - 实测(同一 example.com 克隆): APK 43MB → **25KB**; macOS 114MB → **2.5MB**(zip); Windows 151MB → **2.9MB**(zip, exe 7.4MB)。27MB 资源的门户克隆: APK 24MB、macOS 34.5MB, 即「站点本身 + 极小壳」; 模拟器与本机窗口截图均正常渲染。
 - 缺口: Windows 包需系统自带 WebView2 运行时(Win10/11 通常已带, 缺失时弹窗提示); Windows 包未在实机运行; 桌面壳外链在窗口内打开(未拦截到系统浏览器); Android 壳的上游反代只支持 GET/HEAD(WebView 拦截拿不到请求体); Linux 桌面壳未实现; 签名同前。
 
-### 9.15 签名与三平台构建 CI(2026-11-05)
+### 9.15 Web 窄屏两处通用修复与留出集复测(2026-11-05)
+
+- **窄屏 DOM 变体到位**: 抽取窄屏首载页子树前先平滑滚到底再回顶并跑 ANIM_PHASE_JS(与主页基准后同口径)。此前进视口才起播的入场动画停在 opacity:0, 窄屏版整块空白。语料内 nuxt.com 平板 77.6→88.9、手机 69.3→93.0。
+- **尺寸属性参与分视口比较**: svg/img/canvas 由脚本按视口写的 width/height 属性记成等价 CSS, 成比例改 vw、离散进分视口样式表(此前只比 style, logo 在手机宽保持桌面尺寸溢出)。语料内 remix.run 手机 84.1→86.9。
+- 国际语料内 10 站三视口: 桌面 93.4 / 平板 93.4 / 手机 93.4(REPORT_20261105_021244)。
+- **留出集 11 站复测(只测不调, REPORT_20261105_021846)**: 均分 91.2, 桌面 86.7(前 86.1) / 平板 73.0(前 70.7) / 手机 74.2(前 72.0), p90 68.3s(本机同时跑多线程)。残差仍集中在 github / gitee / MDN 窄屏(40~55) 与 bilibili(全视口 32~46), 语料内尚无同类站复现, 按纪律不在留出站上调。
+
+### 9.16 第二段实录(2026-11-05 下午)
+
+- **L1 带 Key(deepseek-flash, 参考文本=模型读图, 三通道含文本)**: 骨架填充切到 v2 骨架、按截图分段并行(25 块一请求, 32 路), 只跑一轮, 预算内收回多少用多少。截图回环 87.1(4/5≥85, REPORT_20261105_172305); 真实截图留出集 81.8 不限时(均 347s) / 80.1 限 240s 预算(均 242s, REPORT_20261105_181400) —— 产物为真实文案, 文本通道 0.57~0.91。长页瓶颈是读图(6 段并行仍约 100s)与上千块的填充。
+- **Web 提速**: 修复循环还原度 ≥99.5 即停; 活体回补与修复回补的第三方 URL 8 路并发直连预取, 信标形态不回源。语料内 8 站同机前后 p50 88→64s; 留出集 11 站 p90 68→59.9s, 三视口 桌面 87.7 / 平板 72.8 / 手机 75.0。
+- **窄屏**: 加载时按宽度只写一次的 canvas/svg/img 尺寸属性进窄屏首载补采。语料外 6 个新站(gitlab/pypi/python docs/web.dev/stackoverflow/learn.microsoft)平板 91~99 / 手机 88~100, 未复现 github/gitee/MDN 的窄屏塌陷。
+- **代码**: cloner_engine.py 纯搬迁拆分为 core/clone/js.py + support.py, 主文件 6750→约 3500 行(单函数 >120 行尚未拆)。
+
+### 9.17 签名与三平台构建 CI(2026-11-05)
 
 落地 ROADMAP_95.md §3.3 的第一版, 不改任何生成/克隆逻辑:
 - **签名步骤**(`core/uir/toolchain.py`, 纯增量): `build_apk` / `build_desktop` 构建后自动签名并校验, 结果写回报告: `signing`(给人看的标签, 未签名一律以「未签名」开头)、`signed`(布尔)、`signing_detail`(状态/校验/证书)。
@@ -358,4 +372,5 @@ class OutputTarget(Protocol):
   - 冒烟比较时两侧都隐藏滚动条(桌面窗口的经典滚动条占 15px, 会让长页整体错位: 实测落地页 35.5 → 100.0)。5 个描述用例 linux 包冒烟均 100.0。
   - 产物按签名状态命名(`clonjurer-<用例>-<平台>-<架构>[-unsigned].zip/.apk`), 报告与截图上传, `summary` 作业把构建/签名/冒烟汇总进运行摘要。
 - **本地验证(云端容器, Linux)**: render → `@electron/packager` linux-x64 + win32-x64 → Xvfb 下启动 linux 包经 CDP 截图, 与参考 HTML 比较 100.0; 用临时自签名 pfx 走 osslsigncode 给 win32 .exe 签名成功(容器内时间戳服务不可达, 退回无时间戳并如实标注)。未在本地验证: Flutter/APK 签名(容器无 Flutter/Android SDK, 由伪 apksigner 单测覆盖)、macOS codesign/公证、Windows 上 signtool 与实机启动 —— 都要等 CI 首跑。
+- **CI 首跑(PR #2, 默认系统 WebView 壳, 无签名 secret)**: android 绿(APK 17KB, debug 签名如实标未签名, API 34 模拟器安装/启动/存活; 模拟器截图 vs 参考 17.6 只记录, 截图含系统状态栏/导航栏); windows 绿(Go+WebView2 6.8MB 级包, 真机启动, 主窗口客户区截图 vs 参考 95.1 只记录; Electron 版真机 CDP 冒烟 100.0); macos(arm64 托管 runner 容量不足排队多次, 重跑后): Go+WKWebView .app 构建、ad-hoc 签名校验通过、启动存活, 产物打包一步因 zip_dir 相对路径落错目录失败, 已修(dest 取绝对路径)。途中修的通用问题: 模拟器镜像下载磁盘不足(先腾磁盘)、runner 带 android-37.2 小版本平台被选中导致 targetSdk=37.2 装不上(只取整数 API 平台)、WebView2 不接受环境变量/HKCU 策略开调试端口(改截窗口)。
 - 缺口: 未签名时 macOS 会被 Gatekeeper 拦、Windows 会弹 SmartScreen; 仍无安装器(dmg/msi); APK 冒烟分数只记录; macOS / Windows runner 分钟数按 GitHub 计费倍率消耗(macOS 10×, Windows 2×)。

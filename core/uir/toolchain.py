@@ -73,7 +73,7 @@ def host_platform() -> str:
 
 def zip_dir(src, dest) -> Path:
     """把构建目录压成 zip, 保留符号链接(macOS .app 的 Framework 依赖 Versions/Current 链接, 展开会损坏签名结构)。"""
-    src, dest = Path(src), Path(dest)
+    src, dest = Path(src), Path(dest).resolve()   # zip 在 src.parent 下执行, 相对的 dest 会落错目录
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.exists():
         dest.unlink()
@@ -504,6 +504,150 @@ def build_go_desktop(app_dir, platforms=None, log=_print, timeout=1800) -> dict:
     return {"ok": bool(built) and not fails, "artifacts": built, "failures": fails, "gap": gap,
             "signing": (labels or "未签名(无产物)") + "; Windows 需系统自带 WebView2 运行时",
             "signed": bool(built) and all(b["signed"] for b in built)}
+
+
+def _latest(parent: Path, pattern: str):
+    found = sorted(parent.glob(pattern), key=lambda p: [int(x) if x.isdigit() else 0 for x in re.split(r"[.-]", p.name.split("-")[-1])])
+    return found[-1] if found else None
+
+
+def build_android_shell(app_dir, log=_print, timeout=600, min_sdk=24) -> dict:
+    """原生 Android 壳(app_shell.android_shell 产物)→ 签名 APK。不走 Gradle/Flutter:
+    aapt2 link(清单+assets)→ javac → d8 → 并入 classes.dex → zipalign → apksigner。只需 Android SDK(build-tools + platform)与 JDK。"""
+    import zipfile
+    app_dir = Path(app_dir)
+    sdk = find_android_sdk()
+    javac = _which("javac")
+    if not sdk or not javac:
+        return {"ok": False, "gap": "缺工具链: " + ", ".join(n for n, v in (("Android SDK", sdk), ("JDK(javac)", javac)) if not v)}
+    bt = _latest(Path(sdk) / "build-tools", "*")
+    plat = _latest(Path(sdk) / "platforms", "android-*")
+    if not bt or not plat or not (plat / "android.jar").is_file():
+        return {"ok": False, "gap": "缺工具链: Android build-tools / platform(android.jar)"}
+    tool = {n: str(bt / n) for n in ("aapt2", "d8", "zipalign", "apksigner")}
+    if not all(os.access(v, os.X_OK) for v in tool.values()):
+        return {"ok": False, "gap": f"build-tools {bt.name} 不完整"}
+    jar = str(plat / "android.jar")
+    target_sdk = plat.name.split("-")[-1]
+    build = app_dir / "build"
+    if build.exists():
+        shutil.rmtree(build)
+    (build / "classes").mkdir(parents=True)
+    (build / "dex").mkdir()
+    env = os.environ.copy()
+    base, aligned, final = build / "base.apk", build / "aligned.apk", build / "app-release.apk"
+    steps = [
+        [tool["aapt2"], "link", "-o", str(base), "--manifest", str(app_dir / "AndroidManifest.xml"), "-I", jar,
+         "-A", str(app_dir / "assets"), "--min-sdk-version", str(min_sdk), "--target-sdk-version", target_sdk],
+        [javac, "--release", "11", "-nowarn", "-encoding", "UTF-8", "-classpath", jar, "-d", str(build / "classes")]
+        + [str(p) for p in (app_dir / "src").rglob("*.java")],
+    ]
+    for cmd in steps:
+        rc, out = _run(cmd, app_dir, env, log, timeout)
+        if rc:
+            return {"ok": False, "gap": f"{Path(cmd[0]).name} 失败", "log": out}
+    rc, out = _run([tool["d8"], "--release", "--min-api", str(min_sdk), "--lib", jar, "--output", str(build / "dex")]
+                   + [str(p) for p in (build / "classes").rglob("*.class")], app_dir, env, log, timeout)
+    if rc:
+        return {"ok": False, "gap": "d8 失败", "log": out}
+    with zipfile.ZipFile(base, "a", zipfile.ZIP_DEFLATED) as z:
+        z.write(build / "dex" / "classes.dex", "classes.dex")
+    rc, out = _run([tool["zipalign"], "-p", "-f", "4", str(base), str(aligned)], app_dir, env, log, timeout)
+    if rc:
+        return {"ok": False, "gap": "zipalign 失败", "log": out}
+    ks = Path.home() / ".android" / "debug.keystore"
+    if not ks.is_file():
+        keytool = _which("keytool")
+        if not keytool:
+            return {"ok": False, "gap": "缺 debug keystore 且无 keytool"}
+        ks.parent.mkdir(parents=True, exist_ok=True)
+        rc, out = _run([keytool, "-genkeypair", "-keystore", str(ks), "-storepass", "android", "-keypass", "android",
+                        "-alias", "androiddebugkey", "-keyalg", "RSA", "-keysize", "2048", "-validity", "10000",
+                        "-dname", "CN=Android Debug,O=Android,C=US"], app_dir, env, log, timeout)
+        if rc:
+            return {"ok": False, "gap": "生成 debug keystore 失败", "log": out}
+    # Android 公开约定的 debug keystore 口令(android), 不是用户凭据; 正式发布需自备 keystore
+    rc, out = _run([tool["apksigner"], "sign", "--ks", str(ks), "--ks-pass", "pass:android", "--key-pass", "pass:android",
+                    "--ks-key-alias", "androiddebugkey", "--out", str(final), str(aligned)], app_dir, env, log, timeout)
+    if rc or not final.is_file():
+        return {"ok": False, "gap": "apksigner 签名失败", "log": out}
+    return {"ok": True, "artifact": str(final), "bytes": final.stat().st_size, "mode": "release",
+            "signing": "Android debug keystore", "build_tools": bt.name, "target_sdk": target_sdk}
+
+
+_INFO_PLIST = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>{exe}</string>
+<key>CFBundleIdentifier</key><string>{bid}</string>
+<key>CFBundleName</key><string>{name}</string>
+<key>CFBundleDisplayName</key><string>{name}</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>0.1.0</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>LSMinimumSystemVersion</key><string>11.0</string>
+<key>NSHighResolutionCapable</key><true/>
+<key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
+</dict></plist>
+"""
+
+
+def build_go_desktop(app_dir, platforms=None, log=_print, timeout=1800) -> dict:
+    """Go 桌面壳(app_shell.desktop_shell 产物)→ macOS .app(本机 cgo 构建) / Windows .exe(纯 Go 交叉编译)。"""
+    from xml.sax.saxutils import escape
+    app_dir = Path(app_dir)
+    go = _which("go", ("/opt/homebrew/bin/go", "/usr/local/go/bin/go"))
+    if not go:
+        return {"ok": False, "gap": "缺工具链: Go"}
+    spec = json.loads((app_dir / "shell.json").read_text(encoding="utf-8"))
+    name, title, bid = spec["name"], spec["title"], spec["bundle_id"]
+    host = host_platform()
+    platforms = platforms or [host]
+    env = dict(os.environ, GOFLAGS="-mod=mod")
+    rc, out = _run([go, "mod", "tidy"], app_dir, env, log, timeout)
+    if rc:
+        return {"ok": False, "gap": "go mod tidy 失败(网络/代理)", "log": out}
+    built, fails = [], {}
+    for plat in platforms:
+        arch = ("arm64" if _platform.machine() in ("arm64", "aarch64") else "amd64") if plat == host else "amd64"
+        tag = "x64" if arch == "amd64" else arch
+        d = app_dir / "dist" / f"{name}-{plat}-{tag}"
+        if d.exists():
+            shutil.rmtree(d)
+        d.mkdir(parents=True)
+        if plat == "darwin":
+            if host != "darwin":
+                fails[plat] = "macOS 包需在 macOS 上构建(cgo + WebKit)"
+                continue
+            macos = d / f"{name}.app" / "Contents" / "MacOS"
+            macos.mkdir(parents=True)
+            exe = macos / name
+            benv = dict(env, CGO_ENABLED="1", GOOS="darwin", GOARCH=arch)
+            rc, out = _run([go, "build", "-trimpath", "-ldflags", "-s -w", "-o", str(exe), "."], app_dir, benv, log, timeout)
+            if rc:
+                fails[plat] = out
+                continue
+            (d / f"{name}.app" / "Contents" / "Info.plist").write_text(
+                _INFO_PLIST.format(exe=escape(name), bid=escape(bid), name=escape(title)), encoding="utf-8")
+            target = d / f"{name}.app"
+        elif plat == "win32":
+            exe = d / f"{name}.exe"
+            benv = dict(env, CGO_ENABLED="0", GOOS="windows", GOARCH=arch)
+            rc, out = _run([go, "build", "-trimpath", "-ldflags", "-s -w -H windowsgui", "-o", str(exe), "."],
+                           app_dir, benv, log, timeout)
+            if rc:
+                fails[plat] = out
+                continue
+            target = exe
+        else:
+            fails[plat] = "Linux 桌面壳未实现(需 GTK WebKit)"
+            continue
+        size = sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
+        built.append({"platform": plat, "arch": tag, "dir": str(d), "executable": str(target),
+                      "exe_bytes": exe.stat().st_size, "dir_bytes": size})
+    gap = "; ".join(f"{k}: {str(v)[:200]}" for k, v in fails.items()) or None
+    return {"ok": bool(built) and not fails, "artifacts": built, "failures": fails, "gap": gap,
+            "signing": "未签名(macOS 未公证 / Windows 无 Authenticode); Windows 需系统自带 WebView2 运行时"}
 
 
 def build_desktop(app_dir, platforms=None, arch=None, log=_print, timeout=1800) -> dict:

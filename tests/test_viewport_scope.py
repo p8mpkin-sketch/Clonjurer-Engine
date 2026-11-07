@@ -169,8 +169,57 @@ class LiveViewportScope(unittest.TestCase):
                 b.close()
 
 
-if __name__ == "__main__":
-    unittest.main()
+CLS_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<style>.big{font-size:40px}.small{font-size:18px}</style></head><body>
+<h2 id="h" class="big">Title</h2>
+<script>function f(){document.getElementById('h').className = innerWidth < 600 ? 'small' : 'big';}
+addEventListener('resize', f); f();</script></body></html>"""
+
+
+class ViewportClassSwap(unittest.TestCase):
+    """脚本按视口换 class(useMediaQuery 类): 克隆里没有脚本再换, 由分视口 class 运行时接管。"""
+
+    def test_class_follows_band_after_scope(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 1440, "height": 800})
+                page.set_content(CLS_PAGE)
+                page.evaluate(ce.CV_RECORD_JS, "d")
+                for tag, w in (("t", 768), ("m", 390)):
+                    page.set_viewport_size({"width": w, "height": 800})
+                    page.evaluate(ce.CV_QUIET_JS, 100)
+                    page.evaluate(ce.CV_RECORD_JS, tag)
+                page.set_viewport_size({"width": 1440, "height": 800})
+                page.evaluate(ce.CV_QUIET_JS, 100)
+                page.evaluate(ce.CV_RECORD_JS, "b")
+                loads = {}
+                for tag, w in (("t", 768), ("m", 390)):
+                    p2 = b.new_page(viewport={"width": w, "height": 800})
+                    p2.set_content(CLS_PAGE)
+                    loads[tag] = p2.evaluate(ce.CV_PATHS_JS)
+                    p2.close()
+                out = page.evaluate(ce.CV_EMIT_JS, loads)
+                self.assertEqual(out.get("cls"), 1)
+                self.assertEqual(page.evaluate("document.getElementById('h').className"), "big")
+                html = page.content()
+            finally:
+                b.close()
+            html = ce.scope_viewport_css(html, 1000, 0)
+            # 去掉站点自己的换 class 脚本, 只留引擎注入的运行时
+            html = html.replace("addEventListener('resize', f); f();", "")
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 390, "height": 800})
+                page.set_content(html)
+                self.assertEqual(page.evaluate("getComputedStyle(document.getElementById('h')).fontSize"), "18px")
+                page.set_viewport_size({"width": 1440, "height": 800})
+                page.wait_for_timeout(100)
+                self.assertEqual(page.evaluate("getComputedStyle(document.getElementById('h')).fontSize"), "40px")
+            finally:
+                b.close()
+
 
 
 class CalibInjection(unittest.TestCase):
@@ -291,3 +340,96 @@ class DomVariants(unittest.TestCase):
                 self.assertTrue(page.evaluate("document.querySelector('.cards').checkVisibility()"))
             finally:
                 b.close()
+
+
+SVG_ATTR_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<style>body{margin:0}</style></head><body>
+<svg id="logo" viewBox="0 0 100 10"><rect width="100" height="10"/></svg>
+<svg id="icon" width="24" height="24" viewBox="0 0 24 24"><rect width="24" height="24"/></svg>
+<script>
+function fit(){ var l=document.getElementById('logo'); var w=Math.min(innerWidth-48,600);
+  l.setAttribute('width', String(w)); l.setAttribute('height', String(w/10)); }
+fit(); addEventListener('resize', fit);
+</script></body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class ViewportSizeAttrs(unittest.TestCase):
+    def test_script_written_svg_size_attrs_follow_viewport(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 1440, "height": 800})
+                page.set_content(SVG_ATTR_PAGE)
+                page.evaluate(ce.CV_RECORD_JS, "d")
+                for tag, w in (("t", 768), ("m", 390)):
+                    page.set_viewport_size({"width": w, "height": 800})
+                    page.evaluate(ce.CV_QUIET_JS, 100)
+                    page.evaluate(ce.CV_RECORD_JS, tag)
+                page.set_viewport_size({"width": 1440, "height": 800})
+                page.evaluate(ce.CV_QUIET_JS, 100)
+                page.evaluate(ce.CV_RECORD_JS, "b")
+                out = page.evaluate(ce.CV_EMIT_JS)
+                self.assertGreaterEqual(out["banded"], 1)
+                self.assertEqual(page.evaluate("document.getElementById('logo').getBoundingClientRect().width"), 600)
+                html = page.content()
+            finally:
+                b.close()
+            html = ce.scope_viewport_css(html, 1000, 0)
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 390, "height": 800})
+                page.set_content(html.replace("<script>", "<script type='x'>"))
+                self.assertEqual(page.evaluate("document.getElementById('logo').getBoundingClientRect().width"), 342)
+                self.assertEqual(page.evaluate("document.getElementById('icon').getBoundingClientRect().width"), 24)
+            finally:
+                b.close()
+
+
+CANVAS_LOAD_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<style>body{margin:0}canvas{display:block}</style></head><body>
+<canvas id="cv"></canvas><div id="after">下文</div>
+<script>
+var c = document.getElementById('cv');
+c.setAttribute('width', String(innerWidth)); c.setAttribute('height', innerWidth >= 1000 ? '300' : '520');
+</script></body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class LoadTimeSizeAttrs(unittest.TestCase):
+    def test_canvas_size_written_only_at_load(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 1440, "height": 800})
+                page.set_content(CANVAS_LOAD_PAGE)
+                for tag, w in (("d", 1440), ("t", 768), ("m", 390), ("b", 1440)):
+                    page.set_viewport_size({"width": w, "height": 800})
+                    page.evaluate(ce.CV_QUIET_JS, 100)
+                    page.evaluate(ce.CV_RECORD_JS, tag)
+                loads = {}
+                for tag, w in (("t", 768), ("m", 390)):
+                    p2 = b.new_page(viewport={"width": w, "height": 800})
+                    p2.set_content(CANVAS_LOAD_PAGE)
+                    loads[tag] = p2.evaluate(ce.CV_PATHS_JS)
+                    p2.close()
+                out = page.evaluate(ce.CV_EMIT_JS, loads)
+                self.assertGreaterEqual(out["reload"], 1)
+                self.assertEqual(page.evaluate("document.getElementById('cv').getBoundingClientRect().height"), 300)
+                html = page.content()
+            finally:
+                b.close()
+            html = ce.scope_viewport_css(html, 1000, 0)
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 390, "height": 800})
+                page.set_content(html.replace("<script>", "<script type='x'>"))
+                self.assertEqual(page.evaluate("document.getElementById('cv').getBoundingClientRect().height"), 520)
+            finally:
+                b.close()
+
+
+if __name__ == "__main__":
+    unittest.main()

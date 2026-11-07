@@ -1,6 +1,6 @@
 name: app-build
 
-# 三平台安装包构建 + 签名 + 启动冒烟(ROADMAP_95.md §3.3, DESIGN.md §9.15)。
+# 三平台安装包构建 + 签名 + 启动冒烟(ROADMAP_95.md §3.3, DESIGN.md §9.17)。
 # 触发: 手动、每晚, 以及改动构建链本身(toolchain / 目标 / 本 workflow)的 PR。
 # 样本: engine_bench/gen_cases/cases.json 的描述用例(确定性路线, 不调模型) → UIR →
 #   Android: 原生 WebView 壳(默认)/ Flutter → release APK → apksigner 签名/校验 → 模拟器安装启动截图(分数只记录)

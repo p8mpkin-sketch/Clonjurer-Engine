@@ -13,11 +13,11 @@ from core.uir.model import UIR
 @dataclass
 class GenRequest:
     """一次生成请求(来自 POST /api/v4/generate 或 bench)。"""
-    kind: str                                   # "screenshot" | "description" | "web_dom" | "apk_static"
+    kind: str                                   # "screenshot" | "description" | "web_dom" | "apk_static" | "a11y"
     image_path: Optional[Path] = None           # 截图输入(参考图)
     description: str = ""                       # 文字描述输入
     viewport: dict = field(default_factory=dict)  # {"width","height"}; 截图输入默认取图宽
-    source_path: Optional[Path] = None          # web_dom: 克隆工作空间; apk_static: APK 路径
+    source_path: Optional[Path] = None          # web_dom: 克隆工作空间; apk_static: APK 路径; a11y: 导出的树文件
     hints: dict = field(default_factory=dict)   # 上一轮差异线索等(质量循环回喂)
     meta: dict = field(default_factory=dict)
 

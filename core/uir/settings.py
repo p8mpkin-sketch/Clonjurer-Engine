@@ -17,6 +17,11 @@ GEN_INPUTS_DIR = config.BASE_DIR / "gen_inputs"
 GENERATE_TIME_BUDGET = int(os.environ.get("CLONER_GEN_TIME_BUDGET", "240"))   # 秒
 GENERATE_TARGET_SCORE = float(os.environ.get("CLONER_GEN_TARGET_SCORE", "85"))  # ≥ 即停
 GENERATE_MAX_ROUNDS = int(os.environ.get("CLONER_GEN_MAX_ROUNDS", "4"))
+# 截图 + 模型: 读图(参考文本)与骨架填充的墙钟上限(秒), 两者并行; 到点收回多少用多少
+GENERATE_READ_BUDGET = float(os.environ.get("CLONER_GEN_READ_BUDGET", "100"))
+GENERATE_FILL_ROUNDS = int(os.environ.get("CLONER_GEN_FILL_ROUNDS", "3"))      # 骨架填充候选数(取评分最高)
+GENERATE_FILL_WORKERS = int(os.environ.get("CLONER_GEN_FILL_WORKERS", "64"))   # 填充并发请求数
+GENERATE_FILL_BUDGET = float(os.environ.get("CLONER_GEN_FILL_BUDGET", "100"))
 
 # 输入上限
 GEN_MAX_IMAGE_BYTES = 12 * 1024 * 1024

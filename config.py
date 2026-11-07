@@ -128,9 +128,11 @@ REPAIR_MIN_GAIN = 0.5          # 修复循环收敛判定: 缺失集合不变且
 FIDELITY_SKIP_ABOVE = 97.0    # 交互轨达到此分时不渲染保真轨(头条取优不受影响)
 VIEWPORT_VARIANT_MAX = 40      # 窄屏 DOM 变体: 结构不同的子树超过此数视为内容随机(推荐流), 不注入
 VIEWPORT_VARIANT_BYTES = 3_000_000   # 窄屏变体 HTML / 附带样式各自上限
+VIEWPORT_VARIANT_SETTLE = 4.0  # 窄屏首载页抽取变体前平滑滚动的时限(秒): 触发进视口才起播的入场动画
 STATIC_TRACK_MARGIN = 5.0     # 保真轨领先交互轨达此分差时, 试做"静态版"(剥离应用脚本)交付物
                               # 并实测; 静态版也领先交互轨此分差才设为默认预览/导出
 BACKFILL_BUDGET = 20          # 单轮渲染缺失回补的回源时限(秒)
+REPAIR_STOP_SCORE = 99.5      # 修复循环: 还原度达到此值即停(缺失的只剩不可见请求时不再回补)
 REPAIR_TIME_BUDGET = 300       # 修复循环时间预算(秒): 快站快修, 慢站限时收敛(P0-A 速度调度)
 AI_TIME_BUDGET = 900           # 含 AI 修复的任务时间预算(秒): 超预算跳过 AI 轮       # 渲染驱动回补循环轮数(本地渲染->收集404->回源补抓);
                                # Vite/webpack 动态 chunk 是"entry->视图chunk->懒路由->
@@ -153,6 +155,7 @@ AI_API_BASE_URL = os.environ.get("CLONER_AI_BASE_URL", "https://api.deepseek.com
 AI_API_KEY = os.environ.get("CLONER_AI_KEY", "")
 AI_MODEL = os.environ.get("CLONER_AI_MODEL", "deepseek-v4.1")
 AI_REQUEST_TIMEOUT = 90        # 单次大模型请求超时(秒)
+AI_CALL_WALL_LIMIT = 180       # 单次 chat_json 墙钟上限(含重试/升档; 上游 keep-alive 时读超时不触发)
 AI_PATCH_MAX_TOKENS = 8192     # AI 补丁补全预算基档(推理模型的思考 token 计入, 耗尽时自动×2 重试)
 AI_REPAIR_TRIGGER_SCORE = 85.0  # 视觉闭环触发门限: 诚实评分低于此值才调用大模型
 AI_REPAIR_TARGET_SCORE = 90.0   # 修复循环的目标分: 达标即停

@@ -9,6 +9,7 @@ Tier 0(确定性, 始终可用): 递归 XY 切分版面分析——
 Tier 1(LLM, 有 Key 时): 多模态模型直接产出语义 UIR(真实文案/角色/布局), 校验失败回落 Tier 0;
   质量循环把像素差分线索回喂给下一轮。
 """
+import time
 from pathlib import Path
 
 import numpy as np
@@ -326,6 +327,15 @@ _FILL_SYSTEM = (
 )
 
 
+def fill_blocks(skel: UIR) -> list:
+    """骨架里交给模型逐块回答的区块。v1: 顶层全部区块; v2: 只取含文字行的区块(v2 顶层还有大量
+    底色/分割线色块, 列给模型只会浪费输出预算)。merge_fill 与清单生成共用, 编号一致。"""
+    kids = list(skel.root.children)
+    if skel.meta.get("seg") != "v2":
+        return kids
+    return [n for n in kids if any(c.role == "text" for c in n.walk() if c is not n)]
+
+
 def merge_fill(skel: UIR, fill: dict) -> UIR:
     """把模型的逐块填充(role/texts/text_color)合并进确定性骨架。
 
@@ -334,14 +344,14 @@ def merge_fill(skel: UIR, fill: dict) -> UIR:
     并保留文字行作为可见标签(不再另画一个居中标签, 否则重复文字破坏边缘); 图片区块不动。纯函数, 可测。"""
     blocks = {b.get("id"): b for b in (fill or {}).get("blocks", []) if isinstance(b, dict)}
     filled = 0
-    for idx, node in enumerate(skel.root.children, start=1):
+    for idx, node in enumerate(fill_blocks(skel), start=1):
         b = blocks.get(f"b{idx}")
         if not b:
             continue
         role = str(b.get("role") or "").strip()
         texts = [str(t).strip() for t in (b.get("texts") or []) if str(t).strip()]
         color = b.get("text_color") if isinstance(b.get("text_color"), str) and b["text_color"].startswith("#") else None
-        bands = [c for c in node.children if c.role == "text"]
+        bands = [c for c in node.walk() if c.role == "text" and c is not node]
         if node.role == "image" or role == "image":
             continue
         for band, text in zip(bands, texts):          # 文字行: 原位替换
@@ -385,55 +395,130 @@ _READ_SYSTEM = ("你是 OCR。逐字抄录截图中所有可见文字(按阅读�
 _READ_CACHE = {}   # (截图 sha1, 模型) → 参考文本: 同一截图在质量循环/重跑里只读一次
 
 
-def read_screenshot_text(ai_cfg: dict, image_path, max_lines: int = 400, workers: int = 6) -> str:
+def read_screenshot_text(ai_cfg: dict, image_path, max_lines: int = 400, workers: int = 6,
+                         time_left: float = None) -> str:
     """模型读图得到参考文本(截图没有 DOM 文本, 这是评分 v3 文本通道唯一可得的参考)。
 
     长页按 llm.image_parts 纵向切段后**每段一个请求并行发出**, 结果按段序拼接: 此前 6 段塞进同一个
     请求串行生成, 门户整页读一次 2~3 分钟; 并行后墙钟 ≈ 最慢一段。单段失败只丢该段(记 None), 全部失败才抛。
-    结果按截图内容 sha1 + 模型缓存。"""
+    time_left: 读图墙钟上限(秒), 到点收回多少用多少, 没回来的段不读(每个请求本身也带同一墙钟上限,
+    不会在后台无限挂着)。结果按截图内容 sha1 + 模型缓存(只缓存完整结果)。"""
     import hashlib
-    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import ThreadPoolExecutor, wait
     data = Path(image_path).read_bytes()
     key = (hashlib.sha1(data).hexdigest(), ai_cfg.get("model"))
     if key in _READ_CACHE:
         return _READ_CACHE[key]
     parts, ranges, (W, H) = llm.image_parts(image_path)
+    deadline = None if time_left is None else time.monotonic() + max(5.0, float(time_left))
 
     def one(k):
         note = (f"这是一张 {W}×{H}px 长截图纵向切成 {len(parts)} 段中的第 {k + 1} 段(原图 y 区间 "
                 f"[{ranges[k][0]},{ranges[k][1]}))。只抄录这一段里的文字。" if len(parts) > 1 else "")
         obj = llm.chat_json(ai_cfg, _READ_SYSTEM, "请抄录这张界面截图里的全部可见文字。" + note,
-                            parts=[parts[k]], max_tokens=16384)
+                            parts=[parts[k]], max_tokens=16384, deadline=deadline,
+                            thinking=False)
         return [str(x).strip() for x in (obj.get("lines") or []) if str(x).strip()]
 
     results, errors = [None] * len(parts), []
-    with ThreadPoolExecutor(max_workers=max(1, min(workers, len(parts)))) as ex:
+    ex = ThreadPoolExecutor(max_workers=max(1, min(workers, len(parts))))
+    try:
         futs = {ex.submit(one, k): k for k in range(len(parts))}
-        for f, k in futs.items():
+        done, pending = wait(list(futs), timeout=None if deadline is None else max(1.0, deadline - time.monotonic() + 2))
+        for f in done:
             try:
-                results[k] = f.result()
+                results[futs[f]] = f.result()
             except Exception as exc:   # 单段失败不拖累其余段
                 errors.append(exc)
+        errors.extend(TimeoutError("读图段超出时间预算") for _ in pending)
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
     if all(r is None for r in results):
         raise errors[0] if errors else RuntimeError("读图无结果")
     lines = [ln for r in results if r for ln in r]
     text = "\n".join(lines[:max_lines])
-    if len(_READ_CACHE) > 64:
-        _READ_CACHE.clear()
-    _READ_CACHE[key] = text
+    if not errors:
+        if len(_READ_CACHE) > 64:
+            _READ_CACHE.clear()
+        _READ_CACHE[key] = text
     return text
 
 
 def _skeleton_list(skel: UIR, limit: int = 120) -> str:
     lines = []
-    for idx, n in enumerate(skel.root.children, start=1):
+    for idx, n in enumerate(fill_blocks(skel), start=1):
         pos, b = n.box.get("position") or {}, n.box
-        bands = sum(1 for c in n.children if c.role == "text")
+        bands = sum(1 for c in n.walk() if c.role == "text" and c is not n)
         lines.append(f"b{idx}: top {pos.get('top', 0)} left {pos.get('left', 0)} w {b.get('w')} h {b.get('h')}"
                      + (f" 文字行 {bands}" if bands else "") + (" [图片区]" if n.role == "image" else ""))
         if idx >= limit:
             break
     return "\n".join(lines)
+
+
+def prefetch_fill(ai_cfg: dict, image_path, time_left: float):
+    """在独立线程里先算确定性 v2 骨架(资源落临时目录, 编号与正式骨架一致)并发出逐块填充, 返回
+    {"image", "n_blocks", "future"}。供生成器与读图同时启动: 两者都是纯模型等待, 串行时墙钟相加。"""
+    import tempfile
+    from concurrent.futures import ThreadPoolExecutor
+    from core.uir.adapters.layout import segment_v2
+    tmp = tempfile.mkdtemp(prefix="uir_prefill_")
+    skel = segment_v2(image_path, asset_dir=Path(tmp))
+    ex = ThreadPoolExecutor(max_workers=1)
+    fut = ex.submit(fill_by_tiles, ai_cfg, skel, image_path, settings.GENERATE_FILL_WORKERS, 25, time_left)
+    ex.shutdown(wait=False)
+    return {"image": str(image_path), "n_blocks": len(fill_blocks(skel)), "future": fut}
+
+
+def fill_by_tiles(ai_cfg: dict, skel: UIR, image_path, workers: int = 32, per_req: int = 25,
+                  time_left: float = None, temperature: float = 0.2) -> dict:
+    """骨架逐块填充按截图纵向分段并行: 每段只带该段图片与落在该段里的区块(按区块顶边归段,
+    单段区块过多再拆请求)。此前整页 ~400 块一个请求串行生成 2~3 分钟; 分段后墙钟 ≈ 最慢一段,
+    且每个请求看到的是该段的原分辨率切片。单个请求失败只丢那几块, 全部失败才抛。"""
+    from concurrent.futures import ThreadPoolExecutor
+    parts, ranges, (W, H) = llm.image_parts(image_path)
+    blocks = fill_blocks(skel)
+    deadline = None if time_left is None else time.monotonic() + max(5.0, float(time_left))
+    jobs = []
+    for k, (y0, y1) in enumerate(ranges):
+        mine = [(i, n) for i, n in enumerate(blocks, start=1)
+                if y0 <= int((n.box.get("position") or {}).get("top", 0)) < y1
+                or (k == len(ranges) - 1 and int((n.box.get("position") or {}).get("top", 0)) >= y1)]
+        for c in range(0, len(mine), per_req):
+            jobs.append((k, mine[c:c + per_req]))
+
+    def one(job):
+        k, chunk = job
+        y0, y1 = ranges[k]
+        listing = []
+        for i, n in chunk:
+            pos, b = n.box.get("position") or {}, n.box
+            bands = sum(1 for c in n.walk() if c.role == "text" and c is not n)
+            listing.append(f"b{i}: top {pos.get('top', 0)} left {pos.get('left', 0)} w {b.get('w')} h {b.get('h')}"
+                           + (f" 文字行 {bands}" if bands else ""))
+        user = (f"整页截图 {W}×{H}px; 附图是其中 y 区间 [{y0},{y1}) 的一段(按宽缩放, 坐标仍按原图)。"
+                f"区块清单(原图像素坐标):\n" + "\n".join(listing) + "\n\n请对每个区块给出 role 与 texts。")
+        return llm.chat_json(ai_cfg, _FILL_SYSTEM, user, parts=[parts[k]], max_tokens=8192, temperature=temperature,
+                             deadline=deadline, thinking=False).get("blocks") or []
+
+    from concurrent.futures import wait
+    out, errors = [], []
+    ex = ThreadPoolExecutor(max_workers=max(1, min(workers, len(jobs) or 1)))
+    try:
+        futs = [ex.submit(one, j) for j in jobs]
+        # 预算内收回多少用多少: 没回来的段保持确定性占位(merge_fill 对缺失 id 不动)
+        done, pending = wait(futs, timeout=None if time_left is None else max(5.0, time_left))
+        for f in done:
+            try:
+                out.extend(b for b in f.result() if isinstance(b, dict))
+            except Exception as exc:
+                errors.append(exc)
+        errors.extend(TimeoutError("段填充超出时间预算") for _ in pending)
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
+    if jobs and len(errors) == len(jobs):
+        raise errors[0]
+    return {"blocks": out}
 
 
 @register_input("screenshot")
@@ -446,13 +531,19 @@ class ScreenshotAdapter:
         if ctx.ai_cfg and ctx.expired() and not req.hints.get("force_tier0"):
             ctx.log("UIR", f"时间预算已耗尽(剩余 {ctx.remaining():.0f}s), 本轮跳过模型, 走确定性版面分析")
         if ctx.ai_cfg and not ctx.expired() and not req.hints.get("force_tier0") and llm_mode == "skeleton_fill":
-            depth = int(req.hints.get("seg_depth") or settings.SEG_MAX_DEPTH)
-            skel = segment(img, max_depth=depth, asset_dir=(ctx.ws / "static" / "img") if ctx.ws else None)
+            from core.uir.adapters.layout import segment_v2
+            skel = segment_v2(img, asset_dir=(ctx.ws / "static" / "img") if ctx.ws else None)
             try:
                 ctx.log("UIR", f"截图→UIR(骨架填充): 确定性骨架 {len(skel.root.children)} 块, 调用 {ctx.ai_cfg['model']} 逐块填充")
-                user = (f"截图尺寸 {W}×{H}。区块清单(像素坐标):\n{_skeleton_list(skel)}\n\n"
-                        "请对每个区块给出 role 与 texts。")
-                fill = llm.chat_json(ctx.ai_cfg, _FILL_SYSTEM, user, images=[img], max_tokens=16384)
+                pre = (ctx.extra or {}).pop("prefetch_fill", None)
+                if pre and pre.get("image") == str(img) and pre.get("n_blocks") == len(fill_blocks(skel)):
+                    # 生成器在第 1 轮(确定性地板)之前就已并行发出填充请求(与读图同时进行), 这里只收结果
+                    fill = pre["future"].result(timeout=max(1.0, ctx.remaining()))
+                    ctx.log("UIR", "骨架填充: 使用预取结果(与读图/地板轮并行)")
+                else:
+                    fill = fill_by_tiles(ctx.ai_cfg, skel, img, workers=settings.GENERATE_FILL_WORKERS,
+                                         time_left=min(ctx.remaining(), settings.GENERATE_FILL_BUDGET),
+                                         temperature=float(req.hints.get("fill_temp") or 0.2))
                 uir = merge_fill(skel, fill)
                 ctx.log("UIR", f"骨架填充完成: 填入 {uir.meta.get('filled')} 处文字/控件, {uir.root.count()} 节点")
                 return uir
