@@ -358,7 +358,8 @@ def _vp_means(results):
     return {v: round(statistics.mean(xs), 1) for v, xs in out.items()}
 
 
-_VP_NAMES = {"desktop": "桌面", "tablet": "平板768", "mobile": "手机390"}
+_VP_NAMES = {"desktop": "桌面", "tablet": "平板768", "mobile": "手机390",
+             "iphone-air": "iPhone Air 真机口径", "ipad-air": "iPad Air 真机口径"}
 
 
 def _vp_line(g):

@@ -26,6 +26,45 @@ LAZY_JS = r"""
 }
 """
 
+# 冻结前等未加载完的样式表: 媒体条件不匹配当前视口的 <link>(手机断点表)浏览器按最低优先级
+# 排在大量图片之后, 冻结时 sheet 常为空, CSSOM 副本缺失且随机(cgnpc 4 次采集 0~3 张不等)。封顶等待。
+WAIT_SHEETS_JS = r"""
+(capMs) => new Promise(res => {
+  const t0 = performance.now();
+  const isPending = l => {
+    if (l.disabled) return false;
+    if (!l.sheet) return true;
+    try { return !l.sheet.cssRules; } catch (e) { return false; }   // 跨域可读性无关加载
+  };
+  const links = Array.from(document.querySelectorAll('link[rel~="stylesheet" i][href]')).filter(isPending);
+  // 不指望浏览器的最低优先级队列: 同时直接 fetch 一份, 先到先用(到了就紧跟原链接插副本)
+  let fetched = 0, done = false;   // 封顶返回后迟到的 fetch 不再插(冻结已按浏览器的表序列化, 再插即重复)
+  const absolutize = (text, base) => text.replace(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^'")\s]+))\s*\)/g, (m, d, s1, b) => {
+    const q = d !== undefined ? '"' : (s1 !== undefined ? "'" : '');
+    const u = (d !== undefined ? d : (s1 !== undefined ? s1 : b)).trim();
+    if (/^(data:|blob:|about:|#|%23|https?:)/i.test(u)) return m;
+    try { return 'url(' + q + new URL(u, base).href + q + ')'; } catch (e) { return m; }
+  });
+  const jobs = links.map(l => fetch(l.href, {credentials: 'include'}).then(r => r.ok ? r.text() : '').then(text => {
+    if (done || !text || !isPending(l) || !l.isConnected || /<\/?(html|body|style)\b/i.test(text)) return;
+    const media = (l.getAttribute('media') || '').trim();
+    const st = document.createElement('style');
+    st.setAttribute('data-cssom', 'fetched');
+    text = absolutize(text, l.href);
+    st.textContent = (media && media.toLowerCase() !== 'all') ? '@media ' + media + ' {\n' + text + '\n}\n' : text;
+    l.after(st);
+    fetched++;
+  }).catch(() => 0));
+  const tick = () => {
+    const n = links.filter(l => isPending(l) && !(l.nextElementSibling && l.nextElementSibling.getAttribute('data-cssom') === 'fetched')).length;
+    if (!n || performance.now() - t0 > capMs) { done = true; res({pending: n, fetched: fetched, ms: Math.round(performance.now() - t0)}); }
+    else setTimeout(tick, 100);
+  };
+  if (!links.length) return res({pending: 0, fetched: 0, ms: 0});
+  tick();
+})
+"""
+
 DEEP_FREEZE_JS = r"""
 () => {
   const result = { lazy: 0, css: 0, crossOriginSheets: 0, canvas: 0, forms: 0, revealed: 0 };
@@ -74,7 +113,11 @@ DEEP_FREEZE_JS = r"""
   const serializeSheet = (sheet, kind) => {
     try {
       if (sheet.disabled) return;
-      if (sheet.ownerNode && sheet.ownerNode.hasAttribute && sheet.ownerNode.hasAttribute('data-clone-bake')) return;
+      if (sheet.ownerNode && sheet.ownerNode.hasAttribute && (sheet.ownerNode.hasAttribute('data-clone-bake')
+          || sheet.ownerNode.hasAttribute('data-cssom'))) return;   // 引擎自己插的副本(含冻结前直取的)不再复制
+      // 冻结前已 fetch 补过副本(WAIT_SHEETS_JS)的表不再重复
+      { const nx = sheet.ownerNode && sheet.ownerNode.nextElementSibling;
+        if (nx && nx.getAttribute && nx.getAttribute('data-cssom') === 'fetched') return; }
       const rules = sheet.cssRules;
       if (!rules || !rules.length) return;
       let text = '';
@@ -98,7 +141,12 @@ DEEP_FREEZE_JS = r"""
       const style = document.createElement('style');
       style.setAttribute('data-cssom', kind);
       style.textContent = text;
-      head.appendChild(style);
+      // 副本紧跟原节点: 保持与其它样式表的层叠先后。全部追加到 head 末尾时, 某张表的副本缺失
+      // (媒体条件不匹配的表最低优先级加载, 冻结时可能还没到)会让其它表的副本反压它的原链接规则
+      const own = sheet.ownerNode;
+      // (body 里的原节点同样就地插: 副本与原表语义等价, 不改层叠; 窄屏变体的结构比对不计 <style>, 见 CV_PATHS_JS)
+      if (kind === 'true' && own && own.isConnected && own.parentNode) own.after(style);
+      else head.appendChild(style);
       result.css++;
     } catch (err) {
       result.crossOriginSheets++;
@@ -506,6 +554,10 @@ CV_RECORD_JS = r"""
   // 不在 style 里, 记成等价 CSS 一并参与分视口比较(CSS 宽高覆盖展示属性)
   m.attrs = m.attrs || {};
   m.attrs[tag] = m.els.map(__CV_ATTR__);
+  // 脚本按视口写的非 class 属性(data-*/aria-* 被样式表属性选择器引用, 如 [data-media-position=...];
+  // svg 的 viewBox 按容器宽重算): 一并记录, 落盘前按视口分段换(见 CV_EMIT_JS)
+  m.xattr = m.xattr || {};
+  m.xattr[tag] = m.els.map(__CV_XATTR__);
   m.widths = m.widths || {};
   m.widths[tag] = window.innerWidth;
   return m.els.length;
@@ -532,17 +584,37 @@ CV_ATTR_FN = r"""(e) => {
   }
   return s;
 }"""
-CV_RECORD_JS = CV_RECORD_JS.replace("__CV_PATH__", CV_PATH_FN).replace("__CV_ATTR__", CV_ATTR_FN)
+# 可随视口换的非 class 属性快照: 名=值 JSON(按名排序), 无则空串。引擎自加属性不计; 值过长/含尖括号引号的不计
+CV_XATTR_FN = r"""(e) => {
+  const o = {};
+  let n = 0;
+  for (const a of e.attributes) {
+    const k = a.name;
+    if (!(/^(data|aria)-/.test(k) || (k === 'viewBox' && e instanceof SVGSVGElement))) continue;
+    if (/^data-(cv|cb|cssom|clone)/.test(k) || a.value.length > 80 || /[<>"]/.test(a.value)) continue;
+    o[k] = a.value; n++;
+  }
+  if (!n) return '';
+  const r = {};
+  for (const k of Object.keys(o).sort()) r[k] = o[k];
+  return JSON.stringify(r);
+}"""
+CV_RECORD_JS = (CV_RECORD_JS.replace("__CV_PATH__", CV_PATH_FN).replace("__CV_ATTR__", CV_ATTR_FN)
+                .replace("__CV_XATTR__", CV_XATTR_FN))
 
 # 窄屏重载页的内联样式表: {路径: [标签, class, style]}
 CV_PATHS_JS = r"""() => {
+  // 子元素结构签名不计样式/脚本类节点: 引擎就地插的 CSSOM 副本(<style data-cssom>)会让桌面页
+  // 与窄屏首载页同一容器的子元素序列不同, 被误判为"随视口换结构", 整页并列插入窄屏版(aliyun 首页 ×3)
+  const NONVIS = new Set(['STYLE', 'LINK', 'SCRIPT', 'NOSCRIPT', 'META', 'TEMPLATE']);
   const out = {}, pathOf = """ + CV_PATH_FN + r""";
   const els = Array.from(document.body ? document.body.querySelectorAll('*') : []).slice(0, 20000);
   for (const e of els) out[pathOf(e)] = [e.tagName, String(e.className && e.className.baseVal !== undefined ? e.className.baseVal : e.className || ''), e.getAttribute('style') || '',
-    Array.from(e.children, c => c.tagName).join(',').slice(0, 400), (""" + CV_ATTR_FN + r""")(e)];
+    Array.from(e.children, c => c.tagName).filter(t => !NONVIS.has(t)).join(',').slice(0, 400), (""" + CV_ATTR_FN + r""")(e),
+    (""" + CV_XATTR_FN + r""")(e)];
   // 根元素只记 class(加载时按宽度给 <html>/<body> 打的 _mobile / is-mobile 类标记)
   for (const [k, e] of [['@html', document.documentElement], ['@body', document.body]])
-    if (e) out[k] = [e.tagName, e.getAttribute('class') || '', '', '', ''];
+    if (e) out[k] = [e.tagName, e.getAttribute('class') || '', '', '', '', ''];
   return out;
 }"""
 
@@ -567,6 +639,23 @@ ALT_EXTRACT_JS = r"""(paths) => {
     const el = resolve(p);
     if (!el) continue;
     const c = el.cloneNode(true);
+    // cloneNode 不带 canvas 位图: 按原节点逐个固化成 <img>(与 DEEP_FREEZE 第 5 步同口径), 否则窄屏版
+    // 的图表/插画整块空白
+    const cvs = el.querySelectorAll('canvas'), cvc = c.querySelectorAll('canvas');
+    cvs.forEach((cv, k) => {
+      try {
+        const data = cv.toDataURL('image/png'), dst = cvc[k];
+        if (!dst || !data || data.length <= 128) return;
+        const img = document.createElement('img');
+        img.src = data;
+        img.setAttribute('data-canvas-frozen', 'true');
+        for (const a of ['class', 'id']) if (cv.getAttribute(a)) img.setAttribute(a, cv.getAttribute(a));
+        if (cv.getAttribute('style')) img.setAttribute('style', cv.getAttribute('style'));
+        if (cv.clientWidth) img.style.width = cv.clientWidth + 'px';
+        if (cv.clientHeight) img.style.height = cv.clientHeight + 'px';
+        dst.replaceWith(img);
+      } catch (e) {}
+    });
     c.querySelectorAll('script,noscript').forEach(x => x.remove());
     c.querySelectorAll('[data-src],[data-original],[data-lazy-src]').forEach(x => {
       const v = x.getAttribute('data-src') || x.getAttribute('data-original') || x.getAttribute('data-lazy-src');
@@ -746,6 +835,55 @@ CV_EMIT_JS = r"""
     el.setAttribute('data-cv-cls-d', el.getAttribute('class') || '');
     out.cls = (out.cls || 0) + 1;
   });
+  // 分视口非 class 属性: 与 class 同口径要两路证据一致(缩放快照与窄屏首载同路径元素取值相同、都不同于
+  // 桌面、还原后回到桌面值); data-*/aria-* 只换被样式表属性选择器引用的名(未被引用的换了也不影响渲染,
+  // 多是埋点/状态), svg viewBox 恒参与。名字像交互状态的不换
+  const X = m.xattr || {}, xswaps = [];
+  if (X.d && X.b && tags.length) {
+    const refd = new Set();
+    const walk = rules => {
+      for (const r of rules || []) {
+        if (r.selectorText) for (const g of r.selectorText.matchAll(/\[\s*([\w:-]+)/g)) refd.add(g[1].toLowerCase());
+        if (r.cssRules) walk(r.cssRules);
+      }
+    };
+    for (const sh of document.styleSheets) { try { walk(sh.cssRules); } catch (e) {} }
+    const XSTATE = /(expanded|hidden|selected|current|pressed|checked|state|active|open|index|visible|busy|disabled|live|scroll|show)/i;
+    const J = s => { try { return s ? JSON.parse(s) : {}; } catch (e) { return null; } };
+    m.els.forEach((el, i) => {
+      const xd = X.d[i];
+      if (!el.isConnected || X.b[i] !== xd || (__CV_XATTR__)(el) !== xd) return;
+      const D = J(xd);
+      if (!D) return;
+      const alt = {};
+      tags.forEach(t => {
+        const v = X[t] ? X[t][i] : xd;
+        const L = m.paths && loads[t] ? loads[t][m.paths[i]] : null;
+        if (v === xd || !L || L[0] !== el.tagName || (L[5] || '') !== v) return;
+        const V = J(v);
+        if (!V) return;
+        const ch = {};
+        let ok = true, n = 0;
+        for (const k of new Set(Object.keys(D).concat(Object.keys(V)))) {
+          if (D[k] === V[k]) continue;
+          if (k !== 'viewBox' && !refd.has(k)) continue;              // 样式表没引用: 不影响渲染, 不换
+          if (XSTATE.test(k)) { ok = false; break; }
+          ch[k] = k in V ? V[k] : null; n++;
+        }
+        if (ok && n) alt[t] = ch;
+      });
+      if (Object.keys(alt).length) xswaps.push([el, alt, D]);
+    });
+  }
+  xswaps.slice(0, 4000).forEach(([el, alt, D]) => {
+    const base = {};
+    for (const t of Object.keys(alt)) {
+      el.setAttribute('data-cv-xa-' + t, JSON.stringify(alt[t]));
+      for (const k of Object.keys(alt[t])) base[k] = k in D ? D[k] : null;
+    }
+    el.setAttribute('data-cv-xa-d', JSON.stringify(base));
+    out.xattr = (out.xattr || 0) + 1;
+  });
   m.els.forEach((el, i) => {
     const sdRaw = m.snaps.d[i], sd = S('d', i);
     if (!el.isConnected) return;
@@ -804,7 +942,7 @@ CV_EMIT_JS = r"""
       for (const k of ['d', 't', 'm']) if (rule[k].length) bands[k].push('[data-cv="' + i + '"]' + SPEC + '{' + rule[k].join(';') + '}');
     }
   });
-  if (out.cls) {
+  if (out.cls || out.xattr) {
     // 当前视口段由分视口样式表里的 --cv-band 告诉运行时(段边界落盘时才确定, 脚本不重复计算断点)
     bands.d.push(':root{--cv-band:d}'); bands.t.push(':root{--cv-band:t}'); bands.m.push(':root{--cv-band:m}');
     const sc = document.createElement('script');
@@ -824,11 +962,11 @@ CV_EMIT_JS = r"""
   window.__cvRec = null;
   return out;
 }
-""".replace("__CV_ATTR__", CV_ATTR_FN)
+""".replace("__CV_ATTR__", CV_ATTR_FN).replace("__CV_XATTR__", CV_XATTR_FN)
 
 # 分视口 class 运行时(随 CV_EMIT_JS 写入页面): 读 --cv-band 决定当前段, 把 data-cv-cls-<段> 换成 class;
 # 段没变不动 DOM。活体采集时段恒为 d(桌面), 不改变采集结果。
-CV_CLS_RUNTIME = r"""(function(){var cur=null;function apply(){try{var b=(getComputedStyle(document.documentElement).getPropertyValue('--cv-band')||'').trim()||'d';if(b===cur)return;cur=b;var es=document.querySelectorAll('[data-cv-cls-d]');for(var i=0;i<es.length;i++){var e=es[i],v=e.getAttribute('data-cv-cls-'+b);if(v===null)v=e.getAttribute('data-cv-cls-d');if(e.getAttribute('class')!==v)e.setAttribute('class',v);}}catch(x){}}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',apply);else apply();window.addEventListener('resize',apply);window.addEventListener('load',apply);})();"""
+CV_CLS_RUNTIME = r"""(function(){var cur=null;function apply(){try{var b=(getComputedStyle(document.documentElement).getPropertyValue('--cv-band')||'').trim()||'d';if(b===cur)return;cur=b;var es=document.querySelectorAll('[data-cv-cls-d]');for(var i=0;i<es.length;i++){var e=es[i],v=e.getAttribute('data-cv-cls-'+b);if(v===null)v=e.getAttribute('data-cv-cls-d');if(e.getAttribute('class')!==v)e.setAttribute('class',v);}es=document.querySelectorAll('[data-cv-xa-d]');for(i=0;i<es.length;i++){e=es[i];var o=JSON.parse(e.getAttribute('data-cv-xa-d')),bv=e.getAttribute('data-cv-xa-'+b);if(bv!==null){var q=JSON.parse(bv);for(var k in q)o[k]=q[k];}for(k in o){if(o[k]===null)e.removeAttribute(k);else if(e.getAttribute(k)!==o[k])e.setAttribute(k,o[k]);}}}catch(x){}}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',apply);else apply();window.addEventListener('resize',apply);window.addEventListener('load',apply);})();"""
 CV_EMIT_JS = CV_EMIT_JS.replace("CV_CLS_RUNTIME", json.dumps(CV_CLS_RUNTIME))
 
 
@@ -891,8 +1029,22 @@ INLINE_FLUID_JS = r"""
 }
 """
 
+# 原文档 doctype 原样序列化: 渲染模式(标准 / 有限怪异 / 怪异)由它决定。XHTML 1.0 Transitional
+# 等带 system id 的老 doctype 走有限怪异模式(只含行内子元素的块不计自身行高 strut), 写死成
+# <!DOCTYPE html> 会让这类块变高、版面逐段下推(cgnpc 手机版栏目标题 19.8→26.4px); 没有 doctype
+# 的页面是怪异模式, 也不能补。
+DOCTYPE_FN = r"""(d) => {
+  const t = d && d.doctype;
+  if (!t) return '';
+  const q = v => '"' + String(v).replace(/"/g, '') + '"';
+  let s = '<!DOCTYPE ' + (t.name || 'html');
+  if (t.publicId) s += ' PUBLIC ' + q(t.publicId);
+  if (t.systemId) s += (t.publicId ? ' ' : ' SYSTEM ') + q(t.systemId);
+  return s + '>\n';
+}"""
+
 OUTER_HTML_JS = r"""
-() => ('<!DOCTYPE html>\n' + document.documentElement.outerHTML)
+() => ((""" + DOCTYPE_FN + r""")(document) + document.documentElement.outerHTML)
 """
 
 # Shadow DOM 声明式序列化: outerHTML 不含影子树(Web Components/Lit/Stencil 组件内容整块丢失)。
@@ -931,9 +1083,9 @@ SHADOW_SERIALIZE_JS = r"""
   const esc = v => v.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
   const attrs = Array.from(de.attributes).map(a => ' ' + a.name + '="' + esc(a.value) + '"').join('');
   const inner = de.getHTML({serializableShadowRoots: true, shadowRoots: roots});
-  return {html: '<!DOCTYPE html>\n<html' + attrs + '>' + inner + '</html>', roots: roots.length, adopted: adopted};
+  return {html: (__DOCTYPE__)(document) + '<html' + attrs + '>' + inner + '</html>', roots: roots.length, adopted: adopted};
 }
-"""
+""".replace("__DOCTYPE__", DOCTYPE_FN)
 
 # 版面块图: 可见块级元素的结构路径(tag:nth-of-type 链) → 文档坐标矩形。
 # 原站侧在纯净基准截图后采集, 克隆侧在克隆截图后采集; 两侧按路径对齐,
@@ -1582,13 +1734,13 @@ IFRAME_EXTRACT_JS = r"""
         let m;
         while ((m = re.exec(s)) !== null) add(m[2]);
       });
-      out.push({ src: abs.href, html: '<!DOCTYPE html>\n' + doc.documentElement.outerHTML,
+      out.push({ src: abs.href, html: (__DOCTYPE__)(doc) + doc.documentElement.outerHTML,
                  urls: urls, srcsets: srcsets, rawRefs: rawRefs });
     } catch (e) { return; }
   });
   return out.slice(0, 5);
 }
-"""
+""".replace("__DOCTYPE__", DOCTYPE_FN)
 
 COLLECT_LINKS_JS = r"""
 () => {

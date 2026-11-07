@@ -29,7 +29,27 @@ PROBE_VIEWPORTS = {
     "desktop": {"width": 1920, "height": 1080},
     "tablet": {"width": 768, "height": 1024},
     "mobile": {"width": 390, "height": 844},
+    # 真机口径: 移动 UA + 触屏 + DPR + 视口 meta 生效(is_mobile)。服务端按 UA 分发移动版、
+    # (hover:none)/(pointer:coarse) 媒体查询、JS 嗅探 UA 的站, 只有这样才与真机看到的一致
+    "iphone-air": {"width": 420, "height": 912},
+    "ipad-air": {"width": 820, "height": 1180},
 }
+IOS_UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 "
+          "(KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1")
+# iPadOS 13 起 Safari 默认「桌面级浏览」: 发 Mac Safari UA(不含 iPad/Mobile), 靠触屏区分
+IPAD_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+           "(KHTML, like Gecko) Version/18.6 Safari/605.1.15")
+DEVICE_OPTS = {
+    "iphone-air": {"user_agent": IOS_UA, "device_scale_factor": 3, "is_mobile": True, "has_touch": True},
+    "ipad-air": {"user_agent": IPAD_UA, "device_scale_factor": 2, "is_mobile": True, "has_touch": True},
+}
+
+
+def context_opts(name):
+    """视口名 -> new_context 参数(桌面口径: 桌面 UA、DPR 1; 真机口径见 DEVICE_OPTS)。"""
+    opts = {"viewport": PROBE_VIEWPORTS[name], "user_agent": UA, "device_scale_factor": 1}
+    opts.update(DEVICE_OPTS.get(name, {}))
+    return opts
 MAX_SCREENS = 8          # 每侧最多截前 N 屏: 长页尾部(推荐流/页脚)对适配判断信息量低
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
@@ -37,10 +57,12 @@ UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
 # 两侧同口径: 停动画/过渡, 滚动一遍触发懒加载, 回顶
 SETTLE_CSS = ("*,*::before,*::after{animation-play-state:paused!important;"
               "transition:none!important;caret-color:transparent!important}")
+# 每步等 320ms(与引擎采集滚动同节奏): 无限推荐流在快滚下来不及续页, 原站只量到首屏长度,
+# 而用户往下滑时流会续上(克隆里冻结的就是续上后的样子), 快滚会把这当成克隆"多出来"的内容
 SCROLL_JS = r"""
 async (maxH) => {
   const h = () => Math.min(document.documentElement.scrollHeight, maxH);
-  for (let y = 0; y < h(); y += innerHeight * 0.8) { scrollTo(0, y); await new Promise(r => setTimeout(r, 120)); }
+  for (let y = 0; y < h(); y += innerHeight * 0.8) { scrollTo(0, y); await new Promise(r => setTimeout(r, 320)); }
   scrollTo(0, 0); await new Promise(r => setTimeout(r, 400));
   return document.documentElement.scrollWidth;
 }
@@ -93,7 +115,7 @@ def _shoot(ctx, url, vp, out: Path, timeout_ms=45000):
         full_h = page.evaluate("document.documentElement.scrollHeight")
         info["height"] = full_h
         clip_h = min(full_h, max_h)
-        page.screenshot(path=str(out), full_page=True, animations="disabled",
+        page.screenshot(path=str(out), full_page=True, animations="disabled", scale="css",
                         clip={"x": 0, "y": 0, "width": vp["width"], "height": clip_h})
         info["text"] = page.evaluate("document.body ? document.body.innerText.slice(0, 200000) : ''")
         info["ok"] = True
@@ -111,7 +133,7 @@ def probe_one(browser, base, task_id, url, viewports, outdir: Path, clone_tpl=No
     res = {"task_id": task_id, "url": url}
     for name in viewports:
         vp = PROBE_VIEWPORTS[name]
-        ctx = browser.new_context(viewport=vp, user_agent=UA, device_scale_factor=1)
+        ctx = browser.new_context(**context_opts(name))
         try:
             a = outdir / f"{task_id}_{name}_orig.png"
             b = outdir / f"{task_id}_{name}_clone.png"
@@ -133,7 +155,7 @@ def probe_one(browser, base, task_id, url, viewports, outdir: Path, clone_tpl=No
             row.update({k: sim.get(k) for k in ("score", "structure", "edge", "text", "height_ratio")})
             if noise:
                 # 原站自比: 隔一次重新加载原站再比, 得到本口径下的可达上限(活体随机性)
-                ctx2 = browser.new_context(viewport=vp, user_agent=UA, device_scale_factor=1)
+                ctx2 = browser.new_context(**context_opts(name))
                 try:
                     a2 = outdir / f"{task_id}_{name}_orig2.png"
                     i2 = _shoot(ctx2, url, vp, a2)

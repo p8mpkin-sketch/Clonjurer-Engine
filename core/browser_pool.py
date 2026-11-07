@@ -149,8 +149,9 @@ class SyncBrowserPool:
 
     # ------------------------------------------------------------------
     @contextmanager
-    def context(self, viewport=None, user_agent=None, extra_headers=None):
-        """受全局信号量保护的 BrowserContext 生命周期管理(线程安全)。"""
+    def context(self, viewport=None, user_agent=None, extra_headers=None, **device):
+        """受全局信号量保护的 BrowserContext 生命周期管理(线程安全)。
+        device: 设备仿真参数(is_mobile / has_touch / device_scale_factor), 原样交给 new_context。"""
         with self._semaphore:
             with self._active_lock:
                 self.active += 1
@@ -165,6 +166,7 @@ class SyncBrowserPool:
                             user_agent=user_agent,
                             extra_http_headers=extra_headers or {},
                             ignore_https_errors=True,
+                            **device,
                         )
                         launched = True
                         break

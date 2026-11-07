@@ -60,7 +60,9 @@ class ResponsiveInjection(unittest.TestCase):
         self.assertEqual(ce._inject_responsive(html), html)
 
     def test_legacy_site_gets_meta_and_safe_fallback(self):
-        out = ce._inject_responsive("<html><head></head><body></body></html>")
+        bare = "<html><head></head><body></body></html>"
+        self.assertEqual(ce._inject_responsive(bare), bare)   # 默认保真: 原站没 meta 克隆也没有
+        out = ce._inject_responsive(bare, enhance=True)
         self.assertIn('name="viewport"', out)
         self.assertIn('data-clone-preview="responsive"', out)
         self.assertNotIn("height: auto !important", out)
@@ -258,6 +260,65 @@ class ViewportClassSwap(unittest.TestCase):
                 b.close()
 
 
+
+
+XATTR_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<style>body{margin:0}#box{width:50px}#box[data-pos="wide"]{height:300px}#box[data-pos="narrow"]{height:520px}</style></head><body>
+<div id="box" data-pos="wide" data-track="a"></div>
+<svg id="logo" viewBox="0 0 192 84" style="width:100px"></svg>
+<script>function f(){var n = innerWidth < 600, b = document.getElementById('box');
+b.setAttribute('data-pos', n ? 'narrow' : 'wide'); b.setAttribute('data-track', n ? 'm' : 'a');
+document.getElementById('logo').setAttribute('viewBox', n ? '0 0 42 50' : '0 0 192 84');}
+addEventListener('resize', f); f();</script></body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class ViewportAttrSwap(unittest.TestCase):
+    """脚本按视口写属性选择器引用的 data-* 与 svg viewBox: 克隆按视口段换回; 样式表没引用的 data-* 不换。"""
+
+    def test_attrs_follow_band_after_scope(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 1440, "height": 800})
+                page.set_content(XATTR_PAGE)
+                page.evaluate(ce.CV_RECORD_JS, "d")
+                for tag, w in (("t", 768), ("m", 390)):
+                    page.set_viewport_size({"width": w, "height": 800})
+                    page.evaluate(ce.CV_QUIET_JS, 100)
+                    page.evaluate(ce.CV_RECORD_JS, tag)
+                page.set_viewport_size({"width": 1440, "height": 800})
+                page.evaluate(ce.CV_QUIET_JS, 100)
+                page.evaluate(ce.CV_RECORD_JS, "b")
+                loads = {}
+                for tag, w in (("t", 768), ("m", 390)):
+                    p2 = b.new_page(viewport={"width": w, "height": 800})
+                    p2.set_content(XATTR_PAGE)
+                    loads[tag] = p2.evaluate(ce.CV_PATHS_JS)
+                    p2.close()
+                out = page.evaluate(ce.CV_EMIT_JS, loads)
+                self.assertEqual(out.get("xattr"), 2)
+                self.assertEqual(page.evaluate("document.getElementById('box').getAttribute('data-pos')"), "wide")
+                html = page.content()
+            finally:
+                b.close()
+            self.assertNotIn("data-track", html.split('data-cv-xa-d="', 1)[1].split('"', 1)[0])
+            html = ce.scope_viewport_css(html, 1000, 0)
+            html = html.replace("addEventListener('resize', f); f();", "")
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 390, "height": 800})
+                page.set_content(html)
+                self.assertEqual(page.evaluate("document.getElementById('box').getBoundingClientRect().height"), 520)
+                self.assertEqual(page.evaluate("document.getElementById('logo').getAttribute('viewBox')"), "0 0 42 50")
+                self.assertEqual(page.evaluate("document.getElementById('box').getAttribute('data-track')"), "a")
+                page.set_viewport_size({"width": 1440, "height": 800})
+                page.wait_for_timeout(100)
+                self.assertEqual(page.evaluate("document.getElementById('box').getBoundingClientRect().height"), 300)
+                self.assertEqual(page.evaluate("document.getElementById('logo').getAttribute('viewBox')"), "0 0 192 84")
+            finally:
+                b.close()
 
 
 class CalibInjection(unittest.TestCase):

@@ -50,6 +50,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
+import requests
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageStat
 
 try:  # 评分向量化(可选依赖): 缺失时回落纯 Python 实现, 结果一致
@@ -83,6 +84,7 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     CV_QUIET_JS,
     CV_RECORD_JS,
     DEEP_FREEZE_JS,
+    WAIT_SHEETS_JS,
     FONT_BAKE_JS,
     FORM_ACTIVATE_JS,
     IFRAME_EXTRACT_JS,
@@ -274,6 +276,27 @@ from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部
 
 
 
+from core.clone.support import (  # noqa: E402  手机版(按 UA 分发)
+    PHONE_EDITION_FILE, inject_edition_router, merge_static_tree, separate_phone_edition,
+)
+
+
+class _EditionDB:
+    """手机版子克隆用的库代理: 任务状态/进度/完成计数归主克隆, 子克隆只读与记 CAS。"""
+
+    def __init__(self, db):
+        self._db = db
+
+    def update_task(self, *_a, **_k):
+        return None
+
+    def increment_completed(self, *_a, **_k):
+        return None
+
+    def __getattr__(self, name):
+        return getattr(self._db, name)
+
+
 class ClonerEngine:
     """单任务克隆执行器(V4 同步线程模型), 由调度器工作线程驱动。"""
 
@@ -314,9 +337,13 @@ class ClonerEngine:
         self._stat_accum = {"css": 0, "js": 0, "img": 0, "fonts": 0,
                             "media": 0, "misc": 0, "bytes": 0}
         self._timeline = []              # [(stage, 单调时钟)] 阶段切换记录(端到端度量)
+        self._edition_child = False      # 手机版子克隆(见 _maybe_mobile_edition): 不打包、不落任务状态
+        self._log_prefix = ""
+        self._main_dom_html = ""         # 采集期主页面 DOM(手机版探测比对用)
 
     # ------------------------------------------------------------------
     def log(self, stage: str, message: str):
+        message = getattr(self, "_log_prefix", "") + message
         self.bus.publish(self.task_id, stage, message)
         # 任务日志落盘(工作区 engine.log): 内存环形队列只留最近几百条, 事后归因
         # (语料跑分的低分站)要能翻到采集期的每一步
@@ -369,21 +396,7 @@ class ClonerEngine:
         parts = self.bind_target(self.task["target_url"])
         origin = f"{parts.scheme}://{parts.netloc}"
         domain = self.task["domain"] or parts.netloc
-
-        for sub in ("css", "js", "img", "fonts", "media", "misc"):
-            (self.ws / "static" / sub).mkdir(parents=True, exist_ok=True)
-        (self.ws / "frames").mkdir(parents=True, exist_ok=True)
-        self._dl_headers = {
-            "User-Agent": self.cfg.get("user_agent") or config.DEFAULT_USER_AGENT,
-            "Referer": self._target,
-            "Accept": "*/*",
-        }
-        if self.cfg.get("cookie"):
-            self._dl_headers["Cookie"] = self.cfg["cookie"]
-        if self.cfg.get("bearer"):
-            self._dl_headers["Authorization"] = f"Bearer {self.cfg['bearer']}"
-        self.downloader = smart_downloader.SmartDownloader(self._dl_headers,
-                                                           log=self.log)
+        self._prepare_workspace()
 
         self._set(progress=5, stage="DOM渲染", status="running",
                   workspace_path=str(self.ws), error_msg="")
@@ -415,6 +428,154 @@ class ClonerEngine:
             return
         elapsed = time.time() - started
         self.log("INFO", f"任务 #{self.task_id} 完成, 耗时 {elapsed:.1f}s")
+
+    def _prepare_workspace(self):
+        """工作区目录 + 下载器(请求头随任务 UA/Cookie/Bearer)。"""
+        for sub in ("css", "js", "img", "fonts", "media", "misc"):
+            (self.ws / "static" / sub).mkdir(parents=True, exist_ok=True)
+        (self.ws / "frames").mkdir(parents=True, exist_ok=True)
+        self._dl_headers = {
+            "User-Agent": self.cfg.get("user_agent") or config.DEFAULT_USER_AGENT,
+            "Referer": self._target,
+            "Accept": "*/*",
+        }
+        if self.cfg.get("cookie"):
+            self._dl_headers["Cookie"] = self.cfg["cookie"]
+        if self.cfg.get("bearer"):
+            self._dl_headers["Authorization"] = f"Bearer {self.cfg['bearer']}"
+        self.downloader = smart_downloader.SmartDownloader(self._dl_headers,
+                                                           log=self.log)
+
+    # ------------------------------------------------------------------
+    def _start_phone_precheck(self, ua, ctx_headers):
+        """后台线程以桌面/手机两种 UA 直连取目标页 HTML(与主采集并行, 不占浏览器): 服务端按 UA
+        分发(跳转 / 下发不同模板)在这一步就能看出来, 绝大多数响应式站据此免掉浏览器探测。"""
+        def work():
+            res = {}
+            for tag, agent in (("d", ua), ("p", config.PHONE_USER_AGENT)):
+                try:
+                    headers = dict(ctx_headers or {})
+                    headers.update({"User-Agent": agent, "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+                                    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"})
+                    r = requests.get(self._target, headers=headers, timeout=(4, 6), allow_redirects=True)
+                    ctype = r.headers.get("Content-Type", "")
+                    res[tag] = (r.url, r.text[:2_000_000]) if r.ok and "html" in ctype else None
+                except Exception:   # noqa: BLE001 直连不通(风控/证书)就交给浏览器探测
+                    res[tag] = None
+            self._phone_precheck = res
+        self._phone_precheck = None
+        self._phone_precheck_thread = threading.Thread(target=work, daemon=True)
+        self._phone_precheck_thread.start()
+
+    def _probe_phone_edition(self, ua_headers):
+        """手机 UA + 触屏仿真加载目标页, 返回 (落地地址, DOM)。只等到 load(封顶), 不滚动。"""
+        budget = float(getattr(config, "MOBILE_EDITION_PROBE_S", 12.0))
+        vp = config.VIEWPORTS["mobile"]
+        with self.pool.context(viewport={"width": vp["width"], "height": vp["height"]},
+                               user_agent=config.PHONE_USER_AGENT, extra_headers=ua_headers,
+                               **config.PHONE_DEVICE) as ctx:
+            page = ctx.new_page()
+            try:
+                page.goto(self._target, wait_until="domcontentloaded", timeout=int(budget * 1000))
+                with suppress(Exception):   # 跳转在提交时已定, 骨架在 DOMContentLoaded 后基本成形: load 只短等
+                    page.wait_for_load_state("load", timeout=2500)
+                with suppress(Exception):
+                    page.evaluate(CV_QUIET_JS, 400)
+                return page.url or self._target, page.evaluate(OUTER_HTML_JS) or ""
+            finally:
+                with suppress(Exception):
+                    page.close()
+
+    def _maybe_mobile_edition(self, ua, ctx_headers, pages_map, mock_entries):
+        """原站按手机 UA 分发另一套页面(m. 子域跳转 / 同址移动模板)时, 以真机仿真口径另克隆一份
+        手机版(index.m.html, 资源并入同一 static/), 克隆入口按 UA 路由过去。响应式站不触发。"""
+        if self._edition_child or self.cfg.get("device") == "phone" \
+                or self.cfg.get("viewport", "desktop") == "mobile":
+            return None
+        if "iphone" in (ua or "").lower() or "android" in (ua or "").lower():
+            return None   # 任务本身就用手机 UA 采集
+        t0 = time.monotonic()
+        thr = float(getattr(config, "MOBILE_EDITION_SIM", 0.45))
+        th = getattr(self, "_phone_precheck_thread", None)
+        if th is not None:
+            th.join(timeout=8)
+        pre = getattr(self, "_phone_precheck", None) or {}
+        separate, why, phone_url = False, "", None
+        if pre.get("d") and pre.get("p"):
+            (d_url, d_html), (p_url, p_html) = pre["d"], pre["p"]
+            separate, why = separate_phone_edition(d_url, d_html, p_url, p_html, thr)
+            why = "直连比对: " + why
+            phone_url = p_url
+            # 同一份 HTML 且页内没有 UA 嗅探脚本: 不会在浏览器里再分流, 免浏览器探测
+            if not separate and re.search(r"navigator\s*\.\s*userAgent", p_html):
+                pre = {}
+        if not (pre.get("d") and pre.get("p")):
+            try:
+                phone_url, phone_html = self._probe_phone_edition(ctx_headers)
+            except Exception as exc:   # noqa: BLE001
+                self.log("RENDER", f"手机版探测失败, 跳过: {str(exc)[:120]}")
+                return None
+            separate, why = separate_phone_edition(
+                getattr(self, "_main_final_url", self._target), self._main_dom_html,
+                phone_url, phone_html, thr)
+            why = "浏览器比对: " + why
+        self.log("RENDER", f"手机版探测({time.monotonic() - t0:.1f}s): {why}")
+        if not separate:
+            return None
+        child = ClonerEngine(self.task_id, _EditionDB(self.db), self.bus, self.pool)
+        child._edition_child = True
+        child._log_prefix = "[手机版] "
+        child.task = self.task
+        child.ws = self.ws / "edition_m"
+        child.cfg = dict(self.cfg, user_agent=config.PHONE_USER_AGENT, viewport="mobile",
+                         device="phone", mode="single", max_pages=1, ai_vision_repair=False,
+                         mobile_edition=False, viewport_probe=False)
+        child.bind_target(phone_url)
+        child._prepare_workspace()
+        cparts = urlsplit(phone_url)
+        child._execute(f"{cparts.scheme}://{cparts.netloc}", cparts.netloc)
+        page_file = child._main_page_file()
+        if not page_file.is_file():
+            self.log("WARN", "手机版克隆未产出页面, 不接入")
+            return None
+        copied = merge_static_tree(child.ws / "static", self.ws / "static")
+        # 手机版与主页面同目录(目录型目标页落在 page_dir 影子路径, 入口路由按相对路径跳)
+        main_file = self._main_page_file()
+        rel = main_file.parent.relative_to(self.ws).as_posix()
+        m_rel = PHONE_EDITION_FILE if rel in ("", ".") else f"{rel}/{PHONE_EDITION_FILE}"
+        (self.ws / m_rel).write_text(
+            page_file.read_text(encoding="utf-8", errors="replace"), encoding="utf-8")
+        with suppress(Exception):
+            extra = json.loads((child.ws / "mock_data.json").read_text(encoding="utf-8"))
+            have = {json.dumps(e, sort_keys=True, ensure_ascii=False) for e in mock_entries}
+            for e in extra:
+                if json.dumps(e, sort_keys=True, ensure_ascii=False) not in have:
+                    mock_entries.append(e)
+            (self.ws / "mock_data.json").write_text(
+                json.dumps(mock_entries, ensure_ascii=False, indent=2), encoding="utf-8")
+        for f in (main_file, main_file.parent / "index.interactive.html"):
+            if f.is_file():
+                f.write_text(inject_edition_router(f.read_text(encoding="utf-8", errors="replace")),
+                             encoding="utf-8")
+        pages_map["/" + m_rel] = m_rel
+        site = self.ws / "site.json"
+        with suppress(Exception):
+            meta = json.loads(site.read_text(encoding="utf-8"))
+            meta["routes"] = pages_map
+            meta["phone_edition"] = {"url": phone_url, "file": m_rel,
+                                     "similarity": getattr(child, "_edition_score", None)}
+            site.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        # 子克隆的冗余产物不随包(static 已并入; 保留日志/截图/评分便于归因)
+        import shutil
+        for junk in ("static", "frames", "flask_app", "capture.mhtml"):
+            with suppress(OSError):
+                tgt = child.ws / junk
+                shutil.rmtree(tgt) if tgt.is_dir() else tgt.unlink()
+        self._phone_edition = {"url": phone_url, "similarity": getattr(child, "_edition_score", None),
+                               "elapsed_s": round(time.monotonic() - t0, 1), "assets_merged": copied}
+        self.log("RENDER", f"手机版已接入: {PHONE_EDITION_FILE}(还原度 {self._phone_edition['similarity']}, "
+                           f"并入资源 {copied} 个, 耗时 {self._phone_edition['elapsed_s']}s); 手机 UA 打开克隆自动切换")
+        return self._phone_edition
 
     def bind_target(self, target_url: str):
         """绑定目标 URL: 目录型 URL(/apps/#/login)页面真实位置在目录下, 相对路径
@@ -644,12 +805,17 @@ class ClonerEngine:
         detail = None
         ai_report = None
 
+        device = dict(config.PHONE_DEVICE) if self.cfg.get("device") == "phone" else {}
+        if self.cfg.get("mobile_edition", config.MOBILE_EDITION) and not self._edition_child:
+            self._start_phone_precheck(ua, ctx_headers)
         with self.pool.context(
             viewport={"width": viewport["width"], "height": viewport["height"]},
-            user_agent=ua, extra_headers=ctx_headers,
+            user_agent=ua, extra_headers=ctx_headers, **device,
         ) as ctx:
             main = self._render_page(ctx, self._target, screenshot=True,
                                      collect_links=True)
+            self._main_dom_html = main.get("html") or ""
+            self._main_final_url = main.get("final_url") or self._target
             merge_page_assets(main)
             original_text = main.get("text") or ""
             (self.ws / "original_text.txt").write_text(original_text, encoding="utf-8")
@@ -657,7 +823,7 @@ class ClonerEngine:
                 # Cookie/Storage 终态快照: 克隆页启动时前置恢复, 版本守卫自洽
                 (self.ws / "state_snapshot.json").write_text(
                     json.dumps(main["state"], ensure_ascii=False), encoding="utf-8")
-            for frame in main.get("iframes", []):
+            for frame in ([] if self._edition_child else main.get("iframes", [])):
                 merge_page_assets(frame)
                 iframe_pages.append((frame["src"], frame["html"]))
             if iframe_pages:
@@ -665,8 +831,10 @@ class ClonerEngine:
             pages.append(("/", main["html"]))
 
             # ---- 跨域 iframe 递归克隆(顶级页面渲染, 绕过 X-Frame-Options) ----
-            self._collect_frame_pages(ctx, main, frame_records, merge_page_assets,
-                                      depth=1, target_url=self._target)
+            # 手机版子克隆不做: frames/frame_N.html 与主克隆同名, 合并时会互相覆盖
+            if not self._edition_child:
+                self._collect_frame_pages(ctx, main, frame_records, merge_page_assets,
+                                          depth=1, target_url=self._target)
             if frame_records:
                 self.log("RENDER", f"固化 {len(frame_records)} 个跨域 iframe 子页面(frames/*.html)")
                 # iframe 文本并入原站文本指纹(与克隆侧同源 iframe 采集口径一致)
@@ -935,6 +1103,20 @@ class ClonerEngine:
                 json.dumps(site_meta, ensure_ascii=False, indent=2),
                 encoding="utf-8")
 
+        if self._edition_child:
+            # 交付的是静态版时报静态版实测分(与主克隆 preview_track 同口径), 否则报两轨最优
+            static = getattr(self, "_static_score", None)
+            fid = getattr(self, "_fidelity_score", None)
+            self._edition_score = static if isinstance(static, (int, float)) else max(
+                [x for x in (score, fid) if isinstance(x, (int, float))], default=None)
+            return
+        # ---- 手机版: 原站按手机 UA 分发另一套页面时另克隆一份, 手机 UA 打开克隆自动切过去 ----
+        if self.cfg.get("mobile_edition", config.MOBILE_EDITION):
+            try:
+                self._maybe_mobile_edition(ua, ctx_headers, pages_map, mock_entries)
+            except Exception as exc:   # noqa: BLE001 手机版是增量交付, 失败不影响主克隆
+                self.log("WARN", f"手机版克隆失败(不影响桌面版): {type(exc).__name__}: {str(exc)[:200]}")
+
         # ---- 生成 Flask 工程 + ZIP ----
         self._set(progress=92, stage="Flask构建打包")
         tracker_cfg = self.db.get_tracker_config(self.task_id)
@@ -965,6 +1147,8 @@ class ClonerEngine:
         stats["pattern_confidence"] = round(float(self._pattern_info.get("confidence", 0.0) or 0.0), 2)
         stats["pattern_features"] = list(self._pattern_info.get("features", []) or [])
         stats["calibrations"] = self._calibrations
+        if getattr(self, "_phone_edition", None):
+            stats["phone_edition"] = self._phone_edition
         stats["stage_times"] = self._stage_times()
         stats["phase_times"] = self._phase_times()
         stats["elapsed_s"] = round(sum(stats["stage_times"].values()), 1)
@@ -1527,9 +1711,16 @@ class ClonerEngine:
         tp = self._phase("采集-基准截图", tp)
         if screenshot and (self.ws / "original_preview.png").is_file():
             self._freeze_media_from_baseline(page)
-        activated = _safe_eval(FORM_ACTIVATE_JS)
+        # 触屏(手机版)不做 focus/blur 激活: 移动页常把搜索框聚焦做成全屏搜索态(返回箭头 + 历史面板),
+        # blur 后也不退回, 冻结进克隆(手机版首屏 logo/搜索框整块变样)
+        activated = 0 if self.cfg.get("device") == "phone" else _safe_eval(FORM_ACTIVATE_JS)
         if activated:
             self.log("RENDER", f"表单激活: focus/blur {activated} 个输入控件")
+        with suppress(Exception):
+            ws_ = page.evaluate(WAIT_SHEETS_JS, 4000) or {}
+            if ws_.get("ms", 0) > 50 or ws_.get("pending") or ws_.get("fetched"):
+                self.log("RENDER", f"冻结前等样式表: {ws_.get('ms')}ms, 直取补副本 {ws_.get('fetched', 0)} 张,"
+                                   f" 仍未到 {ws_.get('pending', 0)} 张")
         counts = _safe_eval(DEEP_FREEZE_JS)
         if layout_stable:
             # DEEP_FREEZE 已停掉定时器: 此后页面脚本不再改 DOM, 回撤结果能留到序列化
@@ -1965,6 +2156,12 @@ class ClonerEngine:
             return out
         content_type = out.get("content_type") or ""
         path_ext = os_ext(urlsplit(out["url"]).path)
+        # 路径末段里的点不一定是扩展名(base64/签名令牌 ".hcuwe%2fql...%3d"): 不像扩展名的按
+        # content-type 回落。否则本地文件名带 %2f/%3d, 服务端解码后找不到文件, 图片 404 退回
+        # width/height 属性尺寸, 撑破窄屏栅格(手机横向溢出)
+        # (只认带 % 或超长的: 更宽的形状规则曾让 cgnpc 窄屏样式表的 CSSOM 副本丢失, 见 PR 说明)
+        if path_ext and ("%" in path_ext or len(path_ext) > 12):
+            path_ext = ""
         if not path_ext:
             path_ext = config.CONTENT_TYPE_FALLBACK.get(content_type, ".bin")
         category = config.EXT_CATEGORIES.get(path_ext, "")
@@ -2986,7 +3183,7 @@ class ClonerEngine:
                 localized = self._inject_after_head(localized, bg_css)
             localized = self._inject_after_head(localized, sim_script)
             localized = self._inject_after_head(localized, REPLAY_DEDUPE_JS)
-            return _utf8_charset(_inject_responsive(localized))
+            return _utf8_charset(_inject_responsive(localized, bool(self.cfg.get("responsive_enhance"))))
 
         html_pairs = _html_escaped_pairs(pairs)
         for route, html in pages:
@@ -3022,7 +3219,7 @@ class ClonerEngine:
                 "", rewrite_js_navigation(apply_replacements(html, html_pairs)))
             localized = scope_bake_css(localized, self._band_floor_of(localized))
             localized = self._inject_after_head(localized, sim_script)
-            localized = _utf8_charset(_inject_responsive(localized))
+            localized = _utf8_charset(_inject_responsive(localized, bool(self.cfg.get("responsive_enhance"))))
             (self.ws / f"iframe_{i + 1}.html").write_text(
                 localized, encoding="utf-8")
             pages_map[f"/iframe_{i + 1}.html"] = f"iframe_{i + 1}.html"
@@ -3031,7 +3228,7 @@ class ClonerEngine:
                 "", rewrite_js_navigation(apply_replacements(html, html_pairs)))
             localized = scope_bake_css(localized, self._band_floor_of(localized))
             localized = self._inject_after_head(localized, sim_script)
-            localized = _utf8_charset(_inject_responsive(localized))
+            localized = _utf8_charset(_inject_responsive(localized, bool(self.cfg.get("responsive_enhance"))))
             (self.ws / "frames" / f"frame_{i + 1}.html").write_text(
                 localized, encoding="utf-8")
             pages_map[f"/frames/frame_{i + 1}.html"] = f"frames/frame_{i + 1}.html"

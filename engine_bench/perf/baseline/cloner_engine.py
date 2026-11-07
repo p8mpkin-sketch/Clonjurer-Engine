@@ -705,9 +705,10 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 _VIEWPORT_META_RE = re.compile(r"<meta\b[^>]*\bname\s*=\s*[\"']?viewport\b", re.I)
 
 
-def _inject_responsive(html: str) -> str:
-    """原站已有 viewport meta → 原样返回(它自己的媒体查询就是权威); 否则补 meta + 兜底 CSS。"""
-    if _VIEWPORT_META_RE.search(html):
+def _inject_responsive(html: str, enhance: bool = False) -> str:
+    """原站已有 viewport meta → 原样返回; 无 meta 的站默认也原样返回(2026-11-07 语义同步: 保真优先,
+    见 core/clone/support.py), enhance=True 时补 meta + 兜底 CSS。"""
+    if not enhance or _VIEWPORT_META_RE.search(html):
         return html
     match = re.search(r"<head[^>]*>", html, re.I)
     at = match.end() if match else 0
