@@ -61,6 +61,18 @@ class EditionDecision(unittest.TestCase):
         self.assertIn("index.m.html", EDITION_ROUTER_SCRIPT)
 
 
+class LocalNameShape(unittest.TestCase):
+    def test_token_dot_in_last_segment_is_not_extension(self):
+        from core.cloner_engine import ClonerEngine
+        eng = ClonerEngine.__new__(ClonerEngine)
+        out = eng._normalize_out({"ok": True, "url": "https://cdn.test/pong/50a3.hcuwe%2fqln5%2bbe8%3d",
+                                  "content_type": "image/png", "content": b"\x89PNG...."})
+        self.assertEqual(out["ext"], ".png")
+        out = eng._normalize_out({"ok": True, "url": "https://cdn.test/a/b.CSS?v=1",
+                                  "content_type": "", "content": b"body{}"})
+        self.assertEqual(out["ext"], ".css")
+
+
 class _Static(SimpleHTTPRequestHandler):
     def log_message(self, *a):
         pass

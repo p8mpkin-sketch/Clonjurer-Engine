@@ -279,6 +279,9 @@ from core.clone.support import (  # noqa: E402  手机版(按 UA 分发)
 )
 
 
+_EXT_SHAPE_RE = re.compile(r"^\.[a-z0-9]{1,10}$")
+
+
 class _EditionDB:
     """手机版子克隆用的库代理: 任务状态/进度/完成计数归主克隆, 子克隆只读与记 CAS。"""
 
@@ -1064,7 +1067,11 @@ class ClonerEngine:
                 encoding="utf-8")
 
         if self._edition_child:
-            self._edition_score = score
+            # 交付的是静态版时报静态版实测分(与主克隆 preview_track 同口径), 否则报两轨最优
+            static = getattr(self, "_static_score", None)
+            fid = getattr(self, "_fidelity_score", None)
+            self._edition_score = static if isinstance(static, (int, float)) else max(
+                [x for x in (score, fid) if isinstance(x, (int, float))], default=None)
             return
         # ---- 手机版: 原站按手机 UA 分发另一套页面时另克隆一份, 手机 UA 打开克隆自动切过去 ----
         if self.cfg.get("mobile_edition", config.MOBILE_EDITION):
@@ -2105,6 +2112,11 @@ class ClonerEngine:
             return out
         content_type = out.get("content_type") or ""
         path_ext = os_ext(urlsplit(out["url"]).path)
+        # 路径末段里的点不一定是扩展名(base64/签名令牌 ".hcuwe%2fql...%3d"): 不像扩展名的按
+        # content-type 回落。否则本地文件名带 %2f/%3d, 服务端解码后找不到文件, 图片 404 退回
+        # width/height 属性尺寸, 撑破窄屏栅格(手机横向溢出)
+        if path_ext and not _EXT_SHAPE_RE.match(path_ext):
+            path_ext = ""
         if not path_ext:
             path_ext = config.CONTENT_TYPE_FALLBACK.get(content_type, ".bin")
         category = config.EXT_CATEGORIES.get(path_ext, "")
