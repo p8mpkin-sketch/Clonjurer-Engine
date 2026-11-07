@@ -627,6 +627,143 @@ class ScoringMixin:
             return None
 
 
+    def _apply_state_replay(self, ctx, page):
+        """W4 状态注入(模式策略包): 采集期终态 Cookie(含 httpOnly)/Storage 以沙盒原点(127.0.0.1)回放,
+        让运行时的登录态/配置态判断与源站一致(HTML 注入版 inject_state_restore 无法恢复 httpOnly)。"""
+        if not self._strategy_pack.state_replay:
+            return
+        snapshot = self.ws / "state_snapshot.json"
+        if snapshot.is_file():
+            try:
+                payload = json.loads(snapshot.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                payload = {}
+            sandbox_cookies = []
+            for c in payload.get("cookies", []):
+                if not c.get("name"):
+                    continue
+                sandbox_cookies.append({
+                    "name": c["name"], "value": c.get("value") or "",
+                    "domain": "127.0.0.1", "path": c.get("path") or "/",
+                    "httpOnly": bool(c.get("httpOnly")),
+                    "secure": False, "sameSite": "Lax",
+                })
+            if sandbox_cookies:
+                with suppress(Exception):
+                    ctx.add_cookies(sandbox_cookies)
+            seeds = {"local": payload.get("local", {}),
+                     "session": payload.get("session", {})}
+            blob = json.dumps(seeds, ensure_ascii=False)[:1_000_000]
+            with suppress(Exception):
+                page.add_init_script(
+                    "try{var d=" + blob +
+                    ";['local','session'].forEach(function(t){"
+                    "var s=t==='local'?window.localStorage:window.sessionStorage;"
+                    "var m=d[t]||{};for(var k in m){try{"
+                    "if(s.getItem(k)===null)s.setItem(k,m[k]);"
+                    "}catch(e){}}});}catch(e){}")
+
+
+    def _pixel_calibrate(self, page, base, original, cloned, detail, clone_text, orig_text,
+                         diff_path, failed_local, remote_missing, tp):
+        """A1 像素校准一步(活页上做, 可能重渲染重评分); 返回 (detail, clone_text, tp)。"""
+        # A1 完整版: 像素差分 → 元素映射 → CSS 覆盖合成(确定性校准闭环)。
+        # 网格差分定位色差格(原站侧纯色格才取), elementFromPoint 映射到
+        # 克隆 DOM 元素, 以原站格色生成覆盖 —— 注入后重渲染重评分一轮。
+        if detail is not None and (detail.get('score') or 0) < 99 \
+                and self._calibrations < 2 and failed_local \
+                and (not config.REPAIR_STRUCTURAL_ONLY
+                     or self._structural_missing(failed_local, remote_missing)) \
+                and not getattr(self, "_calib_deferred", False):
+            # 本轮还有本地资源 404/兜底壳: 差异格多半是待回补的图, 按缺图时的
+            # 截图上色会在资源到齐后变成色块 —— 让给下一轮(只让一次: 源站本身
+            # 就 404 的资源永远回补不上, 不能因此永不校准)
+            self._calib_deferred = True
+            self.log("RENDER", f"像素校准暂缓: {len(failed_local)} 个本地资源待回补")
+        elif detail is not None and (detail.get('score') or 0) < 99 \
+                and self._calibrations < 2:
+            try:
+                cal_cells = pixel_calibrator.divergent_cells(
+                    original, cloned)
+                if cal_cells:
+                    big_gaps = [c0 for c0 in cal_cells if c0[3] > 200]
+                    if len(big_gaps) >= 4:
+                        self.log("RENDER", f"像素校准诊断: {len(big_gaps)} 格差距>200"
+                                 f" = 大面积区域缺失(回放数据缺口, 归 W2/W3), "
+                                 f"校准仅能补色不能补区域")
+                        if len(big_gaps) * 2 >= len(cal_cells):
+                            # 差异以区域缺失为主: 补色覆盖无从提分(语料里此情形
+                            # 全部持平或回滚), 省掉一整次克隆重渲染
+                            self.log("RENDER", "像素校准跳过: 差异以区域缺失为主")
+                            self._calibrations = 2
+                            cal_cells = []
+                    cal_css = pixel_calibrator.element_css(page, cal_cells) \
+                        if cal_cells else ""
+                    if cal_css and config.CALIB_INPLACE_GATE:
+                        # 就地预评: 覆盖样式直接注入当前活页重截图评分, 不升就不付整页重渲染
+                        # (真实任务日志 58 次像素校准 44 次回滚, 每次白付一次 加载+滚动+静置)
+                        pre = self._calib_inplace_score(page, cal_css, original, orig_text)
+                        if pre is not None and pre <= (detail.get('score') or 0):
+                            self.log("RENDER", f"像素校准就地预评未提升"
+                                     f"({detail.get('score')}→{pre}), 跳过重渲染")
+                            self._calibrations = 2
+                            cal_css = ""
+                    if cal_css:
+                        # 累积(第二轮在已校准页上测得的是新增差异格)并持久化,
+                        # 后续修复轮 _localize 重写页面时重新注入, 不被覆盖
+                        prev_css, prev_detail = self._calib_css, detail
+                        prev_shot = cloned.read_bytes()
+                        prev_text = clone_text
+                        merged = list(dict.fromkeys(
+                            (self._calib_css + "\n" + cal_css).split("\n")))
+                        self._calib_css = "\n".join(r for r in merged if r)
+                        cal_css = self._calib_css
+                        # 写入真实被渲染的页面: 目录型 URL 时 index.html 是跳转桩
+                        idx_html = self._main_page_file()
+                        if idx_html.is_file():
+                            doc = idx_html.read_text(encoding='utf-8',
+                                                     errors='replace')
+                            prev_doc = doc
+                            cal_style = self._calib_style(cal_css)
+                            if 'data-clone-calib' in doc:
+                                doc = re.sub(
+                                    r'<style data-clone-calib>.*?</style>',
+                                    lambda _m: cal_style, doc, count=1, flags=re.S)
+                            else:
+                                doc = self._put_calib(doc, cal_css)
+                            idx_html.write_text(doc, encoding='utf-8')
+                            self._calibrations += 1
+                            self.log("RENDER", f"像素校准: {len(cal_cells)} "
+                                     f"格差 → {len(cal_css.splitlines())} 条覆盖, 重评分")
+                            self._load_clone(page, base)
+                            self._full_shot(page, cloned, "克隆页")
+                            clone_text = page.evaluate(TEXT_EXTRACT_JS)
+                            (self.ws / 'cloned_text.txt').write_text(
+                                clone_text or '', encoding='utf-8')
+                            detail = compute_visual_similarity(
+                                original, cloned, diff_path=diff_path,
+                                orig_text=orig_text, clone_text=clone_text or '',
+                                prime_calibration=self._calibrations < 2)
+                            # 回滚守卫: 校准必须净提升, 否则撤销覆盖并恢复上一版
+                            # 截图/文本/明细(色块覆盖误伤内容时不允许拉低分数)
+                            # 持平同样回滚并停手: 无增益的覆盖只是风险, 后续修复轮再试也只白付一次重渲染
+                            if (detail.get('score') or 0) <= (prev_detail.get('score') or 0):
+                                self.log("RENDER", f"像素校准未提升"
+                                         f"({prev_detail.get('score')}→{detail.get('score')}), 已回滚")
+                                self._calib_css = prev_css
+                                idx_html.write_text(prev_doc, encoding='utf-8')
+                                cloned.write_bytes(prev_shot)
+                                clone_text = prev_text
+                                (self.ws / 'cloned_text.txt').write_text(
+                                    clone_text or '', encoding='utf-8')
+                                detail = prev_detail
+                                self._calibrations = 2   # 不再尝试
+            except Exception as exc:
+                self.log('WARN', f'像素校准失败: {exc}')
+            tp = self._phase("评分-像素校准", tp)
+        return detail, clone_text, tp
+
+
     def _make_render_and_score(self, ctx, defer_diff: bool = False):
         """构造"本地离线渲染 + 三通道评分"闭包(AI 修复循环复用)。
 
@@ -644,40 +781,7 @@ class ScoringMixin:
             page.set_default_timeout(30000)
             with suppress(Exception):
                 page.add_init_script(SCORE_TIMER_GUARD_JS)
-            # W4 状态注入(模式策略包): 采集期终态 Cookie(含 httpOnly)/Storage
-            # 以沙盒原点(127.0.0.1)回放, 让运行时的登录态/配置态判断与源站一致。
-            # HTML 注入版(inject_state_restore)无法恢复 httpOnly —— 此处补全。
-            if self._strategy_pack.state_replay:
-                snapshot = self.ws / "state_snapshot.json"
-                if snapshot.is_file():
-                    try:
-                        payload = json.loads(snapshot.read_text(encoding="utf-8"))
-                    except (OSError, ValueError):
-                        payload = {}
-                    sandbox_cookies = []
-                    for c in payload.get("cookies", []):
-                        if not c.get("name"):
-                            continue
-                        sandbox_cookies.append({
-                            "name": c["name"], "value": c.get("value") or "",
-                            "domain": "127.0.0.1", "path": c.get("path") or "/",
-                            "httpOnly": bool(c.get("httpOnly")),
-                            "secure": False, "sameSite": "Lax",
-                        })
-                    if sandbox_cookies:
-                        with suppress(Exception):
-                            ctx.add_cookies(sandbox_cookies)
-                    seeds = {"local": payload.get("local", {}),
-                             "session": payload.get("session", {})}
-                    blob = json.dumps(seeds, ensure_ascii=False)[:1_000_000]
-                    with suppress(Exception):
-                        page.add_init_script(
-                            "try{var d=" + blob +
-                            ";['local','session'].forEach(function(t){"
-                            "var s=t==='local'?window.localStorage:window.sessionStorage;"
-                            "var m=d[t]||{};for(var k in m){try{"
-                            "if(s.getItem(k)===null)s.setItem(k,m[k]);"
-                            "}catch(e){}}});}catch(e){}")
+            self._apply_state_replay(ctx, page)
 
             def _route_guard(route):
                 try:
@@ -843,100 +947,9 @@ class ScoringMixin:
                         orig_text=orig_text, clone_text=clone_text or "",
                         prime_calibration=self._calibrations < 2)
                     tp = self._phase("评分-计算", tp)
-                    # A1 完整版: 像素差分 → 元素映射 → CSS 覆盖合成(确定性校准闭环)。
-                    # 网格差分定位色差格(原站侧纯色格才取), elementFromPoint 映射到
-                    # 克隆 DOM 元素, 以原站格色生成覆盖 —— 注入后重渲染重评分一轮。
-                    if detail is not None and (detail.get('score') or 0) < 99 \
-                            and self._calibrations < 2 and failed_local \
-                            and (not config.REPAIR_STRUCTURAL_ONLY
-                                 or self._structural_missing(failed_local, remote_missing)) \
-                            and not getattr(self, "_calib_deferred", False):
-                        # 本轮还有本地资源 404/兜底壳: 差异格多半是待回补的图, 按缺图时的
-                        # 截图上色会在资源到齐后变成色块 —— 让给下一轮(只让一次: 源站本身
-                        # 就 404 的资源永远回补不上, 不能因此永不校准)
-                        self._calib_deferred = True
-                        self.log("RENDER", f"像素校准暂缓: {len(failed_local)} 个本地资源待回补")
-                    elif detail is not None and (detail.get('score') or 0) < 99 \
-                            and self._calibrations < 2:
-                        try:
-                            cal_cells = pixel_calibrator.divergent_cells(
-                                original, cloned)
-                            if cal_cells:
-                                big_gaps = [c0 for c0 in cal_cells if c0[3] > 200]
-                                if len(big_gaps) >= 4:
-                                    self.log("RENDER", f"像素校准诊断: {len(big_gaps)} 格差距>200"
-                                             f" = 大面积区域缺失(回放数据缺口, 归 W2/W3), "
-                                             f"校准仅能补色不能补区域")
-                                    if len(big_gaps) * 2 >= len(cal_cells):
-                                        # 差异以区域缺失为主: 补色覆盖无从提分(语料里此情形
-                                        # 全部持平或回滚), 省掉一整次克隆重渲染
-                                        self.log("RENDER", "像素校准跳过: 差异以区域缺失为主")
-                                        self._calibrations = 2
-                                        cal_cells = []
-                                cal_css = pixel_calibrator.element_css(page, cal_cells) \
-                                    if cal_cells else ""
-                                if cal_css and config.CALIB_INPLACE_GATE:
-                                    # 就地预评: 覆盖样式直接注入当前活页重截图评分, 不升就不付整页重渲染
-                                    # (真实任务日志 58 次像素校准 44 次回滚, 每次白付一次 加载+滚动+静置)
-                                    pre = self._calib_inplace_score(page, cal_css, original, orig_text)
-                                    if pre is not None and pre <= (detail.get('score') or 0):
-                                        self.log("RENDER", f"像素校准就地预评未提升"
-                                                 f"({detail.get('score')}→{pre}), 跳过重渲染")
-                                        self._calibrations = 2
-                                        cal_css = ""
-                                if cal_css:
-                                    # 累积(第二轮在已校准页上测得的是新增差异格)并持久化,
-                                    # 后续修复轮 _localize 重写页面时重新注入, 不被覆盖
-                                    prev_css, prev_detail = self._calib_css, detail
-                                    prev_shot = cloned.read_bytes()
-                                    prev_text = clone_text
-                                    merged = list(dict.fromkeys(
-                                        (self._calib_css + "\n" + cal_css).split("\n")))
-                                    self._calib_css = "\n".join(r for r in merged if r)
-                                    cal_css = self._calib_css
-                                    # 写入真实被渲染的页面: 目录型 URL 时 index.html 是跳转桩
-                                    idx_html = self._main_page_file()
-                                    if idx_html.is_file():
-                                        doc = idx_html.read_text(encoding='utf-8',
-                                                                 errors='replace')
-                                        prev_doc = doc
-                                        cal_style = self._calib_style(cal_css)
-                                        if 'data-clone-calib' in doc:
-                                            doc = re.sub(
-                                                r'<style data-clone-calib>.*?</style>',
-                                                lambda _m: cal_style, doc, count=1, flags=re.S)
-                                        else:
-                                            doc = self._put_calib(doc, cal_css)
-                                        idx_html.write_text(doc, encoding='utf-8')
-                                        self._calibrations += 1
-                                        self.log("RENDER", f"像素校准: {len(cal_cells)} "
-                                                 f"格差 → {len(cal_css.splitlines())} 条覆盖, 重评分")
-                                        self._load_clone(page, base)
-                                        self._full_shot(page, cloned, "克隆页")
-                                        clone_text = page.evaluate(TEXT_EXTRACT_JS)
-                                        (self.ws / 'cloned_text.txt').write_text(
-                                            clone_text or '', encoding='utf-8')
-                                        detail = compute_visual_similarity(
-                                            original, cloned, diff_path=diff_path,
-                                            orig_text=orig_text, clone_text=clone_text or '',
-                                            prime_calibration=self._calibrations < 2)
-                                        # 回滚守卫: 校准必须净提升, 否则撤销覆盖并恢复上一版
-                                        # 截图/文本/明细(色块覆盖误伤内容时不允许拉低分数)
-                                        # 持平同样回滚并停手: 无增益的覆盖只是风险, 后续修复轮再试也只白付一次重渲染
-                                        if (detail.get('score') or 0) <= (prev_detail.get('score') or 0):
-                                            self.log("RENDER", f"像素校准未提升"
-                                                     f"({prev_detail.get('score')}→{detail.get('score')}), 已回滚")
-                                            self._calib_css = prev_css
-                                            idx_html.write_text(prev_doc, encoding='utf-8')
-                                            cloned.write_bytes(prev_shot)
-                                            clone_text = prev_text
-                                            (self.ws / 'cloned_text.txt').write_text(
-                                                clone_text or '', encoding='utf-8')
-                                            detail = prev_detail
-                                            self._calibrations = 2   # 不再尝试
-                        except Exception as exc:
-                            self.log('WARN', f'像素校准失败: {exc}')
-                        tp = self._phase("评分-像素校准", tp)
+                    detail, clone_text, tp = self._pixel_calibrate(
+                        page, base, original, cloned, detail, clone_text, orig_text,
+                        diff_path, failed_local, remote_missing, tp)
                     # 布局校准: 版面块高度对齐原站, 消除累积错位(每任务一次, 不提升即回滚)
                     if detail is not None and (detail.get('score') or 0) < 99 \
                             and not self._layout_calibrated:
