@@ -704,6 +704,97 @@ class CaptureMixin:
             return m.group(1) if m else f"{type(exc).__name__}: {msg[:80]}"
 
 
+    def _capture_baseline(self, page, _safe_eval, screenshot: bool):
+        """纯净基准: 等可见图 → 时间冻结 → 冻结后补等 → 整页截图 + 文本指纹 → 动画烘焙; 截图前后两次版面块图
+        取尺寸未变的块(layout_map.json)。返回 (baseline_text, layout_stable)。"""
+        baseline_text = None
+        layout_stable = []
+        if screenshot:
+            with suppress(OSError):   # 重建/重试: 清掉上一轮基准, 防口径混用
+                (self.ws / "original_preview.png").unlink()
+            layout_pre = None
+            with suppress(Exception):
+                layout_pre = _safe_eval(f"() => ({LAYOUT_MAP_JS})({LAYOUT_MAP_MAX})")
+            # 图片未到齐就截基准, 克隆(资源池更全)反被扣分: cn.vuejs 赞助商图床慢时
+            # 基准里整区空白格子而克隆是满的(-15 分)。可见图仍在加载就再等一会(封顶)
+            with suppress(Exception):
+                # 与克隆侧同口径: 克隆截图前懒加载图全部转 eager(见 _load_clone), 基准不转
+                # 就是"克隆满、基准空"(mi.com 轮播页尾整块空白 -5 分)
+                td = time.monotonic()
+                page.evaluate(BASELINE_EAGER_JS, config.BASELINE_EAGER_MAX)
+                pending = page.evaluate(IMG_PENDING_JS)
+                if pending:
+                    t_img = time.monotonic()
+                    # 有进展才继续等: 连续 STALL 内一张都没到齐即放行(坏图床/永不加载的图不空等到上限)
+                    deadline = t_img + config.BASELINE_IMG_WAIT_MS / 1000
+                    last_n, last_t = pending, t_img
+                    while time.monotonic() < deadline:
+                        page.wait_for_timeout(250)
+                        try:
+                            n = page.evaluate(IMG_PENDING_JS)
+                        except Exception:
+                            break
+                        now = time.monotonic()
+                        if not n:
+                            break
+                        if n < last_n:
+                            last_n, last_t = n, now
+                        elif now - last_t >= config.BASELINE_IMG_STALL_MS / 1000:
+                            break
+                    self.log("RENDER", f"基准截图前等待 {pending} 张加载中的图片 "
+                                       f"{time.monotonic() - t_img:.1f}s")
+            with suppress(Exception):
+                frz = _safe_eval(TIME_FREEZE_JS)
+                if frz.get("anims"):
+                    self.log("RENDER", f"时间冻结: 暂停 {frz['anims']} 个动画, "
+                                       f"清空定时器 {frz.get('timers', 0)} 个")
+            t_frz = time.monotonic()
+            # 冻结后再等一轮可见图: 上面等图期间轮播定时器还在翻页, 冻结那一刻露出的往往
+            # 是刚翻到、图还没到的一页(mi.com 基准整屏空白)。冻结后版面不再动, 等的就是截图里那几张
+            with suppress(Exception):
+                pending = page.evaluate(IMG_PENDING_JS)
+                if pending:
+                    t_img = time.monotonic()
+                    deadline = t_img + config.BASELINE_IMG_FROZEN_WAIT_MS / 1000
+                    while time.monotonic() < deadline and page.evaluate(IMG_PENDING_JS):
+                        page.wait_for_timeout(200)
+                    self.log("RENDER", f"冻结后补等 {pending} 张可见图 {time.monotonic() - t_img:.1f}s")
+            with suppress(Exception):
+                left = config.BASELINE_TWEEN_SETTLE_MS / 1000 - (time.monotonic() - t_frz)
+                if left > 0:
+                    page.wait_for_timeout(int(left * 1000))
+                _safe_eval(RAF_FREEZE_JS)
+            try:
+                td = self._phase("细分·基准等图与冻结", td)
+                self._full_shot(page, self.ws / "original_preview.png", "原站")
+                with suppress(NameError):
+                    td = self._phase("细分·基准整页截图", td)
+                baseline_text = _safe_eval(TEXT_EXTRACT_JS)
+                with suppress(Exception):
+                    page.evaluate(MARK_LOADED_IMGS_JS)
+                self.log("RENDER", "原站纯净基准快照已保存(DOM 改动前)")
+            except Exception as exc:
+                self.log("WARN", f"原站截图失败: {exc}")
+            with suppress(Exception):
+                n_wa = _safe_eval(WAAPI_BAKE_JS)
+                if n_wa:
+                    self.log("RENDER", f"脚本动画烘焙: {n_wa} 个 WAAPI 动画按截图时刻写成内联样式")
+            with suppress(Exception):
+                n_ph = _safe_eval(ANIM_PHASE_JS)
+                if n_ph:
+                    self.log("RENDER", f"动画相位固化: {n_ph} 个元素按截图时刻起播")
+        if screenshot and layout_pre and (self.ws / "original_preview.png").is_file():
+            # 截图前后各采一次, 只留尺寸未变的块: 动画/逐帧增长的块真实基准高度不可知,
+            # 拿它校准只会把克隆拉向另一个时刻
+            with suppress(Exception):
+                post = {e[0]: e[2] for e in _safe_eval(
+                    f"() => ({LAYOUT_MAP_JS})({LAYOUT_MAP_MAX})")}
+                stable = [e for e in layout_pre if abs(post.get(e[0], -99) - e[2]) <= 1]
+                layout_stable = stable
+                (self.ws / "layout_map.json").write_text(
+                    json.dumps(stable, ensure_ascii=False), encoding="utf-8")
+        return baseline_text, layout_stable
+
     def _render_page(self, ctx, url: str, screenshot: bool, collect_links: bool):
         page = ctx.new_page()
         rt = self.cfg.get("render_timeout")  # 批次级页面加载超时(秒), 0/缺省 = 平台默认
@@ -796,92 +887,7 @@ class CaptureMixin:
         # 评分基准(纯净原站): 必须在任何引擎 DOM 改动(表单激活/DEEP_FREEZE/
         # 水合剥离/字体烘焙)之前截取 —— 否则评分比较的是"克隆 vs 引擎改过的
         # 原站", 引擎自身引入的失真被基准同步吸收, 分数系统性偏乐观。
-        baseline_text = None
-        layout_stable = []
-        if screenshot:
-            with suppress(OSError):   # 重建/重试: 清掉上一轮基准, 防口径混用
-                (self.ws / "original_preview.png").unlink()
-            layout_pre = None
-            with suppress(Exception):
-                layout_pre = _safe_eval(f"() => ({LAYOUT_MAP_JS})({LAYOUT_MAP_MAX})")
-            # 图片未到齐就截基准, 克隆(资源池更全)反被扣分: cn.vuejs 赞助商图床慢时
-            # 基准里整区空白格子而克隆是满的(-15 分)。可见图仍在加载就再等一会(封顶)
-            with suppress(Exception):
-                # 与克隆侧同口径: 克隆截图前懒加载图全部转 eager(见 _load_clone), 基准不转
-                # 就是"克隆满、基准空"(mi.com 轮播页尾整块空白 -5 分)
-                td = time.monotonic()
-                page.evaluate(BASELINE_EAGER_JS, config.BASELINE_EAGER_MAX)
-                pending = page.evaluate(IMG_PENDING_JS)
-                if pending:
-                    t_img = time.monotonic()
-                    # 有进展才继续等: 连续 STALL 内一张都没到齐即放行(坏图床/永不加载的图不空等到上限)
-                    deadline = t_img + config.BASELINE_IMG_WAIT_MS / 1000
-                    last_n, last_t = pending, t_img
-                    while time.monotonic() < deadline:
-                        page.wait_for_timeout(250)
-                        try:
-                            n = page.evaluate(IMG_PENDING_JS)
-                        except Exception:
-                            break
-                        now = time.monotonic()
-                        if not n:
-                            break
-                        if n < last_n:
-                            last_n, last_t = n, now
-                        elif now - last_t >= config.BASELINE_IMG_STALL_MS / 1000:
-                            break
-                    self.log("RENDER", f"基准截图前等待 {pending} 张加载中的图片 "
-                                       f"{time.monotonic() - t_img:.1f}s")
-            with suppress(Exception):
-                frz = _safe_eval(TIME_FREEZE_JS)
-                if frz.get("anims"):
-                    self.log("RENDER", f"时间冻结: 暂停 {frz['anims']} 个动画, "
-                                       f"清空定时器 {frz.get('timers', 0)} 个")
-            t_frz = time.monotonic()
-            # 冻结后再等一轮可见图: 上面等图期间轮播定时器还在翻页, 冻结那一刻露出的往往
-            # 是刚翻到、图还没到的一页(mi.com 基准整屏空白)。冻结后版面不再动, 等的就是截图里那几张
-            with suppress(Exception):
-                pending = page.evaluate(IMG_PENDING_JS)
-                if pending:
-                    t_img = time.monotonic()
-                    deadline = t_img + config.BASELINE_IMG_FROZEN_WAIT_MS / 1000
-                    while time.monotonic() < deadline and page.evaluate(IMG_PENDING_JS):
-                        page.wait_for_timeout(200)
-                    self.log("RENDER", f"冻结后补等 {pending} 张可见图 {time.monotonic() - t_img:.1f}s")
-            with suppress(Exception):
-                left = config.BASELINE_TWEEN_SETTLE_MS / 1000 - (time.monotonic() - t_frz)
-                if left > 0:
-                    page.wait_for_timeout(int(left * 1000))
-                _safe_eval(RAF_FREEZE_JS)
-            try:
-                td = self._phase("细分·基准等图与冻结", td)
-                self._full_shot(page, self.ws / "original_preview.png", "原站")
-                with suppress(NameError):
-                    td = self._phase("细分·基准整页截图", td)
-                baseline_text = _safe_eval(TEXT_EXTRACT_JS)
-                with suppress(Exception):
-                    page.evaluate(MARK_LOADED_IMGS_JS)
-                self.log("RENDER", "原站纯净基准快照已保存(DOM 改动前)")
-            except Exception as exc:
-                self.log("WARN", f"原站截图失败: {exc}")
-            with suppress(Exception):
-                n_wa = _safe_eval(WAAPI_BAKE_JS)
-                if n_wa:
-                    self.log("RENDER", f"脚本动画烘焙: {n_wa} 个 WAAPI 动画按截图时刻写成内联样式")
-            with suppress(Exception):
-                n_ph = _safe_eval(ANIM_PHASE_JS)
-                if n_ph:
-                    self.log("RENDER", f"动画相位固化: {n_ph} 个元素按截图时刻起播")
-        if screenshot and layout_pre and (self.ws / "original_preview.png").is_file():
-            # 截图前后各采一次, 只留尺寸未变的块: 动画/逐帧增长的块真实基准高度不可知,
-            # 拿它校准只会把克隆拉向另一个时刻
-            with suppress(Exception):
-                post = {e[0]: e[2] for e in _safe_eval(
-                    f"() => ({LAYOUT_MAP_JS})({LAYOUT_MAP_MAX})")}
-                stable = [e for e in layout_pre if abs(post.get(e[0], -99) - e[2]) <= 1]
-                layout_stable = stable
-                (self.ws / "layout_map.json").write_text(
-                    json.dumps(stable, ensure_ascii=False), encoding="utf-8")
+        baseline_text, layout_stable = self._capture_baseline(page, _safe_eval, screenshot)
         tp = self._phase("采集-基准截图", tp)
         if screenshot and (self.ws / "original_preview.png").is_file():
             self._freeze_media_from_baseline(page)
