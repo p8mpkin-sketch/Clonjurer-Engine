@@ -65,6 +65,8 @@ from core import pixel_calibrator
 
 from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 import 路径不变
     AD_RECTS_JS,
+    INTERSTITIAL_HIDE_JS,
+    INTERSTITIAL_RESTORE_JS,
     ALT_EXTRACT_JS,
     ALT_INJECT_JS,
     ANIM_ALIGN_JS,
@@ -594,11 +596,22 @@ class ClonerEngine:
 
     def _full_shot(self, page, path, label="截图", _fresh=False):
         """整页截图 + 第三方广告位遮罩(评分口径, 见 AD_RECTS_JS)。"""
+        hidden = 0
+        if config.SCORE_MASK_ADS and label in ("原站", "克隆页", "保真轨", "静态版"):
+            with suppress(Exception):
+                hidden = page.evaluate(INTERSTITIAL_HIDE_JS) or 0
+                if hidden and label == "原站":
+                    self.log("RENDER", f"评分截图: 插屏广告层 {hidden} 个两侧隐藏(不计分, 交付物保留)")
         if label == "原站" and config.SCORE_MASK_ADS:
             self._ad_rects = []
             with suppress(Exception):
                 self._ad_rects = page.evaluate(AD_RECTS_JS) or []
-        self._full_shot_raw(page, path, label, _fresh)
+        try:
+            self._full_shot_raw(page, path, label, _fresh)
+        finally:
+            if hidden:
+                with suppress(Exception):
+                    page.evaluate(INTERSTITIAL_RESTORE_JS)
         rects = getattr(self, "_ad_rects", None)
         if rects and label in ("原站", "克隆页", "保真轨"):
             with suppress(Exception):

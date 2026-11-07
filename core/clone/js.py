@@ -1806,3 +1806,48 @@ AD_RECTS_JS = r"""() => {
   document.querySelectorAll('[id^="div-gpt-ad"], [data-google-query-id]').forEach(add);
   return out.slice(0, 80);
 }"""
+
+
+# 插屏广告层(进页即弹的全屏遮罩 + 跨域广告 iframe, 素材每次竞价都不同): 评分截图前两侧同口径隐藏,
+# 不计分(与 AD_RECTS_JS 遮广告位同理)。克隆交付物里照样保留该层, 只影响评分截图。
+# 纯结构判据, 不认域名: position:fixed、覆盖视口 ≥90% 宽且 ≥80% 高、z-index ≥ 1000, 且内含可见的
+# 跨源 iframe(面积 ≥ 100×100)。163/搜狐手机版首屏每次都被百度联盟插屏盖住, 两侧素材/几何必然不同
+INTERSTITIAL_HIDE_JS = r"""() => {
+  const vw = innerWidth, vh = innerHeight;
+  let n = 0;
+  const cross = f => {
+    const src = f.getAttribute('src') || '';
+    if (!src || /^(about:|javascript:|data:|blob:)/i.test(src)) return false;
+    try { return new URL(src, document.baseURI).origin !== location.origin; } catch (e) { return false; }
+  };
+  const iframes = Array.from(document.querySelectorAll('iframe')).filter(f => {
+    const r = f.getBoundingClientRect();
+    return r.width >= 100 && r.height >= 100 && cross(f);
+  });
+  const done = new Set();
+  for (const f of iframes) {
+    for (let e = f.parentElement; e && e !== document.body && e !== document.documentElement; e = e.parentElement) {
+      if (done.has(e)) break;
+      const cs = getComputedStyle(e);
+      if (cs.position !== 'fixed') continue;
+      const r = e.getBoundingClientRect(), z = parseInt(cs.zIndex, 10);
+      if (r.width >= vw * 0.9 && r.height >= vh * 0.8 && z >= 1000) {
+        e.setAttribute('data-clone-ihide', e.style.getPropertyValue('display') + '|' + e.style.getPropertyPriority('display'));
+        e.style.setProperty('display', 'none', 'important');
+        done.add(e); n++;
+      }
+      break;   // 只看最近的 fixed 祖先
+    }
+  }
+  return n;
+}"""
+
+# 截图后还原(原站活体页随后还要冻结交付, 插屏层不能带着 display:none 落盘)
+INTERSTITIAL_RESTORE_JS = r"""() => {
+  document.querySelectorAll('[data-clone-ihide]').forEach(e => {
+    const [v, pri] = e.getAttribute('data-clone-ihide').split('|');
+    e.removeAttribute('data-clone-ihide');
+    if (v) e.style.setProperty('display', v, pri || ''); else e.style.removeProperty('display');
+    if (!e.getAttribute('style')) e.removeAttribute('style');
+  });
+}"""

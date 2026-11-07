@@ -108,7 +108,8 @@ def _shoot(ctx, url, vp, out: Path, timeout_ms=45000):
         with suppress(Exception):
             page.evaluate(SETTLE_MEDIA_JS, [max_h, 6000])
         with suppress(Exception):
-            from core.cloner_engine import AD_RECTS_JS
+            from core.cloner_engine import AD_RECTS_JS, INTERSTITIAL_HIDE_JS
+            info["interstitial"] = page.evaluate(INTERSTITIAL_HIDE_JS) or 0
             info["ads"] = page.evaluate(AD_RECTS_JS) or []
         info["scroll_width"] = sw
         info["overflow_x"] = sw > vp["width"] + 2

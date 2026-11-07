@@ -344,6 +344,40 @@ class InlineFluidSelfSized(unittest.TestCase):
                 b.close()
 
 
+INTERSTITIAL_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width"></head><body style="margin:0">
+<div id="hdr" style="position:fixed;top:0;left:0;right:0;height:60px;z-index:9999"><iframe src="http://ads.invalid/x" width="300" height="50"></iframe></div>
+<div style="height:2000px">正文</div>
+<div id="pop" style="position:fixed;top:0;left:0;width:100%;height:110%;z-index:2147483647;background:rgba(0,0,0,.5)">
+<iframe src="http://ads.invalid/s?wid=336&hei=597" width="336" height="597"></iframe></div>
+<div id="own" style="position:fixed;inset:0;z-index:5000"><iframe src="/local" width="300" height="300"></iframe></div>
+</body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class InterstitialHide(unittest.TestCase):
+    """插屏广告层(fixed 全屏 + 跨源 iframe)评分截图时隐藏, 截完还原; 页头小广告条与同源全屏层不动。"""
+
+    def test_hide_and_restore(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 420, "height": 912})
+                page.route("**/*", lambda r: r.abort() if "ads.invalid" in r.request.url or "/local" in r.request.url else r.continue_())
+                page.set_content(INTERSTITIAL_PAGE)
+                self.assertEqual(page.evaluate(ce.INTERSTITIAL_HIDE_JS), 1)
+                disp = "id => getComputedStyle(document.getElementById(id)).display"
+                self.assertEqual(page.evaluate(disp, "pop"), "none")
+                self.assertEqual(page.evaluate(disp, "hdr"), "block")
+                self.assertEqual(page.evaluate(disp, "own"), "block")
+                page.evaluate(ce.INTERSTITIAL_RESTORE_JS)
+                self.assertEqual(page.evaluate(disp, "pop"), "block")
+                self.assertNotIn("display", page.evaluate("document.getElementById('pop').getAttribute('style')"))
+                self.assertIsNone(page.evaluate("document.getElementById('pop').getAttribute('data-clone-ihide')"))
+            finally:
+                b.close()
+
+
 class CalibInjection(unittest.TestCase):
     def test_put_calib_band_wrapped(self):
         eng = ce.ClonerEngine.__new__(ce.ClonerEngine)
