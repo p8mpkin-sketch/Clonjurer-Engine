@@ -144,7 +144,8 @@ def probe_one(browser, base, task_id, url, viewports, outdir: Path, clone_tpl=No
         finally:
             ctx.close()
         row = {"orig_overflow_x": ia.get("overflow_x"), "clone_overflow_x": ib.get("overflow_x"),
-               "orig_h": ia.get("height"), "clone_h": ib.get("height")}
+               "orig_h": ia.get("height"), "clone_h": ib.get("height"),
+               "orig_interstitial": ia.get("interstitial", 0), "clone_interstitial": ib.get("interstitial", 0)}
         if ia.get("ok") and ib.get("ok"):
             rects = (ia.get("ads") or []) + (ib.get("ads") or [])
             if rects:   # 第三方竞价广告位两侧统一遮灰(与引擎评分同口径)
