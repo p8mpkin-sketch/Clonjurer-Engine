@@ -554,6 +554,10 @@ CV_RECORD_JS = r"""
   // 不在 style 里, 记成等价 CSS 一并参与分视口比较(CSS 宽高覆盖展示属性)
   m.attrs = m.attrs || {};
   m.attrs[tag] = m.els.map(__CV_ATTR__);
+  // 脚本按视口写的非 class 属性(data-*/aria-* 被样式表属性选择器引用, 如 [data-media-position=...];
+  // svg 的 viewBox 按容器宽重算): 一并记录, 落盘前按视口分段换(见 CV_EMIT_JS)
+  m.xattr = m.xattr || {};
+  m.xattr[tag] = m.els.map(__CV_XATTR__);
   m.widths = m.widths || {};
   m.widths[tag] = window.innerWidth;
   return m.els.length;
@@ -580,7 +584,23 @@ CV_ATTR_FN = r"""(e) => {
   }
   return s;
 }"""
-CV_RECORD_JS = CV_RECORD_JS.replace("__CV_PATH__", CV_PATH_FN).replace("__CV_ATTR__", CV_ATTR_FN)
+# 可随视口换的非 class 属性快照: 名=值 JSON(按名排序), 无则空串。引擎自加属性不计; 值过长/含尖括号引号的不计
+CV_XATTR_FN = r"""(e) => {
+  const o = {};
+  let n = 0;
+  for (const a of e.attributes) {
+    const k = a.name;
+    if (!(/^(data|aria)-/.test(k) || (k === 'viewBox' && e instanceof SVGSVGElement))) continue;
+    if (/^data-(cv|cb|cssom|clone)/.test(k) || a.value.length > 80 || /[<>"]/.test(a.value)) continue;
+    o[k] = a.value; n++;
+  }
+  if (!n) return '';
+  const r = {};
+  for (const k of Object.keys(o).sort()) r[k] = o[k];
+  return JSON.stringify(r);
+}"""
+CV_RECORD_JS = (CV_RECORD_JS.replace("__CV_PATH__", CV_PATH_FN).replace("__CV_ATTR__", CV_ATTR_FN)
+                .replace("__CV_XATTR__", CV_XATTR_FN))
 
 # 窄屏重载页的内联样式表: {路径: [标签, class, style]}
 CV_PATHS_JS = r"""() => {
@@ -590,7 +610,8 @@ CV_PATHS_JS = r"""() => {
   const out = {}, pathOf = """ + CV_PATH_FN + r""";
   const els = Array.from(document.body ? document.body.querySelectorAll('*') : []).slice(0, 20000);
   for (const e of els) out[pathOf(e)] = [e.tagName, String(e.className && e.className.baseVal !== undefined ? e.className.baseVal : e.className || ''), e.getAttribute('style') || '',
-    Array.from(e.children, c => c.tagName).filter(t => !NONVIS.has(t)).join(',').slice(0, 400), (""" + CV_ATTR_FN + r""")(e)];
+    Array.from(e.children, c => c.tagName).filter(t => !NONVIS.has(t)).join(',').slice(0, 400), (""" + CV_ATTR_FN + r""")(e),
+    (""" + CV_XATTR_FN + r""")(e)];
   return out;
 }"""
 
@@ -615,6 +636,23 @@ ALT_EXTRACT_JS = r"""(paths) => {
     const el = resolve(p);
     if (!el) continue;
     const c = el.cloneNode(true);
+    // cloneNode 不带 canvas 位图: 按原节点逐个固化成 <img>(与 DEEP_FREEZE 第 5 步同口径), 否则窄屏版
+    // 的图表/插画整块空白
+    const cvs = el.querySelectorAll('canvas'), cvc = c.querySelectorAll('canvas');
+    cvs.forEach((cv, k) => {
+      try {
+        const data = cv.toDataURL('image/png'), dst = cvc[k];
+        if (!dst || !data || data.length <= 128) return;
+        const img = document.createElement('img');
+        img.src = data;
+        img.setAttribute('data-canvas-frozen', 'true');
+        for (const a of ['class', 'id']) if (cv.getAttribute(a)) img.setAttribute(a, cv.getAttribute(a));
+        if (cv.getAttribute('style')) img.setAttribute('style', cv.getAttribute('style'));
+        if (cv.clientWidth) img.style.width = cv.clientWidth + 'px';
+        if (cv.clientHeight) img.style.height = cv.clientHeight + 'px';
+        dst.replaceWith(img);
+      } catch (e) {}
+    });
     c.querySelectorAll('script,noscript').forEach(x => x.remove());
     c.querySelectorAll('[data-src],[data-original],[data-lazy-src]').forEach(x => {
       const v = x.getAttribute('data-src') || x.getAttribute('data-original') || x.getAttribute('data-lazy-src');
@@ -779,6 +817,55 @@ CV_EMIT_JS = r"""
     el.setAttribute('data-cv-cls-d', el.getAttribute('class') || '');
     out.cls = (out.cls || 0) + 1;
   });
+  // 分视口非 class 属性: 与 class 同口径要两路证据一致(缩放快照与窄屏首载同路径元素取值相同、都不同于
+  // 桌面、还原后回到桌面值); data-*/aria-* 只换被样式表属性选择器引用的名(未被引用的换了也不影响渲染,
+  // 多是埋点/状态), svg viewBox 恒参与。名字像交互状态的不换
+  const X = m.xattr || {}, xswaps = [];
+  if (X.d && X.b && tags.length) {
+    const refd = new Set();
+    const walk = rules => {
+      for (const r of rules || []) {
+        if (r.selectorText) for (const g of r.selectorText.matchAll(/\[\s*([\w:-]+)/g)) refd.add(g[1].toLowerCase());
+        if (r.cssRules) walk(r.cssRules);
+      }
+    };
+    for (const sh of document.styleSheets) { try { walk(sh.cssRules); } catch (e) {} }
+    const XSTATE = /(expanded|hidden|selected|current|pressed|checked|state|active|open|index|visible|busy|disabled|live|scroll|show)/i;
+    const J = s => { try { return s ? JSON.parse(s) : {}; } catch (e) { return null; } };
+    m.els.forEach((el, i) => {
+      const xd = X.d[i];
+      if (!el.isConnected || X.b[i] !== xd || (__CV_XATTR__)(el) !== xd) return;
+      const D = J(xd);
+      if (!D) return;
+      const alt = {};
+      tags.forEach(t => {
+        const v = X[t] ? X[t][i] : xd;
+        const L = m.paths && loads[t] ? loads[t][m.paths[i]] : null;
+        if (v === xd || !L || L[0] !== el.tagName || (L[5] || '') !== v) return;
+        const V = J(v);
+        if (!V) return;
+        const ch = {};
+        let ok = true, n = 0;
+        for (const k of new Set(Object.keys(D).concat(Object.keys(V)))) {
+          if (D[k] === V[k]) continue;
+          if (k !== 'viewBox' && !refd.has(k)) continue;              // 样式表没引用: 不影响渲染, 不换
+          if (XSTATE.test(k)) { ok = false; break; }
+          ch[k] = k in V ? V[k] : null; n++;
+        }
+        if (ok && n) alt[t] = ch;
+      });
+      if (Object.keys(alt).length) xswaps.push([el, alt, D]);
+    });
+  }
+  xswaps.slice(0, 4000).forEach(([el, alt, D]) => {
+    const base = {};
+    for (const t of Object.keys(alt)) {
+      el.setAttribute('data-cv-xa-' + t, JSON.stringify(alt[t]));
+      for (const k of Object.keys(alt[t])) base[k] = k in D ? D[k] : null;
+    }
+    el.setAttribute('data-cv-xa-d', JSON.stringify(base));
+    out.xattr = (out.xattr || 0) + 1;
+  });
   m.els.forEach((el, i) => {
     const sdRaw = m.snaps.d[i], sd = S('d', i);
     if (!el.isConnected) return;
@@ -837,7 +924,7 @@ CV_EMIT_JS = r"""
       for (const k of ['d', 't', 'm']) if (rule[k].length) bands[k].push('[data-cv="' + i + '"]' + SPEC + '{' + rule[k].join(';') + '}');
     }
   });
-  if (out.cls) {
+  if (out.cls || out.xattr) {
     // 当前视口段由分视口样式表里的 --cv-band 告诉运行时(段边界落盘时才确定, 脚本不重复计算断点)
     bands.d.push(':root{--cv-band:d}'); bands.t.push(':root{--cv-band:t}'); bands.m.push(':root{--cv-band:m}');
     const sc = document.createElement('script');
@@ -857,11 +944,11 @@ CV_EMIT_JS = r"""
   window.__cvRec = null;
   return out;
 }
-""".replace("__CV_ATTR__", CV_ATTR_FN)
+""".replace("__CV_ATTR__", CV_ATTR_FN).replace("__CV_XATTR__", CV_XATTR_FN)
 
 # 分视口 class 运行时(随 CV_EMIT_JS 写入页面): 读 --cv-band 决定当前段, 把 data-cv-cls-<段> 换成 class;
 # 段没变不动 DOM。活体采集时段恒为 d(桌面), 不改变采集结果。
-CV_CLS_RUNTIME = r"""(function(){var cur=null;function apply(){try{var b=(getComputedStyle(document.documentElement).getPropertyValue('--cv-band')||'').trim()||'d';if(b===cur)return;cur=b;var es=document.querySelectorAll('[data-cv-cls-d]');for(var i=0;i<es.length;i++){var e=es[i],v=e.getAttribute('data-cv-cls-'+b);if(v===null)v=e.getAttribute('data-cv-cls-d');if(e.getAttribute('class')!==v)e.setAttribute('class',v);}}catch(x){}}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',apply);else apply();window.addEventListener('resize',apply);window.addEventListener('load',apply);})();"""
+CV_CLS_RUNTIME = r"""(function(){var cur=null;function apply(){try{var b=(getComputedStyle(document.documentElement).getPropertyValue('--cv-band')||'').trim()||'d';if(b===cur)return;cur=b;var es=document.querySelectorAll('[data-cv-cls-d]');for(var i=0;i<es.length;i++){var e=es[i],v=e.getAttribute('data-cv-cls-'+b);if(v===null)v=e.getAttribute('data-cv-cls-d');if(e.getAttribute('class')!==v)e.setAttribute('class',v);}es=document.querySelectorAll('[data-cv-xa-d]');for(i=0;i<es.length;i++){e=es[i];var o=JSON.parse(e.getAttribute('data-cv-xa-d')),bv=e.getAttribute('data-cv-xa-'+b);if(bv!==null){var q=JSON.parse(bv);for(var k in q)o[k]=q[k];}for(k in o){if(o[k]===null)e.removeAttribute(k);else if(e.getAttribute(k)!==o[k])e.setAttribute(k,o[k]);}}}catch(x){}}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',apply);else apply();window.addEventListener('resize',apply);window.addEventListener('load',apply);})();"""
 CV_EMIT_JS = CV_EMIT_JS.replace("CV_CLS_RUNTIME", json.dumps(CV_CLS_RUNTIME))
 
 
