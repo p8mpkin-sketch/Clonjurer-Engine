@@ -113,7 +113,8 @@ DEEP_FREEZE_JS = r"""
   const serializeSheet = (sheet, kind) => {
     try {
       if (sheet.disabled) return;
-      if (sheet.ownerNode && sheet.ownerNode.hasAttribute && sheet.ownerNode.hasAttribute('data-clone-bake')) return;
+      if (sheet.ownerNode && sheet.ownerNode.hasAttribute && (sheet.ownerNode.hasAttribute('data-clone-bake')
+          || sheet.ownerNode.hasAttribute('data-cssom'))) return;   // 引擎自己插的副本(含冻结前直取的)不再复制
       // 冻结前已 fetch 补过副本(WAIT_SHEETS_JS)的表不再重复
       { const nx = sheet.ownerNode && sheet.ownerNode.nextElementSibling;
         if (nx && nx.getAttribute && nx.getAttribute('data-cssom') === 'fetched') return; }

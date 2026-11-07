@@ -94,6 +94,10 @@ class LateNarrowSheet(unittest.TestCase):
                     order = page.evaluate("""() => Array.from(document.head.children).map(e =>
                         e.tagName + (e.getAttribute('media') ? '[m]' : '') + (e.hasAttribute('data-cssom') ? '*' : ''))""")
                     self.assertEqual(order, ["LINK", "STYLE*", "LINK[m]", "STYLE*"], order)
+                    # 再冻结一次(副本已在页内)不会给副本再出副本
+                    page.evaluate(DEEP_FREEZE_JS)
+                    n = page.evaluate("document.querySelectorAll('style[data-cssom]').length")
+                    self.assertEqual(n, 4)
                     page.set_viewport_size({"width": 400, "height": 800})
                     fs = page.evaluate("getComputedStyle(document.querySelector('h3')).fontSize")
                     self.assertEqual(fs, "30px")
