@@ -598,6 +598,100 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
         return parts
 
     # ------------------------------------------------------------------
+    def _repair_loop(self, ctx, render_and_score, want_score, results, routes, origin, srcset_map,
+                     pages, iframe_pages, frame_records, mock_entries, pages_map):
+        """渲染驱动修复循环: 本地化 -> 离线渲染评分 -> 缺失回补 -> 重来; 返回 (detail, score)。
+        收敛口径: 无缺失 / 缺失均非样式表字体 / 到顶 / 无进展 / 轮数或时间预算用尽; 末轮低于最优轮时恢复最优轮产物。"""
+        detail, score = None, None
+        repair_started = time.time()
+        prev_sig, prev_score = None, None   # 收敛判定: 上一轮缺失数与分数
+        stale_prev = False                   # 上一轮回补是否也未涨分
+        best = None                          # 最优轮快照(修复轮回退时恢复)
+        for round_i in range(max(1, config.RENDER_REPAIR_ROUNDS)
+                             if want_score else 1):
+            # P0-A 时间预算: 快站快修, 慢站限时收敛 —— 速度是引擎一等公民
+            if time.time() - repair_started > config.REPAIR_TIME_BUDGET:
+                self.log("RENDER", f"修复循环时间预算耗尽"
+                         f"({config.REPAIR_TIME_BUDGET}s), 提前收敛")
+                break
+            self._set(progress=62 + round_i * 6,
+                      stage="资源重写" if round_i == 0 else f"修复循环第{round_i + 1}轮")
+            tp = time.monotonic()
+            pairs = self._compose_pairs(results, routes, origin, srcset_map,
+                                        iframe_pages, frame_records)
+            self._localize(pages, iframe_pages, frame_records, pairs, pages_map)
+            self._rewrite_js_files(results, pairs)
+            self._rewrite_mock_bodies(mock_entries, pairs)
+            self._phase("本地化重写", tp)
+            if not want_score:
+                break
+            detail, failed_local, remote_missing = render_and_score()
+            self.db.touch_task(self.task_id)   # 心跳: 长渲染防误收割
+            if detail is not None:
+                score = detail["score"]
+                self.log("SIMILARITY",
+                         f"视觉还原度 {score}% (结构 {detail['structure']:.0%} / "
+                         f"边缘 {detail['edge']:.0%} / 文本 {detail['text']:.0%})")
+                for warning in detail.get("warnings", []):
+                    self.log("WARN", f"[评分告警] {warning}")
+                if best is None or score > best["detail"]["score"]:
+                    best = self._snapshot_round(round_i, detail, results)
+            if not failed_local and not remote_missing:
+                break
+            if detail is not None and config.REPAIR_STRUCTURAL_ONLY and \
+                    not self._structural_missing(failed_local, remote_missing):
+                # 缺失只剩图片/脚本/接口/媒体: 活体回补已把浏览器加载过的都取回, 余下多是运行时
+                # 才拼出的埋点/备用资源; 再回补 + 整页重渲染历史上几乎不涨分、还常回退
+                self.log("RENDER", f"本轮缺失 {len(failed_local) + len(remote_missing)} 个均非样式表/字体,"
+                                   f" 不再回补重渲染(交付与评分同为本轮产物)")
+                break
+            if detail is not None and detail["score"] >= config.REPAIR_STOP_SCORE:
+                # 已到顶(缺失的多是结账/埋点等不可见请求): 再回补一轮只花 20s 回源 + 一次渲染
+                self.log("RENDER", f"还原度 {detail['score']} 已达 {config.REPAIR_STOP_SCORE}, 不再回补")
+                break
+            # 无进展即停: 上一轮回补之后缺失数没减少、分数也没涨 —— 回补已无能为力
+            # (缺失资源上游本就 404/鉴权, 或带时间戳/随机参数每轮都"不同"),
+            # 再跑只是重复本地化+渲染(真实语料里 wordpress/runoob/wix 都是 6 轮
+            # 分数一动不动)。比较缺失数而非集合: 埋点 URL 的随机参数让集合每轮都变
+            missing_n = len(failed_local) + len(remote_missing)
+            cur = detail["score"] if detail is not None else None
+            no_gain = (prev_score is not None and cur is not None
+                       and cur - prev_score < config.REPAIR_MIN_GAIN)
+            # 连续两轮回补都不涨分: 缺失数虽在下降, 回补的是登录/埋点/接口这类
+            # 不可见请求(真实语料 jd 三轮 77.0 不动, 缺失 17→11 仍在跑)
+            stale = no_gain and stale_prev
+            if prev_sig is not None and (stale or (missing_n >= prev_sig and (
+                    cur is None or prev_score is None or no_gain))):
+                self.log("RENDER", f"修复循环无进展(缺失 {prev_sig}→{missing_n}, "
+                                   f"分数 {prev_score}→{cur}), 第 {round_i + 1} 轮收敛")
+                break
+            prev_sig, prev_score, stale_prev = missing_n, cur, no_gain
+            if round_i >= config.RENDER_REPAIR_ROUNDS - 1:
+                self.log("SMART-DL",
+                         f"仍有 {len(failed_local) + len(remote_missing)} 个本地缺失资源"
+                         f"(回补轮数已用尽): {sorted(failed_local | {urlsplit(u).path for u in remote_missing})[:6]}")
+                break
+            self.log("SMART-DL", f"本轮缺失 {missing_n}: "
+                                 f"{sorted(failed_local)[:8]} / 外联 {len(remote_missing)}")
+            tp = time.monotonic()
+            new, shadows = self._failed_backfill(ctx, failed_local,
+                                                remote_missing, results, origin)
+            self._phase("修复回补下载", tp)
+            if not new and not shadows:
+                break
+            results.update(new)
+
+        # 修复轮不保证单调(回补进来的埋点/广告资源可能让克隆页更偏离原站):
+        # 末轮低于最优轮时恢复最优轮产物(页面/新增文件/截图/校准样式), 交付与分数一致
+        if best is not None and detail is not None and \
+                detail["score"] < best["detail"]["score"] - 0.05:
+            self._restore_round(best, results)
+            self.log("RENDER", f"修复轮回退({detail['score']}→最优 {best['detail']['score']}), "
+                               f"已恢复第 {best['round'] + 1} 轮产物")
+            detail = best["detail"]
+            score = detail["score"]
+        return detail, score
+
     def _ai_config(self):
         """任务级 AI 配置合并(> 环境变量 > config 默认); 无 Key 返回 None。"""
         base_url = (self.cfg.get("ai_base_url") or "").strip() or config.AI_API_BASE_URL
@@ -778,93 +872,9 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
             # 热力图延迟: 中间修复轮不写 diff_preview.png, 收敛后统一生成一次
             render_and_score = self._make_render_and_score(ctx, defer_diff=True)
 
-            repair_started = time.time()
-            prev_sig, prev_score = None, None   # 收敛判定: 上一轮缺失数与分数
-            stale_prev = False                   # 上一轮回补是否也未涨分
-            best = None                          # 最优轮快照(修复轮回退时恢复)
-            for round_i in range(max(1, config.RENDER_REPAIR_ROUNDS)
-                                 if want_score else 1):
-                # P0-A 时间预算: 快站快修, 慢站限时收敛 —— 速度是引擎一等公民
-                if time.time() - repair_started > config.REPAIR_TIME_BUDGET:
-                    self.log("RENDER", f"修复循环时间预算耗尽"
-                             f"({config.REPAIR_TIME_BUDGET}s), 提前收敛")
-                    break
-                self._set(progress=62 + round_i * 6,
-                          stage="资源重写" if round_i == 0 else f"修复循环第{round_i + 1}轮")
-                tp = time.monotonic()
-                pairs = self._compose_pairs(results, routes, origin, srcset_map,
-                                            iframe_pages, frame_records)
-                self._localize(pages, iframe_pages, frame_records, pairs, pages_map)
-                self._rewrite_js_files(results, pairs)
-                self._rewrite_mock_bodies(mock_entries, pairs)
-                self._phase("本地化重写", tp)
-                if not want_score:
-                    break
-                detail, failed_local, remote_missing = render_and_score()
-                self.db.touch_task(self.task_id)   # 心跳: 长渲染防误收割
-                if detail is not None:
-                    score = detail["score"]
-                    self.log("SIMILARITY",
-                             f"视觉还原度 {score}% (结构 {detail['structure']:.0%} / "
-                             f"边缘 {detail['edge']:.0%} / 文本 {detail['text']:.0%})")
-                    for warning in detail.get("warnings", []):
-                        self.log("WARN", f"[评分告警] {warning}")
-                    if best is None or score > best["detail"]["score"]:
-                        best = self._snapshot_round(round_i, detail, results)
-                if not failed_local and not remote_missing:
-                    break
-                if detail is not None and config.REPAIR_STRUCTURAL_ONLY and \
-                        not self._structural_missing(failed_local, remote_missing):
-                    # 缺失只剩图片/脚本/接口/媒体: 活体回补已把浏览器加载过的都取回, 余下多是运行时
-                    # 才拼出的埋点/备用资源; 再回补 + 整页重渲染历史上几乎不涨分、还常回退
-                    self.log("RENDER", f"本轮缺失 {len(failed_local) + len(remote_missing)} 个均非样式表/字体,"
-                                       f" 不再回补重渲染(交付与评分同为本轮产物)")
-                    break
-                if detail is not None and detail["score"] >= config.REPAIR_STOP_SCORE:
-                    # 已到顶(缺失的多是结账/埋点等不可见请求): 再回补一轮只花 20s 回源 + 一次渲染
-                    self.log("RENDER", f"还原度 {detail['score']} 已达 {config.REPAIR_STOP_SCORE}, 不再回补")
-                    break
-                # 无进展即停: 上一轮回补之后缺失数没减少、分数也没涨 —— 回补已无能为力
-                # (缺失资源上游本就 404/鉴权, 或带时间戳/随机参数每轮都"不同"),
-                # 再跑只是重复本地化+渲染(真实语料里 wordpress/runoob/wix 都是 6 轮
-                # 分数一动不动)。比较缺失数而非集合: 埋点 URL 的随机参数让集合每轮都变
-                missing_n = len(failed_local) + len(remote_missing)
-                cur = detail["score"] if detail is not None else None
-                no_gain = (prev_score is not None and cur is not None
-                           and cur - prev_score < config.REPAIR_MIN_GAIN)
-                # 连续两轮回补都不涨分: 缺失数虽在下降, 回补的是登录/埋点/接口这类
-                # 不可见请求(真实语料 jd 三轮 77.0 不动, 缺失 17→11 仍在跑)
-                stale = no_gain and stale_prev
-                if prev_sig is not None and (stale or (missing_n >= prev_sig and (
-                        cur is None or prev_score is None or no_gain))):
-                    self.log("RENDER", f"修复循环无进展(缺失 {prev_sig}→{missing_n}, "
-                                       f"分数 {prev_score}→{cur}), 第 {round_i + 1} 轮收敛")
-                    break
-                prev_sig, prev_score, stale_prev = missing_n, cur, no_gain
-                if round_i >= config.RENDER_REPAIR_ROUNDS - 1:
-                    self.log("SMART-DL",
-                             f"仍有 {len(failed_local) + len(remote_missing)} 个本地缺失资源"
-                             f"(回补轮数已用尽): {sorted(failed_local | {urlsplit(u).path for u in remote_missing})[:6]}")
-                    break
-                self.log("SMART-DL", f"本轮缺失 {missing_n}: "
-                                     f"{sorted(failed_local)[:8]} / 外联 {len(remote_missing)}")
-                tp = time.monotonic()
-                new, shadows = self._failed_backfill(ctx, failed_local,
-                                                    remote_missing, results, origin)
-                self._phase("修复回补下载", tp)
-                if not new and not shadows:
-                    break
-                results.update(new)
-
-            # 修复轮不保证单调(回补进来的埋点/广告资源可能让克隆页更偏离原站):
-            # 末轮低于最优轮时恢复最优轮产物(页面/新增文件/截图/校准样式), 交付与分数一致
-            if best is not None and detail is not None and \
-                    detail["score"] < best["detail"]["score"] - 0.05:
-                self._restore_round(best, results)
-                self.log("RENDER", f"修复轮回退({detail['score']}→最优 {best['detail']['score']}), "
-                                   f"已恢复第 {best['round'] + 1} 轮产物")
-                detail = best["detail"]
-                score = detail["score"]
+            detail, score = self._repair_loop(
+                ctx, render_and_score, want_score, results, routes, origin, srcset_map,
+                pages, iframe_pages, frame_records, mock_entries, pages_map)
 
             fp_left = getattr(self, "_fid_page", None)   # 交互轨已够高、保真轨没用上的预加载页
             if fp_left is not None:
