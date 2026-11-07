@@ -84,6 +84,7 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     CV_QUIET_JS,
     CV_RECORD_JS,
     DEEP_FREEZE_JS,
+    WAIT_SHEETS_JS,
     FONT_BAKE_JS,
     FORM_ACTIVATE_JS,
     IFRAME_EXTRACT_JS,
@@ -1713,6 +1714,10 @@ class ClonerEngine:
         activated = _safe_eval(FORM_ACTIVATE_JS)
         if activated:
             self.log("RENDER", f"表单激活: focus/blur {activated} 个输入控件")
+        with suppress(Exception):
+            ws_ = page.evaluate(WAIT_SHEETS_JS, 4000) or {}
+            if ws_.get("ms", 0) > 50 or ws_.get("pending"):
+                self.log("RENDER", f"冻结前等样式表: {ws_.get('ms')}ms, 仍未到 {ws_.get('pending', 0)} 张")
         counts = _safe_eval(DEEP_FREEZE_JS)
         if layout_stable:
             # DEEP_FREEZE 已停掉定时器: 此后页面脚本不再改 DOM, 回撤结果能留到序列化

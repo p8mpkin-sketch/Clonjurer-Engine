@@ -26,6 +26,25 @@ LAZY_JS = r"""
 }
 """
 
+# 冻结前等未加载完的样式表: 媒体条件不匹配当前视口的 <link>(手机断点表)浏览器按最低优先级
+# 排在大量图片之后, 冻结时 sheet 常为空, CSSOM 副本缺失且随机(cgnpc 4 次采集 0~3 张不等)。封顶等待。
+WAIT_SHEETS_JS = r"""
+(capMs) => new Promise(res => {
+  const t0 = performance.now();
+  const pending = () => Array.from(document.querySelectorAll('link[rel~="stylesheet" i][href]')).filter(l => {
+    if (l.disabled) return false;
+    if (!l.sheet) return true;
+    try { return !l.sheet.cssRules; } catch (e) { return false; }   // 跨域可读性无关加载
+  });
+  const tick = () => {
+    const n = pending().length;
+    if (!n || performance.now() - t0 > capMs) res({pending: n, ms: Math.round(performance.now() - t0)});
+    else setTimeout(tick, 100);
+  };
+  tick();
+})
+"""
+
 DEEP_FREEZE_JS = r"""
 () => {
   const result = { lazy: 0, css: 0, crossOriginSheets: 0, canvas: 0, forms: 0, revealed: 0 };
@@ -98,7 +117,11 @@ DEEP_FREEZE_JS = r"""
       const style = document.createElement('style');
       style.setAttribute('data-cssom', kind);
       style.textContent = text;
-      head.appendChild(style);
+      // 副本紧跟原节点: 保持与其它样式表的层叠先后。全部追加到 head 末尾时, 某张表的副本缺失
+      // (媒体条件不匹配的表最低优先级加载, 冻结时可能还没到)会让其它表的副本反压它的原链接规则
+      const own = sheet.ownerNode;
+      if (kind === 'true' && own && own.parentNode && own.isConnected) own.after(style);
+      else head.appendChild(style);
       result.css++;
     } catch (err) {
       result.crossOriginSheets++;

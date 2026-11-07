@@ -48,3 +48,57 @@ class DoctypePreserved(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(chromium_available(), "需要 Playwright Chromium")
+class LateNarrowSheet(unittest.TestCase):
+    """媒体条件不匹配的样式表晚到: 冻结前要等到, 副本紧跟原链接(层叠先后不变)。"""
+
+    def test_late_media_sheet_copied_in_place(self):
+        import threading
+        import time
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from playwright.sync_api import sync_playwright
+        from core.clone.js import DEEP_FREEZE_JS, WAIT_SHEETS_JS
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                if self.path == "/m.css":
+                    time.sleep(1.2)
+                    body, ct = b"h3{font-size:30px}", "text/css"
+                elif self.path == "/d.css":
+                    body, ct = b"h3{font-size:12px}", "text/css"
+                else:
+                    body = (b'<!DOCTYPE html><html><head><link rel="stylesheet" href="/d.css">'
+                            b'<link rel="stylesheet" media="(max-width:700px)" href="/m.css"></head>'
+                            b'<body><h3>x</h3></body></html>')
+                    ct = "text/html"
+                self.send_response(200)
+                self.send_header("Content-Type", ct)
+                self.end_headers()
+                self.wfile.write(body)
+
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            with sync_playwright() as p:
+                b = p.chromium.launch()
+                try:
+                    page = b.new_page(viewport={"width": 1200, "height": 800})
+                    page.goto(f"http://127.0.0.1:{srv.server_address[1]}/", wait_until="domcontentloaded")
+                    page.evaluate(WAIT_SHEETS_JS, 4000)
+                    page.evaluate(DEEP_FREEZE_JS)
+                    order = page.evaluate("""() => Array.from(document.head.children).map(e =>
+                        e.tagName + (e.getAttribute('media') ? '[m]' : '') + (e.hasAttribute('data-cssom') ? '*' : ''))""")
+                    self.assertEqual(order, ["LINK", "STYLE*", "LINK[m]", "STYLE*"], order)
+                    page.set_viewport_size({"width": 400, "height": 800})
+                    fs = page.evaluate("getComputedStyle(document.querySelector('h3')).fontSize")
+                    self.assertEqual(fs, "30px")
+                finally:
+                    b.close()
+        finally:
+            srv.shutdown()
+            srv.server_close()
