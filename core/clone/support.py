@@ -453,9 +453,12 @@ RESPONSIVE_META = ('<meta name="viewport" '
 _VIEWPORT_META_RE = re.compile(r"<meta\b[^>]*\bname\s*=\s*[\"']?viewport\b", re.I)
 
 
-def _inject_responsive(html: str) -> str:
-    """原站已有 viewport meta → 原样返回(它自己的媒体查询就是权威); 否则补 meta + 兜底 CSS。"""
-    if _VIEWPORT_META_RE.search(html):
+def _inject_responsive(html: str, enhance: bool = False) -> str:
+    """原站已有 viewport meta → 原样返回(它自己的媒体查询就是权威)。
+    没有 meta 的老式定宽站: 默认也原样返回 —— 触屏浏览器对它按 980 布局视口缩小显示, 补上
+    device-width meta 会让克隆在真机上换成另一种版式(douban/baidu iPad 真机口径 66/45, 原站自比 ~100)。
+    enhance=True(任务配置 responsive_enhance, 主动要"响应式增强")时才补 meta + 兜底 CSS。"""
+    if not enhance or _VIEWPORT_META_RE.search(html):
         return html
     match = re.search(r"<head[^>]*>", html, re.I)
     at = match.end() if match else 0

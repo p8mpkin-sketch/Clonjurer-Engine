@@ -3183,7 +3183,7 @@ class ClonerEngine:
                 localized = self._inject_after_head(localized, bg_css)
             localized = self._inject_after_head(localized, sim_script)
             localized = self._inject_after_head(localized, REPLAY_DEDUPE_JS)
-            return _utf8_charset(_inject_responsive(localized))
+            return _utf8_charset(_inject_responsive(localized, bool(self.cfg.get("responsive_enhance"))))
 
         html_pairs = _html_escaped_pairs(pairs)
         for route, html in pages:
@@ -3219,7 +3219,7 @@ class ClonerEngine:
                 "", rewrite_js_navigation(apply_replacements(html, html_pairs)))
             localized = scope_bake_css(localized, self._band_floor_of(localized))
             localized = self._inject_after_head(localized, sim_script)
-            localized = _utf8_charset(_inject_responsive(localized))
+            localized = _utf8_charset(_inject_responsive(localized, bool(self.cfg.get("responsive_enhance"))))
             (self.ws / f"iframe_{i + 1}.html").write_text(
                 localized, encoding="utf-8")
             pages_map[f"/iframe_{i + 1}.html"] = f"iframe_{i + 1}.html"
@@ -3228,7 +3228,7 @@ class ClonerEngine:
                 "", rewrite_js_navigation(apply_replacements(html, html_pairs)))
             localized = scope_bake_css(localized, self._band_floor_of(localized))
             localized = self._inject_after_head(localized, sim_script)
-            localized = _utf8_charset(_inject_responsive(localized))
+            localized = _utf8_charset(_inject_responsive(localized, bool(self.cfg.get("responsive_enhance"))))
             (self.ws / "frames" / f"frame_{i + 1}.html").write_text(
                 localized, encoding="utf-8")
             pages_map[f"/frames/frame_{i + 1}.html"] = f"frames/frame_{i + 1}.html"

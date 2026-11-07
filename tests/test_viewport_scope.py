@@ -60,7 +60,9 @@ class ResponsiveInjection(unittest.TestCase):
         self.assertEqual(ce._inject_responsive(html), html)
 
     def test_legacy_site_gets_meta_and_safe_fallback(self):
-        out = ce._inject_responsive("<html><head></head><body></body></html>")
+        bare = "<html><head></head><body></body></html>"
+        self.assertEqual(ce._inject_responsive(bare), bare)   # 默认保真: 原站没 meta 克隆也没有
+        out = ce._inject_responsive(bare, enhance=True)
         self.assertIn('name="viewport"', out)
         self.assertIn('data-clone-preview="responsive"', out)
         self.assertNotIn("height: auto !important", out)
