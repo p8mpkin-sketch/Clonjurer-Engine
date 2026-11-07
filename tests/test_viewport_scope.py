@@ -284,10 +284,11 @@ class ViewportAttrSwap(unittest.TestCase):
                 b.close()
 
 
-CANVAS_FREEZE_PAGE = """<style>.wf{width:100%;display:block}#box canvas{width:120px;height:40px}</style>
+CANVAS_FREEZE_PAGE = """<style>img{max-width:100%;height:auto}.wf{width:100%;display:block}.wide{width:calc(100% + 40px);display:block}#box canvas{width:120px;height:40px}</style>
 <div id="w" style="width:390px"><canvas id="a" class="wf" width="600" height="300"></canvas></div>
 <div id="box"><canvas id="b" width="60" height="20"></canvas></div>
-<script>for (const id of ['a', 'b']) { const x = document.getElementById(id).getContext('2d'); x.fillStyle = 'red'; x.fillRect(0, 0, 600, 300); }</script>"""
+<div style="width:300px"><canvas id="c" class="wide" width="680" height="200"></canvas></div>
+<script>for (const id of ['a', 'b', 'c']) { const x = document.getElementById(id).getContext('2d'); x.fillStyle = 'red'; x.fillRect(0, 0, 600, 300); }</script>"""
 
 
 @unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
@@ -308,6 +309,8 @@ class CanvasFreezeResponsive(unittest.TestCase):
                 size = "id => { const r = document.getElementById(id).getBoundingClientRect(); return [r.width, r.height]; }"
                 self.assertEqual(page.evaluate(size, "a"), [390, 195])
                 self.assertEqual(page.evaluate(size, "b"), [120, 40])
+                self.assertEqual(page.evaluate(size, "c"), [340, 100])   # 站点 img{max-width:100%} 不截短
+                self.assertNotIn("340px", page.evaluate("document.getElementById('c').getAttribute('style')"))
                 page.evaluate("document.getElementById('w').style.width = '420px'")
                 self.assertEqual(page.evaluate(size, "a"), [420, 210])
             finally:

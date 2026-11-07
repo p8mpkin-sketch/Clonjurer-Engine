@@ -76,6 +76,12 @@ CANVAS_IMG_FN = r"""(cv, data) => {
   for (const a of ['class', 'id', 'style']) { const v = cv.getAttribute(a); if (v) img.setAttribute(a, v); }
   if (cv.width && cv.height) { img.setAttribute('width', String(cv.width)); img.setAttribute('height', String(cv.height)); }
   if (!cv.style.height) img.style.height = 'auto';
+  // 站点基础样式只对 img 生效的规则(img{max-width:100%} / .img-fluid 等)不该作用在原本是 canvas 的位置:
+  // 把 canvas 的计算值 min/max 尺寸内联到 img(vite 比容器宽 2.5rem 的 canvas 被 max-width:100% 截短)
+  try {
+    const cs = getComputedStyle(cv);
+    for (const k of ['max-width', 'min-width', 'max-height', 'min-height']) if (!cv.style.getPropertyValue(k)) img.style.setProperty(k, cs.getPropertyValue(k));
+  } catch (e) {}
   let fit = false;
   try {
     const r0 = cv.getBoundingClientRect(), st = cv.getAttribute('style');
