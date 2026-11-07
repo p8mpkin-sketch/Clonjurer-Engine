@@ -38,7 +38,7 @@ WAIT_SHEETS_JS = r"""
   };
   const links = Array.from(document.querySelectorAll('link[rel~="stylesheet" i][href]')).filter(isPending);
   // 不指望浏览器的最低优先级队列: 同时直接 fetch 一份, 先到先用(到了就紧跟原链接插副本)
-  let fetched = 0;
+  let fetched = 0, done = false;   // 封顶返回后迟到的 fetch 不再插(冻结已按浏览器的表序列化, 再插即重复)
   const absolutize = (text, base) => text.replace(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^'")\s]+))\s*\)/g, (m, d, s1, b) => {
     const q = d !== undefined ? '"' : (s1 !== undefined ? "'" : '');
     const u = (d !== undefined ? d : (s1 !== undefined ? s1 : b)).trim();
@@ -46,7 +46,7 @@ WAIT_SHEETS_JS = r"""
     try { return 'url(' + q + new URL(u, base).href + q + ')'; } catch (e) { return m; }
   });
   const jobs = links.map(l => fetch(l.href, {credentials: 'include'}).then(r => r.ok ? r.text() : '').then(text => {
-    if (!text || !isPending(l) || !l.isConnected || /<\/?(html|body|style)\b/i.test(text)) return;
+    if (done || !text || !isPending(l) || !l.isConnected || /<\/?(html|body|style)\b/i.test(text)) return;
     const media = (l.getAttribute('media') || '').trim();
     const st = document.createElement('style');
     st.setAttribute('data-cssom', 'fetched');
@@ -57,7 +57,7 @@ WAIT_SHEETS_JS = r"""
   }).catch(() => 0));
   const tick = () => {
     const n = links.filter(l => isPending(l) && !(l.nextElementSibling && l.nextElementSibling.getAttribute('data-cssom') === 'fetched')).length;
-    if (!n || performance.now() - t0 > capMs) res({pending: n, fetched: fetched, ms: Math.round(performance.now() - t0)});
+    if (!n || performance.now() - t0 > capMs) { done = true; res({pending: n, fetched: fetched, ms: Math.round(performance.now() - t0)}); }
     else setTimeout(tick, 100);
   };
   if (!links.length) return res({pending: 0, fetched: 0, ms: 0});
