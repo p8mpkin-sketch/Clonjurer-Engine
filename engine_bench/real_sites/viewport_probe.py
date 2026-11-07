@@ -36,8 +36,9 @@ PROBE_VIEWPORTS = {
 }
 IOS_UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 "
           "(KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1")
-IPAD_UA = ("Mozilla/5.0 (iPad; CPU OS 18_6 like Mac OS X) AppleWebKit/605.1.15 "
-           "(KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1")
+# iPadOS 13 起 Safari 默认「桌面级浏览」: 发 Mac Safari UA(不含 iPad/Mobile), 靠触屏区分
+IPAD_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+           "(KHTML, like Gecko) Version/18.6 Safari/605.1.15")
 DEVICE_OPTS = {
     "iphone-air": {"user_agent": IOS_UA, "device_scale_factor": 3, "is_mobile": True, "has_touch": True},
     "ipad-air": {"user_agent": IPAD_UA, "device_scale_factor": 2, "is_mobile": True, "has_touch": True},

@@ -455,8 +455,8 @@ class ClonerEngine:
             page = ctx.new_page()
             try:
                 page.goto(self._target, wait_until="domcontentloaded", timeout=int(budget * 1000))
-                with suppress(Exception):
-                    page.wait_for_load_state("load", timeout=int(budget * 500))
+                with suppress(Exception):   # 跳转在提交时已定, 骨架在 DOMContentLoaded 后基本成形: load 只短等
+                    page.wait_for_load_state("load", timeout=2500)
                 with suppress(Exception):
                     page.evaluate(CV_QUIET_JS, 400)
                 return page.url or self._target, page.evaluate(OUTER_HTML_JS) or ""
@@ -468,7 +468,7 @@ class ClonerEngine:
         """原站按手机 UA 分发另一套页面(m. 子域跳转 / 同址移动模板)时, 以真机仿真口径另克隆一份
         手机版(index.m.html, 资源并入同一 static/), 克隆入口按 UA 路由过去。响应式站不触发。"""
         if self._edition_child or self.cfg.get("device") == "phone" \
-                or self.cfg.get("viewport", "desktop") == "mobile" or self._page_dir != "/":
+                or self.cfg.get("viewport", "desktop") == "mobile":
             return None
         if "iphone" in (ua or "").lower() or "android" in (ua or "").lower():
             return None   # 任务本身就用手机 UA 采集
@@ -501,7 +501,11 @@ class ClonerEngine:
             self.log("WARN", "手机版克隆未产出页面, 不接入")
             return None
         copied = merge_static_tree(child.ws / "static", self.ws / "static")
-        (self.ws / PHONE_EDITION_FILE).write_text(
+        # 手机版与主页面同目录(目录型目标页落在 page_dir 影子路径, 入口路由按相对路径跳)
+        main_file = self._main_page_file()
+        rel = main_file.parent.relative_to(self.ws).as_posix()
+        m_rel = PHONE_EDITION_FILE if rel in ("", ".") else f"{rel}/{PHONE_EDITION_FILE}"
+        (self.ws / m_rel).write_text(
             page_file.read_text(encoding="utf-8", errors="replace"), encoding="utf-8")
         with suppress(Exception):
             extra = json.loads((child.ws / "mock_data.json").read_text(encoding="utf-8"))
@@ -511,17 +515,16 @@ class ClonerEngine:
                     mock_entries.append(e)
             (self.ws / "mock_data.json").write_text(
                 json.dumps(mock_entries, ensure_ascii=False, indent=2), encoding="utf-8")
-        for name in ("index.html", "index.interactive.html"):
-            f = self.ws / name
+        for f in (main_file, main_file.parent / "index.interactive.html"):
             if f.is_file():
                 f.write_text(inject_edition_router(f.read_text(encoding="utf-8", errors="replace")),
                              encoding="utf-8")
-        pages_map["/" + PHONE_EDITION_FILE] = PHONE_EDITION_FILE
+        pages_map["/" + m_rel] = m_rel
         site = self.ws / "site.json"
         with suppress(Exception):
             meta = json.loads(site.read_text(encoding="utf-8"))
             meta["routes"] = pages_map
-            meta["phone_edition"] = {"url": phone_url, "file": PHONE_EDITION_FILE,
+            meta["phone_edition"] = {"url": phone_url, "file": m_rel,
                                      "similarity": getattr(child, "_edition_score", None)}
             site.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
         # 子克隆的冗余产物不随包(static 已并入; 保留日志/截图/评分便于归因)
