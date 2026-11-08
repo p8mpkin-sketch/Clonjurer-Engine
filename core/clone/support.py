@@ -2050,6 +2050,65 @@ def beacon_like(url: str) -> bool:
     return ext in ("gif", "jpg", "jpeg", "png", "bin", "") and len(parts.query) >= 120
 
 
+# 交付产物部署性能守卫: 落盘前把"未本地化的阻塞 <script src>"去阻塞化。 -----------
+# 根因(cgnpc 562 复盘): 采集时就 404/被跳过的外链计数脚本(cmsHitsCount.js)与跨域埋点图标
+# (govicon.js)仍留在交付 HTML 里作经典阻塞脚本。本地部署时它们本地无文件 → 走 Flask 反代兜底
+# 回源(timeout 20s)或直连一个远端慢主机, 经典脚本在解析期阻塞, 首屏被拖到 20s+。
+# 评分口径一直量不到: 离线渲染的 route guard 对非本地请求一律瞬时 abort, 而交付产物是等 20s。
+# 通用处置(不认具体站点, 只按形态): 已本地化(/static/、相对影子路径、data:)的保持不动;
+# 其余绝对/根相对未捕获的阻塞脚本 —— 埋点/计数/信标形态整条删除, 其余补 async, 使其永不阻塞首屏。
+_SCRIPT_SRC_TAG_RE = re.compile(
+    r"<script\b(?P<attrs>[^>]*?)\bsrc\s*=\s*(?P<q>[\"'])(?P<src>.*?)(?P=q)(?P<rest>[^>]*)>",
+    re.I | re.S)
+
+# 计数器/统计脚本的通用命名形态(不认具体站点): hitcount / viscount / pvcount / cmsHits 等。
+_HITCOUNT_HINT = re.compile(
+    r"(?:hit|visit|view|page)s?[-_]?count|count[-_]?(?:hit|visit|view|pv|uv)|cmshits", re.I)
+
+
+def _script_src_is_localized(src: str) -> bool:
+    """落盘后由静态服务器直接命中、不触发反代回源的引用形态。"""
+    s = (src or "").strip()
+    if not s:
+        return True   # 空 src 不发请求
+    low = s.lower()
+    if low.startswith(("data:", "blob:", "about:", "javascript:", "#")):
+        return True
+    if low.startswith(("http://", "https://", "//")):
+        return False   # 绝对/协议相对: 未被本地化(本地化会改成 /static 根相对)
+    if s.startswith("/"):
+        # 根相对: 仅 /static/ 是内容寻址的已捕获资源; 其余根相对路径(/cgnhit/... 等)
+        # 落盘无文件, 必走反代兜底
+        return low.startswith("/static/")
+    return True        # 页面目录相对路径: 影子文件随包落盘, 静态直通
+
+
+def neutralize_deploy_hazard_scripts(html: str, page_host: str = "") -> str:
+    """交付 HTML 去阻塞: 未本地化的阻塞 <script src> 不得挡首屏(删埋点 / 其余转 async)。"""
+    if "<script" not in html.lower():
+        return html
+
+    def _repl(m):
+        src = m.group("src")
+        if _script_src_is_localized(src):
+            return m.group(0)
+        attrs = m.group("attrs") or ""
+        rest = m.group("rest") or ""
+        flags = (attrs + " " + rest).lower()
+        if "async" in flags or "defer" in flags:
+            return m.group(0)   # 本就非阻塞
+        abs_url = src if src.lower().startswith(("http://", "https://")) else (
+            "https:" + src if src.startswith("//") else "https://_rel_/" + src.lstrip("/"))
+        # 埋点/计数/信标形态: 部署后只会回源打点, 不改画面 → 整条移除
+        if beacon_like(abs_url) or _HITCOUNT_HINT.search(src):
+            return ""
+        # 其余未捕获阻塞脚本(可能是跨域库/未采到的应用脚本): 转 async, 保留 best-effort
+        # 执行但不再阻塞解析与首屏; 配合反代短超时+多线程, 后台 404 代价可控。
+        return f"<script{attrs} src={m.group('q')}{src}{m.group('q')}{rest} async>"
+
+    return _SCRIPT_SRC_TAG_RE.sub(_repl, html)
+
+
 # 重放去重守卫(交互轨通用): 冻结 DOM 已含页面脚本运行后的结果, 交互版再执行一遍同步脚本时,
 # 「插入型」脚本(insertAdjacentHTML / appendChild 追加组件、轮播复制幻灯片等)会把同样的内容再插一次,
 # 页面出现成段重复(example.com 交互轨 70.4 / 保真轨 100 即此类)。守卫在所有页面脚本之前挂钩 DOM

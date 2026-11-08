@@ -287,7 +287,7 @@ def _proxy(path):
             request.method, upstream_url,
             params=list(request.args.items(multi=True)),
             headers=headers, data=request.get_data(),
-            timeout=20, allow_redirects=True,
+            timeout=(@@PROXY_CONNECT_TIMEOUT@@, @@PROXY_READ_TIMEOUT@@), allow_redirects=True,
         )
     except Exception as exc:
         return Response(f"Upstream proxy failed: {exc}", status=502, content_type="text/plain; charset=utf-8")
@@ -534,7 +534,9 @@ if __name__ == "__main__":
             port = int(sys.argv[1])
         except ValueError:
             print(f"忽略非法端口参数 {sys.argv[1]!r}, 使用 {port}")
-    app.run(host="0.0.0.0", port=port)
+    # threaded=True: 反代兜底是同步阻塞请求, 单线程下一个慢回源会卡住后面排队的
+    # 所有静态资源(图片/CSS), 把整页首屏一起拖慢 —— 多线程让各请求互不阻塞。
+    app.run(host="0.0.0.0", port=port, threaded=True)
 '''
 
 GENERATED_REQUIREMENTS = """flask>=3.0.0
@@ -700,6 +702,8 @@ def generate_project(task_id: int, upstream_origin: str, workspace: Path,
         .replace("@@PROXY_ENABLED@@", "True" if proxy_enabled else "False")
         .replace("@@TASK_ID@@", str(task_id))
         .replace("@@PROXY_CACHE_MAX@@", str(config.PROXY_CACHE_MAX_BYTES))
+        .replace("@@PROXY_CONNECT_TIMEOUT@@", str(config.PROXY_FALLBACK_CONNECT_TIMEOUT))
+        .replace("@@PROXY_READ_TIMEOUT@@", str(config.PROXY_FALLBACK_READ_TIMEOUT))
         .replace("@@TRACKER_ENABLED@@",
                  "True" if tracker_hook else "False")
         .replace("@@TRACKER_TASK_ID@@", str(task_id))

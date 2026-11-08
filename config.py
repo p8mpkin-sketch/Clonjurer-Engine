@@ -70,6 +70,10 @@ MAX_TAPE_BODY_BYTES = 512 * 1024       # VCR 磁带单条响应体上限(512KB)
 MAX_TAPE_TOTAL_BYTES = 16 * 1024 * 1024  # VCR 磁带总体积上限(16MB)
 TAPE_RECORD = True                      # 采集期磁带录制开关(A/B 实验用)
 PROXY_CACHE_MAX_BYTES = 8 * 1024 * 1024   # 反向代理兜底单响应缓存上限(8MB)
+# 交付产物反代兜底超时(秒): 部署机离原站远/原站慢时, 旧值 20s 会把阻塞请求拖成
+# 20s 首屏。兜底只为补未捕获的零星资源, 连不上就快速失败, 不该让访客陪等。
+PROXY_FALLBACK_CONNECT_TIMEOUT = 3.05
+PROXY_FALLBACK_READ_TIMEOUT = 6
 
 # ---------------------------------------------------------------------------
 # 设备视口预设

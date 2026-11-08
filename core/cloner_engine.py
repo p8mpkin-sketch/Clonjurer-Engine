@@ -123,6 +123,7 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
 )
 from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部 import 路径不变
     beacon_like,
+    neutralize_deploy_hazard_scripts,
     ASSET_RESOURCE_TYPES,
     ASSET_SKIP_PREFIXES,
     BLOB_INLINE_MAX,
@@ -2986,6 +2987,10 @@ class ClonerEngine:
                 localized = self._inject_after_head(localized, bg_css)
             localized = self._inject_after_head(localized, sim_script)
             localized = self._inject_after_head(localized, REPLAY_DEDUPE_JS)
+            # 部署性能守卫: 未本地化的阻塞外链脚本(采集期已 404/跳过的计数/埋点、跨域图标)
+            # 不得在本地部署时走反代兜底阻塞首屏 —— 删信标 / 其余转 async。
+            localized = neutralize_deploy_hazard_scripts(
+                localized, urlsplit(self._target).netloc)
             return _utf8_charset(_inject_responsive(localized))
 
         html_pairs = _html_escaped_pairs(pairs)
