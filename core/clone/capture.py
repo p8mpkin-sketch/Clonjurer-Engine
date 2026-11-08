@@ -1549,6 +1549,7 @@ class CaptureMixin:
                 return
             self._mock_raw.append({
                 "path": parts.path or "/",
+                "host": parts.netloc,
                 "method": request.method,
                 "query": parts.query,
                 "status": response.status,

@@ -229,6 +229,7 @@ from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部
     _utf8_charset,
     _write_diff,
     apply_replacements,
+    apply_url_replacements,
     band_wrap,
     capture_band_floor,
     compute_visual_similarity,
@@ -764,7 +765,7 @@ class DownloadMixin:
             body = entry.get("response_body") or ""
             if "http" not in body and "/picupload" not in body and "." not in body:
                 continue
-            rewritten = apply_replacements(body, pairs)
+            rewritten = apply_url_replacements(body, pairs)
             if rewritten != body:
                 entry["response_body"] = rewritten
                 changed = True

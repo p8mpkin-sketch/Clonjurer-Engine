@@ -230,6 +230,8 @@ from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部
     _utf8_charset,
     _write_diff,
     apply_replacements,
+    apply_url_replacements,
+    xhost_mock_script,
     band_wrap,
     capture_band_floor,
     compute_visual_similarity,
@@ -262,7 +264,10 @@ class LocalizeMixin:
         """构造 (原始引用 -> 本地路径) 替换表, 长字符串优先。"""
         pairs = {}
         page_netloc = urlsplit(self._target).netloc
-        self._fill_variants_bulk(pairs, [(url, info["local"]) for url, info in results.items()],
+        # 页面自身地址不当资产改写(被 canonical/自引用当资产落地成 .bin 后, 站内导航链接与同名路径段全被换掉)
+        selves = {u.split("#", 1)[0] for u in (self._target, getattr(self, "_main_final_url", "") or "") if u}
+        self._fill_variants_bulk(pairs, [(url, info["local"]) for url, info in results.items()
+                                         if url.split("#", 1)[0] not in selves],
                                  page_netloc)
         srcset_items = []
         for candidate, best in srcset_map.items():
@@ -401,6 +406,9 @@ class LocalizeMixin:
         strip_pack = bool(self._strategy_pack.disable_hydration)
         stripped_total = 0
 
+        xhost_script = xhost_mock_script(getattr(self, "_mock_raw", None) or (),
+                                         urlsplit(self._target).netloc)
+
         def finalize(html: str, route: str) -> str:
             nonlocal stripped_total
             # 模式策略包: 水合类站点以采集期静态 DOM 为权威, 落盘前剥离应用脚本
@@ -429,12 +437,14 @@ class LocalizeMixin:
             # 不得在本地部署时走反代兜底阻塞首屏 —— 删信标 / 其余转 async。
             localized = neutralize_deploy_hazards(
                 localized, urlsplit(self._target).netloc)
+            if xhost_script:
+                localized = self._inject_after_head(localized, xhost_script)
             return _utf8_charset(_inject_responsive(localized, bool(self.cfg.get("responsive_enhance"))))
 
         html_pairs = _html_escaped_pairs(pairs)
         for route, html in pages:
             fname = "index.html" if route == "/" else f"p__{slugify(route)}.html"
-            localized = finalize(apply_replacements(html, html_pairs), route)
+            localized = finalize(apply_url_replacements(html, html_pairs), route)
             (self.ws / fname).write_text(localized, encoding="utf-8")
             pages_map[route] = fname
             if strip_pack and stripped_total and route == "/":
@@ -462,7 +472,7 @@ class LocalizeMixin:
                 (self.ws / "index.html").write_text(stub, encoding="utf-8")
         for i, (_src, html) in enumerate(iframe_pages):
             localized = _BASE_TAG_RE.sub(
-                "", rewrite_js_navigation(apply_replacements(html, html_pairs)))
+                "", rewrite_js_navigation(apply_url_replacements(html, html_pairs)))
             localized = scope_bake_css(localized, self._band_floor_of(localized))
             localized = self._inject_after_head(localized, sim_script)
             localized = _utf8_charset(_inject_responsive(localized, bool(self.cfg.get("responsive_enhance"))))
@@ -471,7 +481,7 @@ class LocalizeMixin:
             pages_map[f"/iframe_{i + 1}.html"] = f"iframe_{i + 1}.html"
         for i, (_src, html, _text) in enumerate(frame_records):
             localized = _BASE_TAG_RE.sub(
-                "", rewrite_js_navigation(apply_replacements(html, html_pairs)))
+                "", rewrite_js_navigation(apply_url_replacements(html, html_pairs)))
             localized = scope_bake_css(localized, self._band_floor_of(localized))
             localized = self._inject_after_head(localized, sim_script)
             localized = _utf8_charset(_inject_responsive(localized, bool(self.cfg.get("responsive_enhance"))))
@@ -506,7 +516,7 @@ class LocalizeMixin:
                         continue
                     text = path.read_text(encoding="utf-8", errors="replace")
                     rewritten = rewrite_js_navigation(
-                        rewrite_module_imports(apply_replacements(text, pairs), url, lookup))
+                        rewrite_module_imports(apply_url_replacements(text, pairs), url, lookup))
                     if rewritten != text:
                         path.write_text(rewritten, encoding="utf-8")
                 except OSError:

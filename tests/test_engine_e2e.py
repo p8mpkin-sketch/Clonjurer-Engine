@@ -127,12 +127,24 @@ url(/fonts/fx.woff) format("woff"),url(/fonts/fx.ttf) format("truetype")}
 @font-face{font-family:Fx;src:url(/fonts/fx-cyr.woff2) format("woff2");unicode-range:U+0400-045F}
 @font-face{font-family:Fx;src:url(/fonts/fx-lat.woff2) format("woff2");unicode-range:U+0000-00FF}
 .ff{font-family:Fx,sans-serif}"""
+SITE["xh.html"] = """<!doctype html><html><head><meta charset="utf-8"><title>XH</title></head>
+<body><h1>Cross host api</h1><ul id="feed"></ul>
+<script>(async () => { const r = await fetch('//127.0.0.1:' + location.port + '/xapi/feed.json');
+const d = await r.json(); const ul = document.getElementById('feed'); ul.innerHTML = '';
+for (const t of d.items) { const li = document.createElement('li'); li.textContent = t; ul.appendChild(li); }
+document.body.setAttribute('data-feed', String(d.items.length)); })();</script></body></html>"""
+SITE["xapi/feed.json"] = '{"items": ["Remote one", "Remote two"]}'
 REQUESTED = []
 
 
 class _Quiet(SimpleHTTPRequestHandler):
     def log_message(self, *a):
         pass
+
+    def end_headers(self):
+        if self.path.startswith("/xapi/"):
+            self.send_header("Access-Control-Allow-Origin", "*")
+        super().end_headers()
 
     def do_GET(self):
         REQUESTED.append(self.path)
@@ -333,6 +345,31 @@ class EngineEndToEnd(unittest.TestCase):
         self.assertEqual(task["status"], "completed", task.get("error_msg"))
         log = (config.WORKSPACE_ROOT / str(task["id"]) / "engine.log").read_text(encoding="utf-8")
         self.assertIn("与上一轮相同", log, "\n".join(l for l in log.splitlines() if "RENDER" in l or "SMART" in l)[-3000:])
+
+    def test_cross_host_api_replayed_from_mock(self):
+        """跨域数据接口(协议相对 //另一主机)录到 Mock 后, 离线回放经垫片改发同源由本地 Mock 接住。"""
+        from core.browser_pool import SyncBrowserPool
+        from core.clone.support import _LocalPreviewServer
+        port = self.httpd.server_address[1]
+        db, task = self._run_direct(f"http://localhost:{port}/xh.html")
+        self.assertEqual(task["status"], "completed", task.get("error_msg"))
+        ws = config.WORKSPACE_ROOT / str(task["id"])
+        html = (ws / "index.html").read_text(encoding="utf-8")
+        self.assertIn('data-clone-preview="xhost-mock"', html)
+        self.assertIn(f"127.0.0.1:{port}", html.split('data-clone-preview="xhost-mock"', 1)[1][:300])
+        srv = _LocalPreviewServer(ws)
+        srv.start()
+        try:
+            base = f"http://127.0.0.1:{srv.port}"
+            with SyncBrowserPool.instance(2).context(viewport={"width": 1280, "height": 800}) as ctx:
+                pg = ctx.new_page()
+                pg.route("**/*", lambda r: r.continue_() if r.request.url.startswith(base) else r.abort())
+                pg.goto(base + "/index.html", wait_until="load")
+                pg.wait_for_function("document.body.getAttribute('data-feed') === '2'", timeout=8000)
+                self.assertIn("Remote two", pg.inner_text("#feed"))
+                pg.close()
+        finally:
+            srv.stop()
 
     def test_rich_page_crawler_mode(self):
         from core.browser_pool import SyncBrowserPool

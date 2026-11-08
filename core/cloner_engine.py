@@ -274,6 +274,7 @@ from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部
     _utf8_charset,
     _write_diff,
     apply_replacements,
+    apply_url_replacements,
     band_wrap,
     capture_band_floor,
     compute_visual_similarity,

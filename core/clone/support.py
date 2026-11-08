@@ -945,6 +945,10 @@ _STATIC_ATTR_RE = re.compile(
     r'\s*=\s*(?:"([^"]*)"|\'([^\']*)\')', re.I)
 
 
+STATIC_LINK_REL_FILTER = os.environ.get("CLONER_STATIC_LINK_REL_FILTER", "1") != "0"
+_LINK_REL_RE = re.compile(r"""\srel\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""", re.I)
+
+
 def _static_refs(html: str, base: str) -> dict:
     """未经采集脚本的 HTML(活体 frame DOM 等)静态提取资源引用, 结构同 COLLECT_ASSETS_JS 结果。
 
@@ -965,8 +969,21 @@ def _static_refs(html: str, base: str) -> dict:
             urls.append(absolute)
             raw_refs.append([raw, absolute])
 
+    page_self = (base or "").split("#", 1)[0]
     for m in _STATIC_ATTR_RE.finditer(html or ""):
         attr, val = m.group(1).lower(), m.group(2) if m.group(2) is not None else m.group(3)
+        if STATIC_LINK_REL_FILTER and m.group(0)[1:5].lower() == "link":
+            # <link> 只取样式/图标/预载(与 COLLECT_ASSETS_JS 同口径): rel=alternate/canonical/hreflang
+            # 指向的是其它语言/地区的整页 HTML(apple 一页 45 份 × ~450KB 当资产下载)
+            end = (html or "").find(">", m.end())
+            tag = (html or "")[m.start(): end if end > 0 else m.end()]
+            rel = _LINK_REL_RE.search(tag)
+            rel_v = (rel.group(1) or rel.group(2) or rel.group(3) or "").lower() if rel else ""
+            if not any(k in rel_v for k in ("stylesheet", "icon", "preload", "prefetch")):
+                continue
+        if attr != "srcset" and page_self and \
+                _urljoin(base, _html.unescape((val or "").strip())).split("#", 1)[0] == page_self:
+            continue   # 页面自身地址(canonical/自引用)不是资产
         if attr == "srcset":
             srcsets.append(_html.unescape(val))
         else:
@@ -2695,3 +2712,48 @@ def bounded_call(sync_obj, coro, timeout_s: float):
         return runner(asyncio.wait_for(coro, timeout_s))
     except asyncio.TimeoutError as exc:
         raise TimeoutError(f"超过 {timeout_s:.0f}s 未返回") from exc
+
+
+# ---- 带边界的 URL 替换(本地化落盘用) ----
+# apply_replacements 是纯子串替换(与冻结基线逐值等价, 不改); 本地化时无协议键(根相对 /x/、原始相对写法)
+# 也会命中更长路径的中段: 页面自身路径 "/airpods-pro/" 被当资产落地后, 视频
+# "/105/media/us/airpods-pro/2025/…/large.mp4" 中段被换成 "/static/misc/x.bin", 交互版 13 个视频全 404。
+# 无协议键只在左侧不是路径字符时替换(引号/括号/=/空白/逗号等之后); http(s):// 与 // 键照旧。
+URL_REPL_BOUNDARY = os.environ.get("CLONER_URL_REPL_BOUNDARY", "1") != "0"
+_URL_MID_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.~%/-")
+
+
+def apply_url_replacements(text: str, pairs) -> str:
+    """apply_replacements + 无协议键的左边界约束(见上)。"""
+    if not pairs or not URL_REPL_BOUNDARY:
+        return apply_replacements(text, pairs)
+    pattern, mapping = _replacement_matcher(pairs)
+    mid = _URL_MID_CHARS
+
+    def _sub(m):
+        k = m.group(0)
+        s = m.start()
+        if s and text[s - 1] in mid and not k.startswith(("http:", "https:", "//")):
+            return k
+        return mapping.get(k, k)
+    return pattern.sub(_sub, text)
+
+
+# ---- 跨域接口回放垫片 ----
+# Mock 只按路径在本地(沙盒/交付 Flask)回放, 但 SPA 的数据接口常在另一个主机(api.x.com, 协议相对 //api.x.com
+# 在本地页里还会解析成 http:)。评分与交付里这些请求要么被外链守卫中止、要么跨域失败, 整页楼层停在骨架
+# (bilibili 交互轨 38 分: 录了 81 条接口, 本地命中 0)。录到过 JSON 响应的跨域主机, 其 fetch/XHR 改发同源
+# 同路径, 由本地 Mock 接住; 没录到的路径本地 404, 与外链被拦等价。
+XHOST_MOCK_SHIM = os.environ.get("CLONER_XHOST_MOCK", "1") != "0"
+XHOST_MOCK_TEMPLATE = r"""<script data-clone-preview="xhost-mock">(function(){try{var H=__HOSTS__;var map=function(u){try{var x=new URL(String(u),location.href);if(x.host===location.host||H.indexOf(x.host)<0)return null;var b=window.__CLONE_PREVIEW_BASE__||'/';return b+x.pathname.replace(/^\/+/,'')+x.search;}catch(e){return null;}};var of=window.fetch;if(of){window.fetch=function(i,o){try{var s=(typeof i==='string'||(typeof URL!=='undefined'&&i instanceof URL))?String(i):(i&&i.url);var m=s&&map(s);if(m){i=(typeof i==='string'||(typeof URL!=='undefined'&&i instanceof URL))?m:new Request(m,i);}}catch(e){}return of.call(this,i,o);};}var X=window.XMLHttpRequest;if(X&&X.prototype&&X.prototype.open){var oo=X.prototype.open;X.prototype.open=function(me,u){try{var m=map(u);if(m){arguments[1]=m;}}catch(e){}return oo.apply(this,arguments);};}}catch(e){}})();</script>"""
+
+
+def xhost_mock_script(mock_entries, page_netloc: str) -> str:
+    """录到 JSON 响应的跨域主机清单 → 回放垫片(无跨域主机时返回空串)。"""
+    if not XHOST_MOCK_SHIM:
+        return ""
+    hosts = sorted({str(e.get("host") or "") for e in mock_entries or ()
+                    if e.get("host") and e.get("host") != page_netloc})
+    if not hosts:
+        return ""
+    return XHOST_MOCK_TEMPLATE.replace("__HOSTS__", json.dumps(hosts[:200]).replace("</", "<\\/"))
