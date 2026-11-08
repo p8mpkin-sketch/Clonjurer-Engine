@@ -2109,6 +2109,92 @@ def neutralize_deploy_hazard_scripts(html: str, page_host: str = "") -> str:
     return _SCRIPT_SRC_TAG_RE.sub(_repl, html)
 
 
+# 渲染阻塞样式表(举一反三, 全语料 554 页复盘: 未本地化的阻塞 <link rel=stylesheet> 59 处/45 站,
+# 是脚本那一类的 4 倍; 44 处是根相对但原站也 404 的路径, 15 处跨域)。样式表阻塞的是**首次绘制**:
+# 部署后浏览器白屏等它加载/失败, 走反代兜底就是等满超时。未被捕获的样式表, 评分渲染时也没有它,
+# 克隆画面不依赖它 —— 改为异步加载(media=print + onload 还原), 到了就生效, 到不了不挡首屏。
+_LINK_TAG_RE = re.compile(r"<link\b(?P<attrs>[^>]*)>", re.I | re.S)
+_ATTR_RE_CACHE = {}
+
+
+def _attr(attrs: str, name: str):
+    rx = _ATTR_RE_CACHE.get(name)
+    if rx is None:
+        rx = _ATTR_RE_CACHE[name] = re.compile(
+            r"\b" + name + r"\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s>]+))", re.I)
+    m = rx.search(attrs)
+    if not m:
+        return None
+    return next((g for g in m.groups() if g is not None), "")
+
+
+def neutralize_deploy_hazard_styles(html: str) -> str:
+    """交付 HTML: 未本地化的渲染阻塞样式表改为异步加载(不挡首次绘制)。"""
+    if "stylesheet" not in html.lower():
+        return html
+
+    def _repl(m):
+        attrs = m.group("attrs") or ""
+        rel = (_attr(attrs, "rel") or "").lower()
+        if "stylesheet" not in rel.split() and rel != "stylesheet":
+            return m.group(0)
+        href = _attr(attrs, "href")
+        if href is None or _script_src_is_localized(href):
+            return m.group(0)
+        if "data-clone-async-css" in attrs.lower():
+            return m.group(0)
+        media = _attr(attrs, "media")
+        restore = (media or "all").replace("'", "\\'")
+        # 去掉原 media(若有), 换成 print + onload 还原
+        new_attrs = re.sub(r"\s*\bmedia\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s>]+)", "", attrs, flags=re.I)
+        return (f"<link{new_attrs} media=\"print\" "
+                f"onload=\"this.media='{restore}'\" data-clone-async-css>")
+
+    return _LINK_TAG_RE.sub(_repl, html)
+
+
+def neutralize_deploy_hazards(html: str, page_host: str = "") -> str:
+    """交付 HTML 去阻塞总入口: 阻塞脚本 + 渲染阻塞样式表。"""
+    return neutralize_deploy_hazard_styles(
+        neutralize_deploy_hazard_scripts(html, page_host))
+
+
+def deploy_hazard_audit(html: str, page_host: str = "") -> dict:
+    """部署隐患审计(评分口径之外的交付侧度量): 仍会阻塞首屏的未本地化脚本/样式数、
+    未本地化引用总数、涉及的外部主机。写入任务 stats, 语料跑分汇总, 让交付侧也被量到。"""
+    blocking_scripts, blocking_styles, uncaptured = 0, 0, 0
+    hosts = set()
+    for m in _SCRIPT_SRC_TAG_RE.finditer(html):
+        src = m.group("src")
+        if _script_src_is_localized(src):
+            continue
+        uncaptured += 1
+        flags = ((m.group("attrs") or "") + " " + (m.group("rest") or "")).lower()
+        if "async" not in flags and "defer" not in flags:
+            blocking_scripts += 1
+        h = (urlsplit(src if "://" in src else "https:" + src).hostname or "") if src.lower().startswith(
+            ("http://", "https://", "//")) else ""
+        if h and h != (page_host or "").lower():
+            hosts.add(h)
+    for m in _LINK_TAG_RE.finditer(html):
+        attrs = m.group("attrs") or ""
+        rel = (_attr(attrs, "rel") or "").lower()
+        if "stylesheet" not in rel:
+            continue
+        href = _attr(attrs, "href")
+        if href is None or _script_src_is_localized(href):
+            continue
+        uncaptured += 1
+        if "data-clone-async-css" not in attrs.lower() and (_attr(attrs, "media") or "all") != "print":
+            blocking_styles += 1
+        if href.lower().startswith(("http://", "https://", "//")):
+            h = urlsplit(href if "://" in href else "https:" + href).hostname or ""
+            if h and h != (page_host or "").lower():
+                hosts.add(h)
+    return {"blocking_scripts": blocking_scripts, "blocking_styles": blocking_styles,
+            "uncaptured_refs": uncaptured, "external_hosts": sorted(hosts)}
+
+
 # 重放去重守卫(交互轨通用): 冻结 DOM 已含页面脚本运行后的结果, 交互版再执行一遍同步脚本时,
 # 「插入型」脚本(insertAdjacentHTML / appendChild 追加组件、轮播复制幻灯片等)会把同样的内容再插一次,
 # 页面出现成段重复(example.com 交互轨 70.4 / 保真轨 100 即此类)。守卫在所有页面脚本之前挂钩 DOM

@@ -123,7 +123,8 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
 )
 from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部 import 路径不变
     beacon_like,
-    neutralize_deploy_hazard_scripts,
+    neutralize_deploy_hazards,
+    deploy_hazard_audit,
     ASSET_RESOURCE_TYPES,
     ASSET_SKIP_PREFIXES,
     BLOB_INLINE_MAX,
@@ -304,6 +305,7 @@ class ClonerEngine:
         self._fidelity_rendered = False      # 保真轨 MHTML 已渲染(每任务一次)
         self._layout_calibrated = False      # 布局校准已尝试(每任务一次)
         self._backfill_dead = set()          # 修复回补回源失败的 URL(跨轮负缓存)
+        self._dead_urls = set()              # 下载期确认 HTTP 4xx/5xx 的资源 URL(交付侧秒 404 用)
         self._calibrations = 0               # A1 像素校准执行次数
         self._phase_acc = {}                 # 子阶段累计耗时(秒): 提速定位用
         self._calib_css = ""                 # A1 校准覆盖(跨修复轮持久, _localize 注入)
@@ -949,6 +951,16 @@ class ClonerEngine:
                 "slots": tracker_cfg.get("slots") or [],
                 "mask": bool(tracker_cfg.get("mask", True)),
             }
+        # 交付侧已知死路径: 下载期/回补期源站明确 4xx/5xx 的同源路径, 生成应用对其秒 404,
+        # 不再走反代兜底回源(favicon/缺图/计数接口等每次加载都白等一轮超时)
+        page_netloc = urlsplit(origin).netloc.lower()
+        dead_paths = sorted({
+            urlsplit(u).path for u in (self._dead_urls | self._backfill_dead)
+            if (urlsplit(u).netloc or "").lower() == page_netloc and urlsplit(u).path
+        })
+        with suppress(OSError):
+            (self.ws / "known_dead.json").write_text(
+                json.dumps(dead_paths, ensure_ascii=False), encoding="utf-8")
         zip_path = flask_generator.generate_project(
             self.task_id, origin, self.ws, pages_map,
             mock_entries, bool(self.cfg.get("proxy_fallback", True)),
@@ -959,6 +971,23 @@ class ClonerEngine:
 
         stats = self._collect_stats()
         stats["api"] = len(mock_entries)
+        # 部署隐患审计(交付侧度量, 评分口径之外): 交付首页里仍会阻塞首屏的未本地化脚本/样式。
+        # 此前评分只量克隆耗时与还原度, 离线渲染对非本地请求瞬时 abort, 交付产物却等满代理
+        # 超时 —— 这里把交付侧也量进 stats, 语料跑分据此汇总, 不再有盲区。
+        try:
+            main_html = (self.ws / pages_map.get("/", "index.html")).read_text(
+                encoding="utf-8", errors="replace")
+            audit = deploy_hazard_audit(main_html, urlsplit(origin).netloc)
+            audit["dead_paths"] = len(dead_paths)
+            stats["deploy_audit"] = audit
+            if audit["blocking_scripts"] or audit["blocking_styles"]:
+                self.log("DEPLOY", f"部署隐患: 阻塞脚本 {audit['blocking_scripts']} / "
+                                   f"阻塞样式 {audit['blocking_styles']} 仍未本地化")
+            else:
+                self.log("DEPLOY", f"部署审计通过: 未本地化引用 {audit['uncaptured_refs']} 个均已去阻塞, "
+                                   f"已知死路径 {len(dead_paths)} 条交付侧秒 404")
+        except Exception as exc:   # noqa: BLE001 审计不阻断交付
+            self.log("DEPLOY", f"部署审计跳过: {type(exc).__name__}: {exc}")
         if detail is not None:
             stats["similarity_detail"] = detail
         # 端到端度量: 识别结果与阶段耗时随任务落库, 真实语料跑分直接读取, 不翻日志
@@ -2060,6 +2089,8 @@ class ClonerEngine:
                             _pump()
                             continue
                         self.log("WARN", f"跳过 {job['url']}: {out['error']}")
+                        if out.get("status"):
+                            self._dead_urls.add(job["url"])   # 源站明确 4xx/5xx: 交付侧不再回源
                         if out.get("status") and ctx is not None:
                             failed_for_browser.append(job)
                         elif not out.get("status") and str(out.get("error") or "").endswith(
@@ -2989,7 +3020,7 @@ class ClonerEngine:
             localized = self._inject_after_head(localized, REPLAY_DEDUPE_JS)
             # 部署性能守卫: 未本地化的阻塞外链脚本(采集期已 404/跳过的计数/埋点、跨域图标)
             # 不得在本地部署时走反代兜底阻塞首屏 —— 删信标 / 其余转 async。
-            localized = neutralize_deploy_hazard_scripts(
+            localized = neutralize_deploy_hazards(
                 localized, urlsplit(self._target).netloc)
             return _utf8_charset(_inject_responsive(localized))
 

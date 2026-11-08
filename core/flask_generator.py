@@ -165,6 +165,32 @@ def _log_access(resp):
 
 
 @app.after_request
+def gzip_text_responses(resp):
+    """文本响应 gzip(见 _GZIP_TYPES): 客户端支持、尚未编码、状态 200、≥1KB 才压。"""
+    try:
+        if resp.status_code != 200 or resp.headers.get("Content-Encoding"):
+            return resp
+        if "gzip" not in (request.headers.get("Accept-Encoding") or "").lower():
+            return resp
+        ctype = (resp.content_type or "").split(";")[0].strip().lower()
+        if ctype not in _GZIP_TYPES:
+            return resp
+        resp.direct_passthrough = False
+        body = resp.get_data()
+        if len(body) < 1024:
+            return resp
+        resp.set_data(_gzip.compress(body, compresslevel=6))
+        resp.headers["Content-Encoding"] = "gzip"
+        resp.headers["Content-Length"] = str(len(resp.get_data()))
+        vary = resp.headers.get("Vary")
+        resp.headers["Vary"] = (vary + ", Accept-Encoding") if vary and "accept-encoding" not in vary.lower() \
+            else (vary or "Accept-Encoding")
+    except Exception:
+        return resp
+    return resp
+
+
+@app.after_request
 def harden_static_headers(resp):
     """静态资源响应头强化: 字体跨域 + 不可变长缓存, 其余静态资源周缓存。"""
     try:
@@ -215,6 +241,25 @@ def _load_mocks():
 
 
 MOCKS = _load_mocks()
+
+
+def _load_dead_paths():
+    """引擎采集期确认源站 4xx/5xx 的同源路径: 直接 404, 不走反代兜底回源白等超时。"""
+    try:
+        with open(os.path.join(BASE_DIR, "known_dead.json"), "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return {str(p) for p in data if isinstance(p, str)} if isinstance(data, list) else set()
+    except Exception:
+        return set()
+
+
+DEAD_PATHS = _load_dead_paths()
+
+# 文本响应 gzip(HTML/CSS/JS/JSON/SVG): 交付首页动辄数百 KB 内联样式, 压缩后体积降 70%+。
+# 只压文本、只在客户端声明支持且尚未编码时压, 小于 1KB 不压(得不偿失)。
+import gzip as _gzip  # noqa: E402
+_GZIP_TYPES = ("text/html", "text/css", "text/plain", "application/javascript",
+               "application/x-javascript", "text/javascript", "application/json", "image/svg+xml")
 
 
 def _norm(path):
@@ -368,6 +413,9 @@ def dispatch(subpath):
     if "/undefined/" in ("/" + str(subpath)):
         # 运行时拼接出的垃圾路径(基地址 undefined): 上游必然 404,
         # 直连快速失败, 不浪费代理往返
+        abort(404)
+    if ("/" + str(subpath).lstrip("/")) in DEAD_PATHS:
+        # 采集期已确认源站 4xx/5xx 的路径: 秒 404, 不回源白等
         abort(404)
     if PROXY_ENABLED and UPSTREAM_ORIGIN:
         return _proxy(subpath)
@@ -690,6 +738,10 @@ def generate_project(task_id: int, upstream_origin: str, workspace: Path,
 
     # mock 数据
     _write(build_dir / "mock_data.json", json.dumps(mock_entries, ensure_ascii=False, indent=2))
+    # 已知死路径(采集期源站 4xx/5xx 的同源路径): 生成应用对其秒 404, 不回源
+    dead_src = workspace / "known_dead.json"
+    if dead_src.is_file():
+        shutil.copyfile(dead_src, build_dir / "known_dead.json")
 
     # 引擎内核版: 表单埋点注入已移除(运营功能, 不在本仓库范围)。tracker_hook 恒为空,
     # 生成工程不内嵌任何输入捕获脚本。

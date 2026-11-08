@@ -218,6 +218,8 @@ def run(args):
             "warnings": sim.get("warnings") or [],
             "calibrations": stats.get("calibrations"),
             "assets": stats.get("assets_total"), "bytes": stats.get("total_bytes"),
+            # 交付侧部署隐患审计(评分口径之外): 仍会阻塞首屏的未本地化脚本/样式
+            "deploy_audit": stats.get("deploy_audit") or {},
             "api": stats.get("api"),
             "elapsed_s": stats.get("elapsed_s") or _elapsed_from_ts(task),
             "stage_times": stage_times,
@@ -340,6 +342,11 @@ def _summary_one(results):
         "p90_elapsed": pct(elapsed, 0.9),
         # 视口分项(探针口径): {desktop/tablet/mobile: 均分}
         "vp_mean": _vp_means(results),
+        # 交付侧: 首页仍残留阻塞首屏的未本地化脚本/样式的站数(应为 0)
+        "deploy_hazard_sites": sum(
+            1 for r in results
+            if ((r.get("deploy_audit") or {}).get("blocking_scripts")
+                or (r.get("deploy_audit") or {}).get("blocking_styles"))),
     }
 
 
@@ -410,7 +417,9 @@ def _report(out, prev_name, prev):
              f"- 识别命中: {s['pattern_hits']}/{s['pattern_checked']}",
              f"- 耗时: 平均 {_fmt(s['mean_elapsed'])}s, p50 {_fmt(s.get('p50_elapsed'))}s,"
              f" p90 {_fmt(s.get('p90_elapsed'))}s; 保真轨胜出 {s['fidelity_dominant']} 站"
-             + (f"; 环境受阻 {s['blocked']} 站(不计入均分)" if s.get("blocked") else ""), ""]
+             + (f"; 环境受阻 {s['blocked']} 站(不计入均分)" if s.get("blocked") else ""),
+             f"- 交付侧部署审计: 首页残留阻塞首屏的未本地化脚本/样式 **{s.get('deploy_hazard_sites', 0)}** 站"
+             f"(应为 0; 评分口径对非本地请求瞬时 abort, 此项补量交付产物部署后的首屏隐患)", ""]
     for name, key in (("语料内(已调优)", "tuned"), ("留出集(只看不调)", "holdout")):
         g = s.get(key)
         if g:
