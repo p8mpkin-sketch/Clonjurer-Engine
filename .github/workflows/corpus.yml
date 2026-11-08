@@ -39,6 +39,10 @@ on:
         description: "每站克隆一完成立即探针(true/false)"
         required: false
         default: "false"
+      shots:
+        description: "低分站截图(base64)进日志(true/false; 远程只读日志尾部归因时填 false)"
+        required: false
+        default: "true"
   schedule:
     - cron: "30 18 * * *"   # 北京时间 02:30
 
@@ -86,9 +90,10 @@ jobs:
           if [ -n "$j" ]; then echo "::group::run json"; cat "$j"; echo "::endgroup::"; fi
           # 未出分/失败/低于 90 分站点的任务日志(engine.log)尾部进日志, 供远程归因
           if [ -n "$j" ]; then
-            python - "$j" <<'PY'
-          import json, sys, pathlib
+            CORPUS_SHOTS="${{ github.event.inputs.shots || 'true' }}" python - "$j" <<'PY'
+          import json, os, sys, pathlib
           run = json.load(open(sys.argv[1], encoding="utf-8"))
+          SHOTS = os.environ.get("CORPUS_SHOTS", "true") != "false"
           def _low_vps(r):
               # 视口探针分(有稳健口径时看稳健分)低于 85 的视口: 这些宽度的原站/克隆截图进日志
               vp = dict(r.get("vp") or {})
@@ -97,6 +102,8 @@ jobs:
                       vp[k] = v
               return [k for k, v in vp.items() if isinstance(v, (int, float)) and v < 85]
           def _shot(path, tag, width=480, max_h=2400):
+              if not SHOTS:
+                  return
               try:
                   from PIL import Image
                   import base64, io
@@ -170,7 +177,7 @@ jobs:
               try:
                   from PIL import Image
                   import base64, io
-                  for name in ("original_preview.png", "cloned_preview.png", "fidelity_preview.png"):
+                  for name in (("original_preview.png", "cloned_preview.png", "fidelity_preview.png") if SHOTS else ()):
                       f = log.parent / name
                       if not f.is_file():
                           continue
