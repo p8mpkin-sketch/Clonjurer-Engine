@@ -128,6 +128,10 @@ jobs:
                   oo = {key(l): l for l in ((d.get("orig") or {}).get("lines") or [])}
                   for l in [oo[k] for k in oo if k not in co][:14]: print("  原站独有文本", l)
                   for l in [co[k] for k in co if k not in oo][:14]: print("  克隆独有文本", l)
+                  # 同一段文案两侧都有但纵向位置差 >40px: 从第一处位移看出哪一块高度/有无不同
+                  ypos = lambda l: int(l.rsplit(" @", 1)[1].split(",")[0]) if " @" in l else 0
+                  moved = [(ypos(oo[k]), ypos(co[k]), k) for k in oo if k in co and abs(ypos(oo[k]) - ypos(co[k])) > 40]
+                  for oy, cy, k in sorted(moved)[:12]: print(f"  位移文本 原 y={oy} 克隆 y={cy}: {k[:70]}")
                   print("::endgroup::")
               # 低分视口的探针截图(原站/克隆/遮罩后)进日志: 产物存储域名在部分环境不可达
               for v in low:

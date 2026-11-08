@@ -1545,8 +1545,8 @@ class ClonerEngine:
             sheets_main = {}
             for _g, _t, *rest in main_rows:
                 sheets_main[rest[0] if rest else ""] = sheets_main.get(rest[0] if rest else "", 0) + 1
-            src = "; ".join(f"{tag}:{sid[:90]}×{n}" for (tag, sid), n in sorted(by_sheet.items(), key=lambda kv: -kv[1])[:4])
-            mains = "; ".join(f"{sid[:90]}×{n}" for sid, n in sorted(sheets_main.items(), key=lambda kv: -kv[1])[:5])
+            src = "; ".join(f"{tag}:{sid[:110]}×{n}" for (tag, sid), n in sorted(by_sheet.items(), key=lambda kv: -kv[1])[:4])
+            mains = "; ".join(f"{sid[:110]}×{n}" for sid, n in sorted(sheets_main.items(), key=lambda kv: -kv[1])[:9])
             sample = "; ".join((g.replace("\x00", ">")[:40] + " | " + t[:70]) for g, t in extra[:2])
             self.log("RENDER", f"窄屏运行时样式: 主页没有的规则 {len(extra)} 条({len(css) // 1024}KB), 来源 [{src}]; 主页表 [{mains}]; 样例: {sample}")
         if re.search(r"</style", css, re.I):

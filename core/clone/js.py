@@ -770,7 +770,9 @@ STYLE_TEXTS_JS = r"""() => {
     // 当成"窄屏才有"(solidjs 79KB 重注入)。烘焙表/分视口表仍不算
     if (n && n.getAttribute && (n.hasAttribute('data-clone-bake') || n.hasAttribute('data-clone-vp'))) continue;
     let id = sh.href || '';
-    if (!id && n) { id = n.tagName.toLowerCase(); for (const a of (n.attributes || [])) id += ' ' + a.name + (a.value ? '=' + a.value.slice(0, 40) : ''); }
+    if (!id && n) { id = n.tagName.toLowerCase(); for (const a of (n.attributes || [])) id += ' ' + a.name + (a.value ? '=' + a.value.slice(0, 40) : '');
+      // 无属性 <style> 用首条规则文本区分(脚本注入的表没有 href/属性可认)
+      if (!n.attributes.length) { let r0 = ''; try { r0 = sh.cssRules.length ? sh.cssRules[0].cssText.slice(0, 50) : ''; } catch (e) {} id += ' #' + (n.parentNode && n.parentNode.tagName || '') + ':' + r0; } }
     sheet(sh, (sh.disabled ? '[disabled] ' : '') + (id || 'inline') + (sh.ownerRule ? ' <-@import' : ''));
   }
   try { for (const sh of document.adoptedStyleSheets || []) sheet(sh, 'adopted'); } catch (e) {}
