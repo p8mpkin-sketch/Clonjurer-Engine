@@ -1507,8 +1507,12 @@ class ClonerEngine:
                         p2.close()
                 self.log("WARN", f"窄屏首载对照({w}px)启动失败: {str(exc)[:120]}")
 
-    def _collect_narrow_loads(self, budget_s=8.0):
-        """收回窄屏首载页的内联样式表并关页; 预算内没加载完的放弃。"""
+    def _collect_narrow_loads(self, budget_s=None):
+        """收回窄屏首载页的内联样式表并关页; 预算内没加载完的放弃(记日志: 否则该站手机端没有变体/分视口
+        样式却看不出原因)。预算随主页就绪耗时放大: 跨境慢站(CI 美国出口访问国内站就绪 11s+)固定 8s 两页都等不到,
+        窄屏首载页一张没有, 手机端整块桌面横幅留在克隆里。"""
+        if budget_s is None:
+            budget_s = min(24.0, max(8.0, float(getattr(self, "_nav_ready_s", 0) or 0) * 1.5))
         loads, t0 = {}, time.monotonic()
         for tag, p2 in getattr(self, "_cv_pages", []) or []:
             try:
@@ -1518,7 +1522,9 @@ class ClonerEngine:
                 loads[tag] = p2.evaluate(CV_PATHS_JS) or {}
                 if self.cfg.get("viewport_variants", True):
                     ClonerEngine._start_settle_narrow(p2)
-            except Exception:
+            except Exception as exc:
+                self.log("WARN", f"窄屏首载页 {tag} 在 {budget_s:.0f}s 预算内未加载完, 放弃({type(exc).__name__}): "
+                                 f"该宽度无首载对照/变体")
                 with suppress(Exception):
                     p2.close()
         return loads
@@ -1850,7 +1856,8 @@ class ClonerEngine:
                 raise
         if not self._wait_quiet(page, config.NETWORK_IDLE_TIMEOUT):
             self.log("RENDER", "网络静置等待超时, 继续后续固化流程")
-        self.log("RENDER", f"页面就绪 {time.time() - t_nav:.1f}s")
+        self._nav_ready_s = time.time() - t_nav
+        self.log("RENDER", f"页面就绪 {self._nav_ready_s:.1f}s")
         if screenshot:
             with suppress(Exception):
                 rt = page.evaluate(RUNTIME_FP_JS) or []
