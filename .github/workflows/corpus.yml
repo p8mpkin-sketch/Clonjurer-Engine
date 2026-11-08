@@ -132,6 +132,7 @@ jobs:
                       for e in (dd.get("exceptions") or [])[:6]: print("  异常定位", e)
                       for sh in (dd.get("sheets") or [])[:40]: print("  样式表", sh)
                       for k, v in (dd.get("probe") or {}).items(): print(f"  探 {k}: {v}")
+                      for k, v in (dd.get("focus") or {}).items(): print(f"  对照原站 0px 行容器 {k[-110:]}: {str(v)[:3200]}")
                       for ov in (dd.get("overlays") or [])[:12]: print("  盖屏层", ov)
                       for hi in (dd.get("hiddenInputs") or [])[:12]: print("  隐藏控件", hi)
                       for st in (dd.get("styles") or [])[:60]: print("  style块", st)

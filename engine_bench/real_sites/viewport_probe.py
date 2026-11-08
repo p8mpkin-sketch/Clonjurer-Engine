@@ -129,6 +129,9 @@ async ([maxH, capMs]) => {
 
 # 诊断: 该视口下加载失败/4xx+ 的请求、样式表装载情况、脚本错误 —— 远程只能读日志时, 这是
 # 定位"手机宽度下图裂/样式丢"的直接证据(产物存储域名在部分环境不可达)
+# 对侧点名: 原站里带 0px 行的 grid 容器, 在克隆里同路径元素(按 data-pi 下标)也转储命中规则, 两侧对照看少了/多了哪条
+FOCUS_RULES_JS = r"""(idxs) => { const o = {}; for (const i of idxs) { try { const el = document.querySelector('[data-pi="' + i + '"]'); o[i] = el && window.__probeDump ? window.__probeDump(el) : '(无)'; } catch (e) { o[i] = 'ERR ' + e; } } return o; }"""
+
 DIAG_JS = r"""() => {
   const sheets = [];
   for (const sh of document.styleSheets) {
@@ -307,8 +310,10 @@ DIAG_JS = r"""() => {
       const walk = (rs, on) => { for (const r of rs) { if (hits.length >= cap) return; if (r.type === 4) { walk(r.cssRules, on && matchMedia(r.conditionText).matches); continue; } if (r.type === 12 || r.type === 3) { try { walk(r.cssRules, on); } catch (e) {} continue; }
         if (r.type === 1 && on) { try { if (el.matches(r.selectorText)) { const ds = []; for (const pn of r.style) if (LAYP.test(pn)) ds.push(pn + ':' + r.style.getPropertyValue(pn).slice(0, 60) + (r.style.getPropertyPriority(pn) ? '!' : '')); const h = r.selectorText.slice(0, 50) + '{' + ds.join(';') + '}'; if (ds.length && !hits.includes(h)) hits.push(h); } } catch (e) {} } } };
       walk(rules, true); if (hits.length >= cap) break; } } catch (e) {} return hits.join(' '); };
+    const dumpOf = (ch) => { let out = ' RULES[' + rulesOf(ch, 10) + ']'; for (const k of ch.children) { const kc = cs(k); out += ' CHILD ' + (k.id ? '#' + k.id.slice(0, 24) : k.tagName) + ' gr=' + kc.gridRowStart + '/' + kc.gridRowEnd + ' h=' + Math.round(k.getBoundingClientRect().height) + ' style=' + (k.getAttribute('style') || '').slice(0, 80) + ' [' + rulesOf(k, 8) + ']'; } return out; };
+    window.__probeDump = dumpOf;
     const zeroRowDump = (ch, c) => { if (dumped >= 30 || !/(^| )0px( |$)/.test(c.gridTemplateRows) || ch.children.length > 8) return ''; dumped++;
-      let out = ' RULES[' + rulesOf(ch, 10) + ']'; for (const k of ch.children) { const kc = cs(k); out += ' CHILD ' + (k.id ? '#' + k.id.slice(0, 24) : k.tagName) + ' gr=' + kc.gridRowStart + '/' + kc.gridRowEnd + ' h=' + Math.round(k.getBoundingClientRect().height) + ' style=' + (k.getAttribute('style') || '').slice(0, 80) + ' [' + rulesOf(k, 8) + ']'; } if (dumpedSet.has(out)) return ' RULES=same#' + dumpedSet.get(out); dumpedSet.set(out, dumped); return out; };
+      const out = dumpOf(ch); if (dumpedSet.has(out)) return ' RULES=same#' + dumpedSet.get(out); dumpedSet.set(out, dumped); return out; };
     const walkT = (el, depth, pidx) => {
       if (tops.length >= 12000 || depth > 40) return;
       for (const ch of el.children) {
@@ -320,6 +325,7 @@ DIAG_JS = r"""() => {
         let idx = pidx;
         if (r.height >= 10 && r.width >= 30 && c.position !== 'fixed') {
           idx = tops.length;
+          try { ch.setAttribute('data-pi', String(idx)); } catch (e) {}   // 截图已拍, 打下标供随后按路径点名转储规则
           tops.push([key12(ch), Math.round(r.top + scrollY), Math.round(r.height), (ch.getAttribute('class') || '').slice(0, 50) + ' | ' + (ch.getAttribute('style') || '').slice(0, 100)
             + (ch.hasAttribute('data-cv-vp') ? ' cv-vp=' + ch.getAttribute('data-cv-vp') : '') + (ch.hasAttribute('data-cv') ? ' cv' : '')
             + (c.maxHeight !== 'none' ? ' mh=' + c.maxHeight : '') + (c.overflow !== 'visible' ? ' ov=' + c.overflow : '')
@@ -339,7 +345,7 @@ DIAG_JS = r"""() => {
 }"""
 
 
-def _shoot(ctx, url, vp, out: Path, timeout_ms=45000, extra_wait_ms=0):
+def _shoot(ctx, url, vp, out: Path, timeout_ms=45000, extra_wait_ms=0, focus_keys=None):
     page = ctx.new_page()
     info = {"url": url}
     failed, errors = [], []
@@ -409,6 +415,12 @@ def _shoot(ctx, url, vp, out: Path, timeout_ms=45000, extra_wait_ms=0):
             with suppress(Exception):
                 raw = page.request.get(url, timeout=15000).text()
                 d["src_tags"] = [m.group(0)[:300] for m in re.finditer(r"<(?:html|body)\b[^>]*>", raw[:400000], re.I)][:2]
+            if focus_keys and d.get("tops"):
+                with suppress(Exception):
+                    idx = {t[0]: i for i, t in enumerate(d["tops"])}
+                    want = [idx[k] for k in focus_keys if k in idx][:12]
+                    got = page.evaluate(FOCUS_RULES_JS, want) or {}
+                    d["focus"] = {k: got.get(str(idx[k]), got.get(idx[k], "")) for k in focus_keys if k in idx}
             if exc_locs:
                 src_lines = None
                 with suppress(Exception):
@@ -508,7 +520,13 @@ def probe_one(browser, base, task_id, url, viewports, outdir: Path, clone_tpl=No
             b = outdir / f"{task_id}_{name}_clone.png"
             ia = _shoot(ctx, url, vp, a)
             clone_url = (clone_tpl or "{base}/preview/{id}/").format(base=base.rstrip("/"), id=task_id)
-            ib = _shoot(ctx, clone_url, vp, b)
+            focus = []
+            with suppress(Exception):
+                for t in ((ia.get("diag") or {}).get("tops") or []):
+                    g = re.search(r"grid gtr=([^ ]+(?: [0-9.]+(?:px|fr))*)", t[3])
+                    if g and re.search(r"(^| )0px( |$)", g.group(1)) and len(focus) < 12:
+                        focus.append(t[0])
+            ib = _shoot(ctx, clone_url, vp, b, focus_keys=focus or None)
         finally:
             ctx.close()
         row = {"orig_overflow_x": ia.get("overflow_x"), "clone_overflow_x": ib.get("overflow_x"),
