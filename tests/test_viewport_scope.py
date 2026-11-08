@@ -555,6 +555,19 @@ class FluidAttrGeometry(unittest.TestCase):
         self.assertNotIn("p:1", fl["inline"])          # 定值不改
         self.assertIn("startsWith('attr-')", ce.FLUID_APPLY_JS)   # 应用侧把 attr- 前缀映射回 style 属性
 
+    def test_three_point_clamp(self):
+        # 390→359 同比, 390→440 不再长(封顶 360px) → min(vw, 360px); 字号窄侧垫底 → max; 三点不成线 → 保留 px
+        fa = {"a:1": ["DIV", 0, "width:325px;padding-top:40px;margin-top:20px"]}
+        fb = {"a:1": ["DIV", 0, "width:299px;padding-top:40px;margin-top:17px"]}
+        fc = {"a:1": ["DIV", 0, "width:360px;padding-top:45px;margin-top:29px"]}
+        fl = ce._fluid_elements(fa, fb, 390, 359, fc=fc, w3=440)
+        got = fl["inline"]["a:1"]
+        self.assertEqual(got["width"], "min(83.3333vw, 360px)")
+        self.assertEqual(got["padding-top"], "max(10.2564vw, 40px)")
+        self.assertNotIn("margin-top", got)       # 17/20=0.85 vs 0.92, 29/20=1.45 vs 1.128: 不成线
+        fl2 = ce._fluid_elements(fa, fb, 390, 359)   # 无第三点: 退回两点直线
+        self.assertEqual(fl2["inline"]["a:1"]["width"], "83.3333vw")
+
 
 @unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
 class AltVariantImgFallback(unittest.TestCase):

@@ -313,13 +313,17 @@ _FLUID_GEOM_RE = re.compile(r"(?:^|;)\s*(attr-width|attr-height|width|height|min
                             r"(-?\d+(?:\.\d+)?)px\s*(!important)?(?=;|$)", re.I)
 
 
-def _fluid_elements(fa: dict, fb: dict, w1: float, w2: float, tol: float = 0.015):
-    """两个宽度下的 FLUID_READ_JS 快照 → 字号随宽同比的元素路径 + 内联 px 同比的属性(改 vw)。
-    同比: 值比 ≈ 宽比(±tol), 且值不同(定值不算)。"""
+def _fluid_elements(fa: dict, fb: dict, w1: float, w2: float, tol: float = 0.015, fc: dict = None, w3: float = None):
+    """两/三个宽度下的 FLUID_READ_JS 快照 → 字号随宽同比的元素路径 + 内联 px 同比的属性(改 vw)。
+    同比: 值比 ≈ 宽比(±tol), 且值不同(定值不算)。
+    第三个样本(更宽, fc/w3)用来认"同比但封顶/垫底"的分段函数: 窄侧同比、宽侧不再长 → min(Xvw, 封顶px);
+    窄侧不再缩、宽侧同比 → max(Xvw, 垫底px)。两个样本只能外推直线, 到更宽的机型(440)就偏一两行字的高度
+    (wix Pro Max 段落少换一行, 其后整页位移 38px)。三点都不成线性(断点换公式)就不改, 保留 px。"""
     paths, inline = [], {}
     if not fa or not fb or not w1 or not w2 or w1 == w2:
         return {"paths": paths, "inline": inline}
     ratio = w2 / w1
+    r3 = (w3 / w1) if (fc and w3 and w3 != w1) else None
     for path, va in fa.items():
         vb = fb.get(path)
         if not vb or vb[0] != va[0]:
@@ -329,12 +333,30 @@ def _fluid_elements(fa: dict, fb: dict, w1: float, w2: float, tol: float = 0.015
             paths.append(path)
         if va[2] and vb[2] and va[2] != vb[2]:
             pb = {m.group(1).lower(): float(m.group(2)) for m in _FLUID_GEOM_RE.finditer(vb[2])}
+            vc = fc.get(path) if r3 else None
+            pc = ({m.group(1).lower(): float(m.group(2)) for m in _FLUID_GEOM_RE.finditer(vc[2])}
+                  if vc and vc[0] == va[0] and vc[2] else None)
             for m in _FLUID_GEOM_RE.finditer(va[2]):
                 k, v1 = m.group(1).lower(), float(m.group(2))
                 v2 = pb.get(k)
-                if v2 is None or v1 == 0 or v1 == v2 or abs((v2 / v1) / ratio - 1) > tol:
+                if v2 is None or v1 == 0:
                     continue
-                inline.setdefault(path, {})[k] = f"{v1 / w1 * 100:.4f}vw"
+                v3 = pc.get(k) if pc is not None else None
+                if v1 == v2 and (v3 is None or v3 == v1):
+                    continue
+                lin12 = v1 != v2 and abs((v2 / v1) / ratio - 1) <= tol
+                vw = f"{v1 / w1 * 100:.4f}vw"
+                if v3 is None:
+                    if lin12:
+                        inline.setdefault(path, {})[k] = vw
+                    continue
+                lin13 = v3 != v1 and abs((v3 / v1) / r3 - 1) <= tol
+                if lin12 and lin13:
+                    inline.setdefault(path, {})[k] = vw
+                elif v1 > 0 and lin12 and v1 <= v3 < v1 * r3 * (1 - tol):
+                    inline.setdefault(path, {})[k] = f"min({vw}, {v3:g}px)"       # 宽侧封顶
+                elif v1 > 0 and lin13 and v1 * ratio * (1 + tol) < v2 <= v1:
+                    inline.setdefault(path, {})[k] = f"max({vw}, {v2:g}px)"       # 窄侧垫底
     return {"paths": paths, "inline": inline}
 
 
@@ -1563,25 +1585,25 @@ class ClonerEngine:
             if not w1:
                 return
             fa = p2.evaluate(FLUID_READ_JS) or {}
-            w2 = int(round(w1 * 0.92))
-            p2.set_viewport_size({"width": w2, "height": h})
-            p2.wait_for_timeout(250)
-            with suppress(Exception):
-                p2.evaluate(CV_QUIET_JS, 300)
-            with suppress(Exception):
-                p2.evaluate(NARROW_STABLE_JS, 1500)
-            fb = p2.evaluate(FLUID_READ_JS) or {}
-            p2.set_viewport_size({"width": w1, "height": h})
-            p2.wait_for_timeout(250)
-            with suppress(Exception):
-                p2.evaluate(CV_QUIET_JS, 300)
-            with suppress(Exception):
-                p2.evaluate(NARROW_STABLE_JS, 1500)
-            fl = _fluid_elements(fa, fb, w1, w2)
+            samples = {}
+            # 窄一档(0.92×)与宽一档(1.128×: 390→440 正好是最宽的主流手机)各读一次, 三点判直线/封顶/垫底
+            for w in (int(round(w1 * 0.92)), int(round(w1 * 1.128)), w1):
+                p2.set_viewport_size({"width": w, "height": h})
+                p2.wait_for_timeout(250)
+                with suppress(Exception):
+                    p2.evaluate(CV_QUIET_JS, 300)
+                with suppress(Exception):
+                    p2.evaluate(NARROW_STABLE_JS, 1500)
+                if w != w1:
+                    samples[w] = p2.evaluate(FLUID_READ_JS) or {}
+            w2, w3 = int(round(w1 * 0.92)), int(round(w1 * 1.128))
+            fb = samples.get(w2) or {}
+            fl = _fluid_elements(fa, fb, w1, w2, fc=samples.get(w3) or None, w3=w3)
             if fl["paths"] or fl["inline"]:
                 res = p2.evaluate(FLUID_APPLY_JS, fl) or {}
-                self.log("RENDER", f"窄屏首载页 {tag} 随宽同比: {res.get('vw', 0)} 个内联 px/尺寸属性改写为 vw,"
-                                   f" {res.get('marked', 0)} 个元素字号随宽(0.92 倍宽对照, 同比 ±1.5%)")
+                piece = sum(1 for v in fl["inline"].values() for x in v.values() if x.startswith(("min(", "max(")))
+                self.log("RENDER", f"窄屏首载页 {tag} 随宽同比: {res.get('vw', 0)} 个内联 px/尺寸属性改写为 vw(其中 {piece} 个封顶/垫底),"
+                                   f" {res.get('marked', 0)} 个元素字号随宽(0.92/1.128 倍宽对照, 同比 ±1.5%)")
         except Exception as exc:   # noqa: BLE001 探测失败就按原样抽取
             self.log("WARN", f"窄屏首载页 {tag} 随宽同比探测失败: {str(exc)[:120]}")
 
