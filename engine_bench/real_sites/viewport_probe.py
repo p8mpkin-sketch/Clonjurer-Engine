@@ -425,9 +425,15 @@ def _shoot(ctx, url, vp, out: Path, timeout_ms=45000, extra_wait_ms=0, focus_key
             if focus_keys and d.get("tops"):
                 with suppress(Exception):
                     idx = {t[0]: i for i, t in enumerate(d["tops"])}
-                    want = [idx[k] for k in focus_keys if k in idx][:12]
+                    hcl = {t[0]: t[2] for t in d["tops"]}
+                    # 原站带 0px 行的 grid 容器可能有几十个(wix 布局全是 grid): 先转储两侧高度不同的(真出问题的那些), 再补其他, 共 12 个
+                    oh = focus_keys if isinstance(focus_keys, dict) else {k: None for k in focus_keys}
+                    keys = [k for k in oh if k in idx]
+                    diff = [k for k in keys if oh[k] is not None and abs((hcl.get(k) or 0) - oh[k]) > 4]
+                    keys = (diff + [k for k in keys if k not in diff])[:12]
+                    want = [idx[k] for k in keys]
                     got = page.evaluate(FOCUS_RULES_JS, want) or {}
-                    d["focus"] = {k: got.get(str(idx[k]), got.get(idx[k], "")) for k in focus_keys if k in idx}
+                    d["focus"] = {k: got.get(str(idx[k]), got.get(idx[k], "")) for k in keys}
             if exc_locs:
                 src_lines = None
                 with suppress(Exception):
@@ -527,12 +533,12 @@ def probe_one(browser, base, task_id, url, viewports, outdir: Path, clone_tpl=No
             b = outdir / f"{task_id}_{name}_clone.png"
             ia = _shoot(ctx, url, vp, a)
             clone_url = (clone_tpl or "{base}/preview/{id}/").format(base=base.rstrip("/"), id=task_id)
-            focus = []
+            focus = {}
             with suppress(Exception):
                 for t in ((ia.get("diag") or {}).get("tops") or []):
                     g = re.search(r"grid gtr=([^ ]+(?: [0-9.]+(?:px|fr))*)", t[3])
-                    if g and re.search(r"(^| )0px( |$)", g.group(1)) and len(focus) < 12:
-                        focus.append(t[0])
+                    if g and re.search(r"(^| )0px( |$)", g.group(1)) and len(focus) < 60:
+                        focus[t[0]] = t[2]
             ib = _shoot(ctx, clone_url, vp, b, focus_keys=focus or None)
         finally:
             ctx.close()
