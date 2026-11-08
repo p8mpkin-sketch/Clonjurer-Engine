@@ -1535,6 +1535,9 @@ class ClonerEngine:
             with suppress(Exception):
                 extra += [(g, t) for g, t in (pages[tag].evaluate(STYLE_TEXTS_JS) or []) if (g, t) not in css_main]
         css = _regroup_css_rules(dict.fromkeys(extra))[:config.VIEWPORT_VARIANT_BYTES]
+        if extra:
+            sample = "; ".join((g.replace("\x00", ">")[:40] + " | " + t[:70]) for g, t in extra[:3])
+            self.log("RENDER", f"窄屏运行时样式: 主页没有的规则 {len(extra)} 条({len(css) // 1024}KB), 样例: {sample}")
         if re.search(r"</style", css, re.I):
             css = ""
         n = page.evaluate(ALT_INJECT_JS, {"items": items, "css": css})
@@ -1898,10 +1901,12 @@ class ClonerEngine:
             loads = self._collect_narrow_loads()
             try:
                 cv = page.evaluate(CV_EMIT_JS, loads) or {}
-                if cv.get("els") or cv.get("cls"):
+                if cv.get("els") or cv.get("cls") or cv.get("srcFill") or cv.get("textFill"):
                     self.log("RENDER", f"多视口内联样式: {cv['els']} 个元素, {cv.get('vw', 0)} 个按视口宽比例改写为 vw,"
                                        f" {cv.get('banded', 0)} 个移入分视口样式表(其中窄屏首载补采 {cv.get('reload', 0)})"
-                                       f"; 分视口 class {cv.get('cls', 0)} 个")
+                                       f"; 分视口 class {cv.get('cls', 0)} 个"
+                                       + (f"; 桌面隐藏元素补窄屏 src {cv['srcFill']} 个" if cv.get("srcFill") else "")
+                                       + (f", 补文本 {cv['textFill']} 个" if cv.get("textFill") else ""))
                 try:
                     self._inject_dom_variants(page, loads)
                 except Exception as exc:
@@ -3021,16 +3026,19 @@ class ClonerEngine:
                            json.dumps(redirect, ensure_ascii=False)))
         # W5 时间冻结(模式策略包): 回放统一到采集时刻, 消除时变内容的
         # 渲染分叉(倒计时/日期组件/限时横幅在回放时与采集态不一致)
+        # 只平移时钟不停表: Date 从采集时刻起继续走, 脚本里按 Date.now() 差值推进的
+        # 动画/节流/懒渲染(新闻列表分批显形)照常完成; 停表会让这类列表永不出现(techcrunch 92→59)
         if getattr(self._strategy_pack, "freeze_time", False) and self._captured_at:
             freeze_js = (
                 '<script data-clone-preview="time-freeze">(function(){try{'
                 'var __cap=new Date("__CAPTURE_ISO__");'
-                'if(!isNaN(__cap.getTime())){var _R=Date;'
-                'function FD(){var a=arguments;switch(a.length){case 0:return new _R(__cap.getTime());'
+                'if(!isNaN(__cap.getTime())){var _R=Date,__off=__cap.getTime()-_R.now();'
+                'function FD(){if(!(this instanceof FD))return new _R(_R.now()+__off).toString();'
+                'var a=arguments;switch(a.length){case 0:return new _R(_R.now()+__off);'
                 'case 1:return new _R(a[0]);case 2:return new _R(a[0],a[1]);case 3:return new _R(a[0],a[1],a[2]);'
                 'case 4:return new _R(a[0],a[1],a[2],a[3]);case 5:return new _R(a[0],a[1],a[2],a[3],a[4]);'
                 'case 6:return new _R(a[0],a[1],a[2],a[3],a[4],a[5]);default:return new _R(a[0],a[1],a[2],a[3],a[4],a[5],a[6]);}}'
-                'FD.prototype=_R.prototype;FD.now=function(){return __cap.getTime()};'
+                'FD.prototype=_R.prototype;FD.now=function(){return _R.now()+__off};'
                 'FD.parse=_R.parse;FD.UTC=_R.UTC;window.Date=FD;'
                 '}}catch(e){}})();</script>')   # if 块与 try 块各收一个括号(此前少一个, 整段语法错误从未生效)
             script = freeze_js.replace("__CAPTURE_ISO__", self._captured_at) + script

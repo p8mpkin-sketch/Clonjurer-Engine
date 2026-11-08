@@ -658,9 +658,14 @@ CV_PATHS_JS = r"""() => {
   const NONVIS = new Set(['STYLE', 'LINK', 'SCRIPT', 'NOSCRIPT', 'META', 'TEMPLATE']);
   const out = {}, pathOf = """ + CV_PATH_FN + r""";
   const els = Array.from(document.body ? document.body.querySelectorAll('*') : []).slice(0, 20000);
+  // [6] 媒体源(src/srcset/poster, \x01 连接) [7] 叶子文本: 桌面上隐藏的手机版元素, 脚本只在可见时才写 src /
+  // 才跑计数动画, 桌面采集永远拿不到 → 用窄屏首载页同路径元素的值补(见 CV_EMIT_JS 末尾)
+  const MEDIA = /^(IMG|SOURCE|VIDEO|AUDIO)$/;
   for (const e of els) out[pathOf(e)] = [e.tagName, String(e.className && e.className.baseVal !== undefined ? e.className.baseVal : e.className || ''), e.getAttribute('style') || '',
     Array.from(e.children, c => c.tagName).filter(t => !NONVIS.has(t)).join(',').slice(0, 400), (""" + CV_ATTR_FN + r""")(e),
-    (""" + CV_XATTR_FN + r""")(e)];
+    (""" + CV_XATTR_FN + r""")(e),
+    MEDIA.test(e.tagName) ? [e.getAttribute('src') || '', e.getAttribute('srcset') || '', e.getAttribute('poster') || ''].join('\x01').replace(/\x01+$/, '') : '',
+    (!e.children.length && !NONVIS.has(e.tagName) && e.tagName !== 'TEXTAREA') ? (e.textContent || '').trim().slice(0, 300) : ''];
   return out;
 }"""
 
@@ -1023,6 +1028,30 @@ CV_EMIT_JS = r"""
       for (const k of ['d', 't', 'm']) if (rule[k].length) bands[k].push('[data-cv="' + i + '"]' + SPEC + '{' + rule[k].join(';') + '}');
     }
   });
+  // 桌面上没渲染(display:none 的手机版实例)的元素: 没 src 的媒体用窄屏首载页同路径元素的 src 补, 空叶子用其文本补。
+  // 脚本只给可见元素写图片地址/跑计数动画(wix 手机首屏图只剩 alt 文字、"300M+" 为空), 桌面采集永远拿不到;
+  // 这些元素桌面本就不显示, 补上不影响桌面
+  let srcFill = 0, textFill = 0;
+  if (m.paths && tags.length) m.els.forEach((el, i) => {
+    if (!el.isConnected || el.getClientRects().length || el.closest('svg')) return;
+    for (const t of ['m', 't']) {
+      const L = loads[t] && loads[t][m.paths[i]];
+      if (!L || L[0] !== el.tagName) continue;
+      if (L[6] && !el.getAttribute('src') && !el.getAttribute('srcset')) {
+        const [s, ss, po] = L[6].split('\x01');
+        if (s && !/^(data:|blob:|javascript:)/i.test(s)) el.setAttribute('src', s);
+        if (ss) el.setAttribute('srcset', ss);
+        if (po) el.setAttribute('poster', po);
+        srcFill++; break;
+      }
+      if (L[7] && !el.children.length && !(el.textContent || '').trim() && !/^(SCRIPT|STYLE|TEXTAREA|INPUT|IFRAME)$/.test(el.tagName)
+          && !/[<>]/.test(L[7])) {
+        el.textContent = L[7]; textFill++; break;
+      }
+    }
+  });
+  if (srcFill) out.srcFill = srcFill;
+  if (textFill) out.textFill = textFill;
   if (out.cls || out.xattr) {
     // 当前视口段由分视口样式表里的 --cv-band 告诉运行时(段边界落盘时才确定, 脚本不重复计算断点)
     bands.d.push(':root{--cv-band:d}'); bands.t.push(':root{--cv-band:t}'); bands.m.push(':root{--cv-band:m}');

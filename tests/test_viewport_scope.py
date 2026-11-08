@@ -563,6 +563,52 @@ class AltVariantImgFallback(unittest.TestCase):
                 b.close()
 
 
+HIDDEN_FILL_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<style>@media (min-width:600px){.m{display:none}} @media (max-width:599px){.d{display:none}}</style></head><body>
+<img class="d" src="/desk.png" alt="hero"><img class="m" alt="hero">
+<span class="d">300M+</span><span class="m"></span><span class="m" id="keep"></span>
+<script>function f(){ if (innerWidth < 600) { document.querySelector('img.m').setAttribute('src', '/phone.png');
+ document.querySelectorAll('span.m')[0].textContent = '300M+'; } }
+f();</script></body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class HiddenElementFill(unittest.TestCase):
+    """桌面上 display:none 的手机版实例: 脚本只在可见时写 src/文本, 用窄屏首载页同路径元素的值补。"""
+
+    def test_src_and_text_filled_from_narrow_load(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                ctx = b.new_context(viewport={"width": 1440, "height": 800})
+                ctx.route("http://fill.test/", lambda r: r.fulfill(body=HIDDEN_FILL_PAGE, content_type="text/html"))
+                page = ctx.new_page()
+                page.goto("http://fill.test/")
+                page.evaluate(ce.CV_RECORD_JS, "d")
+                for tag, w in (("t", 768), ("m", 390)):
+                    page.set_viewport_size({"width": w, "height": 800})
+                    page.evaluate(ce.CV_QUIET_JS, 100)
+                    page.evaluate(ce.CV_RECORD_JS, tag)
+                page.set_viewport_size({"width": 1440, "height": 800})
+                page.evaluate(ce.CV_QUIET_JS, 100)
+                page.evaluate(ce.CV_RECORD_JS, "b")
+                p2 = ctx.new_page()
+                p2.set_viewport_size({"width": 390, "height": 800})
+                p2.goto("http://fill.test/")
+                loads = {"m": p2.evaluate(ce.CV_PATHS_JS)}
+                p2.close()
+                out = page.evaluate(ce.CV_EMIT_JS, loads)
+                self.assertEqual(out.get("srcFill"), 1)
+                self.assertEqual(out.get("textFill"), 1)
+                self.assertEqual(page.evaluate("document.querySelector('img.m').getAttribute('src')"), "/phone.png")
+                self.assertEqual(page.evaluate("document.querySelector('img.d').getAttribute('src')"), "/desk.png")
+                self.assertEqual(page.evaluate("document.querySelectorAll('span.m')[0].textContent"), "300M+")
+                self.assertEqual(page.evaluate("document.getElementById('keep').textContent"), "")
+            finally:
+                b.close()
+
+
 class CalibInjection(unittest.TestCase):
     def test_put_calib_band_wrapped(self):
         eng = ce.ClonerEngine.__new__(ce.ClonerEngine)
