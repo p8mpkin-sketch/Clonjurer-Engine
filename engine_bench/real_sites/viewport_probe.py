@@ -235,7 +235,7 @@ DIAG_JS = r"""() => {
         const cl = String(x.className && x.className.baseVal !== undefined ? x.className.baseVal : x.className || '').trim().split(/\s+/)
           .filter(c => c && !/^(active|on|cur|current|show|open|hover|slick-|swiper-slide-|bx-|owl-|cv-|clone)/.test(c))[0];
         if (cl) s += '.' + cl.slice(0, 24);
-        let i = 1, sib = x; while ((sib = sib.previousElementSibling)) if (sib.tagName === x.tagName) i++;
+        let i = 1, sib = x; while ((sib = sib.previousElementSibling)) if (sib.tagName === x.tagName && !sib.hasAttribute('data-cv-vp')) i++;
         p.unshift(s + ':' + i); x = x.parentElement;
       }
       return p.join('>');
@@ -273,7 +273,7 @@ DIAG_JS = r"""() => {
         const cl = String(x.className && x.className.baseVal !== undefined ? x.className.baseVal : x.className || '').trim().split(/\s+/)
           .filter(c => c && !/^(active|on|cur|current|show|open|hover|slick-|swiper-slide-|bx-|owl-|cv-|clone)/.test(c))[0];
         if (cl) s += '.' + cl.slice(0, 24);
-        let i = 1, sib = x; while ((sib = sib.previousElementSibling)) if (sib.tagName === x.tagName) i++;
+        let i = 1, sib = x; while ((sib = sib.previousElementSibling)) if (sib.tagName === x.tagName && !sib.hasAttribute('data-cv-vp')) i++;
         p.unshift(s + ':' + i); x = x.parentElement;
       }
       return p.join('>');
@@ -350,8 +350,11 @@ def _shoot(ctx, url, vp, out: Path, timeout_ms=45000, extra_wait_ms=0):
         if extra_wait_ms:
             page.wait_for_timeout(extra_wait_ms)
         with suppress(Exception):
-            from core.cloner_engine import AD_RECTS_JS, INTERSTITIAL_HIDE_JS
+            from core.cloner_engine import AD_RECTS_JS, INTERSTITIAL_HIDE_JS, SCROLL_LOCK_STRIP_JS
             info["interstitial"] = page.evaluate(INTERSTITIAL_HIDE_JS) or 0
+            # 弹层藏掉后把它写在 html/body 上的滚动锁也剥掉(两侧同做): 否则活体原站整页只剩一屏(allbirds 桌面
+            # 原高 1080 / 克隆 4335), 比的是"弹层锁住的一屏"而不是页面
+            info["unlocked"] = page.evaluate(SCROLL_LOCK_STRIP_JS) or 0
             info["ads"] = page.evaluate(AD_RECTS_JS) or []
         info["scroll_width"] = sw
         info["overflow_x"] = sw > vp["width"] + 2

@@ -229,7 +229,8 @@ jobs:
                           if f.is_file():
                               _shot(f, f"{r.get('task_id')} vp {v} {kind} {r.get('url')}", width=300, max_h=5200)
                               break
-              if r.get("status") == "completed" and isinstance(r.get("score"), (int, float)) and r["score"] >= 90 and not low:
+              # 手动派发的小规模运行(≤3 站)是在做归因, 高分站的日志也要(双峰站高分那次长什么样)
+              if len(run["results"]) > 3 and r.get("status") == "completed" and isinstance(r.get("score"), (int, float)) and r["score"] >= 90 and not low:
                   continue
               log = pathlib.Path("workspaces") / str(r.get("task_id")) / "engine.log"
               print(f"::group::engine.log {r.get('url')} ({r.get('status')})")
