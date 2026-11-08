@@ -1529,15 +1529,25 @@ class ClonerEngine:
                 alts += [{"bands": t, "html": h} for t, h in v.items()]
             own = " ".join(["d"] + [t for t in ("t", "m") if t not in v])
             items.append({"path": p, "own": own, "alts": alts})
-        css_main = {(g, t) for g, t in (page.evaluate(STYLE_TEXTS_JS) or [])}
-        extra = []
+        main_rows = page.evaluate(STYLE_TEXTS_JS) or []
+        css_main = {(g, t) for g, t, *_ in main_rows}
+        extra, by_sheet = [], {}
         for tag in {t for v in variants.values() for t in v}:
             with suppress(Exception):
-                extra += [(g, t) for g, t in (pages[tag].evaluate(STYLE_TEXTS_JS) or []) if (g, t) not in css_main]
+                for g, t, *rest in (pages[tag].evaluate(STYLE_TEXTS_JS) or []):
+                    if (g, t) not in css_main:
+                        extra.append((g, t))
+                        by_sheet[(tag, rest[0] if rest else "")] = by_sheet.get((tag, rest[0] if rest else ""), 0) + 1
         css = _regroup_css_rules(dict.fromkeys(extra))[:config.VIEWPORT_VARIANT_BYTES]
         if extra:
-            sample = "; ".join((g.replace("\x00", ">")[:40] + " | " + t[:70]) for g, t in extra[:3])
-            self.log("RENDER", f"窄屏运行时样式: 主页没有的规则 {len(extra)} 条({len(css) // 1024}KB), 样例: {sample}")
+            # 归因: 多出的规则来自窄屏页哪些样式表, 主页又有哪些表(定位"主页没有"是真窄屏专属还是采集/序列化差异)
+            sheets_main = {}
+            for _g, _t, *rest in main_rows:
+                sheets_main[rest[0] if rest else ""] = sheets_main.get(rest[0] if rest else "", 0) + 1
+            src = "; ".join(f"{tag}:{sid[:90]}×{n}" for (tag, sid), n in sorted(by_sheet.items(), key=lambda kv: -kv[1])[:4])
+            mains = "; ".join(f"{sid[:90]}×{n}" for sid, n in sorted(sheets_main.items(), key=lambda kv: -kv[1])[:5])
+            sample = "; ".join((g.replace("\x00", ">")[:40] + " | " + t[:70]) for g, t in extra[:2])
+            self.log("RENDER", f"窄屏运行时样式: 主页没有的规则 {len(extra)} 条({len(css) // 1024}KB), 来源 [{src}]; 主页表 [{mains}]; 样例: {sample}")
         if re.search(r"</style", css, re.I):
             css = ""
         n = page.evaluate(ALT_INJECT_JS, {"items": items, "css": css})

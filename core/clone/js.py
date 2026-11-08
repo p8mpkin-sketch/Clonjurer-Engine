@@ -758,18 +758,22 @@ STYLE_TEXTS_JS = r"""() => {
           : (r instanceof CSSLayerBlockRule ? '@layer ' + r.name : '');
         if (head) { walk(r.cssRules, prefix.concat(head)); continue; }
       }
-      out.push([prefix.join('\x00'), r.cssText]);
+      out.push([prefix.join('\x00'), r.cssText, src]);
     }
   };
-  const sheet = (sh) => { try { walk(sh.cssRules, []); } catch (e) {} };
+  // 第三项: 规则所属样式表(href / 节点标签+属性 / adopted), 只用于归因日志, 做差不比较它
+  let src = '';
+  const sheet = (sh, id) => { src = id; try { walk(sh.cssRules, []); } catch (e) {} };
   for (const sh of document.styleSheets) {
     const n = sh.ownerNode;
     // 引擎的 CSSOM 副本(data-cssom)要算进主页规则集: 固化后原 <link> 表可能已停用/摘除, 不算副本就把整份主表
     // 当成"窄屏才有"(solidjs 79KB 重注入)。烘焙表/分视口表仍不算
     if (n && n.getAttribute && (n.hasAttribute('data-clone-bake') || n.hasAttribute('data-clone-vp'))) continue;
-    sheet(sh);
+    let id = sh.href || '';
+    if (!id && n) { id = n.tagName.toLowerCase(); for (const a of (n.attributes || [])) id += ' ' + a.name + (a.value ? '=' + a.value.slice(0, 40) : ''); }
+    sheet(sh, (sh.disabled ? '[disabled] ' : '') + (id || 'inline') + (sh.ownerRule ? ' <-@import' : ''));
   }
-  try { for (const sh of document.adoptedStyleSheets || []) sheet(sh); } catch (e) {}
+  try { for (const sh of document.adoptedStyleSheets || []) sheet(sh, 'adopted'); } catch (e) {}
   return out;
 }"""
 
