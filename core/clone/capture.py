@@ -255,7 +255,7 @@ from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部
     text_overlap_score,
     write_diff_preview,
 )
-from core.clone.support import _fluid_elements, _is_global_reset_rule, _is_transient_hide_rule, _regroup_css_rules  # noqa: F401
+from core.clone.support import bounded_call, _fluid_elements, _is_global_reset_rule, _is_transient_hide_rule, _regroup_css_rules  # noqa: F401
 
 
 
@@ -574,8 +574,16 @@ class CaptureMixin:
     def _close_narrow_loads(self):
         for _tag, p2 in getattr(self, "_cv_pages", []) or []:
             self._diag_mark(f"关窄屏首载页 {_tag}")
-            with suppress(Exception):
-                p2.close()
+            try:
+                impl = getattr(p2, "_impl_obj", None)
+                if impl is None:
+                    p2.close()
+                else:
+                    bounded_call(p2, impl.close(), config.NARROW_CLOSE_TIMEOUT_S)
+            except TimeoutError as exc:
+                self.log("WARN", f"窄屏首载页 {_tag} 关闭{exc}, 放弃等待(页面留给上下文关闭时回收)")
+            except Exception:
+                pass
         self._cv_pages = []
 
 
@@ -1197,7 +1205,10 @@ class CaptureMixin:
                 cdp = ctx.new_cdp_session(page)
                 # 卡死归因: CDP 调用没有超时, 163/wix 偶发在窄屏变体之后整任务无日志挂死(疑在此处或关窄屏页)
                 self._diag_mark("保真轨 MHTML 快照开始")
-                snap = cdp.send('Page.captureSnapshot', {'format': 'mhtml'})
+                impl = getattr(cdp, "_impl_obj", None)
+                snap = bounded_call(cdp, impl.send('Page.captureSnapshot', {'format': 'mhtml'}),
+                                    config.MHTML_SNAPSHOT_TIMEOUT_S) if impl is not None else \
+                    cdp.send('Page.captureSnapshot', {'format': 'mhtml'})
                 (self.ws / 'capture.mhtml').write_text(snap['data'], encoding='utf-8')
                 self.log("RENDER", f"保真轨 MHTML 快照: {len(snap['data']) // 1024} KB")
             except Exception as exc:

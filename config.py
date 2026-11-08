@@ -222,3 +222,6 @@ NAV_STALE_GATE = os.environ.get("CLONER_NAV_STALE_GATE", "1") != "0"
 # 修复循环: 结构性缺失(样式表/字体)与上一轮完全相同(回补补不上)即收敛
 REPAIR_STRUCT_SAME_STOP = os.environ.get("CLONER_REPAIR_STRUCT_SAME_STOP", "1") != "0"
 REPAIR_NEED_STRUCT_GAIN = os.environ.get("CLONER_REPAIR_NEED_STRUCT_GAIN", "1") != "0"  # 回补没补回样式表/字体就不再重渲染
+# 无超时的 CDP/关页调用设时限(页面渲染进程卡住时任务不再永久挂起)
+NARROW_CLOSE_TIMEOUT_S = float(os.environ.get("CLONER_NARROW_CLOSE_TIMEOUT_S", "15"))
+MHTML_SNAPSHOT_TIMEOUT_S = float(os.environ.get("CLONER_MHTML_SNAPSHOT_TIMEOUT_S", "90"))

@@ -2675,3 +2675,23 @@ def _regroup_css_rules(pairs) -> str:
             body = h + "{\n" + body + "\n}"
         out.append(body)
     return "\n".join(out)
+
+
+# ---- 有时限的 Playwright 同步调用 ----
+def bounded_call(sync_obj, coro, timeout_s: float):
+    """在 Playwright 同步对象的事件循环上带时限执行一个底层协程(如 cdp._impl_obj.send(...))。
+    同步 API 的 CDP send / page.close 没有超时参数, 页面渲染进程卡住时会让整个任务永久挂起
+    (163/wix 偶发); 超时抛 TimeoutError, 迟到的应答由连接层丢弃(回调 future 已取消)。
+    取不到内部接口(Playwright 内部结构变化)时退回无时限执行, 行为同旧实现。"""
+    import asyncio
+    runner = getattr(sync_obj, "_sync", None)
+    if runner is None:
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+    try:
+        return runner(asyncio.wait_for(coro, timeout_s))
+    except asyncio.TimeoutError as exc:
+        raise TimeoutError(f"超过 {timeout_s:.0f}s 未返回") from exc

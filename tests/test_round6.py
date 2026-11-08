@@ -57,3 +57,36 @@ class FontPlan(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BoundedCall(unittest.TestCase):
+    """无超时的 Playwright 同步调用加时限: 永不返回的页内 Promise 在时限内抛 TimeoutError, 页面仍可继续用。"""
+
+    def test_times_out_and_page_stays_usable(self):
+        import time
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("无 playwright")
+        from core.clone.support import bounded_call
+        try:
+            pw = sync_playwright().start()
+            browser = pw.chromium.launch()
+        except Exception as exc:  # 无浏览器环境
+            self.skipTest(f"无 chromium: {exc}")
+        try:
+            page = browser.new_page()
+            page.set_content("<p>x</p>")
+            t0 = time.monotonic()
+            with self.assertRaises(TimeoutError):
+                bounded_call(page, page._impl_obj.evaluate("() => new Promise(() => {})"), 1.0)
+            self.assertLess(time.monotonic() - t0, 5)
+            self.assertEqual(page.evaluate("1 + 1"), 2)
+            cdp = page.context.new_cdp_session(page)
+            snap = bounded_call(cdp, cdp._impl_obj.send("Page.captureSnapshot", {"format": "mhtml"}), 30)
+            self.assertIn("MIME", snap["data"][:400])
+            bounded_call(page, page._impl_obj.close(), 10)
+            self.assertTrue(page.is_closed())
+        finally:
+            browser.close()
+            pw.stop()
