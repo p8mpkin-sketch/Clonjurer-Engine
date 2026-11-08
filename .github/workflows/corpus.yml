@@ -35,6 +35,10 @@ on:
         description: "每站克隆一完成立即探针(true/false)"
         required: false
         default: "false"
+      engine_env:
+        description: "引擎常量 A/B: 空格分隔的 CLONER_CFG_<常量>=值(如 CLONER_CFG_NARROW_PHONE_UA=0)"
+        required: false
+        default: ""
   schedule:
     - cron: "30 18 * * *"   # 北京时间 02:30
 
@@ -56,6 +60,7 @@ jobs:
       - name: 启动平台实例(开放模式, 无用户)
         run: |
           mkdir -p logs
+          for kv in ${{ github.event.inputs.engine_env }}; do export "$kv"; echo "引擎常量覆盖: $kv"; done
           CLONER_PORT=8897 nohup python app.py > logs/app_ci.log 2>&1 &
           for i in $(seq 1 60); do
             curl -sf http://127.0.0.1:8897/api/auth/state && exit 0

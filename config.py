@@ -200,3 +200,32 @@ PLATFORM_PUBLIC_URL = os.environ.get("CLONER_PUBLIC_URL", f"http://127.0.0.1:{PO
 # 审计日志保留天数(超过自动清理; 0 = 永久保留)
 AUDIT_RETENTION_DAYS = int(os.environ.get("CLONER_AUDIT_RETENTION_DAYS", "90"))
 
+
+# ---------------------------------------------------------------------------
+# 常量环境覆盖(A/B 用): CLONER_CFG_<常量名>=值 覆盖本模块同名的 bool/int/float/str 常量。
+# 例 CLONER_CFG_NARROW_PHONE_UA=0 CLONER_CFG_MAIN_SETTLE_MS=0。CI 的 engine_env 输入就是一串这样的赋值,
+# 同一分支不改代码就能对照开关; 类型随原值, 解析失败忽略。
+# ---------------------------------------------------------------------------
+def _apply_env_overrides():
+    g = globals()
+    for k, v in os.environ.items():
+        if not k.startswith("CLONER_CFG_"):
+            continue
+        name = k[len("CLONER_CFG_"):]
+        if name not in g or name.startswith("_"):
+            continue
+        cur = g[name]
+        try:
+            if isinstance(cur, bool):
+                g[name] = v.strip().lower() in ("1", "true", "yes", "on")
+            elif isinstance(cur, int):
+                g[name] = int(v)
+            elif isinstance(cur, float):
+                g[name] = float(v)
+            elif isinstance(cur, str):
+                g[name] = v
+        except ValueError:
+            pass
+
+
+_apply_env_overrides()
