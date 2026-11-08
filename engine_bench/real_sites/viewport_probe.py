@@ -218,8 +218,43 @@ DIAG_JS = r"""() => {
                   el.naturalWidth || el.videoWidth || 0, el.naturalHeight || el.videoHeight || 0, (c.objectFit || '') + '/' + (c.aspectRatio || '')]);
     }
   } catch (e) {}
+  // 大块显隐(前 8 屏): body 下 7 层内 高≥150px 且宽≥半屏的可见块, 以及含图/链接却 display:none/visibility:hidden 的块
+  // (记内联 display 与是否带分视口标记): 两侧按路径做差直接看出"原站手机端藏起的桌面横幅克隆没藏"是样式表没生效
+  // 还是脚本首载时写的内联样式没采到
+  const blocks = [];
+  try {
+    const key = e => {
+      const p = []; let x = e;
+      while (x && x !== document.body && p.length < 7) {
+        let s = x.tagName.toLowerCase() + (x.id ? '#' + x.id.slice(0, 24) : '');
+        const cl = String(x.className && x.className.baseVal !== undefined ? x.className.baseVal : x.className || '').trim().split(/\s+/)
+          .filter(c => c && !/^(active|on|cur|current|show|open|hover|slick-|swiper-slide-|bx-|owl-|cv-|clone)/.test(c))[0];
+        if (cl) s += '.' + cl.slice(0, 24);
+        let i = 1, sib = x; while ((sib = sib.previousElementSibling)) if (sib.tagName === x.tagName) i++;
+        p.unshift(s + ':' + i); x = x.parentElement;
+      }
+      return p.join('>');
+    };
+    const walk = (el, depth) => {
+      if (blocks.length >= 120 || depth > 7) return;
+      for (const ch of el.children) {
+        if (blocks.length >= 120) break;
+        const c = cs(ch); const r = ch.getBoundingClientRect();
+        if (c.display === 'none' || c.visibility === 'hidden') {
+          if (ch.querySelector('img,video,a') && (ch.textContent.trim().length + ch.querySelectorAll('img').length * 100) > 60)
+            blocks.push([key(ch), 'hidden:' + (c.display === 'none' ? 'display' : 'visibility') + (ch.style.display || ch.style.visibility ? ' inline=' + (ch.style.display || ch.style.visibility) : '')
+                         + (ch.hasAttribute('data-cv-vp') ? ' cv-vp=' + ch.getAttribute('data-cv-vp') : '') + (ch.hasAttribute('data-cv') ? ' cv' : ''), 0, 0, ch.querySelectorAll('img').length]);
+          continue;
+        }
+        if (r.top > innerHeight * 8) continue;
+        if (r.height >= 150 && r.width >= innerWidth * 0.5) blocks.push([key(ch), 'vis', Math.round(r.top), Math.round(r.height), ch.querySelectorAll('img').length]);
+        walk(ch, depth + 1);
+      }
+    };
+    walk(document.body, 0);
+  } catch (e) {}
   return {sheets: sheets.slice(0, 40), broken: broken.slice(0, 30), nimg: document.images.length,
-          styles: styles.slice(0, 60), probe: probe, lines: lines, overlays: overlays, hiddenInputs: hiddenInputs, boxes: boxes};
+          styles: styles.slice(0, 60), probe: probe, lines: lines, overlays: overlays, hiddenInputs: hiddenInputs, boxes: boxes, blocks: blocks};
 }"""
 
 
