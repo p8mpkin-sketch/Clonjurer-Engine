@@ -73,7 +73,9 @@ jobs:
           import json, sys, pathlib
           run = json.load(open(sys.argv[1], encoding="utf-8"))
           for r in run.get("results", []):
-              if r.get("status") == "completed" and isinstance(r.get("score"), (int, float)) and r["score"] >= 90:
+              # 慢站(>120s)也打日志: 远程做耗时归因
+              if r.get("status") == "completed" and isinstance(r.get("score"), (int, float)) and r["score"] >= 90 \
+                      and (r.get("elapsed_s") or 0) <= 120:
                   continue
               log = pathlib.Path("workspaces") / str(r.get("task_id")) / "engine.log"
               print(f"::group::engine.log {r.get('url')} ({r.get('status')})")
