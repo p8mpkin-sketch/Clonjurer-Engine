@@ -537,6 +537,12 @@ FONT_BAKE_JS = r"""
   } catch (e) { return 0; }
 }
 """.replace("__SCOPED_BAKE__", "(" + SCOPED_BAKE_FN + ")")
+# rem 基准随视口宽的窄屏采集(见 ROOT_FONT_READ_JS): 字号/行高/字距由 rem 规则随宽变化, 烘焙成采集宽的 px
+# 会把它们冻住(163 手机版 420 宽下标题/来源统一小 7% = 390/420)。只烘焙族名/字重/字形/颜色
+FONT_BAKE_NOSIZE_JS = FONT_BAKE_JS.replace(
+    "const PROPS = ['font-family', 'font-size', 'font-weight', 'font-style',\n                   'line-height', 'letter-spacing', 'color'];",
+    "const PROPS = ['font-family', 'font-weight', 'font-style', 'color'];")
+assert FONT_BAKE_NOSIZE_JS != FONT_BAKE_JS
 
 
 REMOVE_SCRIPTS_JS = r"""

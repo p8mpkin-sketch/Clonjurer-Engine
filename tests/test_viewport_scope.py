@@ -396,12 +396,15 @@ class RootFontFluid(unittest.TestCase):
         with sync_playwright() as p:
             b = p.chromium.launch()
             try:
-                page = b.new_page(viewport={"width": 390, "height": 800})
-                page.set_content(FLEXIBLE_PAGE)
+                ctx = b.new_context(viewport={"width": 390, "height": 800})
+                ctx.route("http://flex.test/", lambda r: r.fulfill(body=FLEXIBLE_PAGE, content_type="text/html"))
+                page = ctx.new_page()
+                page.goto("http://flex.test/")
                 eng._probe_root_font(page)
                 self.assertAlmostEqual(eng._root_fluid.get("html", 0), 10.0, places=3)
                 self.assertNotIn("body", eng._root_fluid)
                 self.assertEqual(page.viewport_size["width"], 390)
+                self.assertEqual(len(ctx.pages), 1)   # 对照页已关, 主页没被缩放/导航
                 page.evaluate(ce.ROOT_FONT_APPLY_JS, eng._root_fluid)
                 html = page.content().replace("addEventListener('resize', f); f();", "")
                 page2 = b.new_page(viewport={"width": 420, "height": 800})

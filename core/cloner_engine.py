@@ -90,6 +90,7 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     DEEP_FREEZE_JS,
     WAIT_SHEETS_JS,
     FONT_BAKE_JS,
+    FONT_BAKE_NOSIZE_JS,
     FORM_ACTIVATE_JS,
     IFRAME_EXTRACT_JS,
     IFRAME_SRCS_JS,
@@ -1320,30 +1321,34 @@ class ClonerEngine:
 
     def _probe_root_font(self, page):
         """rem 基准随视口宽成正比(<html>/<body> 内联 font-size = 宽/N)时, 冻结后改写成 vw(见
-        ROOT_FONT_READ_JS)。证据: 活体页缩到 0.92 倍宽, 计算字号同比变化(±1.5%)才认; 只认内联写的
-        (样式表里的 vw/媒体查询本就随视口)。缩放在基准截图之前做完并还原。"""
+        ROOT_FONT_READ_JS)。证据: 0.92 倍宽另开页面重新加载, 计算字号同比变化(±1.5%)才认; 只认内联写的
+        (样式表里的 vw/媒体查询本就随视口)。认定后字体烘焙不烘字号/行高/字距(FONT_BAKE_NOSIZE_JS)。"""
         self._root_fluid = {}
         vp = page.viewport_size or {}
         width, height = vp.get("width") or 0, vp.get("height") or 0
         # 只在窄屏采集(手机版子克隆等)做: 桌面宽下按宽算的 rem 到了窄屏多半换公式/封顶, 改 vw 未必更近
         if not width or width >= 1024 or not self.cfg.get("viewport_probe_root", True):
             return
+        # 另开同上下文页面在 0.92 倍宽重新加载来对照, 不缩放主页: 有的站 resize 处理整页重载(搜狐手机版),
+        # 主页一旦被导航, 已滚动/懒加载的状态就丢了
+        p2 = None
         try:
             a = page.evaluate(ROOT_FONT_READ_JS)
             if not (a[1] or a[3]):
                 return
             w2 = int(round(width * 0.92))
-            page.set_viewport_size({"width": w2, "height": height})
-            page.evaluate(CV_QUIET_JS, 250)
-            b = page.evaluate(ROOT_FONT_READ_JS)
+            p2 = page.context.new_page()
+            p2.set_viewport_size({"width": w2, "height": height})
+            p2.goto(page.url, wait_until="load", timeout=12000)
+            p2.evaluate(CV_QUIET_JS, 300)
+            b = p2.evaluate(ROOT_FONT_READ_JS)
         except Exception as exc:   # noqa: BLE001 探测失败不影响采集
             self.log("WARN", f"rem 基准探测失败: {str(exc)[:120]}")
             return
         finally:
             with suppress(Exception):
-                if page.viewport_size and page.viewport_size.get("width") != width:
-                    page.set_viewport_size({"width": width, "height": height})
-                    page.evaluate(CV_QUIET_JS, 300)
+                if p2 is not None:
+                    p2.close()
         for k, i in (("html", 1), ("body", 3)):
             f1, f2 = a[i + 1], b[i + 1]
             if a[i] and f1 > 0 and f2 > 0 and a[0] and b[0] and abs((f2 / f1) / (b[0] / a[0]) - 1) <= 0.015:
@@ -1806,7 +1811,7 @@ class ClonerEngine:
         # A2 字体度量固化(W7): 活体 computed font 采样为 !important 覆盖,
         # 序列化进 HTML/MHTML —— 回放文本度量与采集态一致。
         try:
-            baked = _safe_eval(FONT_BAKE_JS)
+            baked = _safe_eval(FONT_BAKE_NOSIZE_JS if getattr(self, "_root_fluid", None) else FONT_BAKE_JS)
             if baked:
                 self.log("RENDER", f"字体度量固化: {baked} 个元素逐元素烘焙(差分继承)")
         except Exception:
