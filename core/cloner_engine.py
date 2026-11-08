@@ -2166,7 +2166,7 @@ class ClonerEngine:
             if any(fl.values()):
                 self.log("RENDER", f"内联尺寸流式化: 全宽 {fl.get('width', 0)} / 轨道 {fl.get('track', 0)}"
                                    f" / 位移 {fl.get('shift', 0)}(采集视口下不变, 换视口随容器伸缩)")
-        with suppress(Exception):
+        try:
             try:
                 loads = self._collect_narrow_loads()
                 cv = page.evaluate(CV_EMIT_JS, loads) or {}
@@ -2183,6 +2183,8 @@ class ClonerEngine:
                     self.log("WARN", f"窄屏 DOM 变体注入失败: {str(exc)[:160]}")
             finally:
                 self._close_narrow_loads()
+        except Exception as exc:   # noqa: BLE001 以前静默吞掉: 该站手机端没有分视口样式/变体却看不出原因(qwik 手机 41/100 双峰)
+            self.log("WARN", f"多视口内联样式/窄屏变体整步失败: {type(exc).__name__}: {str(exc)[:200]}")
         # N1 保真轨: MHTML 快照(采集期活体渲染的权威固化)。
         # Chromium 对 MHTML 的回放默认禁脚本 —— 确定性由构造保证。
         if screenshot:
