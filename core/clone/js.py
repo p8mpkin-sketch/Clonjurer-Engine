@@ -950,8 +950,25 @@ CV_EMIT_JS = r"""
       }
       if (/[{}<>]/.test(JSON.stringify([dv, V.t && V.t[p], V.m && V.m[p]]))) continue;
       el.style.removeProperty(p);
-      if (dv) rule.d.push(p + ':' + dv[0] + (dv[1] ? '!important' : ''));
-      tags.forEach(t => { const v = V[t][p]; if (v) rule[t].push(p + ':' + v[0] + (v[1] ? '!important' : '')); });
+      // 分段同比: 脚本按容器/视口宽算的字号或尺寸被上限(桌面)或下限(手机)夹住时, 三点不同比, 但相邻两段
+      // 仍与宽度同比(值不同、值/宽相同) → 这两段写 vw, 否则手机段会被钉在 390 采集宽的 px
+      // (420 宽真机全站字号统一小 7%: 390/420)。夹住的那段照旧写 px
+      const nmap = Object.fromEntries(nums);
+      const same = (a, b) => nmap[a] !== null && nmap[b] !== null && nmap[a] !== nmap[b] && nmap[a] !== 0 && nmap[b] !== 0
+        && Math.abs(nmap[a] / W[a] - nmap[b] / W[b]) <= Math.abs(nmap[a] / W[a]) * 0.015;
+      const fluid = new Set();
+      if (tags.length === 2) {
+        if (same('t', 'm')) { fluid.add('t'); fluid.add('m'); }
+        else if (same('d', 't')) { fluid.add('d'); fluid.add('t'); }
+      }
+      const emit = (k, v) => {
+        if (!v) return;
+        const val = fluid.has(k) ? (nmap[k] / W[k] * 100).toFixed(4) + 'vw' : v[0];
+        rule[k].push(p + ':' + val + (v[1] ? '!important' : ''));
+      };
+      emit('d', dv);
+      tags.forEach(t => emit(t, V[t][p]));
+      if (fluid.size) out.vw++;
       out.banded++; touched = true;
     }
     if (!touched) return;
