@@ -2382,9 +2382,29 @@ class ClonerEngine:
             msg += " 样例 " + " | ".join(f"{u[-70:]} {f}" for _rt, u, f in failed[:3])
         self.log("RENDER", msg)
 
+    def _unlock_scroll(self, page, when: str) -> int:
+        """滚动前/后剥掉 html/body 内联的锁滚动声明。自动弹层(短信订阅/优惠券/Cookie 墙)在采集窗口内打开时
+        给 html/body 写 overflow:hidden; position:fixed|absolute; inset:0 锁住页面: 文档高度只剩一屏, 自动滚动
+        原地不动, IntersectionObserver 驱动的懒加载/入场显形全都不触发, 首屏以下整段空白被当成"原站本来如此"
+        序列化并当作基准(allbirds: 基准与克隆都只有一屏, 保真轨 98.5 虚高; 对真机 4628px 的原站只有 38 分)。"""
+        try:
+            n = page.evaluate(SCROLL_LOCK_STRIP_JS) or 0
+        except Exception:
+            return 0
+        if n:
+            self.log("RENDER", f"{when}解锁滚动: 弹层给 html/body 写的 {n} 条锁滚动声明已剥离, 页面恢复可滚")
+        return n
+
     def _auto_scroll(self, page):
         """平滑滚动到底再回顶, 触发 IntersectionObserver / 无限加载(见 AUTO_SCROLL_JS)。
-        总时长受 AUTO_SCROLL_BUDGET 约束(页内计时, 一次往返)。"""
+        总时长受 AUTO_SCROLL_BUDGET 约束(页内计时, 一次往返)。滚动前后各查一次滚动锁: 滚动途中弹出的
+        层锁住页面时, 剥离后再滚一遍。"""
+        self._unlock_scroll(page, "滚动前")
+        self._auto_scroll_once(page)
+        if self._unlock_scroll(page, "滚动后"):
+            self._auto_scroll_once(page)
+
+    def _auto_scroll_once(self, page):
         if not config.AUTO_SCROLL_SMOOTH:
             return self._auto_scroll_stepped(page)
         try:

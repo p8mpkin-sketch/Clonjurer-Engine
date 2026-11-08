@@ -197,18 +197,29 @@ jobs:
                               pk, pb = prev
                               print(f"    其前元素 @原 y={pb[1]}: {pk[-120:]} 高 原{pb[2]}/克隆{ctm[pk][2]} [{pb[3][:150]}] | 克隆侧 [{ctm[pk][3][:150]}]")
                       prev_dy, prev = dy, (k, ob)
-                  # 高度不同元素只列"最深"的: 某后代已承担 ≥60% 的高度差就不重复列祖先(祖先只是跟着变高)
+                  # 高度不同元素只列"最深"的: 某后代已承担 ≥60% 的高度差就不重复列祖先(祖先只是跟着变高)。
+                  # 祖先/子孙关系用第 5 项(父下标)判断: 路径只留 12 层, 深处元素的路径不是祖先路径的前缀
+                  otl = [b for _, b in ot]
+                  pidx = lambda b: (b[4] if len(b) > 4 else -1)
                   dhs = {k: ctm[k][2] - ob[2] for k, ob in ot if k in ctm and abs(ctm[k][2] - ob[2]) >= 4}
-                  leaf = [k for k in dhs if not any(q != k and q.startswith(k + ">") and abs(dhs[q]) >= abs(dhs[k]) * 0.6 for q in dhs)]
+                  carried = {}          # 原站下标 → 子孙中最大的 |Δh|
+                  for i, b in enumerate(otl):
+                      if b[0] not in dhs: continue
+                      j = pidx(b)
+                      while 0 <= j < len(otl):
+                          carried[j] = max(carried.get(j, 0), abs(dhs[b[0]])); j = pidx(otl[j])
+                  oidx = {b[0]: i for i, b in enumerate(otl)}
+                  leaf = [k for k in dhs if carried.get(oidx[k], 0) < abs(dhs[k]) * 0.6]
                   obm = dict(ot)
+                  ctl = list(ctm.values()); cidx = {b[0]: i for i, b in enumerate(ctl)}
                   for k in sorted(leaf, key=lambda q: -abs(dhs[q]))[:8]:
                       ob = obm[k]
                       print(f"  高度不同元素 Δh {dhs[k]:+d} @原 y={ob[1]}: {k[-120:]} 原{ob[2]}/克隆{ctm[k][2]} [{ob[3][:120]}] | 克隆侧 [{ctm[k][3][:120]}]")
                       # 该块的直接子元素两侧高度: 看出是子项多了/少了(克隆独有/原站独有)还是某个子项变高
-                      kids = [(q, b) for q, b in ot if q.startswith(k + ">") and q.count(">") == k.count(">") + 1]
-                      ck = [(q, b) for q, b in ctm.items() if q.startswith(k + ">") and q.count(">") == k.count(">") + 1]
-                      for q, b in kids[:8]: print(f"      子 {q.split('>')[-1][:60]} 原 y={b[1]} 高{b[2]} / 克隆 {'高' + str(ctm[q][2]) if q in ctm else '无'} [{b[3][:80]}]")
-                      for q, b in [x for x in ck if x[0] not in obm][:4]: print(f"      子(克隆独有) {q.split('>')[-1][:60]} 克隆 y={b[1]} 高{b[2]} [{b[3][:80]}]")
+                      kids = [b for b in otl if pidx(b) == oidx[k]]
+                      ck = [b for b in ctl if pidx(b) == cidx.get(k, -2)]
+                      for b in kids[:8]: print(f"      子 {b[0].split('>')[-1][:60]} 原 y={b[1]} 高{b[2]} / 克隆 {'高' + str(ctm[b[0]][2]) if b[0] in ctm else '无'} [{b[3][:80]}]")
+                      for b in [x for x in ck if x[0] not in obm][:4]: print(f"      子(克隆独有) {b[0].split('>')[-1][:60]} 克隆 y={b[1]} 高{b[2]} [{b[3][:80]}]")
                   print("::endgroup::")
               # 低分视口的探针截图(原站/克隆/遮罩后)进日志: 产物存储域名在部分环境不可达
               for v in low:
