@@ -542,6 +542,20 @@ class FluidSizeProbe(unittest.TestCase):
                 b.close()
 
 
+class FluidAttrGeometry(unittest.TestCase):
+    """img 的 width/height 属性按宽写死(wix 手机图 325x215): 以 attr-width/attr-height 伪声明进同比探测, 应用写成 style vw。"""
+
+    def test_attr_width_height_scale(self):
+        fa = {"div:1>img:1": ["IMG", 0, ";attr-width:325px;attr-height:215px"], "p:1": ["P", 16, "margin-top:20px"]}
+        fb = {"div:1>img:1": ["IMG", 0, ";attr-width:299px;attr-height:198px"], "p:1": ["P", 16, "margin-top:20px"]}
+        fl = ce._fluid_elements(fa, fb, 390, 359)
+        self.assertEqual(fl["paths"], [])
+        self.assertEqual(set(fl["inline"]["div:1>img:1"]), {"attr-width", "attr-height"})
+        self.assertAlmostEqual(float(fl["inline"]["div:1>img:1"]["attr-width"][:-2]), 325 / 390 * 100, places=3)
+        self.assertNotIn("p:1", fl["inline"])          # 定值不改
+        self.assertIn("startsWith('attr-')", ce.FLUID_APPLY_JS)   # 应用侧把 attr- 前缀映射回 style 属性
+
+
 @unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
 class AltVariantImgFallback(unittest.TestCase):
     """窄屏变体里没 src 的 <img>(抽取时脚本还没写)用主页同子树对应图补上: 先按 alt, 再按同数量按序。"""
@@ -725,6 +739,68 @@ class DomVariants(unittest.TestCase):
                 page.set_viewport_size({"width": 1440, "height": 800})
                 self.assertFalse(page.evaluate("document.querySelector('.slider').checkVisibility()"))
                 self.assertTrue(page.evaluate("document.querySelector('.cards').checkVisibility()"))
+            finally:
+                b.close()
+
+
+FLUID_VARIANT_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<style>body{margin:0}</style></head><body><header>站头</header>
+<main id="m"></main>
+<script>
+var m = document.getElementById('m');
+function render(){
+  if (innerWidth >= 1000) {
+    m.innerHTML = '<div class="cards"><div class="card">甲</div><div class="card">乙</div></div>';
+  } else {
+    var w = Math.round(innerWidth * 0.8333), h = Math.round(w * 0.662);
+    m.innerHTML = '<section class="hero" style="margin-top:' + Math.round(innerWidth * 0.1) + 'px;padding:12px">'
+      + '<img id="pic" width="' + w + '" height="' + h + '" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="">'
+      + '<p>手机版</p></section>';
+  }
+}
+render(); addEventListener('resize', render);
+</script></body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class FluidVariant(unittest.TestCase):
+    """窄屏变体抽取前的随宽同比: 脚本按加载宽度写死的 img width/height 属性与内联 margin px 改写成 vw,
+    变体到了 360~440 宽按比例渲染, 不再是 390 的尺寸。"""
+
+    def test_variant_geometry_follows_width(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 1440, "height": 800})
+                page.set_content(FLUID_VARIANT_PAGE)
+                eng = _FakeEngine()
+                eng.log = lambda *a: logs.append(a[-1])
+                logs = []
+                eng._cv_pages = []
+                loads = {}
+                p2 = b.new_page(viewport={"width": 390, "height": 800})
+                p2.set_content(FLUID_VARIANT_PAGE)
+                eng._cv_pages.append(("m", p2))
+                loads["m"] = p2.evaluate(ce.CV_PATHS_JS)
+                n = ce.ClonerEngine._inject_dom_variants(eng, page, loads)
+                self.assertEqual(n, 1)
+                self.assertTrue(any("随宽同比" in l for l in logs), logs)
+                html = page.content()
+            finally:
+                b.close()
+            html = ce.scope_viewport_css(html, 1000, 0).replace("<script>", "<script type='x'>")
+            b = p.chromium.launch()
+            try:
+                for w in (360, 420, 440):
+                    pg = b.new_page(viewport={"width": w, "height": 800})
+                    pg.set_content(html)
+                    r = pg.evaluate("document.getElementById('pic').getBoundingClientRect()")
+                    self.assertAlmostEqual(r["width"], w * 0.8333, delta=1.5, msg=f"{w}: {r}")
+                    self.assertAlmostEqual(r["height"], w * 0.8333 * 0.662, delta=1.5, msg=f"{w}: {r}")
+                    mt = pg.evaluate("parseFloat(getComputedStyle(document.querySelector('.hero')).marginTop)")
+                    self.assertAlmostEqual(mt, w * 0.1, delta=1.0, msg=f"{w}: margin {mt}")
+                    pg.close()
             finally:
                 b.close()
 

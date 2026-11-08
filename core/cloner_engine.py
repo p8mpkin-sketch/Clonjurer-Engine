@@ -308,7 +308,7 @@ class _EditionDB:
         return getattr(self._db, name)
 
 
-_FLUID_GEOM_RE = re.compile(r"(?:^|;)\s*(width|height|min-width|max-width|min-height|max-height|font-size|line-height|"
+_FLUID_GEOM_RE = re.compile(r"(?:^|;)\s*(attr-width|attr-height|width|height|min-width|max-width|min-height|max-height|font-size|line-height|"
                             r"letter-spacing|top|left|right|bottom|margin-[a-z]+|padding-[a-z]+|gap|column-gap|row-gap)\s*:\s*"
                             r"(-?\d+(?:\.\d+)?)px\s*(!important)?(?=;|$)", re.I)
 
@@ -1549,6 +1549,42 @@ class ClonerEngine:
             p2.evaluate(ANIM_PHASE_JS)
         return bool(stable), counts
 
+    def _fluidize_narrow_page(self, p2, tag):
+        """窄屏首载页抽取变体前的随宽同比: 页面脚本按加载宽度把几何写死成 px(内联 style / img 的 width·height 属性,
+        wix 手机图 325x215), 变体只在 390 采一次, 到 360~440 宽就按 390 的尺寸渲染, 整页从该处起位移十几像素
+        (iPhone Air 70 / Pro Max 59 / S24 50~96 双峰)。同页改到 0.92 倍宽再读一遍, 值比≈宽比(±1.5%)的 px 改写成
+        vw 后再抽取(与主页 _probe_root_font 同口径, 见 _fluid_elements)。改宽触发整页重载的站: 两次读的路径对不上,
+        自然什么都不改。"""
+        if not getattr(config, "VARIANT_FLUID", True):
+            return
+        try:
+            vp = p2.viewport_size or {}
+            w1, h = int(vp.get("width") or 0), int(vp.get("height") or 800)
+            if not w1:
+                return
+            fa = p2.evaluate(FLUID_READ_JS) or {}
+            w2 = int(round(w1 * 0.92))
+            p2.set_viewport_size({"width": w2, "height": h})
+            p2.wait_for_timeout(250)
+            with suppress(Exception):
+                p2.evaluate(CV_QUIET_JS, 300)
+            with suppress(Exception):
+                p2.evaluate(NARROW_STABLE_JS, 1500)
+            fb = p2.evaluate(FLUID_READ_JS) or {}
+            p2.set_viewport_size({"width": w1, "height": h})
+            p2.wait_for_timeout(250)
+            with suppress(Exception):
+                p2.evaluate(CV_QUIET_JS, 300)
+            with suppress(Exception):
+                p2.evaluate(NARROW_STABLE_JS, 1500)
+            fl = _fluid_elements(fa, fb, w1, w2)
+            if fl["paths"] or fl["inline"]:
+                res = p2.evaluate(FLUID_APPLY_JS, fl) or {}
+                self.log("RENDER", f"窄屏首载页 {tag} 随宽同比: {res.get('vw', 0)} 个内联 px/尺寸属性改写为 vw,"
+                                   f" {res.get('marked', 0)} 个元素字号随宽(0.92 倍宽对照, 同比 ±1.5%)")
+        except Exception as exc:   # noqa: BLE001 探测失败就按原样抽取
+            self.log("WARN", f"窄屏首载页 {tag} 随宽同比探测失败: {str(exc)[:120]}")
+
     def _inject_dom_variants(self, page, loads):
         """窄屏 DOM 变体(见 ALT_EXTRACT_JS): 结构不同的最上层子树把窄屏版并列插入主页。"""
         if not loads or not self.cfg.get("viewport_variants", True):
@@ -1566,6 +1602,7 @@ class ClonerEngine:
             if not top or len(top) > config.VIEWPORT_VARIANT_MAX or tag not in pages:
                 continue
             stable, counts = ClonerEngine._settle_narrow_page(pages[tag])
+            ClonerEngine._fluidize_narrow_page(self, pages[tag], tag)
             mc = getattr(self, "_main_counts", {}) or {}
             self.log("RENDER", f"窄屏首载页 {tag}: {'到位' if stable else '到时限仍在变化'}, 控件 {counts.get('ctrl', '?')}"
                                f"(主页 {mc.get('ctrl', '?')}) / 按钮 {counts.get('btn', '?')}(主页 {mc.get('btn', '?')})"

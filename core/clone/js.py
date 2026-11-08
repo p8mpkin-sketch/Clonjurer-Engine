@@ -2036,7 +2036,14 @@ FLUID_READ_JS = r"""() => {
   const els = Array.from(document.body ? document.body.querySelectorAll('*') : []).slice(0, 20000);
   for (const e of els) {
     if (e.closest('svg')) continue;
-    const st = e.getAttribute('style') || '';
+    let st = e.getAttribute('style') || '';
+    // 替换元素的 width/height 属性也是按宽算出来写死的几何(wix 手机图 325x215 在 360~440 宽都不变):
+    // 以伪声明并入, 同比探测一并认, 应用时写成 style 的 vw(属性不接受 vw)
+    if (/^(IMG|VIDEO|CANVAS|IFRAME)$/.test(e.tagName)) {
+      const aw = e.getAttribute('width'), ah = e.getAttribute('height');
+      if (aw && /^\d+(\.\d+)?$/.test(aw)) st += ';attr-width:' + aw + 'px';
+      if (ah && /^\d+(\.\d+)?$/.test(ah)) st += ';attr-height:' + ah + 'px';
+    }
     let fs = 0;
     if (e.firstChild || st) fs = parseFloat(getComputedStyle(e).fontSize) || 0;
     out[pathOf(e)] = [e.tagName, fs, st];
@@ -2061,7 +2068,10 @@ FLUID_APPLY_JS = r"""({paths, inline}) => {
   for (const [p, props] of Object.entries(inline || {})) {
     const e = resolve(p);
     if (!e) continue;
-    for (const [k, v] of Object.entries(props)) { e.style.setProperty(k, v, e.style.getPropertyPriority(k)); vw++; }
+    for (const [k, v] of Object.entries(props)) {
+      const prop = k.startsWith('attr-') ? k.slice(5) : k;
+      e.style.setProperty(prop, v, e.style.getPropertyPriority(prop)); vw++;
+    }
   }
   return {marked, vw};
 }"""
