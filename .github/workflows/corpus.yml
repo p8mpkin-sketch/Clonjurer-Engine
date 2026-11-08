@@ -180,6 +180,23 @@ jobs:
                   for k in [k for k in cbk if cbk[k][1] == "vis" and k not in obk][:6]: print(f"  克隆独有大块 {k[-110:]} @{cbk[k][2]} 高{cbk[k][3]} 图{cbk[k][4]} [{how(cbk[k])}]")
                   drift = [(ypos(oo[k]), ypos(co[k]), k) for k in oo if k in co and 3 <= abs(ypos(oo[k]) - ypos(co[k])) <= 40]
                   for oy, cy, k in sorted(drift)[:10]: print(f"  微位移文本 原 y={oy} 克隆 y={cy}: {k[:70]}")
+                  # 位移源头: 两侧逐元素顶边按路径对齐, 相邻元素间 Δy 跳变 ≥4px 处 = 其前一个元素(或祖先)两侧高度不同
+                  ot = [(b[0], b) for b in ((d.get("orig") or {}).get("tops") or [])]
+                  ctm = {b[0]: b for b in ((d.get("clone") or {}).get("tops") or [])}
+                  prev_dy, prev, n = 0, None, 0
+                  for k, ob in ot:
+                      cb = ctm.get(k)
+                      if not cb: continue
+                      dy = cb[1] - ob[1]
+                      if abs(dy - prev_dy) >= 4 and n < 8:
+                          n += 1
+                          print(f"  位移源头 Δy {prev_dy:+d}→{dy:+d} @原 y={ob[1]}: {k[-120:]} 高 原{ob[2]}/克隆{cb[2]} [{ob[3][:150]}]")
+                          if prev is not None:
+                              pk, pb = prev
+                              print(f"    其前元素 @原 y={pb[1]}: {pk[-120:]} 高 原{pb[2]}/克隆{ctm[pk][2]} [{pb[3][:150]}] | 克隆侧 [{ctm[pk][3][:150]}]")
+                      prev_dy, prev = dy, (k, ob)
+                  hd = sorted(((abs(ctm[k][2] - ob[2]), k, ob) for k, ob in ot if k in ctm and abs(ctm[k][2] - ob[2]) >= 4), reverse=True)
+                  for dh, k, ob in hd[:8]: print(f"  高度不同元素 Δh {ctm[k][2] - ob[2]:+d} @原 y={ob[1]}: {k[-120:]} 原{ob[2]}/克隆{ctm[k][2]} [{ob[3][:120]}] | 克隆侧 [{ctm[k][3][:120]}]")
                   print("::endgroup::")
               # 低分视口的探针截图(原站/克隆/遮罩后)进日志: 产物存储域名在部分环境不可达
               for v in low:

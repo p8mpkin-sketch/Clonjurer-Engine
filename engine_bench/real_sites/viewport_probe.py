@@ -261,7 +261,39 @@ DIAG_JS = r"""() => {
     };
     walk(document.body, 0);
   } catch (e) {}
-  return {sheets: sheets.slice(0, 40), broken: broken.slice(0, 30), nimg: document.images.length,
+  // 逐元素顶边(前 20 屏, 12 层内, 高≥6 宽≥30 的可见元素, DOM 序): 两侧按路径对齐后, 相邻元素间"位移量跳变"的地方
+  // 就是位移源头(某块两侧高度不同), 比只看图盒/文字快得多——位移源头常是无图无字的容器(视频壳/动画占位)
+  const tops = [];
+  try {
+    const key12 = e => {
+      const p = []; let x = e;
+      while (x && x !== document.body && p.length < 12) {
+        let s = x.tagName.toLowerCase() + (x.id ? '#' + x.id.slice(0, 24) : '');
+        const cl = String(x.className && x.className.baseVal !== undefined ? x.className.baseVal : x.className || '').trim().split(/\s+/)
+          .filter(c => c && !/^(active|on|cur|current|show|open|hover|slick-|swiper-slide-|bx-|owl-|cv-|clone)/.test(c))[0];
+        if (cl) s += '.' + cl.slice(0, 24);
+        let i = 1, sib = x; while ((sib = sib.previousElementSibling)) if (sib.tagName === x.tagName) i++;
+        p.unshift(s + ':' + i); x = x.parentElement;
+      }
+      return p.join('>');
+    };
+    const walkT = (el, depth) => {
+      if (tops.length >= 3000 || depth > 12) return;
+      for (const ch of el.children) {
+        if (tops.length >= 3000) break;
+        if (/^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE|LINK|META)$/.test(ch.tagName)) continue;
+        const c = cs(ch); if (c.display === 'none' || c.visibility === 'hidden') continue;
+        const r = ch.getBoundingClientRect();
+        if (r.top > innerHeight * 20) continue;
+        if (r.height >= 6 && r.width >= 30 && c.position !== 'fixed')
+          tops.push([key12(ch), Math.round(r.top), Math.round(r.height), (ch.getAttribute('class') || '').slice(0, 50) + ' | ' + (ch.getAttribute('style') || '').slice(0, 100)
+            + (ch.hasAttribute('data-cv-vp') ? ' cv-vp=' + ch.getAttribute('data-cv-vp') : '') + (ch.hasAttribute('data-cv') ? ' cv' : '')]);
+        walkT(ch, depth + 1);
+      }
+    };
+    walkT(document.body, 0);
+  } catch (e) {}
+  return {tops: tops, sheets: sheets.slice(0, 40), broken: broken.slice(0, 30), nimg: document.images.length,
           styles: styles.slice(0, 60), probe: probe, lines: lines, overlays: overlays, hiddenInputs: hiddenInputs, boxes: boxes, blocks: blocks};
 }"""
 
