@@ -1250,9 +1250,20 @@ CV_EMIT_JS = r"""
 }
 """.replace("__CV_ATTR__", CV_ATTR_FN).replace("__CV_XATTR__", CV_XATTR_FN)
 
-# 分视口 class 运行时(随 CV_EMIT_JS 写入页面): 读 --cv-band 决定当前段, 把 data-cv-cls-<段> 换成 class;
+# 分视口 class/属性运行时(随 CV_EMIT_JS 写入页面): 读 --cv-band 决定当前段, 把 data-cv-cls-<段> 换成 class;
+# 解析期由 MutationObserver 逐元素即时应用(不等 DOMContentLoaded): 站点脚本(defer/module 打包, 跑在 DOMContentLoaded 前)初始化手风琴/标签页/轮播时读到的
+# class/aria 态已是本视口段的, 否则会按烘进 HTML 的桌面态(aria-expanded=true 等)把窄屏上该折叠的内容展开;
 # 段没变不动 DOM。活体采集时段恒为 d(桌面), 不改变采集结果。
-CV_CLS_RUNTIME = r"""(function(){var cur=null;function apply(){try{var b=(getComputedStyle(document.documentElement).getPropertyValue('--cv-band')||'').trim()||'d';if(b===cur)return;cur=b;var es=document.querySelectorAll('[data-cv-cls-d]');for(var i=0;i<es.length;i++){var e=es[i],v=e.getAttribute('data-cv-cls-'+b);if(v===null)v=e.getAttribute('data-cv-cls-d');if(e.getAttribute('class')!==v)e.setAttribute('class',v);}es=document.querySelectorAll('[data-cv-xa-d]');for(i=0;i<es.length;i++){e=es[i];var o=JSON.parse(e.getAttribute('data-cv-xa-d')),bv=e.getAttribute('data-cv-xa-'+b);if(bv!==null){var q=JSON.parse(bv);for(var k in q)o[k]=q[k];}for(k in o){if(o[k]===null)e.removeAttribute(k);else if(e.getAttribute(k)!==o[k])e.setAttribute(k,o[k]);}}}catch(x){}}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',apply);else apply();window.addEventListener('resize',apply);window.addEventListener('load',apply);})();"""
+CV_CLS_RUNTIME = r"""(function(){var cur=null;
+function band(){try{return (getComputedStyle(document.documentElement).getPropertyValue('--cv-band')||'').trim();}catch(x){return '';}}
+function one(e,b){try{
+if(e.hasAttribute('data-cv-cls-d')){var v=e.getAttribute('data-cv-cls-'+b);if(v===null)v=e.getAttribute('data-cv-cls-d');if(e.getAttribute('class')!==v)e.setAttribute('class',v);}
+if(e.hasAttribute('data-cv-xa-d')){var o=JSON.parse(e.getAttribute('data-cv-xa-d')),bv=e.getAttribute('data-cv-xa-'+b);if(bv!==null){var q=JSON.parse(bv);for(var k in q)o[k]=q[k];}for(k in o){if(o[k]===null)e.removeAttribute(k);else if(e.getAttribute(k)!==o[k])e.setAttribute(k,o[k]);}}
+}catch(x){}}
+function all(b){var es=document.querySelectorAll('[data-cv-cls-d],[data-cv-xa-d]');for(var i=0;i<es.length;i++)one(es[i],b);}
+function apply(){var b=band()||'d';if(b===cur)return;cur=b;all(b);}
+try{new MutationObserver(function(ms){var b=cur||band();if(!b)return;for(var i=0;i<ms.length;i++){var ad=ms[i].addedNodes;for(var j=0;j<ad.length;j++){var n=ad[j];if(n.nodeType!==1)continue;one(n,b);if(n.children&&n.children.length){var es=n.querySelectorAll('[data-cv-cls-d],[data-cv-xa-d]');for(var k=0;k<es.length;k++)one(es[k],b);}}}}).observe(document.documentElement,{childList:true,subtree:true});}catch(x){}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',apply);else apply();window.addEventListener('resize',apply);window.addEventListener('load',apply);})();"""
 CV_EMIT_JS = CV_EMIT_JS.replace("CV_CLS_RUNTIME", json.dumps(CV_CLS_RUNTIME))
 
 
