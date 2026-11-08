@@ -259,6 +259,7 @@ DIAG_JS = r"""() => {
       }
       return p.join('>');
     };
+    const stAttr = e => { let s = ''; for (const a of e.attributes) if (/^(aria-(expanded|hidden|selected|current|controls)|open|hidden|data-(state|open|active|expanded|collapsed|visible|toggle|accordion))$/.test(a.name)) s += ' ' + a.name + '=' + a.value.slice(0, 14); return s; };
     const walk = (el, depth) => {
       if (blocks.length >= 120 || depth > 7) return;
       for (const ch of el.children) {
@@ -268,7 +269,11 @@ DIAG_JS = r"""() => {
         // 脚本写的内联样式还是引擎分视口规则(data-cv)造成
         const how = (ch.getAttribute('class') || '').slice(0, 60) + ' | ' + (ch.getAttribute('style') || '').slice(0, 90) + ' | ' + c.position
           + (c.transform !== 'none' ? ' tf=' + c.transform.slice(0, 40) : '') + (ch.hasAttribute('data-cv') ? ' cv=' + ch.getAttribute('data-cv') : '')
-          + (ch.hasAttribute('data-cv-vp') ? ' cv-vp=' + ch.getAttribute('data-cv-vp') : '') + (ch.hasAttribute('data-cv-cls-d') ? ' cv-cls' : '');
+          + (ch.hasAttribute('data-cv-vp') ? ' cv-vp=' + ch.getAttribute('data-cv-vp') : '') + (ch.hasAttribute('data-cv-cls-d') ? ' cv-cls' : '')
+          // 状态属性(自身 + 前一个兄弟, 手风琴/折叠的开关钮通常在内容前): 两侧同路径块一显一隐时看出是脚本按烘进 HTML 的桌面态
+          // (aria-expanded=true)重跑把内容展开, 还是样式表没生效
+          + (stAttr(ch) ? ' attrs[' + stAttr(ch).trim() + ']' : '')
+          + (ch.previousElementSibling ? ' prev[' + ch.previousElementSibling.tagName.toLowerCase() + stAttr(ch.previousElementSibling) + ']' : '');
         if (c.display === 'none' || c.visibility === 'hidden') {
           if (ch.querySelector('img,video,a') && (ch.textContent.trim().length + ch.querySelectorAll('img').length * 100) > 60)
             blocks.push([key(ch), 'hidden:' + (c.display === 'none' ? 'display' : 'visibility'), 0, 0, ch.querySelectorAll('img').length, how]);

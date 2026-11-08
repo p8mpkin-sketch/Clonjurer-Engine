@@ -1104,6 +1104,16 @@ CV_EMIT_JS = r"""
     el.setAttribute('data-cv-xa-d', JSON.stringify(base));
     out.xattr = (out.xattr || 0) + 1;
   });
+  // 固化 canvas 的分视口对照诊断: 图表库按宽算高不成比例时平板/手机盒高靠这条链, 哪一环没接上在 engine.log 里能看出
+  const cvdbg = [];
+  m.els.forEach((el, i) => {
+    if (!el.isConnected || !(el.getAttribute && el.getAttribute('data-canvas-frozen')) || cvdbg.length >= 6) return;
+    const L = {};
+    for (const t of tags) { const x = loads[t] && m.paths ? loads[t][m.paths[i]] : null; L[t] = x ? [x[0], x[1].slice(0, 30), x[2], x[4]] : null; }
+    cvdbg.push({p: (m.paths ? m.paths[i] : '').slice(-60), d: S('d', i), b: S('b', i), t: m.snaps.t ? S('t', i) : null, m: m.snaps.m ? S('m', i) : null,
+      cur: (el.getAttribute('style') || '').slice(0, 80) + ';' + attrOf(el), cls: String(el.className || '').slice(0, 30), L});
+  });
+  if (cvdbg.length) out.cvdbg = cvdbg;
   m.els.forEach((el, i) => {
     const sdRaw = m.snaps.d[i], sd = S('d', i);
     if (!el.isConnected) return;

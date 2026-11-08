@@ -2179,6 +2179,8 @@ class ClonerEngine:
                                        f"; 分视口 class {cv.get('cls', 0)} 个"
                                        + (f"; 桌面隐藏元素补窄屏 src {cv['srcFill']} 个" if cv.get("srcFill") else "")
                                        + (f", 补文本 {cv['textFill']} 个" if cv.get("textFill") else ""))
+                if cv.get("cvdbg"):
+                    self.log("RENDER", f"固化 canvas 分视口对照: {json.dumps(cv['cvdbg'], ensure_ascii=False)[:1500]}")
                 try:
                     self._inject_dom_variants(page, loads)
                 except Exception as exc:
