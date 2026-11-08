@@ -2127,17 +2127,18 @@ def relax_font_display(text):
 # 换成空网格)。守卫在所有页面脚本之前挂钩 DOM 移除 API(removeChild/remove/replaceChild/replaceChildren/
 # innerHTML/textContent): 加载后 12s 内、用户没有任何激活手势时, 移除一块 ≥100px 高的已连接元素, 先量下它和
 # 父元素的高; 600ms 后若该块没有被放回文档、父元素又真的塌掉了被移除块 60% 以上的高度(即不是"拆了再换一份"),
-# 就把原块放回原位。放回后一直看着(不限时): 父元素后来又长回来(异步数据到了 / 滚到视口才挂载, 新内容补上), 再把放回的
+# 就把原块放回原位(父元素下已有同签名、高度相近的孪生块 = 先插新再删旧的替换, 不放回)。放回后一直看着(不限时): 父元素后来又长回来(异步数据到了 / 滚到视口才挂载, 新内容补上), 再把放回的
 # 旧块撤掉, 避免双份(allbirds 轮播: Vue 先插入空壳、图片到了/swiper 初始化后才长高, 父元素 childList 不再变 —— 用
 # ResizeObserver 盯父元素尺寸 + 子树变动兜底; 曾与放回块并存 394px×2)。
 CONTENT_KEEP_GUARD_JS = r"""<script data-clone-preview="content-keep">(function(){try{if(window.__cloneKeep)return;window.__cloneKeep=1;var T0=Date.now(),WIN=12000,MIN=100,REC=[],KEPT=[],measured=0,done=false;
 function active(){return !!window.__cloneUserAct;}if(!window.__cloneActHook){window.__cloneActHook=1;['pointerdown','keydown','touchstart','wheel'].forEach(function(t){try{addEventListener(t,function(e){if(e.isTrusted)window.__cloneUserAct=1;},{capture:true,passive:true});}catch(e){}});}
 function over(){return done||active()||Date.now()-T0>WIN;}
 function hOf(el){try{var r=el.getBoundingClientRect();return r.width>=60?r.height:0;}catch(e){return 0;}}
-function note(n,parent){if(over()||measured>300||!n||n.nodeType!==1||!n.isConnected||!parent||parent.nodeType!==1)return;var t=n.tagName;if(/^(SCRIPT|STYLE|LINK|TEMPLATE|NOSCRIPT|META|HTML|HEAD|BODY)$/.test(t)||n.closest('svg'))return;measured++;var h=hOf(n);if(h<MIN)return;REC.push({n:n,p:parent,next:n.nextElementSibling,h:h,ph:hOf(parent),t:Date.now()});sched();}
+var selfRm=0;function twin(r){try{var ch=r.p.children;for(var i=0;i<ch.length;i++){var c=ch[i];if(c!==r.n&&c.tagName===r.n.tagName&&sim(c,r.n)&&hOf(c)>=r.h*0.75)return true;}}catch(e){}return false;}
+function note(n,parent){if(selfRm||over()||measured>300||!n||n.nodeType!==1||!n.isConnected||!parent||parent.nodeType!==1)return;var t=n.tagName;if(/^(SCRIPT|STYLE|LINK|TEMPLATE|NOSCRIPT|META|HTML|HEAD|BODY)$/.test(t)||n.closest('svg'))return;measured++;var h=hOf(n);if(h<MIN)return;REC.push({n:n,p:parent,next:n.nextElementSibling,h:h,ph:hOf(parent),t:Date.now()});sched();}
 function noteAll(parent){if(over()||!parent||parent.nodeType!==1||!parent.isConnected||!parent.children)return;var ch=parent.children;for(var i=0;i<ch.length;i++)note(ch[i],parent);}
 var tm=0;function sched(){if(tm)return;tm=setTimeout(check,600);}
-function check(){tm=0;if(over()){return;}var now=Date.now(),rest=[];for(var i=0;i<REC.length;i++){var r=REC[i];if(r.back){rest.push(r);continue;}if(now-r.t<550){rest.push(r);continue;}if(r.n.isConnected||!r.p.isConnected)continue;var ph=hOf(r.p);if(ph>r.ph-r.h*0.6)continue;try{var nx=r.next&&r.next.parentNode===r.p?r.next:null;r.p.insertBefore(r.n,nx);r.back=1;KEPT.push(r);r.phBack=hOf(r.p);window.__cloneKept=(window.__cloneKept||0)+1;rest.push(r);try{mo.observe(r.p,{childList:true,subtree:true});if(ro)ro.observe(r.p);}catch(e){}}catch(e){}}
+function check(){tm=0;if(over()){return;}var now=Date.now(),rest=[];for(var i=0;i<REC.length;i++){var r=REC[i];if(r.back){rest.push(r);continue;}if(now-r.t<550){rest.push(r);continue;}if(r.n.isConnected||!r.p.isConnected)continue;var ph=hOf(r.p);if(ph>r.ph-r.h*0.6)continue;if(twin(r))continue;try{var nx=r.next&&r.next.parentNode===r.p?r.next:null;r.p.insertBefore(r.n,nx);r.back=1;KEPT.push(r);r.phBack=hOf(r.p);window.__cloneKept=(window.__cloneKept||0)+1;rest.push(r);try{mo.observe(r.p,{childList:true,subtree:true});if(ro)ro.observe(r.p);}catch(e){}}catch(e){}}
 REC=rest;if(REC.length)sched();}
 function undo(){for(var i=0;i<KEPT.length;i++){var r=KEPT[i];if(!r.back||!r.n.isConnected)continue;var ph=hOf(r.p);if(ph-r.h>=r.ph*0.7){try{r.n.remove();r.back=0;window.__cloneKept=(window.__cloneKept||0)-1;}catch(e){}}}}
 function wrap(P,k,pick){var d=Object.getOwnPropertyDescriptor(P,k);if(!d||typeof d.value!=='function')return;var f=d.value;P[k]=function(){try{pick(this,arguments);}catch(e){}return f.apply(this,arguments);};}
@@ -2151,6 +2152,19 @@ wrapSet(Element.prototype,'innerHTML');wrapSet(Node.prototype,'textContent');
 // 放回后的撤销不限时: 父元素里后来又长出新内容(懒挂载/滚到视口才渲染, 可能远在 12s 之后), 旧块必须撤, 否则双份
 var ud=0,bump=function(){clearTimeout(ud);ud=setTimeout(undo,400);},mo=new MutationObserver(bump),ro=window.ResizeObserver?new ResizeObserver(bump):null;
 setTimeout(function(){done=true;},WIN+500);
+// 水合"追加而非接管": 框架在克隆里重跑时把组件当作未渲染, 在已有 SSR 块旁边再插一份同签名(同标签、class 几乎相同)、
+// 高度相近(±25%)的大块(allbirds 手机端 Best Sellers 轮播 394px×2)。加载后 12s 内、无手势、父元素下该签名块从 1 个变 2 个,
+// 1.5s 后两块仍都在且高度仍相近 → 移除序列化的旧块, 留脚本新渲染的那份(苹果类页面"先插新再删旧"会在 1.5s 内自己删旧, 不触发)
+var NEWS=new WeakSet(),PAIRS=[];
+function toks(e){return String(e.className&&e.className.baseVal!==undefined?e.className.baseVal:e.className||'').split(/\s+/).filter(Boolean);}
+function sim(a,b){var A=toks(a),B=toks(b);if(!A.length&&!B.length)return true;var S=new Set(A),n=0;for(var i=0;i<B.length;i++)if(S.has(B[i]))n++;return n/Math.max(A.length,B.length)>=0.6;}
+function onAdded(n){if(over()||!n||n.nodeType!==1||!n.parentNode||n.parentNode.nodeType!==1)return;if(/^(SCRIPT|STYLE|LINK|TEMPLATE|NOSCRIPT|META|HTML|HEAD|BODY)$/.test(n.tagName))return;NEWS.add(n);
+  var old=null,cnt=0,ch=n.parentNode.children;for(var i=0;i<ch.length;i++){var c=ch[i];if(c===n||c.tagName!==n.tagName||!sim(c,n))continue;cnt++;if(!NEWS.has(c))old=c;}
+  if(cnt!==1||!old)return;PAIRS.push({n:n,o:old,t:Date.now()});setTimeout(dedup,1600);}
+function dedup(){if(over())return;var now=Date.now(),rest=[];for(var i=0;i<PAIRS.length;i++){var q=PAIRS[i];if(now-q.t<1500){rest.push(q);continue;}if(!q.n.isConnected||!q.o.isConnected||q.n.parentNode!==q.o.parentNode)continue;var a=hOf(q.n),b=hOf(q.o);if(a<MIN||b<MIN||Math.abs(a-b)>Math.max(a,b)*0.25)continue;try{selfRm=1;q.o.remove();selfRm=0;window.__cloneHydrDedup=(window.__cloneHydrDedup||0)+1;}catch(e){}}PAIRS=rest;}
+var addMo=new MutationObserver(function(rs){if(over()){try{addMo.disconnect();}catch(e){}return;}for(var i=0;i<rs.length;i++){var a=rs[i].addedNodes;for(var j=0;j<a.length;j++)onAdded(a[j]);}});
+function armAdd(){try{addMo.observe(document.documentElement,{childList:true,subtree:true});}catch(e){}}
+if(document.readyState!=='loading')armAdd();else document.addEventListener('DOMContentLoaded',armAdd);
 window.__cloneKeepDbg=function(){return KEPT.map(function(r){return [r.n.tagName+'.'+String(r.n.className).slice(0,30),r.h,r.ph,hOf(r.p),r.back?1:0,r.n.isConnected?1:0];});};}catch(e){}})();</script>"""
 
 REPLAY_DEDUPE_JS = r"""<script data-clone-preview="replay-dedupe">(function(){try{if(window.__cloneDedupe)return;window.__cloneDedupe=1;var M=[],mark=new WeakSet(),mo=new MutationObserver(function(){});mo.observe(document.documentElement,{childList:true,subtree:true});

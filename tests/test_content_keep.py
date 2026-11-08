@@ -11,6 +11,9 @@ PAGE = """<!doctype html><html><head>GUARD</head><body style="margin:0">
 <div id="foot"><footer id="f1" style="height:800px">footer</footer></div>
 <div id="lazy"><div id="ph" style="height:300px">placeholder</div></div>
 <div id="sec2"><div id="car2" style="height:394px">carousel2</div></div>
+<div id="sec3"><div class="mb-6" style="height:22px">t</div><div id="ssr" class="relative z-0 select-none" style="height:394px">ssr</div></div>
+<div id="apple"><div id="old" class="hero" style="height:300px">old</div></div>
+<div id="wrap"><div class="slide" style="height:200px"></div><div class="slide" style="height:200px"></div></div>
 <button id="b" onclick="document.getElementById('top').remove()">x</button>
 <script>
   // 水合重建: 轮播整块被拆掉, 没有东西补上
@@ -25,6 +28,14 @@ PAGE = """<!doctype html><html><head>GUARD</head><body style="margin:0">
   document.getElementById('car2').remove();
   var shell = document.createElement('div'); shell.id = 'shell'; document.getElementById('sec2').appendChild(shell);
   setTimeout(function(){ var d = document.createElement('div'); d.style.height = '394px'; shell.appendChild(d); }, 1500);
+  window.addEventListener('DOMContentLoaded', function(){
+    // 水合追加而非接管: SSR 块旁再插一份同签名同高的块 → 1.5s 后旧块应被移除
+    setTimeout(function(){ var d=document.createElement('div'); d.id='live'; d.className='relative z-0 select-none swiper-initialized'; d.style.height='394px'; document.getElementById('sec3').appendChild(d); }, 200);
+    // 苹果类"先插新再删旧": 站点自己删旧, 守卫既不放回旧块也不动新块
+    setTimeout(function(){ var d=document.createElement('div'); d.id='new'; d.className='hero'; d.style.height='300px'; document.getElementById('apple').appendChild(d); setTimeout(function(){ document.getElementById('old').remove(); }, 400); }, 200);
+    // 轮播复制幻灯片: 父下同签名已有多份, 不管
+    setTimeout(function(){ var d=document.createElement('div'); d.className='slide'; d.style.height='200px'; document.getElementById('wrap').appendChild(d); }, 200);
+  });
 </script></body></html>"""
 
 
@@ -48,6 +59,12 @@ class ContentKeep(unittest.TestCase):
                 self.assertEqual(page.evaluate("!!document.getElementById('ph')"), False, "异步内容到了, 放回的占位块撤掉")
                 self.assertEqual(page.evaluate("!!document.getElementById('car2')"), False, "壳内长出内容(父元素只变尺寸)后旧块撤掉")
                 self.assertEqual(page.evaluate("window.__cloneKept"), 1)
+                self.assertEqual(page.evaluate("!!document.getElementById('ssr')"), False, "水合追加的孪生块: 序列化旧块移除")
+                self.assertEqual(page.evaluate("!!document.getElementById('live')"), True)
+                self.assertEqual(page.evaluate("!!document.getElementById('old')"), False, "站点自己删的旧块不放回")
+                self.assertEqual(page.evaluate("!!document.getElementById('new')"), True)
+                self.assertEqual(page.evaluate("document.querySelectorAll('#wrap .slide').length"), 3)
+                self.assertEqual(page.evaluate("window.__cloneHydrDedup"), 1)
                 page.click("#b")   # 用户手势之后的移除不管
                 page.wait_for_timeout(900)
                 self.assertEqual(page.evaluate("!!document.getElementById('top')"), False)

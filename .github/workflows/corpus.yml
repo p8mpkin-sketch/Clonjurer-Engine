@@ -132,7 +132,10 @@ jobs:
                       for e in (dd.get("exceptions") or [])[:6]: print("  异常定位", e)
                       for sh in (dd.get("sheets") or [])[:40]: print("  样式表", sh)
                       for k, v in (dd.get("probe") or {}).items(): print(f"  探 {k}: {v}")
-                      for k, v in (dd.get("focus") or {}).items(): print(f"  对照原站 0px 行容器 {k[-110:]}: {str(v)[:3200]}")
+                      for k, v in (dd.get("focus") or {}).items():
+                          parts = str(v).split(" CHILD ")
+                          print(f"  对照原站 0px 行容器 {k[-110:]}: {parts[0][:1500]}")
+                          for c in parts[1:12]: print(f"      CHILD {c[:1500]}")
                       for ov in (dd.get("overlays") or [])[:12]: print("  盖屏层", ov)
                       for hi in (dd.get("hiddenInputs") or [])[:12]: print("  隐藏控件", hi)
                       for st in (dd.get("styles") or [])[:60]: print("  style块", st)
@@ -217,7 +220,10 @@ jobs:
                       ob = obm[k]
                       print(f"  高度不同元素 Δh {dhs[k]:+d} @原 y={ob[1]}: {k[-120:]} 原{ob[2]}/克隆{ctm[k][2]} [{ob[3][:120]}] | 克隆侧 [{ctm[k][3][:120]}]")
                       for side, x in (("原", ob[3]), ("克隆", ctm[k][3])):
-                          if "RULES[" in x: print(f"        {side}侧样式 {x[x.index('RULES['):][:3200]}")
+                          if "RULES[" in x:
+                              parts = x[x.index('RULES['):].split(" CHILD ")
+                              print(f"        {side}侧样式 {parts[0][:1500]}")
+                              for c in parts[1:12]: print(f"          CHILD {c[:1500]}")
                       # 该块的直接子元素两侧高度: 看出是子项多了/少了(克隆独有/原站独有)还是某个子项变高
                       kids = [b for b in otl if pidx(b) == oidx[k]]
                       ck = [b for b in ctl if pidx(b) == cidx.get(k, -2)]
@@ -229,7 +235,10 @@ jobs:
                           pb = otl[pj]; pc = ctm.get(pb[0])
                           print(f"      父 {pb[0].split('>')[-1][:60]} 原 y={pb[1]} 高{pb[2]} / 克隆 {'高' + str(pc[2]) if pc else '无'} [{pb[3][:160]}] | 克隆侧 [{pc[3][:160] if pc else ''}]")
                           for side, x in (("原", pb[3]), ("克隆", pc[3] if pc else "")):
-                              if "RULES[" in x: print(f"        {side}侧样式 {x[x.index('RULES['):][:3200]}")
+                              if "RULES[" in x:
+                                  parts = x[x.index('RULES['):].split(" CHILD ")
+                                  print(f"        {side}侧样式 {parts[0][:1500]}")
+                                  for c in parts[1:12]: print(f"          CHILD {c[:1500]}")
                           for b in [x for x in otl if pidx(x) == pj and x[0] != k][:8]:
                               cb = ctm.get(b[0])
                               print(f"      兄弟 {b[0].split('>')[-1][:60]} 原 y={b[1]} 高{b[2]} / 克隆 {'y=' + str(cb[1]) + ' 高' + str(cb[2]) if cb else '无'} [{b[3][:100]}]")

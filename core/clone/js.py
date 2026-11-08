@@ -75,8 +75,11 @@ CANVAS_IMG_FN = r"""(cv, data) => {
   img.setAttribute('data-canvas-frozen', 'true');
   // 原 canvas 的全部属性照搬(class/id/style 之外还有引擎此前打的 data-cb/data-cv 等, 烘焙/分视口规则靠它们命中)
   for (const a of cv.attributes) if (a.name !== 'width' && a.name !== 'height') img.setAttribute(a.name, a.value);
-  if (cv.width && cv.height) { img.setAttribute('width', String(cv.width)); img.setAttribute('height', String(cv.height)); }
-  if (!cv.style.height) img.style.height = 'auto';
+  // 只给 width 属性 + 内联 aspect-ratio, 不给 height 属性也不写 height:auto: img 的 height 属性是展示提示(等于 CSS height:Hpx,
+  // 别的视口不随宽缩), 内联 height:auto 又会压过站点 CSS 给这个盒子的高(flex 拉伸/显式高): vite 平板的图表 canvas 盒高 347 由
+  // 布局给出、位图按盒子算, 固化后 height:auto 按桌面位图比例只剩 312, 下文整段上移 35px。aspect-ratio 与 canvas 固有比例同义:
+  // CSS 没定高时按比例随宽缩, CSS 定了高/拉伸时让位
+  if (cv.width && cv.height) { img.setAttribute('width', String(cv.width)); img.style.aspectRatio = cv.width + ' / ' + cv.height; }
   // 站点基础样式只对 img 生效的规则(img{max-width:100%} / .img-fluid 等)不该作用在原本是 canvas 的位置:
   // 把 canvas 的计算值 min/max 尺寸内联到 img(vite 比容器宽 2.5rem 的 canvas 被 max-width:100% 截短)
   try {
