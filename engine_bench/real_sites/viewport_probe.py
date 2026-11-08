@@ -163,7 +163,7 @@ DIAG_JS = r"""() => {
     // 该族的 @font-face 规则: src 与 unicode-range(两侧对照看克隆本地化后的文件/子集)
     fontFaces: (() => { try { const fam = cs(document.body).fontFamily.split(',')[0].trim().replace(/["']/g, ''); const out = [];
       for (const sh of document.styleSheets) { let rules; try { rules = sh.cssRules; } catch (e) { continue; } if (!rules) continue;
-        for (const r of rules) { if (r instanceof CSSFontFaceRule && r.style.fontFamily.replace(/["']/g, '') === fam) out.push(r.style.fontWeight + ' ' + (r.style.src || '').slice(-70) + ' ' + (r.style.unicodeRange || '').slice(0, 40)); if (out.length >= 12) break; } }
+        for (const r of rules) { if (r instanceof CSSFontFaceRule && r.style.fontFamily.replace(/["']/g, '') === fam) out.push(r.style.fontWeight + ' ' + (r.style.fontDisplay ? 'display=' + r.style.fontDisplay + ' ' : '') + (r.style.src || '').slice(-70) + ' ' + (r.style.unicodeRange || '').slice(0, 40)); if (out.length >= 12) break; } }
       return out.join(' | '); } catch (e) { return ''; } })(),
     // 字体文件的网络事实(资源计时): 状态码/耗时/字节 —— status=loading 卡 6s 不结束时, 看请求是慢、404 还是根本没发出
     fontReq: (() => { try { return performance.getEntriesByType('resource').filter(e => /\.(woff2?|ttf|otf|eot)(\?|$)/i.test(e.name) || e.initiatorType === 'font' || e.initiatorType === 'css' && /font/i.test(e.name)).slice(0, 10)

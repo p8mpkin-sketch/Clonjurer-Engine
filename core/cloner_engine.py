@@ -152,6 +152,8 @@ from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部
     INTERACTION_SIM_TEMPLATE,
     REPLAY_DEDUPE_JS,
     SCROLL_UNLOCK_GUARD_JS,
+    CONTENT_KEEP_GUARD_JS,
+    relax_font_display,
     JS_NAV_GUARD_SCRIPT,
     JS_NAV_OPEN_RE,
     JS_PARENT_LOC_RE,
@@ -2801,7 +2803,7 @@ class ClonerEngine:
             info = results.get(css_url)
             if info is None:
                 continue
-            rewritten = text
+            rewritten = relax_font_display(text)
             for raw, absolute in css_refs.get(css_url, []):
                 child = results.get(absolute)
                 if child is None:
@@ -2833,6 +2835,8 @@ class ClonerEngine:
     def _store(self, out: dict) -> dict:
         """写入全局 CAS 池并落到任务工作空间(命中同样计入统计)。"""
         content = out["content"]
+        if out.get("is_css") and b"font-display" in content:
+            content = relax_font_display(content)
         sha = hashlib.sha256(content).hexdigest()
         ext = out["ext"] if out["ext"] in config.EXT_CATEGORIES or out["ext"] else ".bin"
         cat = config.EXT_CATEGORIES.get(ext, "misc")
@@ -3658,6 +3662,8 @@ class ClonerEngine:
             localized = self._inject_after_head(localized, sim_script)
             localized = self._inject_after_head(localized, REPLAY_DEDUPE_JS)
             localized = self._inject_after_head(localized, SCROLL_UNLOCK_GUARD_JS)
+            localized = self._inject_after_head(localized, CONTENT_KEEP_GUARD_JS)
+            localized = relax_font_display(localized)
             return _utf8_charset(_inject_responsive(localized, bool(self.cfg.get("responsive_enhance"))))
 
         html_pairs = _html_escaped_pairs(pairs)

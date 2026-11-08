@@ -2102,8 +2102,54 @@ def beacon_like(url: str) -> bool:
 # 克隆页运行时滚动锁守卫: 站点脚本在已序列化(脚本跑过)的 DOM 上重跑, 把弹层/抽屉当作"已打开"去水合,
 # 不等用户任何动作就给 html/body 写 overflow:hidden + position:fixed|absolute 的锁(allbirds 手机端 body 运行后
 # 多出 overflow:hidden;position:absolute;inset:0, 原站运行后 body 无内联样式)。页面加载后 12s 内、用户还没有
-# 任何激活手势(navigator.userActivation.hasBeenActive 为假)时写上的锁, 一律撤掉; 用户点开菜单后的锁不管。
-SCROLL_UNLOCK_GUARD_JS = r"""<script data-clone-preview="scroll-unlock">(function(){try{if(window.__cloneUnlock)return;window.__cloneUnlock=1;var T0=Date.now(),LOCK=/^(overflow(?:-[xy])?|position|inset|top|right|bottom|left|height|width|padding-right|touch-action|overscroll-behavior(?:-[xy])?|scrollbar-gutter)$/i;function active(){try{return !!(navigator.userActivation&&navigator.userActivation.hasBeenActive);}catch(e){return false;}}function strip(el){if(!el)return;var st=el.getAttribute('style')||'';if(!/(?:^|;)\s*overflow(?:-y)?\s*:\s*(?:hidden|clip)\b/i.test(st))return;var keep=[],parts=st.split(';'),n=0;for(var i=0;i<parts.length;i++){var d=parts[i],m=d.match(/^\s*([a-z-]+)\s*:\s*([\s\S]*)$/i);if(!m){if(d.trim())keep.push(d.trim());continue;}var k=m[1].toLowerCase(),v=m[2].trim();var lock=LOCK.test(k)&&!(k==='position'&&!/^(fixed|absolute)/i.test(v))&&!(k==='height'&&!/^(100%|100vh|100dvh|unset|auto|initial)$/i.test(v))&&!(k==='width'&&!/^(100%|100vw|unset|auto)$/i.test(v));if(lock)n++;else keep.push(k+': '+v);}if(!n)return;busy=1;try{if(keep.length)el.setAttribute('style',keep.join('; '));else el.removeAttribute('style');}finally{busy=0;}window.__cloneUnlocked=(window.__cloneUnlocked||0)+n;}var busy=0,mo=new MutationObserver(function(rs){if(busy||active()||Date.now()-T0>12000){try{mo.disconnect();}catch(e){}return;}for(var i=0;i<rs.length;i++){var t=rs[i].target;if(t===document.documentElement||t===document.body)strip(t);}});function arm(){try{mo.observe(document.documentElement,{attributes:true,attributeFilter:['style']});if(document.body)mo.observe(document.body,{attributes:true,attributeFilter:['style']});}catch(e){}strip(document.documentElement);strip(document.body);}if(document.body)arm();else document.addEventListener('DOMContentLoaded',arm);setTimeout(function(){try{mo.disconnect();}catch(e){}},12500);}catch(e){}})();</script>"""
+# 任何激活手势时写上的锁, 一律撤掉; 用户点开菜单后的锁不管。「手势」= 守卫自己在捕获阶段听到的可信
+# pointerdown/keydown/touchstart/wheel(不用 navigator.userActivation: Playwright 的 evaluate 带 userGesture, 引擎评分/探针
+# 一调 evaluate 它就为真, 守卫在评分里形同虚设, 真机上却生效 —— 评分看不到的修复不可信)。
+SCROLL_UNLOCK_GUARD_JS = r"""<script data-clone-preview="scroll-unlock">(function(){try{if(window.__cloneUnlock)return;window.__cloneUnlock=1;var T0=Date.now(),LOCK=/^(overflow(?:-[xy])?|position|inset|top|right|bottom|left|height|width|padding-right|touch-action|overscroll-behavior(?:-[xy])?|scrollbar-gutter)$/i;function active(){return !!window.__cloneUserAct;}if(!window.__cloneActHook){window.__cloneActHook=1;['pointerdown','keydown','touchstart','wheel'].forEach(function(t){try{addEventListener(t,function(e){if(e.isTrusted)window.__cloneUserAct=1;},{capture:true,passive:true});}catch(e){}});}function strip(el){if(!el)return;var st=el.getAttribute('style')||'';if(!/(?:^|;)\s*overflow(?:-y)?\s*:\s*(?:hidden|clip)\b/i.test(st))return;var keep=[],parts=st.split(';'),n=0;for(var i=0;i<parts.length;i++){var d=parts[i],m=d.match(/^\s*([a-z-]+)\s*:\s*([\s\S]*)$/i);if(!m){if(d.trim())keep.push(d.trim());continue;}var k=m[1].toLowerCase(),v=m[2].trim();var lock=LOCK.test(k)&&!(k==='position'&&!/^(fixed|absolute)/i.test(v))&&!(k==='height'&&!/^(100%|100vh|100dvh|unset|auto|initial)$/i.test(v))&&!(k==='width'&&!/^(100%|100vw|unset|auto)$/i.test(v));if(lock)n++;else keep.push(k+': '+v);}if(!n)return;busy=1;try{if(keep.length)el.setAttribute('style',keep.join('; '));else el.removeAttribute('style');}finally{busy=0;}window.__cloneUnlocked=(window.__cloneUnlocked||0)+n;}var busy=0,mo=new MutationObserver(function(rs){if(busy||active()||Date.now()-T0>12000){try{mo.disconnect();}catch(e){}return;}for(var i=0;i<rs.length;i++){var t=rs[i].target;if(t===document.documentElement||t===document.body)strip(t);}});function arm(){try{mo.observe(document.documentElement,{attributes:true,attributeFilter:['style']});if(document.body)mo.observe(document.body,{attributes:true,attributeFilter:['style']});}catch(e){}strip(document.documentElement);strip(document.body);}if(document.body)arm();else document.addEventListener('DOMContentLoaded',arm);setTimeout(function(){try{mo.disconnect();}catch(e){}},12500);}catch(e){}})();</script>"""
+
+# 网页字体展示策略放宽(通用): @font-face{font-display:optional|fallback} 下, 字体没在首帧(optional 约 100ms /
+# fallback 3s)前到位, 浏览器就整页按后备字体排到底, 之后字体 loaded 也不再换(qwik 克隆手机端 41/100 双峰: 两张
+# Poppins 都 loaded, 却按后备字体行高排版; 原站有 CDN 预热/预加载, 首帧前到位)。克隆是离线交付, 字体从本地盘
+# 加载, 首帧前到不到位看运气; 真机看原站的稳态是网页字体, 所以改为 swap: 迟到也换上。
+_FONT_DISPLAY_RE = re.compile(r"(font-display\s*:\s*)(optional|fallback)\b", re.I)
+_FONT_DISPLAY_RE_B = re.compile(rb"(font-display\s*:\s*)(optional|fallback)\b", re.I)
+
+
+def relax_font_display(text):
+    """str 或 bytes 中的 font-display:optional|fallback → swap。"""
+    if isinstance(text, bytes):
+        return _FONT_DISPLAY_RE_B.sub(rb"\1swap", text)
+    return _FONT_DISPLAY_RE.sub(r"\1swap", text)
+
+
+# 克隆页运行时内容守卫(通用): 站点脚本在已序列化的 DOM 上重跑, 框架水合失配后按"客户端渲染"重建组件, 数据接口
+# 在克隆里拿不到就把已经渲染好的一整块拆掉(allbirds 手机端 Best Sellers 轮播 394px 整块被 Vue 移除, 页脚被
+# 换成空网格)。守卫在所有页面脚本之前挂钩 DOM 移除 API(removeChild/remove/replaceChild/replaceChildren/
+# innerHTML/textContent): 加载后 12s 内、用户没有任何激活手势时, 移除一块 ≥100px 高的已连接元素, 先量下它和
+# 父元素的高; 600ms 后若该块没有被放回文档、父元素又真的塌掉了被移除块 60% 以上的高度(即不是"拆了再换一份"),
+# 就把原块放回原位。放回后继续看着: 父元素后来又长回来(异步数据到了, 新内容补上), 再把放回的旧块撤掉, 避免双份。
+CONTENT_KEEP_GUARD_JS = r"""<script data-clone-preview="content-keep">(function(){try{if(window.__cloneKeep)return;window.__cloneKeep=1;var T0=Date.now(),WIN=12000,MIN=100,REC=[],measured=0,done=false;
+function active(){return !!window.__cloneUserAct;}if(!window.__cloneActHook){window.__cloneActHook=1;['pointerdown','keydown','touchstart','wheel'].forEach(function(t){try{addEventListener(t,function(e){if(e.isTrusted)window.__cloneUserAct=1;},{capture:true,passive:true});}catch(e){}});}
+function over(){return done||active()||Date.now()-T0>WIN;}
+function hOf(el){try{var r=el.getBoundingClientRect();return r.width>=60?r.height:0;}catch(e){return 0;}}
+function note(n,parent){if(over()||measured>300||!n||n.nodeType!==1||!n.isConnected||!parent||parent.nodeType!==1)return;var t=n.tagName;if(/^(SCRIPT|STYLE|LINK|TEMPLATE|NOSCRIPT|META|HTML|HEAD|BODY)$/.test(t)||n.closest('svg'))return;measured++;var h=hOf(n);if(h<MIN)return;REC.push({n:n,p:parent,next:n.nextElementSibling,h:h,ph:hOf(parent),t:Date.now()});sched();}
+function noteAll(parent){if(over()||!parent||parent.nodeType!==1||!parent.isConnected||!parent.children)return;var ch=parent.children;for(var i=0;i<ch.length;i++)note(ch[i],parent);}
+var tm=0;function sched(){if(tm)return;tm=setTimeout(check,600);}
+function check(){tm=0;if(over()){return;}var now=Date.now(),rest=[];for(var i=0;i<REC.length;i++){var r=REC[i];if(r.back){rest.push(r);continue;}if(now-r.t<550){rest.push(r);continue;}if(r.n.isConnected||!r.p.isConnected)continue;var ph=hOf(r.p);if(ph>r.ph-r.h*0.6)continue;try{var nx=r.next&&r.next.parentNode===r.p?r.next:null;r.p.insertBefore(r.n,nx);r.back=1;r.phBack=hOf(r.p);window.__cloneKept=(window.__cloneKept||0)+1;rest.push(r);}catch(e){}}
+REC=rest;if(REC.length)sched();}
+function undo(){for(var i=0;i<REC.length;i++){var r=REC[i];if(!r.back||!r.n.isConnected)continue;var ph=hOf(r.p);if(ph-r.h>=r.ph*0.7){try{r.n.remove();r.back=0;window.__cloneKept=(window.__cloneKept||0)-1;}catch(e){}}}}
+function wrap(P,k,pick){var d=Object.getOwnPropertyDescriptor(P,k);if(!d||typeof d.value!=='function')return;var f=d.value;P[k]=function(){try{pick(this,arguments);}catch(e){}return f.apply(this,arguments);};}
+function wrapSet(P,k){var d=Object.getOwnPropertyDescriptor(P,k);if(!d||!d.set)return;Object.defineProperty(P,k,{configurable:true,enumerable:d.enumerable,get:d.get,set:function(v){try{noteAll(this);}catch(e){}d.set.call(this,v);}});}
+wrap(Node.prototype,'removeChild',function(self,a){note(a[0],self);});
+wrap(Node.prototype,'replaceChild',function(self,a){note(a[1],self);});
+wrap(Element.prototype,'remove',function(self){note(self,self.parentNode);});
+wrap(Element.prototype,'replaceChildren',function(self){noteAll(self);});
+wrap(Element.prototype,'replaceWith',function(self){note(self,self.parentNode);});
+wrapSet(Element.prototype,'innerHTML');wrapSet(Node.prototype,'textContent');
+var mo=new MutationObserver(function(){if(over()){try{mo.disconnect();}catch(e){}return;}var any=false;for(var i=0;i<REC.length;i++)if(REC[i].back){any=true;break;}if(any){clearTimeout(ud);ud=setTimeout(undo,500);}});var ud=0;
+function arm(){try{mo.observe(document.documentElement,{childList:true,subtree:true});}catch(e){}}
+if(document.body)arm();else document.addEventListener('DOMContentLoaded',arm);
+setTimeout(function(){done=true;try{mo.disconnect();}catch(e){}},WIN+500);}catch(e){}})();</script>"""
 
 REPLAY_DEDUPE_JS = r"""<script data-clone-preview="replay-dedupe">(function(){try{if(window.__cloneDedupe)return;window.__cloneDedupe=1;var M=[],mark=new WeakSet(),mo=new MutationObserver(function(){});mo.observe(document.documentElement,{childList:true,subtree:true});
 function take(was){var rs=mo.takeRecords();if(document.readyState!=='loading')return;for(var i=0;i<rs.length;i++){var a=rs[i].addedNodes;for(var j=0;j<a.length;j++){var n=a[j];if(n.nodeType===1&&!(was&&was.indexOf(n)>=0)&&!mark.has(n)){mark.add(n);if(M.length<4000)M.push(n);}}}}
