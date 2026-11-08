@@ -294,6 +294,12 @@ DIAG_JS = r"""() => {
       return p.join('>');
     };
     // 第 5 项: 父元素在 tops 里的下标(-1 为 body 直属), 路径只留 12 层, 深处的祖先/子孙关系靠它判断
+    // 作者写的 grid-template-rows(计算值只给 used px, 看不出是 0px 写死还是 auto 塌掉): 预筛含该声明的规则(含媒体条件), 逐 grid 元素匹配
+    const gtrRules = (() => { const out = []; try { const walk = (rules, media) => { for (const r of rules) { if (out.length > 600) return;
+      if (r.type === 4) { walk(r.cssRules, (media ? media + ' & ' : '') + r.conditionText); continue; } if (r.type === 12 || r.type === 3) { try { walk(r.cssRules, media); } catch (e) {} continue; }
+      if (r.style && r.style.gridTemplateRows) out.push([r.selectorText, r.style.gridTemplateRows.slice(0, 60), media, (media ? matchMedia(media.split(' & ').pop()).matches : true)]); } };
+      for (const sh of document.styleSheets) { try { walk(sh.cssRules, ''); } catch (e) {} } } catch (e) {} return out; })();
+    const gtrSrc = (el) => { const hits = []; for (const [sel, v, media, on] of gtrRules) { try { if (el.matches(sel)) hits.push(v + (media ? '@' + media.slice(0, 30) : '') + (on ? '' : '(off)')); } catch (e) {} if (hits.length >= 3) break; } return hits.join(';'); };
     const walkT = (el, depth, pidx) => {
       if (tops.length >= 12000 || depth > 40) return;
       for (const ch of el.children) {
@@ -308,7 +314,7 @@ DIAG_JS = r"""() => {
           tops.push([key12(ch), Math.round(r.top + scrollY), Math.round(r.height), (ch.getAttribute('class') || '').slice(0, 50) + ' | ' + (ch.getAttribute('style') || '').slice(0, 100)
             + (ch.hasAttribute('data-cv-vp') ? ' cv-vp=' + ch.getAttribute('data-cv-vp') : '') + (ch.hasAttribute('data-cv') ? ' cv' : '')
             + (c.maxHeight !== 'none' ? ' mh=' + c.maxHeight : '') + (c.overflow !== 'visible' ? ' ov=' + c.overflow : '')
-            + (c.display.indexOf('grid') >= 0 ? ' grid gtr=' + c.gridTemplateRows.slice(0, 80) : '') + (c.minHeight !== '0px' && c.minHeight !== 'auto' ? ' minh=' + c.minHeight : '')
+            + (c.display.indexOf('grid') >= 0 ? ' grid gtr=' + c.gridTemplateRows.slice(0, 80) + ' gtrSrc=' + gtrSrc(ch) : '') + (c.minHeight !== '0px' && c.minHeight !== 'auto' ? ' minh=' + c.minHeight : '')
             + ((ch.firstChild && ch.firstChild.nodeType === 3 && ch.firstChild.nodeValue.trim().length >= 3) ? ' f=' + c.fontSize + '/' + c.lineHeight + '/' + c.fontFamily.split(',')[0].slice(0, 16) : '')
             + (c.position !== 'static' ? ' pos=' + c.position + (c.position === 'absolute' ? '@' + c.top : '') : '') + (c.marginTop !== '0px' ? ' mt=' + c.marginTop : '')
             + (cs(el).display.indexOf('grid') >= 0 ? ' gr=' + c.gridRowStart + '/' + c.gridRowEnd + (c.alignSelf !== 'auto' && c.alignSelf !== 'normal' ? ' as=' + c.alignSelf : '') : '')
