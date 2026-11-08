@@ -217,3 +217,5 @@ FONT_PLAN = os.environ.get("CLONER_FONT_PLAN", "1") != "0"
 BACKFILL_PREFETCH = os.environ.get("CLONER_BACKFILL_PREFETCH", "1") != "0"
 # 首导航静置: 导航前挂请求追踪, load 只被挂起请求拖住时不再等满上限
 NAV_STALE_GATE = os.environ.get("CLONER_NAV_STALE_GATE", "1") != "0"
+# 修复循环: 结构性缺失(样式表/字体)与上一轮完全相同(回补补不上)即收敛
+REPAIR_STRUCT_SAME_STOP = os.environ.get("CLONER_REPAIR_STRUCT_SAME_STOP", "1") != "0"

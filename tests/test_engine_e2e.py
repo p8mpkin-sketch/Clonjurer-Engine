@@ -112,6 +112,12 @@ for(var k=0;k<3;k++){var d=document.createElement('div');d.className='item';d.te
 SITE["hang.html"] = """<!doctype html><html><head><meta charset="utf-8"><title>Hang</title></head>
 <body><h1>Content ready early</h1><p>Body text that renders before a hung pixel.</p>
 <img src="/hang/pixel.gif" width="1" height="1" alt=""></body></html>"""
+SITE["repair.html"] = """<!doctype html><html><head><meta charset="utf-8"><title>Repair</title>
+<link rel="stylesheet" href="/css/dead-404.css"></head>
+<body><h1>Repair loop fixture</h1><div id="slot"></div>
+<script>var i=document.createElement('img');i.width=900;i.height=600;
+i.src='/img/rt_'+(location.hostname==='localhost'?'a':'b')+'.png';document.getElementById('slot').appendChild(i);</script>
+</body></html>"""
 SITE["fonts.html"] = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>Fonts</title><link rel="stylesheet" href="/css/fonts.css"></head>
 <body><h1 class="ff">Plain latin heading only</h1><p class="ff">Second paragraph</p></body></html>"""
@@ -155,6 +161,8 @@ class EngineEndToEnd(unittest.TestCase):
             (img / f"{name}.png").write_bytes(_png(200, 120, rgb))
         (img / "bg.png").write_bytes(PNG_1PX)
         (img / "apibg.png").write_bytes(_png(8, 8, (1, 2, 3)))
+        (img / "rt_a.png").write_bytes(_png(900, 600, (200, 0, 0)))
+        (img / "rt_b.png").write_bytes(_png(900, 600, (200, 0, 0)))
         fonts = site / "fonts"
         fonts.mkdir(parents=True, exist_ok=True)
         real = next((Path(__file__).resolve().parent.parent / "static_vendor" / "fonts").glob("*.woff2")).read_bytes()
@@ -301,6 +309,15 @@ class EngineEndToEnd(unittest.TestCase):
         self.assertIsNotNone(m, log[:2000])
         self.assertLess(float(m.group(1)), 6.0, "\n".join(log.splitlines()[:12]))
         self.assertIn("Content ready early", (ws / "index.html").read_text(encoding="utf-8"))
+
+    def test_repair_loop_stops_when_structural_missing_unchanged(self):
+        """结构性缺失(死样式表)回补补不上、每轮只补回非结构资源时, 第 2 轮即收敛。"""
+        port = self.httpd.server_address[1]
+        db, task = self._run_direct(f"http://localhost:{port}/repair.html")
+        self.assertEqual(task["status"], "completed", task.get("error_msg"))
+        ws = config.WORKSPACE_ROOT / str(task["id"])
+        log = (ws / "engine.log").read_text(encoding="utf-8")
+        self.assertIn("与上一轮相同", log, "\n".join(l for l in log.splitlines() if "RENDER" in l or "SMART" in l)[-3000:])
 
     def test_rich_page_crawler_mode(self):
         from core.browser_pool import SyncBrowserPool

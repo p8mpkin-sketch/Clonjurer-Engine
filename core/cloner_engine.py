@@ -619,6 +619,7 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
         repair_started = time.time()
         prev_sig, prev_score = None, None   # 收敛判定: 上一轮缺失数与分数
         stale_prev = False                   # 上一轮回补是否也未涨分
+        prev_struct = None                   # 上一轮的结构性缺失(样式表/字体)路径集合
         best = None                          # 最优轮快照(修复轮回退时恢复)
         for round_i in range(max(1, config.RENDER_REPAIR_ROUNDS)
                              if want_score else 1):
@@ -658,6 +659,17 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
                 self.log("RENDER", f"本轮缺失 {len(failed_local) + len(remote_missing)} 个均非样式表/字体,"
                                    f" 不再回补重渲染(交付与评分同为本轮产物)")
                 break
+            struct_now = {urlsplit(u).path for u in self._structural_missing(failed_local, remote_missing)}
+            if detail is not None and config.REPAIR_STRUCTURAL_ONLY and \
+                    getattr(config, "REPAIR_STRUCT_SAME_STOP", True) and \
+                    prev_struct is not None and struct_now == prev_struct:
+                # 只为结构性缺失才再渲染, 而上一轮回补后这批样式表/字体一个没补上(上游 404/鉴权/
+                # 连不上): 再回补 + 整页重渲染只会重复同样结果(CI allbirds 第 2、3 轮各 40s, 缺失
+                # 589→588、分数 91.7→91.7)
+                self.log("RENDER", f"结构性缺失 {len(struct_now)} 个与上一轮相同(回补补不上),"
+                                   f" 第 {round_i + 1} 轮收敛")
+                break
+            prev_struct = struct_now
             if detail is not None and detail["score"] >= config.REPAIR_STOP_SCORE:
                 # 已到顶(缺失的多是结账/埋点等不可见请求): 再回补一轮只花 20s 回源 + 一次渲染
                 self.log("RENDER", f"还原度 {detail['score']} 已达 {config.REPAIR_STOP_SCORE}, 不再回补")
