@@ -542,6 +542,27 @@ class FluidSizeProbe(unittest.TestCase):
                 b.close()
 
 
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class AltVariantImgFallback(unittest.TestCase):
+    """窄屏变体里没 src 的 <img>(抽取时脚本还没写)用主页同子树对应图补上: 先按 alt, 再按同数量按序。"""
+
+    def test_missing_src_filled_from_main(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 1440, "height": 800})
+                page.set_content('<!doctype html><body><section><img src="/a.png" alt="A"><img src="/b.png" alt="B"></section></body>')
+                alt = '<section><img alt="B"><img alt="A"><img alt="C" src="/c.png"></section>'
+                n = page.evaluate(ce.ALT_INJECT_JS, {"items": [{"path": "section:1", "own": "d", "alts": [{"bands": "t m", "html": alt}]}], "css": ""})
+                self.assertEqual(n, 1)
+                self.assertEqual(page.evaluate("window.__cvAltImgFixed"), 2)
+                srcs = page.evaluate("Array.from(document.querySelectorAll('[data-cv-vp=\"t m\"] img'), i => i.getAttribute('src'))")
+                self.assertEqual(srcs, ["/b.png", "/a.png", "/c.png"])
+            finally:
+                b.close()
+
+
 class CalibInjection(unittest.TestCase):
     def test_put_calib_band_wrapped(self):
         eng = ce.ClonerEngine.__new__(ce.ClonerEngine)

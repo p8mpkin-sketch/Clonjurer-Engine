@@ -759,12 +759,23 @@ STYLE_TEXTS_JS = r"""() => {
   const sheet = (sh) => { try { walk(sh.cssRules, []); } catch (e) {} };
   for (const sh of document.styleSheets) {
     const n = sh.ownerNode;
-    if (n && n.getAttribute && (n.hasAttribute('data-clone-bake') || n.hasAttribute('data-clone-vp') || n.hasAttribute('data-cssom'))) continue;
+    // 引擎的 CSSOM 副本(data-cssom)要算进主页规则集: 固化后原 <link> 表可能已停用/摘除, 不算副本就把整份主表
+    // 当成"窄屏才有"(solidjs 79KB 重注入)。烘焙表/分视口表仍不算
+    if (n && n.getAttribute && (n.hasAttribute('data-clone-bake') || n.hasAttribute('data-clone-vp'))) continue;
     sheet(sh);
   }
   try { for (const sh of document.adoptedStyleSheets || []) sheet(sh); } catch (e) {}
   return out;
 }"""
+
+# 窄屏首载页"到位"等待: 文字量 + 已有 src 的图片数 连续两次(250ms)不变即返回, 上限 ms
+NARROW_STABLE_JS = r"""(ms) => new Promise(res => {
+  let last = '', hits = 0;
+  const sig = () => { const im = document.images; let s = 0; for (const i of im) if (i.currentSrc) s++;
+    return (document.body ? document.body.innerText.length : 0) + '|' + im.length + '|' + s; };
+  const t = setInterval(() => { const v = sig(); if (v === last) { if (++hits >= 2) { clearInterval(t); res(1); } } else { hits = 0; last = v; } }, 250);
+  setTimeout(() => { clearInterval(t); res(0); }, ms);
+})"""
 
 ALT_INJECT_JS = r"""({items, css}) => {
   const resolve = (path) => {
@@ -780,9 +791,10 @@ ALT_INJECT_JS = r"""({items, css}) => {
   };
   // 先全部解析出主页元素再插入(插入会改变后续兄弟的同类序号)
   const plan = items.map(it => [resolve(it.path), it]).filter(x => x[0]);
-  let n = 0;
+  let n = 0, fixed = 0;
   for (const [el, it] of plan) {
     el.setAttribute('data-cv-vp', it.own);
+    const srcImgs = Array.from(el.querySelectorAll('img')).filter(s => s.getAttribute('src') || s.getAttribute('srcset'));
     let anchor = el;
     for (const alt of it.alts) {
       const t = document.createElement('template');
@@ -790,11 +802,23 @@ ALT_INJECT_JS = r"""({items, css}) => {
       const node = t.content.firstElementChild;
       if (!node) continue;
       node.setAttribute('data-cv-vp', alt.bands);
+      // 窄屏首载页抽取时脚本还没给 <img> 写 src(懒加载/按容器宽算地址的图片组件), 变体里只剩 alt 文字:
+      // 用主页同子树里的对应图(alt 相同, 或数量相同按序)补上, 至少显示桌面那张而不是裂图
+      const dstImgs = Array.from(node.querySelectorAll('img'));
+      const allImgs = Array.from(node.querySelectorAll('img'));
+      dstImgs.forEach((d, k) => {
+        if (d.getAttribute('src') || d.getAttribute('srcset')) return;
+        const m = (d.alt && srcImgs.find(s => s.alt === d.alt)) || (srcImgs.length === allImgs.length ? srcImgs[k] : null);
+        if (!m) return;
+        for (const a of ['src', 'srcset', 'sizes']) { const v = m.getAttribute(a); if (v) d.setAttribute(a, v); }
+        fixed++;
+      });
       anchor.after(node);
       anchor = node;
       n++;
     }
   }
+  window.__cvAltImgFixed = fixed;
   if (n) {
     const st = document.createElement('style');
     st.setAttribute('data-clone-vp', 'alt');

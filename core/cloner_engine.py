@@ -119,6 +119,7 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     SHOT_DIAG_JS,
     STORAGE_SNAPSHOT_JS,
     STYLE_TEXTS_JS,
+    NARROW_STABLE_JS,
     SUBTREE_SIZE_JS,
     TEXT_EXTRACT_JS,
     TIME_FREEZE_JS,
@@ -1478,6 +1479,12 @@ class ClonerEngine:
             p2.wait_for_timeout(400)
             p2.evaluate("window.scrollTo(0, 0)")
             p2.evaluate(CV_QUIET_JS, 300)
+        # 滚完再等页面"到位": 网络静默 + 文字量/已出 src 的图片数连续两次不变(水合晚到的表单、计数动画、
+        # 懒加载图片组件写 src 都在这之后才稳定; 抽早了变体里只剩 alt 文字与空计数, wix 手机首屏 ~40 分)
+        with suppress(Exception):
+            p2.wait_for_load_state("networkidle", timeout=3000)
+        with suppress(Exception):
+            p2.evaluate(NARROW_STABLE_JS, 2500)
         with suppress(Exception):
             p2.evaluate(ANIM_PHASE_JS)
 
@@ -1532,8 +1539,12 @@ class ClonerEngine:
             css = ""
         n = page.evaluate(ALT_INJECT_JS, {"items": items, "css": css})
         if n:
+            fixed = 0
+            with suppress(Exception):
+                fixed = page.evaluate("window.__cvAltImgFixed || 0")
             self.log("RENDER", f"窄屏 DOM 变体: {len(items)} 处子树结构随视口不同, 并列插入 {n} 个窄屏版"
-                               f"({total // 1024}KB, 附窄屏运行时样式 {len(css) // 1024}KB)")
+                               f"({total // 1024}KB, 附窄屏运行时样式 {len(css) // 1024}KB"
+                               + (f", 补 {fixed} 张无 src 的图" if fixed else "") + ")")
         return n
 
     def _bg_freeze_css(self):
@@ -3021,7 +3032,7 @@ class ClonerEngine:
                 'case 6:return new _R(a[0],a[1],a[2],a[3],a[4],a[5]);default:return new _R(a[0],a[1],a[2],a[3],a[4],a[5],a[6]);}}'
                 'FD.prototype=_R.prototype;FD.now=function(){return __cap.getTime()};'
                 'FD.parse=_R.parse;FD.UTC=_R.UTC;window.Date=FD;'
-                '}catch(e){}})();</script>')
+                '}}catch(e){}})();</script>')   # if 块与 try 块各收一个括号(此前少一个, 整段语法错误从未生效)
             script = freeze_js.replace("__CAPTURE_ISO__", self._captured_at) + script
         return script
 
