@@ -118,6 +118,7 @@ jobs:
                       for b in (dd.get("broken") or [])[:20]: print("  裂图", b)
                       for f in (dd.get("failed") or [])[:30]: print("  失败", f)
                       for e in (dd.get("errors") or [])[:5]: print("  错误", e)
+                      for e in (dd.get("exceptions") or [])[:6]: print("  异常定位", e)
                       for sh in (dd.get("sheets") or [])[:40]: print("  样式表", sh)
                       for k, v in (dd.get("probe") or {}).items(): print(f"  探 {k}: {v}")
                       for st in (dd.get("styles") or [])[:60]: print("  style块", st)

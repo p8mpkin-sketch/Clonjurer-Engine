@@ -67,6 +67,8 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     AD_RECTS_JS,
     INTERSTITIAL_HIDE_JS,
     ROOT_FONT_APPLY_JS,
+    FLUID_READ_JS,
+    FLUID_APPLY_JS,
     ROOT_FONT_READ_JS,
     INTERSTITIAL_RESTORE_JS,
     ALT_EXTRACT_JS,
@@ -300,6 +302,51 @@ class _EditionDB:
 
     def __getattr__(self, name):
         return getattr(self._db, name)
+
+
+_FLUID_GEOM_RE = re.compile(r"(?:^|;)\s*(width|height|min-width|max-width|min-height|max-height|font-size|line-height|"
+                            r"letter-spacing|top|left|right|bottom|margin-[a-z]+|padding-[a-z]+|gap|column-gap|row-gap)\s*:\s*"
+                            r"(-?\d+(?:\.\d+)?)px\s*(!important)?(?=;|$)", re.I)
+
+
+def _fluid_elements(fa: dict, fb: dict, w1: float, w2: float, tol: float = 0.015):
+    """两个宽度下的 FLUID_READ_JS 快照 → 字号随宽同比的元素路径 + 内联 px 同比的属性(改 vw)。
+    同比: 值比 ≈ 宽比(±tol), 且值不同(定值不算)。"""
+    paths, inline = [], {}
+    if not fa or not fb or not w1 or not w2 or w1 == w2:
+        return {"paths": paths, "inline": inline}
+    ratio = w2 / w1
+    for path, va in fa.items():
+        vb = fb.get(path)
+        if not vb or vb[0] != va[0]:
+            continue
+        f1, f2 = va[1] or 0, vb[1] or 0
+        if f1 >= 6 and f2 > 0 and f1 != f2 and abs((f2 / f1) / ratio - 1) <= tol:
+            paths.append(path)
+        if va[2] and vb[2] and va[2] != vb[2]:
+            pb = {m.group(1).lower(): float(m.group(2)) for m in _FLUID_GEOM_RE.finditer(vb[2])}
+            for m in _FLUID_GEOM_RE.finditer(va[2]):
+                k, v1 = m.group(1).lower(), float(m.group(2))
+                v2 = pb.get(k)
+                if v2 is None or v1 == 0 or v1 == v2 or abs((v2 / v1) / ratio - 1) > tol:
+                    continue
+                inline.setdefault(path, {})[k] = f"{v1 / w1 * 100:.4f}vw"
+    return {"paths": paths, "inline": inline}
+
+
+def _regroup_css_rules(pairs) -> str:
+    """[(分组前缀 'head\x00head', 规则文本)] → 按前缀重新包回 @media/@supports/@layer 块的 CSS 文本。"""
+    groups = {}
+    for g, t in pairs:
+        groups.setdefault(g, []).append(t)
+    out = []
+    for g, rules in groups.items():
+        heads = [h for h in g.split("\x00") if h]
+        body = "\n".join(rules)
+        for h in reversed(heads):
+            body = h + "{\n" + body + "\n}"
+        out.append(body)
+    return "\n".join(out)
 
 
 class ClonerEngine:
@@ -1324,6 +1371,7 @@ class ClonerEngine:
         ROOT_FONT_READ_JS)。证据: 0.92 倍宽另开页面重新加载, 计算字号同比变化(±1.5%)才认; 只认内联写的
         (样式表里的 vw/媒体查询本就随视口)。认定后字体烘焙不烘字号/行高/字距(FONT_BAKE_NOSIZE_JS)。"""
         self._root_fluid = {}
+        self._fluid = None
         vp = page.viewport_size or {}
         width, height = vp.get("width") or 0, vp.get("height") or 0
         # 只在窄屏采集(手机版子克隆等)做: 桌面宽下按宽算的 rem 到了窄屏多半换公式/封顶, 改 vw 未必更近
@@ -1334,16 +1382,18 @@ class ClonerEngine:
         p2 = None
         try:
             a = page.evaluate(ROOT_FONT_READ_JS)
-            if not (a[1] or a[3]):
-                return
+            fa = page.evaluate(FLUID_READ_JS) or {}
             w2 = int(round(width * 0.92))
             p2 = page.context.new_page()
             p2.set_viewport_size({"width": w2, "height": height})
-            p2.goto(page.url, wait_until="load", timeout=12000)
+            p2.goto(page.url, wait_until="domcontentloaded", timeout=10000)
+            with suppress(Exception):
+                p2.wait_for_load_state("load", timeout=4000)
             p2.evaluate(CV_QUIET_JS, 300)
             b = p2.evaluate(ROOT_FONT_READ_JS)
+            fb = p2.evaluate(FLUID_READ_JS) or {}
         except Exception as exc:   # noqa: BLE001 探测失败不影响采集
-            self.log("WARN", f"rem 基准探测失败: {str(exc)[:120]}")
+            self.log("WARN", f"随宽同比探测失败: {str(exc)[:120]}")
             return
         finally:
             with suppress(Exception):
@@ -1355,6 +1405,11 @@ class ClonerEngine:
                 self._root_fluid[k] = f1 / a[0] * 100
         if self._root_fluid:
             self.log("RENDER", "rem 基准随视口宽: " + ", ".join(f"{k} {v:.3f}vw" for k, v in self._root_fluid.items()))
+        self._fluid = _fluid_elements(fa, fb, a[0] or width, b[0] or w2)
+        if self._fluid and (self._fluid["paths"] or self._fluid["inline"]):
+            self.log("RENDER", f"随宽同比: {len(self._fluid['paths'])} 个元素字号随视口宽(不烘字号),"
+                               f" {sum(len(v) for v in self._fluid['inline'].values())} 个内联 px 改写为 vw"
+                               f"(0.92 倍宽对照, 同比 ±1.5%)")
 
     def _start_narrow_loads(self, page, height):
         """同上下文另开平板/手机宽的页面重新加载目标页(只等到响应提交, 与主页后续采集并行):
@@ -1467,12 +1522,12 @@ class ClonerEngine:
                 alts += [{"bands": t, "html": h} for t, h in v.items()]
             own = " ".join(["d"] + [t for t in ("t", "m") if t not in v])
             items.append({"path": p, "own": own, "alts": alts})
-        css_main = set(page.evaluate(STYLE_TEXTS_JS) or [])
+        css_main = {(g, t) for g, t in (page.evaluate(STYLE_TEXTS_JS) or [])}
         extra = []
         for tag in {t for v in variants.values() for t in v}:
             with suppress(Exception):
-                extra += [t for t in (pages[tag].evaluate(STYLE_TEXTS_JS) or []) if t not in css_main]
-        css = "\n".join(dict.fromkeys(extra))[:config.VIEWPORT_VARIANT_BYTES]
+                extra += [(g, t) for g, t in (pages[tag].evaluate(STYLE_TEXTS_JS) or []) if (g, t) not in css_main]
+        css = _regroup_css_rules(dict.fromkeys(extra))[:config.VIEWPORT_VARIANT_BYTES]
         if re.search(r"</style", css, re.I):
             css = ""
         n = page.evaluate(ALT_INJECT_JS, {"items": items, "css": css})
@@ -1783,6 +1838,10 @@ class ClonerEngine:
             # 定时器已停, 页面脚本不会再改回 px
             with suppress(Exception):
                 page.evaluate(ROOT_FONT_APPLY_JS, self._root_fluid)
+        fl = getattr(self, "_fluid", None)
+        if fl and (fl["paths"] or fl["inline"]):
+            with suppress(Exception):
+                page.evaluate(FLUID_APPLY_JS, fl)
         if layout_stable:
             # DEEP_FREEZE 已停掉定时器: 此后页面脚本不再改 DOM, 回撤结果能留到序列化
             with suppress(Exception):

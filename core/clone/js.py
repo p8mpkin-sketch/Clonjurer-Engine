@@ -488,6 +488,7 @@ FONT_BAKE_JS = r"""
   try {
     const PROPS = ['font-family', 'font-size', 'font-weight', 'font-style',
                    'line-height', 'letter-spacing', 'color'];
+    const SIZEP = new Set(['font-size', 'line-height', 'letter-spacing']);
     const SKIP = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG', 'svg',
                           'PATH', 'path', 'IFRAME', 'CANVAS', 'VIDEO', 'IMG', 'BR', 'HEAD']);
     const MAX = 8000;
@@ -527,12 +528,16 @@ FONT_BAKE_JS = r"""
       const parent = el === root ? null : el.parentElement;
       const pv = parent ? comp(parent) : null;
       const diff = [];
+      // 字号随视口宽同比的元素(见 FLUID_READ_JS 探测): 字号/行高/字距交给样式表, 不钉成采集宽的 px
+      const fluid = el.hasAttribute('data-cv-fluidsz');
       for (let i = 0; i < PROPS.length; i++) {
         if (i === 0 && mine[0] === defFam) continue;
+        if (fluid && SIZEP.has(PROPS[i])) continue;
         if (!pv || pv[i] !== mine[i]) diff.push([PROPS[i], mine[i]]);
       }
       if (diff.length) plan.push([el, diff]);
     }
+    document.querySelectorAll('[data-cv-fluidsz]').forEach(e => e.removeAttribute('data-cv-fluidsz'));
     return __SCOPED_BAKE__('f', plan);
   } catch (e) { return 0; }
 }
@@ -733,15 +738,31 @@ SUBTREE_SIZE_JS = r"""(paths) => {
 }"""
 
 # 运行时样式文本(<style> 与文档级构造样式表): 窄屏版组件的 CSS-in-JS 样式只在窄屏页里有
+# 页面全部样式规则的逐条文本(含 <link> 表、<style>、adoptedStyleSheets; 分组规则 @media/@supports/@layer 递归到
+# 叶子, 叶子带上分组前缀)。窄屏首载页与主页按规则做差, 只把主页没有的规则注入窄屏段 —— 此前按整个 <style>
+# 文本做差, 同一份样式表在两页里序列化略有不同就被当成"窄屏才有", 整表再注入一遍到手机段, 层叠顺序被打乱
+# (solidjs 手机端链接下划线/字体回落, 基础层被后注入的副本盖掉)
 STYLE_TEXTS_JS = r"""() => {
   const out = [];
-  const txt = (sheet) => { try { let t = ''; for (const r of sheet.cssRules) t += r.cssText + '\n'; return t; } catch (e) { return ''; } };
-  for (const st of document.querySelectorAll('style')) {
-    if (st.hasAttribute('data-clone-bake') || st.hasAttribute('data-clone-vp') || st.hasAttribute('data-cssom')) continue;
-    const t = st.sheet ? txt(st.sheet) : (st.textContent || '');
-    if (t.trim()) out.push(t);
+  const walk = (rules, prefix) => {
+    for (const r of rules) {
+      let p = null;
+      if (r.cssRules && (r.conditionText !== undefined || r instanceof CSSLayerBlockRule)) {
+        const head = r instanceof CSSMediaRule ? '@media ' + r.conditionText
+          : r instanceof CSSSupportsRule ? '@supports ' + r.conditionText
+          : (r instanceof CSSLayerBlockRule ? '@layer ' + r.name : '');
+        if (head) { walk(r.cssRules, prefix.concat(head)); continue; }
+      }
+      out.push([prefix.join('\x00'), r.cssText]);
+    }
+  };
+  const sheet = (sh) => { try { walk(sh.cssRules, []); } catch (e) {} };
+  for (const sh of document.styleSheets) {
+    const n = sh.ownerNode;
+    if (n && n.getAttribute && (n.hasAttribute('data-clone-bake') || n.hasAttribute('data-clone-vp') || n.hasAttribute('data-cssom'))) continue;
+    sheet(sh);
   }
-  try { for (const sh of document.adoptedStyleSheets || []) { const t = txt(sh); if (t.trim()) out.push(t); } } catch (e) {}
+  try { for (const sh of document.adoptedStyleSheets || []) sheet(sh); } catch (e) {}
   return out;
 }"""
 
@@ -1931,4 +1952,43 @@ ROOT_FONT_APPLY_JS = r"""(m) => {
     n++;
   }
   return n;
+}"""
+
+# 逐元素"随宽同比"探测(窄屏采集): 0.92 倍宽另开页面对照, 计算字号与宽度同比的元素字体烘焙不烘字号/
+# 行高/字距; 内联 px 几何值与宽度同比的改写成 vw。站点按容器宽算字号(wix 手机版 h1 = 宽 × 0.1056)
+# 时, 390 采集 → 420/440 真机全站字号钉在 390 的值(小 7~11%, 整页逐段上移, 像素分 ~40)。
+# 读: {路径: [标签, 计算字号 px, 内联 style]}
+FLUID_READ_JS = r"""() => {
+  const out = {}, pathOf = """ + CV_PATH_FN + r""";
+  const els = Array.from(document.body ? document.body.querySelectorAll('*') : []).slice(0, 20000);
+  for (const e of els) {
+    if (e.closest('svg')) continue;
+    const st = e.getAttribute('style') || '';
+    let fs = 0;
+    if (e.firstChild || st) fs = parseFloat(getComputedStyle(e).fontSize) || 0;
+    out[pathOf(e)] = [e.tagName, fs, st];
+  }
+  return out;
+}"""
+# 写: {paths: [字号随宽的路径], inline: {路径: {属性: 'Xvw'}}} → 标 data-cv-fluidsz(烘焙跳过字号类), 内联改 vw
+FLUID_APPLY_JS = r"""({paths, inline}) => {
+  const resolve = (path) => {
+    let e = document.body;
+    for (const seg of path ? path.split('>') : []) {
+      const [tag, n] = seg.split(':');
+      let k = 0, hit = null;
+      for (const c of e.children) if (c.tagName.toLowerCase() === tag && ++k === +n) { hit = c; break; }
+      if (!hit) return null;
+      e = hit;
+    }
+    return e;
+  };
+  let marked = 0, vw = 0;
+  for (const p of paths || []) { const e = resolve(p); if (e) { e.setAttribute('data-cv-fluidsz', ''); marked++; } }
+  for (const [p, props] of Object.entries(inline || {})) {
+    const e = resolve(p);
+    if (!e) continue;
+    for (const [k, v] of Object.entries(props)) { e.style.setProperty(k, v, e.style.getPropertyPriority(k)); vw++; }
+  }
+  return {marked, vw};
 }"""

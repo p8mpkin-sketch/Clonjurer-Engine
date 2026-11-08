@@ -167,6 +167,18 @@ def _shoot(ctx, url, vp, out: Path, timeout_ms=45000, extra_wait_ms=0):
         [rs.url[-120:], str(rs.status), rs.request.resource_type]))
     page.on("pageerror", lambda e: len(errors) < 10 and errors.append(
         (str(e)[:160] + " @ " + str(getattr(e, "stack", "") or "").split("\n")[1:2].__str__()[:200])))
+    # 语法错误没有栈: 走 CDP 拿到出错脚本的 URL 与行列, 再从页面源码截出那一行(定位是哪段注入/改写的脚本)
+    exc_locs = []
+    try:
+        cdp = ctx.new_cdp_session(page)
+        cdp.send("Runtime.enable")
+        cdp.on("Runtime.exceptionThrown", lambda ev: len(exc_locs) < 6 and exc_locs.append(
+            [((ev.get("exceptionDetails") or {}).get("text") or "")[:120],
+             (ev.get("exceptionDetails") or {}).get("url") or "",
+             (ev.get("exceptionDetails") or {}).get("lineNumber"),
+             (ev.get("exceptionDetails") or {}).get("columnNumber")]))
+    except Exception:   # noqa: BLE001
+        pass
     page.on("console", lambda m: m.type == "error" and len(errors) < 10 and errors.append(
         "console: " + m.text[:160] + " @ " + str((m.location or {}).get("url", ""))[-100:]
         + ":" + str((m.location or {}).get("line_number", ""))))
@@ -207,6 +219,15 @@ def _shoot(ctx, url, vp, out: Path, timeout_ms=45000, extra_wait_ms=0):
             d = page.evaluate(DIAG_JS) or {}
             d["failed"] = failed
             d["errors"] = errors
+            if exc_locs:
+                src_lines = None
+                with suppress(Exception):
+                    src_lines = page.request.get(url, timeout=15000).text().splitlines()
+                for ex in exc_locs:
+                    if src_lines and ex[1] in (url, page.url) and isinstance(ex[2], int) and 0 <= ex[2] < len(src_lines):
+                        col = ex[3] or 0
+                        ex.append(src_lines[ex[2]][max(0, col - 160):col + 120])
+                d["exceptions"] = exc_locs
             info["diag"] = d
         info["ok"] = True
     except Exception as exc:   # noqa: BLE001 单侧失败记入结果

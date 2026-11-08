@@ -493,6 +493,55 @@ class RootFontFluid(unittest.TestCase):
                 b.close()
 
 
+FLUID_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<style>#css{font-size:10vw}#fixed{font-size:18px}</style></head><body style="margin:0">
+<h1 id="css">CSS 随宽</h1><p id="fixed">定值</p>
+<h2 id="js">脚本随宽</h2><div id="box" style="color:red">盒</div>
+<script>function f(){document.getElementById('js').style.fontSize = (innerWidth * 0.1) + 'px';
+document.getElementById('box').style.width = (innerWidth * 0.8) + 'px';}
+addEventListener('resize', f); f();</script></body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class FluidSizeProbe(unittest.TestCase):
+    """字号/内联 px 随视口宽同比(0.92 倍宽对照): 烘焙不钉字号, 内联 px 改 vw; 定值照旧烘焙。"""
+
+    def test_fluid_elements_not_pinned(self):
+        from playwright.sync_api import sync_playwright
+        eng = ce.ClonerEngine.__new__(ce.ClonerEngine)
+        eng.cfg, logs = {}, []
+        eng.log = lambda level, msg: logs.append(msg)
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                ctx = b.new_context(viewport={"width": 390, "height": 800})
+                ctx.route("http://fluid.test/", lambda r: r.fulfill(body=FLUID_PAGE, content_type="text/html"))
+                page = ctx.new_page()
+                page.goto("http://fluid.test/")
+                eng._probe_root_font(page)
+                self.assertEqual(eng._root_fluid, {})
+                fl = eng._fluid
+                self.assertEqual(sorted(fl["paths"]), ["h1:1", "h2:1"])
+                self.assertEqual(fl["inline"], {"h2:1": {"font-size": "10.0000vw"}, "div:1": {"width": "80.0000vw"}})
+                self.assertEqual(len(ctx.pages), 1)
+                page.evaluate(ce.FLUID_APPLY_JS, fl)
+                self.assertEqual(page.evaluate("document.getElementById('js').style.fontSize"), "10vw")
+                self.assertGreater(page.evaluate(ce.FONT_BAKE_JS), 0)
+                self.assertEqual(page.evaluate("document.querySelectorAll('[data-cv-fluidsz]').length"), 0)
+                bake = page.evaluate("document.querySelector('style[data-clone-bake]').textContent")
+                self.assertIn("font-size:18px", bake)        # 定值照烘
+                self.assertNotIn("font-size:39px", bake)     # 随宽的不钉 390 宽的值
+                html = page.content().replace("addEventListener('resize', f); f();", "")
+                page2 = b.new_page(viewport={"width": 420, "height": 800})
+                page2.set_content(ce.scope_bake_css(html, 320))
+                self.assertEqual(page2.evaluate("getComputedStyle(document.getElementById('css')).fontSize"), "42px")
+                self.assertEqual(page2.evaluate("getComputedStyle(document.getElementById('js')).fontSize"), "42px")
+                self.assertAlmostEqual(page2.evaluate("document.getElementById('box').getBoundingClientRect().width"), 336, delta=1)
+                self.assertEqual(page2.evaluate("getComputedStyle(document.getElementById('fixed')).fontSize"), "18px")
+            finally:
+                b.close()
+
+
 class CalibInjection(unittest.TestCase):
     def test_put_calib_band_wrapped(self):
         eng = ce.ClonerEngine.__new__(ce.ClonerEngine)
