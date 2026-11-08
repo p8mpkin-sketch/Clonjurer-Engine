@@ -327,7 +327,8 @@ DIAG_JS = r"""() => {
           idx = tops.length;
           try { ch.setAttribute('data-pi', String(idx)); } catch (e) {}   // 截图已拍, 打下标供随后按路径点名转储规则
           tops.push([key12(ch), Math.round(r.top + scrollY), Math.round(r.height), (ch.getAttribute('class') || '').slice(0, 50) + ' | ' + (ch.getAttribute('style') || '').slice(0, 100)
-            + (ch.hasAttribute('data-cv-vp') ? ' cv-vp=' + ch.getAttribute('data-cv-vp') : '') + (ch.hasAttribute('data-cv') ? ' cv' : '')
+            + (ch.hasAttribute('data-cv-vp') ? ' cv-vp=' + ch.getAttribute('data-cv-vp') : '') + (ch.hasAttribute('data-cv') ? ' cv=' + ch.getAttribute('data-cv') : '')
+            + (/^(IMG|CANVAS|VIDEO|SVG)$/i.test(ch.tagName) ? ' a=' + (ch.getAttribute('width') || '-') + 'x' + (ch.getAttribute('height') || '-') + (ch.naturalWidth ? ' nat=' + ch.naturalWidth + 'x' + ch.naturalHeight : '') + ' box=' + Math.round(r.width) + 'x' + Math.round(r.height) + ' h=' + c.height + ' ar=' + c.aspectRatio : '')
             + (c.maxHeight !== 'none' ? ' mh=' + c.maxHeight : '') + (c.overflow !== 'visible' ? ' ov=' + c.overflow : '')
             + (c.display.indexOf('grid') >= 0 ? ' grid gtr=' + c.gridTemplateRows.slice(0, 80) + ' gtrSrc=' + gtrSrc(ch) + zeroRowDump(ch, c) : '') + (c.minHeight !== '0px' && c.minHeight !== 'auto' ? ' minh=' + c.minHeight : '')
             + ((ch.firstChild && ch.firstChild.nodeType === 3 && ch.firstChild.nodeValue.trim().length >= 3) ? ' f=' + c.fontSize + '/' + c.lineHeight + '/' + c.fontFamily.split(',')[0].slice(0, 16) : '')
