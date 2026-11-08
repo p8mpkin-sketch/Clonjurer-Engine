@@ -122,6 +122,8 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     SCROLL_TOP_JS,
     NARROW_STABLE_JS,
     DOM_COUNTS_JS,
+    HIDDEN_ROOTS_JS,
+    VISIBLE_PATHS_JS,
     SUBTREE_SIZE_JS,
     TEXT_EXTRACT_JS,
     TIME_FREEZE_JS,
@@ -1613,6 +1615,33 @@ class ClonerEngine:
         except Exception as exc:   # noqa: BLE001 探测失败就按原样抽取
             self.log("WARN", f"窄屏首载页 {tag} 随宽同比探测失败: {str(exc)[:120]}")
 
+    @staticmethod
+    def _hidden_root_variants(self, page, p2, main, other, top):
+        """桌面采集时整棵 display:none 的子树(手机版横幅/visible-xs 块), 窄屏首载页里可见, 且子树内任一元素的
+        class 或内联 style 与窄屏页不同 → 作为变体根返回(不与已有结构变体重叠)。桌面上这些子树的状态来自后台
+        脚本(轮播对不渲染的项翻页, 过渡事件不触发, 时间冻结截掉其兜底定时器 → 两项同时 active), 无法验证;
+        窄屏页里它渲染着、已静置, 才是该视口的真实状态(cgnpc 手机端横幅下多出一整项, 49 分)。"""
+        try:
+            roots = page.evaluate(HIDDEN_ROOTS_JS) or []
+            roots = [p for p in roots if p in other and p in main and not any(p == q or p.startswith(q + ">") for q in top)]
+            if not roots:
+                return []
+            vis = set(p2.evaluate(VISIBLE_PATHS_JS, roots) or [])
+        except Exception as exc:   # noqa: BLE001 诊断性增强, 失败不影响主流程
+            self.log("WARN", f"桌面隐藏子树窄屏对照失败: {str(exc)[:120]}")
+            return []
+        out = []
+        for p in roots:
+            if p not in vis:
+                continue
+            pre = p + ">"
+            diff = (other[p][1] != main[p][1] or other[p][2] != main[p][2]) or any(
+                k in other and (other[k][1] != v[1] or other[k][2] != v[2])
+                for k, v in main.items() if k.startswith(pre))
+            if diff and not any(p.startswith(q + ">") for q in out):
+                out.append(p)
+        return out
+
     def _inject_dom_variants(self, page, loads):
         """窄屏 DOM 变体(见 ALT_EXTRACT_JS): 结构不同的最上层子树把窄屏版并列插入主页。"""
         if not loads or not self.cfg.get("viewport_variants", True):
@@ -1627,14 +1656,20 @@ class ClonerEngine:
             for p in diff:
                 if not any(p.startswith(q + ">") for q in top):
                     top.append(p)
-            if not top or len(top) > config.VIEWPORT_VARIANT_MAX or tag not in pages:
+            if tag not in pages:
+                continue
+            # 桌面不渲染、窄屏可见的子树: 类或内联样式与窄屏首载页不同就整棵换成窄屏版(状态只在窄屏页里可信)
+            hidden_tops = ClonerEngine._hidden_root_variants(self, page, pages[tag], main, other, top)
+            top += hidden_tops
+            if not top or len(top) > config.VIEWPORT_VARIANT_MAX:
                 continue
             stable, counts = ClonerEngine._settle_narrow_page(pages[tag])
             ClonerEngine._fluidize_narrow_page(self, pages[tag], tag)
             mc = getattr(self, "_main_counts", {}) or {}
             self.log("RENDER", f"窄屏首载页 {tag}: {'到位' if stable else '到时限仍在变化'}, 控件 {counts.get('ctrl', '?')}"
                                f"(主页 {mc.get('ctrl', '?')}) / 按钮 {counts.get('btn', '?')}(主页 {mc.get('btn', '?')})"
-                               f" / 文字 {counts.get('text', '?')}(主页 {mc.get('text', '?')}); 结构不同子树 {len(top)}")
+                               f" / 文字 {counts.get('text', '?')}(主页 {mc.get('text', '?')}); 结构不同子树 {len(top) - len(hidden_tops)}"
+                               + (f", 桌面不渲染而窄屏状态不同的子树 {len(hidden_tops)}" if hidden_tops else ""))
             with suppress(Exception):
                 htmls = pages[tag].evaluate(ALT_EXTRACT_JS, top) or {}
                 sizes = page.evaluate(SUBTREE_SIZE_JS, list(htmls))
@@ -1643,7 +1678,8 @@ class ClonerEngine:
                     alt_ctrl = alt_rest[0] if alt_rest else 0
                     main_ctrl = main_rest[0] if main_rest else 0
                     # 窄屏版明显"更空": 多半是异步内容(赞助位/推荐流)还没到, 不是换了结构
-                    if alt_text < 0.5 * main_text or alt_n < 0.3 * main_n:
+                    # (桌面不渲染的子树 innerText 退化为 textContent, 含未激活项的文字, 不比文字量)
+                    if (alt_text < 0.5 * main_text and p not in hidden_tops) or alt_n < 0.3 * main_n:
                         continue
                     # 窄屏版表单控件比主页少: 组件晚水合(wix 首屏邮箱表单在窄屏页里时有时无 → 手机端整块表单消失),
                     # 不是响应式换结构; 退回主页子树 + 分视口样式

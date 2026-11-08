@@ -788,6 +788,40 @@ NARROW_STABLE_JS = r"""(ms) => new Promise(res => {
   setTimeout(() => { clearInterval(t); res(0); }, ms);
 })"""
 
+# 桌面采集视口下整棵不渲染(display:none)的子树根: 父元素可见、自身 display:none、子树 ≥3 个元素。
+# 这类子树(手机版横幅/visible-xs 块)的类与内联样式在桌面无从验证 —— 后台脚本照样驱动它们(Bootstrap 轮播对
+# display:none 的项翻页, 过渡事件永不触发、时间冻结又截掉 600ms 兜底定时器, 序列化时两项都带 active),
+# 窄屏首载页里它可见且已静置, 其版本才是该视口的真实状态(见 _inject_dom_variants)
+HIDDEN_ROOTS_JS = r"""() => {
+  const out = [], pathOf = __CV_PATH__;
+  for (const e of document.body ? document.body.querySelectorAll('*') : []) {
+    if (out.length >= 200) break;
+    if (e.getClientRects().length || /^(SCRIPT|STYLE|TEMPLATE|NOSCRIPT|LINK|META)$/.test(e.tagName)) continue;
+    const p = e.parentElement;
+    if (!p || !p.getClientRects().length) continue;
+    if (getComputedStyle(e).display !== 'none') continue;
+    if (e.getElementsByTagName('*').length < 3) continue;
+    out.push(pathOf(e));
+  }
+  return out;
+}""".replace("__CV_PATH__", CV_PATH_FN)
+
+# 给定路径里在本页实际渲染(有盒)的那些
+VISIBLE_PATHS_JS = r"""(paths) => {
+  const resolve = (path) => {
+    let e = document.body;
+    for (const seg of path ? path.split('>') : []) {
+      const [tag, n] = seg.split(':');
+      let k = 0, hit = null;
+      for (const c of e.children) if (c.tagName.toLowerCase() === tag && ++k === +n) { hit = c; break; }
+      if (!hit) return null;
+      e = hit;
+    }
+    return e;
+  };
+  return paths.filter(p => { const el = resolve(p); return !!(el && el.getClientRects().length); });
+}"""
+
 DOM_COUNTS_JS = r"""() => { const im = document.images; let s = 0; for (const i of im) if (i.currentSrc) s++;
   return { text: document.body ? document.body.innerText.length : 0, imgs: im.length, imgsrc: s,
     ctrl: document.querySelectorAll('input:not([type=hidden]),textarea,select').length,
