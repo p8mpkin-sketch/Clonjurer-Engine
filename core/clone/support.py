@@ -2757,3 +2757,151 @@ def xhost_mock_script(mock_entries, page_netloc: str) -> str:
     if not hosts:
         return ""
     return XHOST_MOCK_TEMPLATE.replace("__HOSTS__", json.dumps(hosts[:200]).replace("</", "<\\/"))
+
+
+# ---------------------------------------------------------------------------
+# 图片分片主机 / 变体就近解析: 运行时拼出来的图片地址(接口 JSON 里的底图 + 客户端追加的
+# "@672w_378h_1c.avif" 之类变换后缀, 主机在 i0/i1/i2 分片间轮换)整串对不上替换表, 克隆页里
+# 照旧外链, 离线评分被中止、离线交付破图; 而同一张底图的某个变体其实已经在资源池里。
+# 垫片在 <img>/<source> 的 src/srcset 赋值与解析器插入时, 把"同注册域主机 + 同路径"(精确, 或
+# 去掉 @ 后缀的底图路径)的外链指向资源池里的本地文件。跨主机命中要求文件名带内容哈希,
+# 免得 a.x.com/logo.png 与 b.x.com/logo.png 这类同名不同图串号。开关 CLONER_IMG_SHARD_RESOLVE=0。
+IMG_SHARD_RESOLVE = os.environ.get("CLONER_IMG_SHARD_RESOLVE", "1") != "0"
+_SHARD_IMG_EXT_RE = re.compile(r"\.(?:png|jpe?g|gif|webp|avif|svg|bmp|ico)$", re.I)
+_SECOND_LEVEL = {"com", "net", "org", "gov", "edu", "co", "ac", "ne", "or"}
+
+
+def host_suffix(host: str) -> str:
+    """近似注册域(与垫片里的 JS 同口径): 末两段, 二级公共后缀(com.cn/co.uk 等)取末三段; IP 原样。"""
+    host = (host or "").lower()
+    labels = host.split(".")
+    if re.fullmatch(r"[\d.]+", host) or len(labels) <= 2:
+        return host
+    if len(labels) >= 3 and len(labels[-1]) == 2 and labels[-2] in _SECOND_LEVEL:
+        return ".".join(labels[-3:])
+    return ".".join(labels[-2:])
+
+
+IMG_SHARD_TEMPLATE = r"""<script data-clone-preview="img-shard">(function(){try{var G=__MAP__;var SL=['com','net','org','gov','edu','co','ac','ne','or'];var sfx=function(h){h=String(h).toLowerCase();var l=h.split('.');if(/^[\d.]+$/.test(h)||l.length<=2)return h;if(l.length>=3&&l[l.length-1].length===2&&SL.indexOf(l[l.length-2])>=0)return l.slice(-3).join('.');return l.slice(-2).join('.');};var ok=function(eh,h,p){if(eh===h)return true;var st=p.split('/').pop().replace(/\.[a-z0-9]+$/i,'');return /[0-9a-f]{16,}/i.test(st)||st.length>=24;};var loc=function(v){return (window.__CLONE_PREVIEW_BASE__||'/')+String(v).replace(/^\/+/,'');};var res=function(u){try{if(u==null)return null;var s=String(u);if(!s||/^(data|blob|about|javascript):/i.test(s))return null;var x=new URL(s,location.href);if(x.host===location.host||(x.protocol!=='http:'&&x.protocol!=='https:'))return null;var g=G[sfx(x.hostname)];if(!g)return null;var p=x.pathname;var e=g.e[p+x.search];if(e&&ok(e[0],x.host,p))return loc(e[1]);var bs=p.split('@')[0];var v=g.b[bs];if(v&&ok(v[0],x.host,bs))return loc(v[1]);}catch(err){}return null;};var rss=function(v){try{if(v==null)return null;var ch=false;var out=String(v).split(',').map(function(c){var t=c.trim();var i=t.search(/\s/);var u=i<0?t:t.slice(0,i);var r=u&&res(u);if(r){ch=true;return r+(i<0?'':t.slice(i));}return t;});return ch?out.join(', '):null;}catch(err){return null;}};var hook=function(P,n,f){try{var d=Object.getOwnPropertyDescriptor(P,n);if(!d||!d.set)return;Object.defineProperty(P,n,{configurable:true,enumerable:d.enumerable,get:d.get,set:function(v){var r=f(v);return d.set.call(this,r||v);}});}catch(err){}};var I=window.HTMLImageElement&&HTMLImageElement.prototype,S=window.HTMLSourceElement&&HTMLSourceElement.prototype;if(I){hook(I,'src',res);hook(I,'srcset',rss);}if(S){hook(S,'src',res);hook(S,'srcset',rss);}var sa=Element.prototype.setAttribute;Element.prototype.setAttribute=function(n,v){try{var t=this.tagName;if(t==='IMG'||t==='SOURCE'){var ln=String(n).toLowerCase();var r=ln==='src'?res(v):(ln==='srcset'?rss(v):null);if(r)return sa.call(this,n,r);}}catch(err){}return sa.apply(this,arguments);};var fix=function(el){try{var t=el.tagName;if(t!=='IMG'&&t!=='SOURCE')return;var s=el.getAttribute('src');var r=s&&res(s);if(r)sa.call(el,'src',r);var ss=el.getAttribute('srcset');var rs=ss&&rss(ss);if(rs)sa.call(el,'srcset',rs);}catch(err){}};var scan=function(n){if(!n||n.nodeType!==1)return;fix(n);if(n.firstElementChild&&n.querySelectorAll){var l=n.querySelectorAll('img,source');for(var i=0;i<l.length;i++)fix(l[i]);}};new MutationObserver(function(ms){for(var i=0;i<ms.length;i++){var m=ms[i];if(m.type==='attributes')fix(m.target);else for(var j=0;j<m.addedNodes.length;j++)scan(m.addedNodes[j]);}}).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['src','srcset']});}catch(e){}})();</script>"""
+
+
+def img_shard_map(items, page_netloc: str, limit: int = 2000) -> dict:
+    """资源池 [(原地址, 本地路径, 字节数)] → {注册域: {"e": {路径+查询: [主机, 本地]}, "b": {底图路径: [主机, 本地]}}}。
+
+    同一底图多个变体取字节数最大的(大图缩小显示失真最小)。关闭开关时返回空表。"""
+    if not IMG_SHARD_RESOLVE:
+        return {}
+    groups: dict = {}
+    n = 0
+    for url, local, size in items or ():
+        try:
+            parts = urlsplit(url)
+        except ValueError:
+            continue
+        if parts.scheme not in ("http", "https") or not parts.netloc or parts.netloc == page_netloc:
+            continue
+        if not str(local or "").startswith("/static/"):
+            continue
+        base = parts.path.split("@", 1)[0]
+        if not _SHARD_IMG_EXT_RE.search(base):
+            continue
+        g = groups.setdefault(host_suffix(parts.hostname or ""), {"e": {}, "b": {}})
+        key = parts.path + (("?" + parts.query) if parts.query else "")
+        g["e"].setdefault(key, [parts.netloc, local])
+        cur = g["b"].get(base)
+        if cur is None or int(size or 0) > cur[2]:
+            g["b"][base] = [parts.netloc, local, int(size or 0)]
+        n += 1
+        if n >= limit:
+            break
+    for g in groups.values():
+        g["b"] = {k: v[:2] for k, v in g["b"].items()}
+    return groups
+
+
+_HASHY_STEM_RE = re.compile(r"[0-9a-f]{16,}", re.I)
+
+
+def _shard_ok(entry_host: str, host: str, path: str) -> bool:
+    if entry_host == host:
+        return True
+    stem = re.sub(r"\.[a-z0-9]+$", "", path.rsplit("/", 1)[-1], flags=re.I)
+    return bool(_HASHY_STEM_RE.search(stem)) or len(stem) >= 24
+
+
+def shard_resolve(groups: dict, url: str):
+    """与垫片里 res() 同口径的 Python 版: 绝对/协议相对的外域图片地址 → 本地路径, 未命中 None。"""
+    if not groups or not url:
+        return None
+    u = url.strip()
+    if u.startswith("//"):
+        u = "http:" + u
+    if not u.startswith(("http://", "https://")):
+        return None
+    try:
+        parts = urlsplit(u)
+    except ValueError:
+        return None
+    g = groups.get(host_suffix(parts.hostname or ""))
+    if not g:
+        return None
+    path = parts.path
+    e = g["e"].get(path + (("?" + parts.query) if parts.query else ""))
+    if e and _shard_ok(e[0], parts.netloc, path):
+        return e[1]
+    base = path.split("@", 1)[0]
+    v = g["b"].get(base)
+    if v and _shard_ok(v[0], parts.netloc, base):
+        return v[1]
+    return None
+
+
+_IMG_TAG_RE = re.compile(r"<(?:img|source)\b[^>]*>", re.I)
+_IMG_SRC_ATTR_RE = re.compile(r"""(\s(src|srcset)\s*=\s*)(["'])([^"'<>]*)\3""", re.I)
+
+
+def rewrite_img_shards(html: str, groups: dict):
+    """固化 HTML 里 <img>/<source> 的 src/srcset 外链按资源池就近改成本地(预加载扫描器在垫片之前就发请求,
+    且保真轨/静态版不跑脚本)。返回 (新 HTML, 改写个数)。"""
+    if not groups or not html:
+        return html, 0
+    count = 0
+
+    def attr(m):
+        nonlocal count
+        name, val = m.group(2).lower(), m.group(4)
+        if name == "src":
+            r = shard_resolve(groups, val)
+            if not r:
+                return m.group(0)
+            count += 1
+            return m.group(1) + m.group(3) + r + m.group(3)
+        out, changed = [], False
+        for c in val.split(","):
+            sp = c.strip().split(None, 1)
+            r = shard_resolve(groups, sp[0]) if sp else None
+            if r:
+                changed = True
+                out.append(r + ((" " + sp[1]) if len(sp) > 1 else ""))
+            else:
+                out.append(c.strip())
+        if not changed:
+            return m.group(0)
+        count += 1
+        return m.group(1) + m.group(3) + ", ".join(out) + m.group(3)
+
+    def tag(m):
+        t = m.group(0)
+        if "//" not in t:
+            return t
+        return _IMG_SRC_ATTR_RE.sub(attr, t)
+
+    return _IMG_TAG_RE.sub(tag, html), count
+
+
+def img_shard_script(groups: dict) -> str:
+    """分片/变体解析表 → 运行时垫片; 空表返回空串。"""
+    if not groups:
+        return ""
+    return IMG_SHARD_TEMPLATE.replace(
+        "__MAP__", json.dumps(groups, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/"))

@@ -232,6 +232,9 @@ from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部
     apply_replacements,
     apply_url_replacements,
     xhost_mock_script,
+    img_shard_map,
+    img_shard_script,
+    rewrite_img_shards,
     band_wrap,
     capture_band_floor,
     compute_visual_similarity,
@@ -269,6 +272,10 @@ class LocalizeMixin:
         self._fill_variants_bulk(pairs, [(url, info["local"]) for url, info in results.items()
                                          if url.split("#", 1)[0] not in selves],
                                  page_netloc)
+        # 图片分片/变体解析垫片的资源表随替换表一起按本轮资源池重算
+        self._img_shard_map = img_shard_map(
+            [(url, info.get("local"), info.get("size") or 0) for url, info in results.items()],
+            page_netloc)
         srcset_items = []
         for candidate, best in srcset_map.items():
             # 候选自身已落地(浏览器按 sizes 实际选中的那档, 活体复用/回补拿到)就用它自己:
@@ -408,9 +415,12 @@ class LocalizeMixin:
 
         xhost_script = xhost_mock_script(getattr(self, "_mock_raw", None) or (),
                                          urlsplit(self._target).netloc)
+        shard_map = getattr(self, "_img_shard_map", None) or {}
+        shard_script = img_shard_script(shard_map)
+        shard_total = 0
 
         def finalize(html: str, route: str) -> str:
-            nonlocal stripped_total
+            nonlocal stripped_total, shard_total
             # 模式策略包: 水合类站点以采集期静态 DOM 为权威, 落盘前剥离应用脚本
             # (活体阶段只对 Next/Nuxt 早识别剥离; 这里补齐识别后的整类开关)
             if strip_pack:
@@ -439,6 +449,10 @@ class LocalizeMixin:
                 localized, urlsplit(self._target).netloc)
             if xhost_script:
                 localized = self._inject_after_head(localized, xhost_script)
+            if shard_script:
+                localized, n_sh = rewrite_img_shards(localized, shard_map)
+                shard_total += n_sh
+                localized = self._inject_after_head(localized, shard_script)
             return _utf8_charset(_inject_responsive(localized, bool(self.cfg.get("responsive_enhance"))))
 
         html_pairs = _html_escaped_pairs(pairs)
@@ -450,6 +464,8 @@ class LocalizeMixin:
             if strip_pack and stripped_total and route == "/":
                 self.log("RENDER", f"策略包水合剥离({self._strategy_pack.pattern}): "
                                    f"落盘前剥离 {stripped_total} 个应用脚本, 静态 DOM 权威")
+            if shard_total and route == "/":
+                self.log("SMART-DL", f"图片分片/变体就近: HTML 里 {shard_total} 处外域图片指向资源池同底图本地文件")
             # 目录型目标页: 在原路径落一份副本(index.html), 使页面相对路径
             # (运行时拼接的懒加载 chunk 等)与原站解析一致
             if route == "/" and self._page_dir != "/":

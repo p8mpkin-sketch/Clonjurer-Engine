@@ -90,3 +90,106 @@ class BoundedCall(unittest.TestCase):
         finally:
             browser.close()
             pw.stop()
+
+
+PNG_1x1 = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+    "0000000d4944415478da63f8cfc0f01f0005000201e0a1b3a90000000049454e44ae426082")
+HASH = "a6fc20e8360913e8c796df1def661bf1d7f1b9c8"
+
+
+class ImgShardResolve(unittest.TestCase):
+    """运行时拼出的图片地址(换分片主机 / 追加 @变换后缀)就近指向资源池里同一底图的本地文件。"""
+
+    def test_host_suffix(self):
+        from core.clone.support import host_suffix
+        self.assertEqual(host_suffix("i1.hdslb.com"), "hdslb.com")
+        self.assertEqual(host_suffix("img.alicdn.com.cn"), "alicdn.com.cn")
+        self.assertEqual(host_suffix("a.b.co.uk"), "b.co.uk")
+        self.assertEqual(host_suffix("127.0.0.1"), "127.0.0.1")
+        self.assertEqual(host_suffix("localhost"), "localhost")
+
+    def test_map_builder(self):
+        import json
+        from core.clone.support import img_shard_map, img_shard_script
+        items = [
+            (f"http://i0.cdn.test/bfs/archive/{HASH}.jpg@100w.webp", "/static/img/s.webp", 10),
+            (f"http://i0.cdn.test/bfs/archive/{HASH}.jpg@900w.webp", "/static/img/l.webp", 900),
+            ("https://site.test/own.png", "/static/img/own.png", 5),       # 页面自身主机: 本就本地化
+            ("http://i0.cdn.test/api/feed", "/static/misc/f.json", 5),     # 非图片
+        ]
+        js = img_shard_script(img_shard_map(items, "site.test"))
+        m = json.loads(js.split("var G=", 1)[1].split(";var SL=", 1)[0])
+        self.assertEqual(list(m), ["cdn.test"])
+        self.assertEqual(m["cdn.test"]["b"][f"/bfs/archive/{HASH}.jpg"], ["i0.cdn.test", "/static/img/l.webp"])
+        self.assertEqual(len(m["cdn.test"]["e"]), 2)
+        self.assertEqual(img_shard_script(img_shard_map(items[2:], "site.test")), "")
+
+    def test_runtime_rewrite(self):
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("无 playwright")
+        from core.clone.support import img_shard_map, img_shard_script
+        items = [(f"http://i0.cdn.test/bfs/archive/{HASH}.jpg@672w_378h_1c_!cover.avif", "/static/img/a.png", 99),
+                 ("http://i0.cdn.test/bfs/static/logo.png@48w.avif", "/static/img/logo.png", 9)]
+        shim = img_shard_script(img_shard_map(items, "site.test"))
+        html = ("<html><head>" + shim + "</head><body>"
+                f"<img id=p src='//i2.cdn.test/bfs/archive/{HASH}.jpg@976w.avif'>"
+                "<div id=box></div><script>"
+                f"var a=new Image();a.id='js';a.src='http://i1.cdn.test/bfs/archive/{HASH}.jpg@672w_378h_1c.avif';"
+                "document.body.appendChild(a);"
+                f"document.getElementById('box').innerHTML=\"<img id=h src='https://i1.cdn.test/bfs/archive/{HASH}.jpg'>\";"
+                "var c=document.createElement('img');c.id='cross';c.setAttribute('src','http://i1.cdn.test/bfs/static/logo.png@48w.avif');"
+                "document.body.appendChild(c);"
+                "var d=document.createElement('img');d.id='same';d.src='http://i0.cdn.test/bfs/static/logo.png@96w.avif';"
+                "document.body.appendChild(d);"
+                "</script></body></html>")
+        try:
+            pw = sync_playwright().start()
+            browser = pw.chromium.launch()
+        except Exception as exc:
+            self.skipTest(f"无 chromium: {exc}")
+        try:
+            page = browser.new_page()
+            seen = []
+
+            def handle(route):
+                url = route.request.url
+                seen.append(url)
+                if url == "http://site.test/":
+                    route.fulfill(status=200, content_type="text/html", body=html)
+                elif url.startswith("http://site.test/static/img/"):
+                    route.fulfill(status=200, content_type="image/png", body=PNG_1x1)
+                else:
+                    route.abort()
+            page.route("**/*", handle)
+            page.goto("http://site.test/", wait_until="load")
+            page.wait_for_timeout(300)
+            src = {i: page.get_attribute("#" + i, "src") for i in ("p", "js", "h", "cross", "same")}
+            self.assertEqual(src["p"], "/static/img/a.png")        # 解析器插入: 换分片主机 + 换后缀
+            self.assertEqual(src["js"], "/static/img/a.png")       # .src 赋值
+            self.assertEqual(src["h"], "/static/img/a.png")        # innerHTML 插入, 无后缀底图
+            self.assertTrue(src["cross"].startswith("http://i1."))  # 跨主机且无内容哈希: 不串号
+            self.assertEqual(src["same"], "/static/img/logo.png")  # 同主机同底图: 变体就近
+            self.assertTrue(page.evaluate("document.getElementById('js').naturalWidth") > 0)
+            # 脚本插入/赋值的图片不再外发(解析器插入的那张由预加载扫描器先发, 由 HTML 侧改写覆盖)
+            self.assertFalse([u for u in seen if "cdn.test" in u and HASH in u and "976w" not in u])
+
+        finally:
+            browser.close()
+            pw.stop()
+
+    def test_html_rewrite(self):
+        from core.clone.support import img_shard_map, rewrite_img_shards
+        g = img_shard_map([(f"http://i0.cdn.test/bfs/archive/{HASH}.jpg@672w.avif", "/static/img/a.avif", 5),
+                           ("http://i0.cdn.test/bfs/static/logo.png", "/static/img/logo.png", 5)], "site.test")
+        html = (f'<img alt=x src="//i1.cdn.test/bfs/archive/{HASH}.jpg@976w_550h_!cover" '
+                f'srcset="http://i2.cdn.test/bfs/archive/{HASH}.jpg@2x.avif 2x, /local/y.png 1x">'
+                '<img src="//i1.cdn.test/bfs/static/logo.png"><script src="//i1.cdn.test/bfs/x.js"></script>'
+                f'<a href="//i1.cdn.test/bfs/archive/{HASH}.jpg">link</a>')
+        out, n = rewrite_img_shards(html, g)
+        self.assertEqual(n, 2)
+        self.assertIn('src="/static/img/a.avif" srcset="/static/img/a.avif 2x, /local/y.png 1x"', out)
+        self.assertIn('<img src="//i1.cdn.test/bfs/static/logo.png">', out)   # 跨主机无哈希不动
+        self.assertIn(f'<a href="//i1.cdn.test/bfs/archive/{HASH}.jpg">', out)  # 只动 img/source
