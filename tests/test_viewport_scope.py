@@ -1181,3 +1181,59 @@ class VariantNormalizesCycledGroup(unittest.TestCase):
                 self.assertEqual(shown, ["甲"])
             finally:
                 b.close()
+
+
+LOAD_ONCE_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<style>body{margin:0}img{display:block;width:100%}</style></head><body><header>站头</header>
+<main id="m"></main>
+<script>
+var m = document.getElementById('m');
+if (innerWidth >= 1000) {
+  m.innerHTML = '<div class="cards"><div class="card">甲</div><div class="card">乙</div></div>';
+} else {
+  // 图片组件只在加载时按宽度写一次 height px(wix 图片组件), resize 不重写
+  var h = Math.round(innerWidth * 0.8333 * 0.889);
+  m.innerHTML = '<section class="hero"><img id="pic" style="height:' + h + 'px" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt=""><p>手机版文案在图片下面</p></section>';
+}
+</script></body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class FluidPairPage(unittest.TestCase):
+    """只在加载时按宽度写一次的内联 height px: 同页三点采样(resize)看不出, 0.92 倍宽的另一张首载页对照认出同比 → vw。"""
+
+    def test_load_once_height_follows_width(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 1440, "height": 800})
+                page.set_content(LOAD_ONCE_PAGE)
+                eng = _FakeEngine()
+                logs = []
+                eng.log = lambda *a: logs.append(a[-1])
+                eng._cv_pages = []
+                p2 = b.new_page(viewport={"width": 390, "height": 800})
+                p2.set_content(LOAD_ONCE_PAGE)
+                p3 = b.new_page(viewport={"width": 359, "height": 800})
+                p3.set_content(LOAD_ONCE_PAGE)
+                eng._cv_pages.append(("m", p2))
+                eng._cv_pair = {"m": (p3, 359)}
+                loads = {"m": p2.evaluate(ce.CV_PATHS_JS)}
+                n = ce.ClonerEngine._inject_dom_variants(eng, page, loads)
+                self.assertEqual(n, 1)
+                self.assertTrue(any("首载对照页认出" in l for l in logs), logs)
+                html = page.content()
+            finally:
+                b.close()
+            html = ce.scope_viewport_css(html, 1000, 0).replace("<script>", "<script type='x'>")
+            b = p.chromium.launch()
+            try:
+                for w in (360, 420, 440):
+                    pg = b.new_page(viewport={"width": w, "height": 800})
+                    pg.set_content(html)
+                    h = pg.evaluate("document.getElementById('pic').getBoundingClientRect().height")
+                    self.assertAlmostEqual(h, w * 0.8333 * 0.889, delta=1.5, msg=f"{w}: {h}")
+                    pg.close()
+            finally:
+                b.close()

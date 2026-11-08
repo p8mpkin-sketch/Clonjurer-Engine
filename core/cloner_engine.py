@@ -1483,6 +1483,7 @@ class ClonerEngine:
         只在加载时按宽度写一次的内联样式, 缩放采不到, 要靠窄屏首载对照(见 CV_EMIT_JS)。"""
         self._cv_pages = []
         self._cv_extra_ctx = []
+        self._cv_pair = {}
         for tag, w in (("t", 768), ("m", 390)):
             p2 = None
             try:
@@ -1504,6 +1505,18 @@ class ClonerEngine:
                 p2.set_viewport_size({"width": w, "height": height})
                 p2.goto(page.url, wait_until="commit", timeout=10000)
                 self._cv_pages.append((tag, p2))
+                # 手机页旁再开一张 0.92 倍宽的首载对照页(同上下文): 只在加载时按宽度写一次的内联尺寸(wix 图片组件
+                # 的 height px)缩放不会重写, 同页三点采样看不出; 两张不同宽度的首载页对照才认得出同比
+                if tag == "m" and getattr(config, "NARROW_FLUID_PAIR", True):
+                    w2 = int(round(w * 0.92))
+                    try:
+                        p3 = p2.context.new_page()
+                        p3.on("response", lambda r: self._on_asset_response(r, bodies=False))
+                        p3.set_viewport_size({"width": w2, "height": height})
+                        p3.goto(page.url, wait_until="commit", timeout=10000)
+                        self._cv_pair[tag] = (p3, w2)
+                    except Exception as exc:   # noqa: BLE001 对照页可有可无
+                        self.log("WARN", f"窄屏首载对照页({w2}px)启动失败: {str(exc)[:120]}")
             except Exception as exc:
                 with suppress(Exception):
                     if p2 is not None:
@@ -1530,6 +1543,14 @@ class ClonerEngine:
                                  f"该宽度无首载对照/变体")
                 with suppress(Exception):
                     p2.close()
+        for tag, (p3, _w) in list((getattr(self, "_cv_pair", {}) or {}).items()):
+            try:
+                left = max(0.5, budget_s - (time.monotonic() - t0))
+                p3.wait_for_load_state("load", timeout=int(left * 1000))
+            except Exception:   # noqa: BLE001
+                with suppress(Exception):
+                    p3.close()
+                self._cv_pair.pop(tag, None)
         return loads
 
     def _close_narrow_loads(self):
@@ -1537,6 +1558,10 @@ class ClonerEngine:
             with suppress(Exception):
                 p2.close()
         self._cv_pages = []
+        for p3, _w in (getattr(self, "_cv_pair", {}) or {}).values():
+            with suppress(Exception):
+                p3.close()
+        self._cv_pair = {}
         for ctx2 in getattr(self, "_cv_extra_ctx", []) or []:
             with suppress(Exception):
                 ctx2.close()
@@ -1608,11 +1633,36 @@ class ClonerEngine:
             w2, w3 = int(round(w1 * 0.92)), int(round(w1 * 1.128))
             fb = samples.get(w2) or {}
             fl = _fluid_elements(fa, fb, w1, w2, fc=samples.get(w3) or None, w3=w3)
+            # 另一张不同宽度的首载页对照: 只在加载时按宽度写一次的内联尺寸(缩放不重写, 上面三点看不出)
+            pair_n = 0
+            pair = (getattr(self, "_cv_pair", {}) or {}).get(tag)
+            if pair:
+                p3, wp = pair
+                try:
+                    with suppress(Exception):
+                        p3.evaluate(CV_QUIET_JS, 300)
+                    with suppress(Exception):
+                        p3.evaluate(NARROW_STABLE_JS, 1500)
+                    fp = p3.evaluate(FLUID_READ_JS) or {}
+                    fl2 = _fluid_elements(fa, fp, w1, wp)
+                    for path, props in fl2["inline"].items():
+                        cur = fl["inline"].setdefault(path, {})
+                        for k, v in props.items():
+                            if k not in cur:
+                                cur[k] = v
+                                pair_n += 1
+                    for path in fl2["paths"]:
+                        if path not in fl["paths"]:
+                            fl["paths"].append(path)
+                            pair_n += 1
+                except Exception as exc:   # noqa: BLE001
+                    self.log("WARN", f"窄屏首载对照页({tag})读取失败: {str(exc)[:120]}")
             if fl["paths"] or fl["inline"]:
                 res = p2.evaluate(FLUID_APPLY_JS, fl) or {}
                 piece = sum(1 for v in fl["inline"].values() for x in v.values() if x.startswith(("min(", "max(")))
                 self.log("RENDER", f"窄屏首载页 {tag} 随宽同比: {res.get('vw', 0)} 个内联 px/尺寸属性改写为 vw(其中 {piece} 个封顶/垫底),"
-                                   f" {res.get('marked', 0)} 个元素字号随宽(0.92/1.128 倍宽对照, 同比 ±1.5%)")
+                                   f" {res.get('marked', 0)} 个元素字号随宽(0.92/1.128 倍宽对照, 同比 ±1.5%)"
+                                   + (f"; 其中 {pair_n} 项只在首载时按宽度写一次, 由 {pair[1]}px 首载对照页认出" if pair_n else ""))
         except Exception as exc:   # noqa: BLE001 探测失败就按原样抽取
             self.log("WARN", f"窄屏首载页 {tag} 随宽同比探测失败: {str(exc)[:120]}")
 
