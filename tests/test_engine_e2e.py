@@ -317,6 +317,21 @@ class EngineEndToEnd(unittest.TestCase):
         self.assertEqual(task["status"], "completed", task.get("error_msg"))
         ws = config.WORKSPACE_ROOT / str(task["id"])
         log = (ws / "engine.log").read_text(encoding="utf-8")
+        log = log[log.rfind(f"导航 http://localhost:{port}/repair.html"):]   # 同号任务工作区可能复用, 只看本次
+        tail = "\n".join(l for l in log.splitlines() if "RENDER" in l or "SMART" in l)[-3000:]
+        # 默认: 第 1 轮先只回补死样式表, 补不回 → 不再回补图片、不再重渲染, 只渲染评分一次
+        self.assertIn("回补一个没补回", log, tail)
+        self.assertEqual(log.count("视觉还原度"), 1, tail)
+        self.assertNotIn("rt_b", "\n".join(l for l in log.splitlines() if "渲染缺失回补" in l), tail)
+
+    def test_repair_loop_struct_same_stop_without_gain_gate(self):
+        """关掉"回补须补回结构性资源"闸门时, 由"结构性缺失与上一轮相同"在第 2 轮收敛。"""
+        from unittest import mock
+        port = self.httpd.server_address[1]
+        with mock.patch.object(config, "REPAIR_NEED_STRUCT_GAIN", False):
+            db, task = self._run_direct(f"http://localhost:{port}/repair.html")
+        self.assertEqual(task["status"], "completed", task.get("error_msg"))
+        log = (config.WORKSPACE_ROOT / str(task["id"]) / "engine.log").read_text(encoding="utf-8")
         self.assertIn("与上一轮相同", log, "\n".join(l for l in log.splitlines() if "RENDER" in l or "SMART" in l)[-3000:])
 
     def test_rich_page_crawler_mode(self):

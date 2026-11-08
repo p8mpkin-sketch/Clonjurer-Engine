@@ -511,6 +511,14 @@ class DownloadMixin:
         return out
 
 
+    @classmethod
+    def _struct_recovered(cls, new, shadow_paths) -> bool:
+        """本轮回补是否补回了结构性资源(样式表/字体): new 的键是 URL, shadow_paths 是按原路径写的影子文件。"""
+        return any(urlsplit(u).path.lower().endswith(cls._STRUCT_EXT) or
+                   (isinstance(info, dict) and info.get("name", "").lower().endswith(cls._STRUCT_EXT))
+                   for u, info in (new or {}).items()) or \
+            any(str(p).lower().split("?", 1)[0].endswith(cls._STRUCT_EXT) for p in (shadow_paths or ()))
+
     def _session_fetch(self, ctx, urls, referer: str = None, budget: float = None) -> dict:
         """批量会话补抓(见 SmartDownloader.fetch_session_many): 带活体 Cookie 并发直连, 风控类拒绝
         才串行走浏览器会话。活体期浏览器确实加载成功过的 URL 直连失败(含同源网络层错误)也再试会话:
@@ -897,6 +905,7 @@ class DownloadMixin:
         page_netloc = urlsplit(self._target).netloc
         new = {}
         shadows = 0
+        self._bf_shadow_paths = []   # 本轮回补写入的影子路径(修复循环判断是否补回了结构性资源)
         # 时限 + 跨轮负缓存: 埋点/广告类外联 URL 动辄几十个, 逐个 20s 超时串行回源曾让
         # 单站修复回补耗时 180s(techcrunch); 回源失败的 URL 后续轮次不再重试
         deadline = time.monotonic() + config.BACKFILL_BUDGET
@@ -940,6 +949,7 @@ class DownloadMixin:
                 shadow.parent.mkdir(parents=True, exist_ok=True)
                 shadow.write_bytes(content)
             shadows += 1
+            self._bf_shadow_paths.append(shadow_rel)
             self.db.record_asset_name(
                 shadow_rel.rsplit("/", 1)[-1],
                 hashlib.sha256(content).hexdigest(), len(content))

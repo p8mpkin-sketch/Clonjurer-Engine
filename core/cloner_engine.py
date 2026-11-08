@@ -74,6 +74,7 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     FONT_BAKE_NOSIZE_JS,
     SCROLL_TOP_JS,
     NARROW_STABLE_JS,
+    DOM_COUNTS_JS,
     ALT_EXTRACT_JS,
     ALT_INJECT_JS,
     ANIM_ALIGN_JS,
@@ -710,8 +711,26 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
             self.log("SMART-DL", f"本轮缺失 {missing_n}: "
                                  f"{sorted(failed_local)[:8]} / 外联 {len(remote_missing)}")
             tp = time.monotonic()
-            new, shadows = self._failed_backfill(ctx, failed_local,
-                                                remote_missing, results, origin)
+            if config.REPAIR_STRUCTURAL_ONLY and getattr(config, "REPAIR_NEED_STRUCT_GAIN", True):
+                # 本轮之所以还要重渲染, 只因为有样式表/字体缺失: 先只回补它们。一个都没补回时再整页重渲染 +
+                # 评分只会复现同一版面(CI allbirds 第 2 轮 65s, 缺失 463→537, 91.7→91.7), 直接收敛,
+                # 交付与评分同为本轮产物; 补回了才连同其余缺失一起回补并重渲染
+                s_local = set(self._structural_missing(failed_local, ()))
+                s_remote = set(self._structural_missing((), remote_missing))
+                new, shadows = self._failed_backfill(ctx, s_local, s_remote, results, origin)
+                if not self._struct_recovered(new, getattr(self, "_bf_shadow_paths", ())):
+                    self._phase("修复回补下载", tp)
+                    self.log("RENDER", f"结构性缺失 {len(s_local) + len(s_remote)} 个回补一个没补回,"
+                                       f" 不再重渲染, 第 {round_i + 1} 轮收敛")
+                    break
+                results.update(new)
+                rest_new, rest_sh = self._failed_backfill(ctx, set(failed_local) - s_local,
+                                                          set(remote_missing) - s_remote, results, origin)
+                new.update(rest_new)
+                shadows += rest_sh
+            else:
+                new, shadows = self._failed_backfill(ctx, failed_local,
+                                                    remote_missing, results, origin)
             self._phase("修复回补下载", tp)
             if not new and not shadows:
                 break

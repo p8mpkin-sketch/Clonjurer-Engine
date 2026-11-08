@@ -45,6 +45,7 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     FONT_BAKE_NOSIZE_JS,
     SCROLL_TOP_JS,
     NARROW_STABLE_JS,
+    DOM_COUNTS_JS,
     ALT_EXTRACT_JS,
     ALT_INJECT_JS,
     ANIM_ALIGN_JS,
@@ -595,10 +596,14 @@ class CaptureMixin:
         # 懒加载图片组件写 src 都在这之后才稳定; 抽早了变体里只剩 alt 文字与空计数, wix 手机首屏 ~40 分)
         with suppress(Exception):
             p2.wait_for_load_state("networkidle", timeout=3000)
+        stable, counts = 1, {}
         with suppress(Exception):
-            p2.evaluate(NARROW_STABLE_JS, 2500)
+            stable = p2.evaluate(NARROW_STABLE_JS, 2500)
+        with suppress(Exception):
+            counts = p2.evaluate(DOM_COUNTS_JS) or {}
         with suppress(Exception):
             p2.evaluate(ANIM_PHASE_JS)
+        return bool(stable), counts
 
 
     def _inject_dom_variants(self, page, loads):
@@ -617,7 +622,11 @@ class CaptureMixin:
                     top.append(p)
             if not top or len(top) > config.VIEWPORT_VARIANT_MAX or tag not in pages:
                 continue
-            CaptureMixin._settle_narrow_page(pages[tag])
+            stable, counts = CaptureMixin._settle_narrow_page(pages[tag])
+            mc = getattr(self, "_main_counts", {}) or {}
+            self.log("RENDER", f"窄屏首载页 {tag}: {'到位' if stable else '到时限仍在变化'}, 控件 {counts.get('ctrl', '?')}"
+                               f"(主页 {mc.get('ctrl', '?')}) / 按钮 {counts.get('btn', '?')}(主页 {mc.get('btn', '?')})"
+                               f" / 文字 {counts.get('text', '?')}(主页 {mc.get('text', '?')}); 结构不同子树 {len(top)}")
             with suppress(Exception):
                 htmls = pages[tag].evaluate(ALT_EXTRACT_JS, top) or {}
                 sizes = page.evaluate(SUBTREE_SIZE_JS, list(htmls))
@@ -633,6 +642,8 @@ class CaptureMixin:
                     if main_ctrl and alt_ctrl < main_ctrl:
                         self.log("RENDER", f"窄屏 DOM 变体: {p[:60]} 的 {tag} 版表单控件 {alt_ctrl} < 主页 {main_ctrl}, 视为未水合, 不用")
                         continue
+                    if alt_ctrl > main_ctrl:
+                        self.log("RENDER", f"窄屏 DOM 变体: {p[:60]} 的 {tag} 版表单控件 {alt_ctrl} > 主页 {main_ctrl}(主页该组件可能未水合), 采用窄屏版")
                     variants.setdefault(p, {})[tag] = h
         if not variants:
             return 0
@@ -969,6 +980,8 @@ class CaptureMixin:
         if self.cfg.get("mock_api", True):
             page.on("response", self._on_response)
         page.on("response", self._on_asset_response)  # 活体资源采集(恒开)
+        self._nav_failed = []
+        page.on("requestfailed", self._on_nav_request_failed)
         self.log("RENDER", f"导航 {url}")
         t_nav, t_nav_m = time.time(), time.monotonic()
         nav_tr = None
@@ -1059,6 +1072,7 @@ class CaptureMixin:
             self.log("RENDER", f"触发 {lazy_count} 个懒加载资源")
         self._auto_scroll(page)
         self.log("RENDER", f"懒加载与滚动完成 {time.time() - t_nav:.1f}s")
+        self._settle_main_page(page)
         tp = self._phase("采集-懒加载滚动", tp)
         if screenshot:
             self._probe_viewports(page)
@@ -1322,6 +1336,48 @@ class CaptureMixin:
       return {y: y, h: H, timeout: false};
     }"""
 
+
+    def _on_nav_request_failed(self, req):
+        """采集期主页失败请求(排除引擎/媒体主动取消): 晚水合组件的脚本块或接口没到, 克隆整块缺失时据此归因。"""
+        try:
+            fail = (req.failure or "") if isinstance(req.failure, str) else str(req.failure or "")
+            if req.resource_type in ("media", "websocket", "eventsource", "other") or "ERR_ABORTED" in fail \
+                    or "BLOCKED_BY_CLIENT" in fail:
+                return
+            lst = getattr(self, "_nav_failed", None)
+            if lst is not None and len(lst) < 40:
+                lst.append((req.resource_type, req.url[:160], fail[:60]))
+        except Exception:
+            pass
+
+    def _settle_main_page(self, page):
+        """懒加载滚动后等主页 DOM「到位」: 文字量/有源图片数/控件数连续不变(与窄屏首载页同口径,
+        NARROW_STABLE_JS)。晚水合的表单/标签页组件(wix 首屏邮箱表单、模板标签行)在 load 与滚动之后才出现,
+        抽早了基准与克隆同时缺它, 评分看不出, 手机端整块表单消失(~40 分)。到位与否与控件数都写日志,
+        远程归因"同一引擎一次好一次坏"。"""
+        cap = int(getattr(config, "MAIN_SETTLE_MS", 4000) or 0)
+        if cap <= 0:
+            return
+        t0 = time.monotonic()
+        stable, counts = 1, {}
+        with suppress(Exception):
+            stable = page.evaluate(NARROW_STABLE_JS, cap)
+        with suppress(Exception):
+            counts = page.evaluate(DOM_COUNTS_JS) or {}
+        failed = list(getattr(self, "_nav_failed", []) or [])
+        self._main_counts = counts
+        msg = (f"页面到位({time.monotonic() - t0:.1f}s): 文字 {counts.get('text', '?')} / 图 {counts.get('imgs', '?')}"
+               f"({counts.get('imgsrc', '?')} 有源) / 控件 {counts.get('ctrl', '?')} / 按钮 {counts.get('btn', '?')}"
+               f" / 元素 {counts.get('els', '?')}")
+        if not stable:
+            msg += "; DOM 到时限仍在变化(按当前态采集)"
+        if failed:
+            kinds = {}
+            for rt, _u, _f in failed:
+                kinds[rt] = kinds.get(rt, 0) + 1
+            msg += "; 采集期失败请求 " + ", ".join(f"{k}×{v}" for k, v in kinds.items())
+            msg += " 样例 " + " | ".join(f"{u[-70:]} {f}" for _rt, u, f in failed[:3])
+        self.log("RENDER", msg)
 
     def _auto_scroll(self, page):
         """平滑滚动到底再回顶, 触发 IntersectionObserver / 无限加载(见 AUTO_SCROLL_JS)。

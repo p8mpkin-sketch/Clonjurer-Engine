@@ -849,6 +849,11 @@ NARROW_STABLE_JS = r"""(ms) => new Promise(res => {
   setTimeout(() => { clearInterval(t); res(0); }, ms);
 })"""
 
+DOM_COUNTS_JS = r"""() => { const im = document.images; let s = 0; for (const i of im) if (i.currentSrc) s++;
+  return { text: document.body ? document.body.innerText.length : 0, imgs: im.length, imgsrc: s,
+    ctrl: document.querySelectorAll('input:not([type=hidden]),textarea,select').length,
+    btn: document.querySelectorAll('button,[role=button]').length, els: document.getElementsByTagName('*').length }; }"""
+
 ALT_INJECT_JS = r"""({items, css}) => {
   const resolve = (path) => {
     let e = document.body;
