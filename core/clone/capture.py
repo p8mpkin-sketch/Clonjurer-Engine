@@ -565,8 +565,15 @@ class CaptureMixin:
         return loads
 
 
+    def _diag_mark(self, what: str):
+        """只写文件不进日志总线的进度标记(engine.diag): 任务挂死时据最后一行定位卡点, 正常日志不变。"""
+        with suppress(Exception):
+            with open(self.ws / "engine.diag", "a", encoding="utf-8") as fh:
+                fh.write(f"{time.strftime('%H:%M:%S')} {what}\n")
+
     def _close_narrow_loads(self):
         for _tag, p2 in getattr(self, "_cv_pages", []) or []:
+            self._diag_mark(f"关窄屏首载页 {_tag}")
             with suppress(Exception):
                 p2.close()
         self._cv_pages = []
@@ -1178,13 +1185,18 @@ class CaptureMixin:
                 except Exception as exc:
                     self.log("WARN", f"窄屏 DOM 变体注入失败: {str(exc)[:160]}")
             finally:
+                t_close = time.monotonic()
                 self._close_narrow_loads()
+                if time.monotonic() - t_close > 3:
+                    self.log("RENDER", f"窄屏首载页关闭耗时 {time.monotonic() - t_close:.1f}s")
         # N1 保真轨: MHTML 快照(采集期活体渲染的权威固化)。
         # Chromium 对 MHTML 的回放默认禁脚本 —— 确定性由构造保证。
         if screenshot:
             try:
                 td = self._phase("细分·窄屏收回与变体", td)
                 cdp = ctx.new_cdp_session(page)
+                # 卡死归因: CDP 调用没有超时, 163/wix 偶发在窄屏变体之后整任务无日志挂死(疑在此处或关窄屏页)
+                self._diag_mark("保真轨 MHTML 快照开始")
                 snap = cdp.send('Page.captureSnapshot', {'format': 'mhtml'})
                 (self.ws / 'capture.mhtml').write_text(snap['data'], encoding='utf-8')
                 self.log("RENDER", f"保真轨 MHTML 快照: {len(snap['data']) // 1024} KB")

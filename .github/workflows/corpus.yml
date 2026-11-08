@@ -196,6 +196,17 @@ jobs:
             engine_bench/real_sites/runs/
             logs/app_ci.log
           if-no-files-found: ignore
+      - name: 未完成任务的日志尾部(卡死归因)
+        if: always()
+        run: |
+          for d in workspaces/*/; do
+            [ -f "$d/engine.log" ] || continue
+            grep -q "完成, 耗时\|任务失败\|失败:" "$d/engine.log" && continue
+            echo "::group::UNFINISHED $d"
+            tail -30 "$d/engine.log"
+            [ -f "$d/engine.diag" ] && { echo "--- engine.diag"; tail -15 "$d/engine.diag"; }
+            echo "::endgroup::"
+          done
       - name: 紧凑摘要(日志尾部, 远程归因只拉最后 150 行即可)
         if: always()
         run: |
