@@ -213,3 +213,5 @@ AUDIT_RETENTION_DAYS = int(os.environ.get("CLONER_AUDIT_RETENTION_DAYS", "90"))
 
 # @font-face 下载计划: 只下浏览器会请求的字体(src 首个受支持格式 + 页面有对应字符的 unicode-range 切片)
 FONT_PLAN = os.environ.get("CLONER_FONT_PLAN", "1") != "0"
+# 回补预取: 活体差集回补 / Mock 资产收割的回源在 CAS 下载期间并发发起
+BACKFILL_PREFETCH = os.environ.get("CLONER_BACKFILL_PREFETCH", "1") != "0"

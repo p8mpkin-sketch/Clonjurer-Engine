@@ -530,10 +530,20 @@ class DownloadMixin:
                 return st is not None or (urlsplit(url).hostname or "") == page_host
             return False
 
-        deadline = time.monotonic() + float(budget if budget is not None else config.SESSION_FETCH_BUDGET)
-        return self.downloader.fetch_session_many(
-            urls, ctx.request if ctx is not None else None, referer=referer or self._target,
+        t_budget = float(budget if budget is not None else config.SESSION_FETCH_BUDGET)
+        t0 = time.monotonic()
+        pre = self._take_prefetched(urls, t_budget) if self._prefetch_futs else {}
+        rest = [u for u in urls if u not in pre]
+        if pre:
+            self._prefetch_hits += len(pre)
+        if not rest:
+            return pre
+        deadline = t0 + t_budget if pre else time.monotonic() + t_budget
+        got = self.downloader.fetch_session_many(
+            rest, ctx.request if ctx is not None else None, referer=referer or self._target,
             cookies=cookies, deadline=deadline, browser_ok=browser_ok)
+        got.update(pre)
+        return got
 
 
     def _fetch_asset(self, job: dict) -> dict:
@@ -632,6 +642,29 @@ class DownloadMixin:
         白底白字。此处把响应体里出现的 URL 全部下载, 并登记 raw 引用供
         Mock 体本地化重写。
         """
+        candidates = self._mock_asset_candidates(mock_entries, results, origin)
+        added = 0
+        need = [u for u in candidates if u not in self._live_bodies]
+        fetched = self._session_fetch(ctx, need, budget=config.BACKFILL_BUDGET) if need else {}
+        for url, raw in candidates.items():
+            if len(results) >= config.MAX_ASSETS_PER_TASK:
+                break
+            pre = self._live_bodies.get(url)
+            out = dict(pre) if pre is not None else fetched.get(url)
+            if out is None:
+                continue
+            out = self._normalize_out(out)
+            if not out["ok"]:
+                continue
+            info = self._store(out)
+            results[url] = info
+            self._raw_refs[raw] = url  # 响应体里的原始写法 -> 绝对地址
+            added += 1
+        return added
+
+
+    def _mock_asset_candidates(self, mock_entries: list, results, origin: str) -> dict:
+        """录制响应体里出现、尚未进资源池的资产 URL(最多 30 个): {绝对地址: 原始写法}。"""
         page_netloc = urlsplit(self._target).netloc
         candidates: dict = {}  # url -> raw
         for entry in mock_entries:
@@ -655,24 +688,65 @@ class DownloadMixin:
                     break
             if len(candidates) >= 30:
                 break
-        added = 0
-        need = [u for u in candidates if u not in self._live_bodies]
-        fetched = self._session_fetch(ctx, need, budget=config.BACKFILL_BUDGET) if need else {}
-        for url, raw in candidates.items():
-            if len(results) >= config.MAX_ASSETS_PER_TASK:
-                break
-            pre = self._live_bodies.get(url)
-            out = dict(pre) if pre is not None else fetched.get(url)
-            if out is None:
+        return candidates
+
+
+    def _start_backfill_prefetch(self, ctx, assets, mock_entries: list, origin: str) -> int:
+        """回补预取: 活体差集回补 / Mock 资产收割要回源的 URL 在 CAS 下载期间就并发直连起来。
+
+        这两步原本排在 CAS 之后串行, 各自给满 BACKFILL_BUDGET 等慢主机(aliyun 8 个资源等 29s,
+        CAS 本身 28s)。待取集合在 CAS 前就能算出(活体加载过、不在下载集合里的 URL; 响应体里的
+        资产 URL), 先发起只是把等待与 CAS 重叠: 预取成功的直接用, 没成功的照旧走会话补抓(含
+        浏览器会话降级), 结果与旧路径一致, 最坏情形耗时不变。"""
+        if not getattr(config, "BACKFILL_PREFETCH", True):
+            return 0
+        page_netloc = urlsplit(self._target).netloc
+        known = set()
+        for u in assets:
+            known.update(self._variants(u, page_netloc))
+        urls = []
+        for url in self._live_seen:
+            if url in known or url in self._live_bodies or beacon_like(url):
                 continue
-            out = self._normalize_out(out)
-            if not out["ok"]:
+            urls.append(url)
+        urls = urls[:config.LIVE_HARVEST_MAX]
+        with suppress(Exception):
+            for u in self._mock_asset_candidates(mock_entries, known, origin):
+                if u not in self._live_bodies and u not in urls:
+                    urls.append(u)
+        if not urls:
+            return 0
+        cookies = []
+        if ctx is not None:
+            with suppress(Exception):
+                cookies = ctx.cookies()
+        ex = ThreadPoolExecutor(max_workers=8, thread_name_prefix="bf-pre")
+        self._prefetch_pool = ex
+        deadline = time.monotonic() + float(config.BACKFILL_BUDGET) * 2
+        for u in urls:
+            self._prefetch_futs[u] = ex.submit(
+                lambda url: self.downloader.fetch_session_many(
+                    [url], None, referer=self._target, cookies=cookies, deadline=deadline,
+                    workers=1).get(url), u)
+        ex.shutdown(wait=False)
+        return len(urls)
+
+
+    def _take_prefetched(self, urls, budget: float) -> dict:
+        """取回补预取结果: 只等本次要的 URL, 封顶 budget 秒; 只收成功的(失败的交正常补抓路径)。"""
+        futs = {u: self._prefetch_futs.pop(u) for u in urls if u in self._prefetch_futs}
+        if not futs:
+            return {}
+        _wait_futures(list(futs.values()), timeout=max(0.0, budget))
+        got = {}
+        for u, f in futs.items():
+            if not f.done():
                 continue
-            info = self._store(out)
-            results[url] = info
-            self._raw_refs[raw] = url  # 响应体里的原始写法 -> 绝对地址
-            added += 1
-        return added
+            with suppress(Exception):
+                out = f.result()
+                if out and out.get("ok"):
+                    got[u] = out
+        return got
 
 
     def _rewrite_mock_bodies(self, mock_entries: list, pairs: list):

@@ -100,7 +100,7 @@ localStorage.setItem('fixture','1');document.cookie='fx=1; path=/';
 body{margin:0;font-family:Arial}.spin{animation:sp 4s linear infinite}@keyframes sp{to{transform:rotate(360deg)}}
 .slide{display:none}.slide.on{display:block}.io{margin-top:1400px}""",
     "fonts/f.woff2": "not-a-real-font",
-    "api/items.json": '{"items": ["Alpha item", "Beta item", "Gamma item"]}',
+    "api/items.json": '{"items": ["Alpha item", "Beta item", "Gamma item"], "banner": "/img/apibg.png"}',
     "css/base.css": "footer{padding:24px;color:#666;border-top:1px solid #ccc}",
     "js/app.js": """document.querySelectorAll('img.lazy').forEach(function(i){i.src=i.getAttribute('data-src');});
 var f=document.getElementById('feed');
@@ -146,6 +146,7 @@ class EngineEndToEnd(unittest.TestCase):
                           ("c2", (60, 60, 220)), ("small", (90, 90, 90))):
             (img / f"{name}.png").write_bytes(_png(200, 120, rgb))
         (img / "bg.png").write_bytes(PNG_1PX)
+        (img / "apibg.png").write_bytes(_png(8, 8, (1, 2, 3)))
         fonts = site / "fonts"
         fonts.mkdir(parents=True, exist_ok=True)
         real = next((Path(__file__).resolve().parent.parent / "static_vendor" / "fonts").glob("*.woff2")).read_bytes()
@@ -258,6 +259,10 @@ class EngineEndToEnd(unittest.TestCase):
         ws = Path(task["workspace_path"]) if task.get("workspace_path") else config.WORKSPACE_ROOT / str(task["id"])
         html = (ws / "index.html").read_text(encoding="utf-8")
         self.assertIn("Gamma item", html)
+        # 响应体里下发的资产 URL: CAS 期间预取, Mock 资产收割直接取用
+        log = (ws / "engine.log").read_text(encoding="utf-8")
+        self.assertIn("回补预取命中", log)
+        self.assertIn("Mock 资产收割", log)
         self.assertGreaterEqual(float(task.get("similarity_score") or 0), 90.0)
 
     def test_font_plan_downloads_only_used_files(self):

@@ -340,6 +340,9 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
         self._dead_urls = set()              # 下载期确认 HTTP 4xx/5xx 的资源 URL(交付侧秒 404 用)
         self._ff_needed, self._ff_skip = set(), set()   # @font-face 下载计划: 必下 / 证明不会被请求
         self._ff_fallbacks = {}              # 首选字体 URL -> 兜底 URL 列表(首选下不来时补下)
+        self._prefetch_futs = {}             # 回补预取: URL -> Future(CAS 期间并发直连)
+        self._prefetch_pool = None
+        self._prefetch_hits = 0
         self._ff_cps = None                  # 页面可能出现的字符码位(已排序); None = 不按 unicode-range 剔除
         self._calibrations = 0               # A1 像素校准执行次数
         self._phase_acc = {}                 # 子阶段累计耗时(秒): 提速定位用
@@ -859,7 +862,12 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
             # 评分时直接截图(旧实现在评分阶段才加载 + 固定 2s 静置, 每站串行 1.5~3s)
             if self.cfg.get("similarity", True) and getattr(config, "FIDELITY_PRESTART", True):
                 self._prestart_fidelity(ctx)
+            n_pre = 0
+            with suppress(Exception):
+                n_pre = self._start_backfill_prefetch(ctx, assets, mock_entries, origin)
             results = self._materialize(assets, origin, ctx=ctx)
+            if n_pre:
+                self.log("SMART-DL", f"回补预取: {n_pre} 个活体差集/响应体资产在 CAS 期间并发回源")
             self.log("INFO", f"资源池落地完成: {len(results)} 个文件 "
                              f"(浏览器会话救回 {self.downloader.browser_rescues} 个)")
 
@@ -878,6 +886,8 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
             harvested = self._harvest_mock_assets(ctx, mock_entries, results, origin)
             if harvested:
                 self.log("SMART-DL", f"Mock 资产收割: 录制响应体中追加下载 {harvested} 个资源")
+            if self._prefetch_hits:
+                self.log("SMART-DL", f"回补预取命中 {self._prefetch_hits} 个(CAS 期间已取回, 回补不再等回源)")
 
             # ---- 渲染驱动修复循环: 本地化 -> 离线渲染评分 -> 404 回补 -> 重来 ----
             routes = {route for route, _ in pages}
