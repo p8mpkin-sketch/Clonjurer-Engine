@@ -2721,6 +2721,9 @@ def bounded_call(sync_obj, coro, timeout_s: float):
 # 无协议键只在左侧不是路径字符时替换(引号/括号/=/空白/逗号等之后); http(s):// 与 // 键照旧。
 URL_REPL_BOUNDARY = os.environ.get("CLONER_URL_REPL_BOUNDARY", "1") != "0"
 _URL_MID_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.~%/-")
+# 归因: CLONER_URL_REPL_TRACE=1 时记录被左边界挡下的替换(上下文 => 本应换成), 引擎每轮本地化后写进日志
+URL_REPL_TRACE = os.environ.get("CLONER_URL_REPL_TRACE", "0") == "1"
+URL_REPL_BLOCKED: list = []
 
 
 def apply_url_replacements(text: str, pairs) -> str:
@@ -2734,6 +2737,8 @@ def apply_url_replacements(text: str, pairs) -> str:
         k = m.group(0)
         s = m.start()
         if s and text[s - 1] in mid and not k.startswith(("http:", "https:", "//")):
+            if URL_REPL_TRACE and len(URL_REPL_BLOCKED) < 60:
+                URL_REPL_BLOCKED.append(f"{text[max(0, s - 40):s]!r}+{k!r} => {mapping.get(k, k)!r}")
             return k
         return mapping.get(k, k)
     return pattern.sub(_sub, text)

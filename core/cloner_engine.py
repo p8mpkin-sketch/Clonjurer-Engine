@@ -623,6 +623,15 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
         self._page_frag = ("#" + parts.fragment) if parts.fragment else ""
         return parts
 
+    def _log_repl_blocked(self):
+        """CLONER_URL_REPL_TRACE=1: 把本轮被左边界挡下的替换样本写进任务日志(远程归因用)。"""
+        from core.clone import support as _sup
+        if not _sup.URL_REPL_TRACE or not _sup.URL_REPL_BLOCKED:
+            return
+        for line in _sup.URL_REPL_BLOCKED[:60]:
+            self.log("SMART-DL", f"左边界挡下: {line[:260]}")
+        _sup.URL_REPL_BLOCKED.clear()
+
     # ------------------------------------------------------------------
     def _repair_loop(self, ctx, render_and_score, want_score, results, routes, origin, srcset_map,
                      pages, iframe_pages, frame_records, mock_entries, pages_map):
@@ -650,6 +659,7 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
             self._rewrite_js_files(results, pairs)
             self._rewrite_mock_bodies(mock_entries, pairs)
             self._phase("本地化重写", tp)
+            self._log_repl_blocked()
             if not want_score:
                 break
             detail, failed_local, remote_missing = render_and_score()
