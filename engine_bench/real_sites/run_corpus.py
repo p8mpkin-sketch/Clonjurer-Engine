@@ -141,11 +141,24 @@ def run(args):
     timelines = {}           # task_id -> [(stage, t)]
     started = time.time()
     tasks = []
+    vps = [v.strip() for v in (args.viewports or "").split(",") if v.strip() and v.strip() != "none"]
+    if vps:
+        sys.path.insert(0, str(HERE))
+        from viewport_probe import expand_viewports
+        vps = expand_viewports(vps)
+    early = None
+    if vps and args.probe_each:
+        sys.path.insert(0, str(HERE))
+        early = _EarlyProbe(args, vps, RUNS / f"viewports_{stamp}")
+        (RUNS / f"viewports_{stamp}").mkdir(parents=True, exist_ok=True)
     while True:
         code, payload = api.call("GET", "/api/tasks", query={"batch_id": batch_id})
         tasks = payload.get("tasks", []) if code == 200 else []
         now = time.time()
         for t in tasks:
+            if early is not None:
+                early.mark_done(t)
+                early.maybe_submit(t)
             tl = timelines.setdefault(t["id"], [])
             if tl and tl[-1][0] == "_end":
                 continue
@@ -229,9 +242,13 @@ def run(args):
             "error": (task.get("error_msg") or "")[:300],
         })
 
-    vps = [v for v in (args.viewports or "").split(",") if v.strip() and v.strip() != "none"]
     if vps:
-        _probe_viewports(args, results, [v.strip() for v in vps])
+        pre = early.collect() if early is not None else None
+        if pre:
+            # 基准页被拦截的站(登录墙/风控)不计探针分, 与整批探针口径一致
+            blocked = {r["task_id"] for r in results if r.get("blocked")}
+            pre = {k: v for k, v in pre.items() if k not in blocked}
+        _probe_viewports(args, results, vps, pre)
 
     RUNS.mkdir(parents=True, exist_ok=True)
     prev_name, prev = _previous_run()
@@ -263,7 +280,53 @@ def run(args):
     return 0 if s["completed"] == s["total"] else 2
 
 
-def _probe_viewports(args, results, vps):
+class _EarlyProbe:
+    """每站克隆一完成就探针(--probe-each): 克隆与活体参考之间只隔几十秒, 而不是等整批跑完再探
+    (隔几分钟到十几分钟, 实时内容/投放素材已换, 两次活体一致遮不掉, 克隆分却低)。"""
+
+    def __init__(self, args, vps, out_dir):
+        from concurrent.futures import ThreadPoolExecutor
+        self.args, self.vps, self.out_dir = args, vps, out_dir
+        self.ex = ThreadPoolExecutor(max_workers=max(1, args.probe_workers))
+        self.futs, self.seen, self.started = {}, set(), {}
+
+    def maybe_submit(self, task):
+        tid = task.get("id")
+        if task.get("status") != "completed" or tid in self.seen:
+            return
+        self.seen.add(tid)
+        self.futs[tid] = self.ex.submit(self._one, tid, task.get("target_url"))
+
+    def _one(self, tid, url):
+        from playwright.sync_api import sync_playwright
+        from viewport_probe import probe_one
+        t0 = time.time()
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            try:
+                r = probe_one(browser, self.args.base, tid, url, self.vps, self.out_dir, None, self.args.probe_noise)
+            finally:
+                browser.close()
+        r["probe_s"] = round(time.time() - t0, 1)
+        r["probe_lag_s"] = round(t0 - self.started.get(tid, t0), 1)
+        return r
+
+    def mark_done(self, task):
+        if task.get("status") == "completed" and task.get("id") not in self.started:
+            self.started[task["id"]] = time.time()
+
+    def collect(self):
+        out = {}
+        for tid, f in self.futs.items():
+            try:
+                out[tid] = f.result()
+            except Exception as exc:   # noqa: BLE001 单站探针失败不影响其它站
+                print(f"  (探针 #{tid} 失败: {exc})")
+        self.ex.shutdown(wait=True)
+        return out
+
+
+def _probe_viewports(args, results, vps, pre=None):
     """多视口分项: 桌面采集的克隆在平板/手机宽下与原站同宽对比(见 viewport_probe.py)。
     desktop 探针分是本方法(活体原站 vs 预览, 无冻结)的噪声基线, 与引擎分不同口径。"""
     sys.path.insert(0, str(HERE))
@@ -272,17 +335,20 @@ def _probe_viewports(args, results, vps):
     except ImportError as exc:
         print(f"(视口探针不可用, 跳过: {exc})")
         return
+    pre = pre or {}
     pairs = [(r["task_id"], r["url"]) for r in results
-             if r["status"] == "completed" and not r.get("blocked")]
-    if not pairs:
-        return
-    print(f"视口分项探针: {len(pairs)} 站 × {','.join(vps)}", flush=True)
-    out_dir = RUNS / f"viewports_{time.strftime('%Y%m%d_%H%M%S')}"
-    try:
-        res, _ = probe_tasks(args.base, pairs, vps, out_dir, workers=args.probe_workers,
-                             noise=args.probe_noise)
-    except Exception as exc:   # noqa: BLE001 探针失败不影响主跑分
-        print(f"(视口探针失败: {exc})")
+             if r["status"] == "completed" and not r.get("blocked") and r["task_id"] not in pre]
+    res = dict(pre)
+    if pairs:
+        print(f"视口分项探针: {len(pairs)} 站 × {','.join(vps)}", flush=True)
+        out_dir = RUNS / f"viewports_{time.strftime('%Y%m%d_%H%M%S')}"
+        try:
+            more, _ = probe_tasks(args.base, pairs, vps, out_dir, workers=args.probe_workers,
+                                  noise=args.probe_noise)
+            res.update(more)
+        except Exception as exc:   # noqa: BLE001 探针失败不影响主跑分
+            print(f"(视口探针失败: {exc})")
+    if not res:
         return
     for r in results:
         p = res.get(r["task_id"])
@@ -290,6 +356,21 @@ def _probe_viewports(args, results, vps):
             r["vp"] = {v: (p.get(v) or {}).get("score") for v in vps}
             if args.probe_noise:
                 r["vp_ceiling"] = {v: (p.get(v) or {}).get("ceiling") for v in vps}
+                # 稳健口径: 两次原站加载间变化的区域两侧遮掉, 克隆取较接近的一次原站(见 viewport_probe)
+                r["vp_robust"] = {v: (p.get(v) or {}).get("robust") for v in vps}
+                r["vp_robust_ceiling"] = {v: (p.get(v) or {}).get("robust_ceiling") for v in vps}
+                r["vp_dyn_frac"] = {v: (p.get(v) or {}).get("dyn_frac") for v in vps}
+            if p.get("probe_lag_s") is not None:
+                r["probe_lag_s"] = p["probe_lag_s"]
+            # 低分视口的克隆侧诊断(失败请求/裂图/样式表/脚本错误)留档, 远程归因只靠日志
+            diag = {}
+            for v in vps:
+                row = p.get(v) or {}
+                sc = row.get("robust") if row.get("robust") is not None else row.get("score")
+                if isinstance(sc, (int, float)) and sc < 85 and row.get("clone_diag"):
+                    diag[v] = {"clone": row["clone_diag"], "orig": row.get("orig_diag")}
+            if diag:
+                r["vp_diag"] = diag
             r["vp_overflow"] = [v for v in vps if (p.get(v) or {}).get("clone_overflow_x")
                                 and not (p.get(v) or {}).get("orig_overflow_x")]
 
@@ -347,6 +428,9 @@ def _summary_one(results):
             1 for r in results
             if ((r.get("deploy_audit") or {}).get("blocking_scripts")
                 or (r.get("deploy_audit") or {}).get("blocking_styles"))),
+        "vp_ceiling_mean": _vp_means(results, "vp_ceiling"),
+        "vp_robust_mean": _vp_means(results, "vp_robust"),
+        "vp_robust_ceiling_mean": _vp_means(results, "vp_robust_ceiling"),
     }
 
 
@@ -356,22 +440,30 @@ def _mean_of(results, key):
     return round(statistics.mean(xs), 1) if xs else None
 
 
-def _vp_means(results):
+def _vp_means(results, key="vp"):
     out = {}
     for r in results:
-        for v, sc in (r.get("vp") or {}).items():
+        for v, sc in (r.get(key) or {}).items():
             if isinstance(sc, (int, float)) and not r.get("blocked"):
                 out.setdefault(v, []).append(sc)
     return {v: round(statistics.mean(xs), 1) for v, xs in out.items()}
 
 
 _VP_NAMES = {"desktop": "桌面", "tablet": "平板768", "mobile": "手机390",
-             "iphone-air": "iPhone Air 真机口径", "ipad-air": "iPad Air 真机口径"}
+             "iphone-air": "iPhone Air 真机口径", "ipad-air": "iPad Air 真机口径",
+             "iphone-se": "iPhone SE", "iphone-15": "iPhone 15", "iphone-16-pro": "iPhone 16 Pro", "iphone-16-pro-max": "iPhone 16 Pro Max",
+             "pixel-8": "Pixel 8", "galaxy-s24": "Galaxy S24", "xiaomi-14": "小米 14",
+             "huawei-mate60": "华为 Mate 60", "oppo-find-x7": "OPPO Find X7"}
 
 
 def _vp_line(g):
     vm = g.get("vp_mean") or {}
-    return "".join(f"  {_VP_NAMES.get(v, v)} {_fmt(x)}" for v, x in vm.items())
+    line = "".join(f"  {_VP_NAMES.get(v, v)} {_fmt(x)}" for v, x in vm.items())
+    rb, rc = g.get("vp_robust_mean") or {}, g.get("vp_robust_ceiling_mean") or {}
+    if rb:
+        line += "  | 稳健口径:" + "".join(
+            f"  {_VP_NAMES.get(v, v)} {_fmt(x)}" + (f"/{_fmt(rc[v])}" if v in rc else "") for v, x in rb.items())
+    return line
 
 
 def _ci_thumbs(results, below=99.0):
@@ -506,9 +598,12 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--viewport", default="desktop", choices=["desktop", "laptop", "mobile"])
     ap.add_argument("--viewports", default="desktop,tablet,mobile",
-                    help="视口分项探针(逗号分隔 desktop/tablet/mobile; none 关闭)")
+                    help="视口分项探针(逗号分隔 desktop/tablet/mobile/iphone-air/ipad-air/机型名; "
+                         "phones=主流安卓+苹果机型矩阵, phones4=360/393/412/440 四档代表机型; none 关闭)")
     ap.add_argument("--probe-workers", type=int, default=3)
     ap.add_argument("--probe-noise", action="store_true", help="视口探针另测原站自比上限(多一倍原站加载)")
+    ap.add_argument("--probe-each", action="store_true",
+                    help="每站克隆一完成立即探针(克隆与活体参考间隔几十秒, 实时内容站测得更准), 不等整批")
     ap.add_argument("--render-timeout", type=int, default=0, help="页面加载超时秒(0=平台默认)")
     ap.add_argument("--timeout", type=int, default=3600, help="整批等待上限秒")
     ap.add_argument("--poll", type=float, default=2.0)

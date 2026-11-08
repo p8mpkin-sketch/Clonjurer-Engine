@@ -546,6 +546,7 @@ FONT_BAKE_JS = r"""
   try {
     const PROPS = ['font-family', 'font-size', 'font-weight', 'font-style',
                    'line-height', 'letter-spacing', 'color'];
+    const SIZEP = new Set(['font-size', 'line-height', 'letter-spacing']);
     const SKIP = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG', 'svg',
                           'PATH', 'path', 'IFRAME', 'CANVAS', 'VIDEO', 'IMG', 'BR', 'HEAD']);
     const MAX = 8000;
@@ -585,16 +586,26 @@ FONT_BAKE_JS = r"""
       const parent = el === root ? null : el.parentElement;
       const pv = parent ? comp(parent) : null;
       const diff = [];
+      // 字号随视口宽同比的元素(见 FLUID_READ_JS 探测): 字号/行高/字距交给样式表, 不钉成采集宽的 px
+      const fluid = el.hasAttribute('data-cv-fluidsz');
       for (let i = 0; i < PROPS.length; i++) {
         if (i === 0 && mine[0] === defFam) continue;
+        if (fluid && SIZEP.has(PROPS[i])) continue;
         if (!pv || pv[i] !== mine[i]) diff.push([PROPS[i], mine[i]]);
       }
       if (diff.length) plan.push([el, diff]);
     }
+    document.querySelectorAll('[data-cv-fluidsz]').forEach(e => e.removeAttribute('data-cv-fluidsz'));
     return __SCOPED_BAKE__('f', plan);
   } catch (e) { return 0; }
 }
 """.replace("__SCOPED_BAKE__", "(" + SCOPED_BAKE_FN + ")")
+# rem 基准随视口宽的窄屏采集(见 ROOT_FONT_READ_JS): 字号/行高/字距由 rem 规则随宽变化, 烘焙成采集宽的 px
+# 会把它们冻住(163 手机版 420 宽下标题/来源统一小 7% = 390/420)。只烘焙族名/字重/字形/颜色
+FONT_BAKE_NOSIZE_JS = FONT_BAKE_JS.replace(
+    "const PROPS = ['font-family', 'font-size', 'font-weight', 'font-style',\n                   'line-height', 'letter-spacing', 'color'];",
+    "const PROPS = ['font-family', 'font-weight', 'font-style', 'color'];")
+assert FONT_BAKE_NOSIZE_JS != FONT_BAKE_JS
 
 
 REMOVE_SCRIPTS_JS = r"""
@@ -705,12 +716,17 @@ CV_PATHS_JS = r"""() => {
   const NONVIS = new Set(['STYLE', 'LINK', 'SCRIPT', 'NOSCRIPT', 'META', 'TEMPLATE']);
   const out = {}, pathOf = """ + CV_PATH_FN + r""";
   const els = Array.from(document.body ? document.body.querySelectorAll('*') : []).slice(0, 20000);
+  // [6] 媒体源(src/srcset/poster, \x01 连接) [7] 叶子文本: 桌面上隐藏的手机版元素, 脚本只在可见时才写 src /
+  // 才跑计数动画, 桌面采集永远拿不到 → 用窄屏首载页同路径元素的值补(见 CV_EMIT_JS 末尾)
+  const MEDIA = /^(IMG|SOURCE|VIDEO|AUDIO)$/;
   for (const e of els) out[pathOf(e)] = [e.tagName, String(e.className && e.className.baseVal !== undefined ? e.className.baseVal : e.className || ''), e.getAttribute('style') || '',
     Array.from(e.children, c => c.tagName).filter(t => !NONVIS.has(t)).join(',').slice(0, 400), (""" + CV_ATTR_FN + r""")(e),
-    (""" + CV_XATTR_FN + r""")(e)];
+    (""" + CV_XATTR_FN + r""")(e),
+    MEDIA.test(e.tagName) ? [e.getAttribute('src') || '', e.getAttribute('srcset') || '', e.getAttribute('poster') || ''].join('\x01').replace(/\x01+$/, '') : '',
+    (!e.children.length && !NONVIS.has(e.tagName) && e.tagName !== 'TEXTAREA') ? (e.textContent || '').trim().slice(0, 300) : ''];
   // 根元素只记 class(加载时按宽度给 <html>/<body> 打的 _mobile / is-mobile 类标记)
   for (const [k, e] of [['@html', document.documentElement], ['@body', document.body]])
-    if (e) out[k] = [e.tagName, e.getAttribute('class') || '', '', '', '', ''];
+    if (e) out[k] = [e.tagName, e.getAttribute('class') || '', '', '', '', '', '', ''];
   return out;
 }"""
 
@@ -764,7 +780,7 @@ ALT_EXTRACT_JS = r"""(paths) => {
         if (v && !/^(data:|blob:|#|javascript:|mailto:|tel:)/i.test(v)) { try { x.setAttribute(a, new URL(v, document.baseURI).href); } catch (e) {} }
       }
     });
-    out[p] = [c.outerHTML, (el.innerText || '').trim().length, el.getElementsByTagName('*').length];
+    out[p] = [c.outerHTML, (el.innerText || '').trim().length, el.getElementsByTagName('*').length, el.querySelectorAll('input:not([type=hidden]),textarea,select').length];
   }
   return out;
 }""".replace("__CANVAS_IMG__", CANVAS_IMG_FN)
@@ -783,22 +799,55 @@ SUBTREE_SIZE_JS = r"""(paths) => {
     return e;
   };
   const out = {};
-  for (const p of paths) { const el = resolve(p); if (el) out[p] = [(el.innerText || '').trim().length, el.getElementsByTagName('*').length]; }
+  for (const p of paths) { const el = resolve(p); if (el) out[p] = [(el.innerText || '').trim().length, el.getElementsByTagName('*').length, el.querySelectorAll('input:not([type=hidden]),textarea,select').length]; }
   return out;
 }"""
 
 # 运行时样式文本(<style> 与文档级构造样式表): 窄屏版组件的 CSS-in-JS 样式只在窄屏页里有
+# 页面全部样式规则的逐条文本(含 <link> 表、<style>、adoptedStyleSheets; 分组规则 @media/@supports/@layer 递归到
+# 叶子, 叶子带上分组前缀)。窄屏首载页与主页按规则做差, 只把主页没有的规则注入窄屏段 —— 此前按整个 <style>
+# 文本做差, 同一份样式表在两页里序列化略有不同就被当成"窄屏才有", 整表再注入一遍到手机段, 层叠顺序被打乱
+# (solidjs 手机端链接下划线/字体回落, 基础层被后注入的副本盖掉)
 STYLE_TEXTS_JS = r"""() => {
   const out = [];
-  const txt = (sheet) => { try { let t = ''; for (const r of sheet.cssRules) t += r.cssText + '\n'; return t; } catch (e) { return ''; } };
-  for (const st of document.querySelectorAll('style')) {
-    if (st.hasAttribute('data-clone-bake') || st.hasAttribute('data-clone-vp') || st.hasAttribute('data-cssom')) continue;
-    const t = st.sheet ? txt(st.sheet) : (st.textContent || '');
-    if (t.trim()) out.push(t);
+  const walk = (rules, prefix) => {
+    for (const r of rules) {
+      let p = null;
+      if (r.cssRules && (r.conditionText !== undefined || r instanceof CSSLayerBlockRule)) {
+        const head = r instanceof CSSMediaRule ? '@media ' + r.conditionText
+          : r instanceof CSSSupportsRule ? '@supports ' + r.conditionText
+          : (r instanceof CSSLayerBlockRule ? '@layer ' + r.name : '');
+        if (head) { walk(r.cssRules, prefix.concat(head)); continue; }
+      }
+      out.push([prefix.join('\x00'), r.cssText, src]);
+    }
+  };
+  // 第三项: 规则所属样式表(href / 节点标签+属性 / adopted), 只用于归因日志, 做差不比较它
+  let src = '';
+  const sheet = (sh, id) => { src = id; try { walk(sh.cssRules, []); } catch (e) {} };
+  for (const sh of document.styleSheets) {
+    const n = sh.ownerNode;
+    // 引擎的 CSSOM 副本(data-cssom)要算进主页规则集: 固化后原 <link> 表可能已停用/摘除, 不算副本就把整份主表
+    // 当成"窄屏才有"(solidjs 79KB 重注入)。烘焙表/分视口表仍不算
+    if (n && n.getAttribute && (n.hasAttribute('data-clone-bake') || n.hasAttribute('data-clone-vp'))) continue;
+    let id = sh.href || '';
+    if (!id && n) { id = n.tagName.toLowerCase(); for (const a of (n.attributes || [])) id += ' ' + a.name + (a.value ? '=' + a.value.slice(0, 40) : '');
+      // 无属性 <style> 用首条规则文本区分(脚本注入的表没有 href/属性可认)
+      if (!n.attributes.length) { let r0 = ''; try { r0 = sh.cssRules.length ? sh.cssRules[0].cssText.slice(0, 50) : ''; } catch (e) {} id += ' #' + (n.parentNode && n.parentNode.tagName || '') + ':' + r0; } }
+    sheet(sh, (sh.disabled ? '[disabled] ' : '') + (id || 'inline') + (sh.ownerRule ? ' <-@import' : ''));
   }
-  try { for (const sh of document.adoptedStyleSheets || []) { const t = txt(sh); if (t.trim()) out.push(t); } } catch (e) {}
+  try { for (const sh of document.adoptedStyleSheets || []) sheet(sh, 'adopted'); } catch (e) {}
   return out;
 }"""
+
+# 窄屏首载页"到位"等待: 文字量 + 已有 src 的图片数 连续两次(250ms)不变即返回, 上限 ms
+NARROW_STABLE_JS = r"""(ms) => new Promise(res => {
+  let last = '', hits = 0;
+  const sig = () => { const im = document.images; let s = 0; for (const i of im) if (i.currentSrc) s++;
+    return (document.body ? document.body.innerText.length : 0) + '|' + im.length + '|' + s + '|' + document.querySelectorAll('input,textarea,select,button').length; };
+  const t = setInterval(() => { const v = sig(); if (v === last) { if (++hits >= 2) { clearInterval(t); res(1); } } else { hits = 0; last = v; } }, 250);
+  setTimeout(() => { clearInterval(t); res(0); }, ms);
+})"""
 
 ALT_INJECT_JS = r"""({items, css}) => {
   const resolve = (path) => {
@@ -814,9 +863,10 @@ ALT_INJECT_JS = r"""({items, css}) => {
   };
   // 先全部解析出主页元素再插入(插入会改变后续兄弟的同类序号)
   const plan = items.map(it => [resolve(it.path), it]).filter(x => x[0]);
-  let n = 0;
+  let n = 0, fixed = 0;
   for (const [el, it] of plan) {
     el.setAttribute('data-cv-vp', it.own);
+    const srcImgs = Array.from(el.querySelectorAll('img')).filter(s => s.getAttribute('src') || s.getAttribute('srcset'));
     let anchor = el;
     for (const alt of it.alts) {
       const t = document.createElement('template');
@@ -824,11 +874,23 @@ ALT_INJECT_JS = r"""({items, css}) => {
       const node = t.content.firstElementChild;
       if (!node) continue;
       node.setAttribute('data-cv-vp', alt.bands);
+      // 窄屏首载页抽取时脚本还没给 <img> 写 src(懒加载/按容器宽算地址的图片组件), 变体里只剩 alt 文字:
+      // 用主页同子树里的对应图(alt 相同, 或数量相同按序)补上, 至少显示桌面那张而不是裂图
+      const dstImgs = Array.from(node.querySelectorAll('img'));
+      const allImgs = Array.from(node.querySelectorAll('img'));
+      dstImgs.forEach((d, k) => {
+        if (d.getAttribute('src') || d.getAttribute('srcset')) return;
+        const m = (d.alt && srcImgs.find(s => s.alt === d.alt)) || (srcImgs.length === allImgs.length ? srcImgs[k] : null);
+        if (!m) return;
+        for (const a of ['src', 'srcset', 'sizes']) { const v = m.getAttribute(a); if (v) d.setAttribute(a, v); }
+        fixed++;
+      });
       anchor.after(node);
       anchor = node;
       n++;
     }
   }
+  window.__cvAltImgFixed = fixed;
   if (n) {
     const st = document.createElement('style');
     st.setAttribute('data-clone-vp', 'alt');
@@ -1020,8 +1082,25 @@ CV_EMIT_JS = r"""
       }
       if (/[{}<>]/.test(JSON.stringify([dv, V.t && V.t[p], V.m && V.m[p]]))) continue;
       el.style.removeProperty(p);
-      if (dv) rule.d.push(p + ':' + dv[0] + (dv[1] ? '!important' : ''));
-      tags.forEach(t => { const v = V[t][p]; if (v) rule[t].push(p + ':' + v[0] + (v[1] ? '!important' : '')); });
+      // 分段同比: 脚本按容器/视口宽算的字号或尺寸被上限(桌面)或下限(手机)夹住时, 三点不同比, 但相邻两段
+      // 仍与宽度同比(值不同、值/宽相同) → 这两段写 vw, 否则手机段会被钉在 390 采集宽的 px
+      // (420 宽真机全站字号统一小 7%: 390/420)。夹住的那段照旧写 px
+      const nmap = Object.fromEntries(nums);
+      const same = (a, b) => nmap[a] !== null && nmap[b] !== null && nmap[a] !== nmap[b] && nmap[a] !== 0 && nmap[b] !== 0
+        && Math.abs(nmap[a] / W[a] - nmap[b] / W[b]) <= Math.abs(nmap[a] / W[a]) * 0.015;
+      const fluid = new Set();
+      if (tags.length === 2) {
+        if (same('t', 'm')) { fluid.add('t'); fluid.add('m'); }
+        else if (same('d', 't')) { fluid.add('d'); fluid.add('t'); }
+      }
+      const emit = (k, v) => {
+        if (!v) return;
+        const val = fluid.has(k) ? (nmap[k] / W[k] * 100).toFixed(4) + 'vw' : v[0];
+        rule[k].push(p + ':' + val + (v[1] ? '!important' : ''));
+      };
+      emit('d', dv);
+      tags.forEach(t => emit(t, V[t][p]));
+      if (fluid.size) out.vw++;
       out.banded++; touched = true;
     }
     if (!touched) return;
@@ -1031,6 +1110,30 @@ CV_EMIT_JS = r"""
       for (const k of ['d', 't', 'm']) if (rule[k].length) bands[k].push('[data-cv="' + i + '"]' + SPEC + '{' + rule[k].join(';') + '}');
     }
   });
+  // 桌面上没渲染(display:none 的手机版实例)的元素: 没 src 的媒体用窄屏首载页同路径元素的 src 补, 空叶子用其文本补。
+  // 脚本只给可见元素写图片地址/跑计数动画(wix 手机首屏图只剩 alt 文字、"300M+" 为空), 桌面采集永远拿不到;
+  // 这些元素桌面本就不显示, 补上不影响桌面
+  let srcFill = 0, textFill = 0;
+  if (m.paths && tags.length) m.els.forEach((el, i) => {
+    if (!el.isConnected || el.getClientRects().length || el.closest('svg')) return;
+    for (const t of ['m', 't']) {
+      const L = loads[t] && loads[t][m.paths[i]];
+      if (!L || L[0] !== el.tagName) continue;
+      if (L[6] && !el.getAttribute('src') && !el.getAttribute('srcset')) {
+        const [s, ss, po] = L[6].split('\x01');
+        if (s && !/^(data:|blob:|javascript:)/i.test(s)) el.setAttribute('src', s);
+        if (ss) el.setAttribute('srcset', ss);
+        if (po) el.setAttribute('poster', po);
+        srcFill++; break;
+      }
+      if (L[7] && !el.children.length && !(el.textContent || '').trim() && !/^(SCRIPT|STYLE|TEXTAREA|INPUT|IFRAME)$/.test(el.tagName)
+          && !/[<>]/.test(L[7])) {
+        el.textContent = L[7]; textFill++; break;
+      }
+    }
+  });
+  if (srcFill) out.srcFill = srcFill;
+  if (textFill) out.textFill = textFill;
   if (out.cls || out.xattr) {
     // 当前视口段由分视口样式表里的 --cv-band 告诉运行时(段边界落盘时才确定, 脚本不重复计算断点)
     bands.d.push(':root{--cv-band:d}'); bands.t.push(':root{--cv-band:t}'); bands.m.push(':root{--cv-band:m}');
@@ -1882,3 +1985,159 @@ AD_RECTS_JS = r"""() => {
   document.querySelectorAll('[id^="div-gpt-ad"], [data-google-query-id]').forEach(add);
   return out.slice(0, 80);
 }"""
+
+
+# 插屏广告层(进页即弹的全屏遮罩 + 跨域广告 iframe, 素材每次竞价都不同): 评分截图前两侧同口径隐藏,
+# 不计分(与 AD_RECTS_JS 遮广告位同理)。克隆交付物里照样保留该层, 只影响评分截图。
+# 纯结构判据, 不认域名: position:fixed、覆盖视口 ≥90% 宽且 ≥80% 高、z-index ≥ 1000, 且内含可见的
+# 跨源 iframe(面积 ≥ 100×100)。163/搜狐手机版首屏每次都被百度联盟插屏盖住, 两侧素材/几何必然不同
+INTERSTITIAL_HIDE_JS = r"""() => {
+  const vw = innerWidth, vh = innerHeight;
+  let n = 0;
+  const cross = f => {
+    const src = f.getAttribute('src') || '';
+    if (!src || /^(about:|javascript:|data:|blob:)/i.test(src)) return false;
+    try { return new URL(src, document.baseURI).origin !== location.origin; } catch (e) { return false; }
+  };
+  const iframes = Array.from(document.querySelectorAll('iframe')).filter(f => {
+    const r = f.getBoundingClientRect();
+    return r.width >= 100 && r.height >= 100 && cross(f);
+  });
+  const done = new Set();
+  for (const f of iframes) {
+    for (let e = f.parentElement; e && e !== document.body && e !== document.documentElement; e = e.parentElement) {
+      if (done.has(e)) break;
+      const cs = getComputedStyle(e);
+      if (cs.position !== 'fixed') continue;
+      const r = e.getBoundingClientRect(), z = parseInt(cs.zIndex, 10);
+      if (r.width >= vw * 0.9 && r.height >= vh * 0.8 && z >= 1000) {
+        e.setAttribute('data-clone-ihide', e.style.getPropertyValue('display') + '|' + e.style.getPropertyPriority('display'));
+        e.style.setProperty('display', 'none', 'important');
+        done.add(e); n++;
+      }
+      break;   // 只看最近的 fixed 祖先
+    }
+  }
+  // 同源营销弹层(邮件订阅/优惠券/下载 App 的模态框 + 遮罩): 活体按定时/滚动弹出, 采集期多半没弹或已被
+  // 关掉, 克隆里没有; 评分时两侧同隐藏。只认"模态"证据: fixed、z-index ≥ 100、盖住 ≥85% 宽 × ≥80% 高,
+  // 且自身或后代带 role=dialog / aria-modal, 或含输入框 + 关闭钮。Cookie 条(贴底, 不盖高)与导航抽屉(默认关)不中
+  const hideEl = e => {
+    if (done.has(e)) return;
+    e.setAttribute('data-clone-ihide', e.style.getPropertyValue('display') + '|' + e.style.getPropertyPriority('display'));
+    e.style.setProperty('display', 'none', 'important');
+    done.add(e); n++;
+  };
+  const modalish = e => (e.matches('[role=dialog],[role=alertdialog],[aria-modal=true]') ||
+    e.querySelector('[role=dialog],[role=alertdialog],[aria-modal=true]') ||
+    (e.querySelector('input:not([type=hidden]):not([type=checkbox]):not([type=radio]),select,textarea') &&
+     e.querySelector('button[aria-label*=close i],[class*=close i],button[aria-label*=关闭],[aria-label*=dismiss i]')));
+  const fixeds = [];
+  for (const e of document.body ? document.body.querySelectorAll('div,section,aside,dialog,form') : []) {
+    if (done.has(e)) continue;
+    const cs = getComputedStyle(e);
+    if (cs.position !== 'fixed' || cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) < 0.05) continue;
+    const z = parseInt(cs.zIndex, 10);
+    if (!(z >= 100)) continue;
+    const r = e.getBoundingClientRect();
+    if (r.width < vw * 0.85 || r.height < vh * 0.8) continue;
+    if (fixeds.some(f => f.contains(e))) continue;   // 外层已记
+    fixeds.push(e);
+  }
+  // 第三方营销弹窗 iframe(attentive/klaviyo 等): iframe 自身 fixed 铺满视口(z 往往是 auto), 里面是跨域文档看不到
+  // role/输入框; 采集时按埋点沙盒置空或根本没弹, 克隆里没有 → 评分时两侧都藏 iframe 本身
+  for (const f of document.querySelectorAll('iframe')) {
+    if (done.has(f)) continue;
+    const cs = getComputedStyle(f);
+    if (cs.position !== 'fixed' || cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) < 0.05) continue;
+    const r = f.getBoundingClientRect();
+    if (r.width >= vw * 0.85 && r.height >= vh * 0.8) hideEl(f);
+  }
+  for (const e of fixeds) {
+    if (!modalish(e)) {
+      // 纯遮罩: 要有同层级的模态兄弟(对话框与遮罩分开挂)才算营销弹层
+      const sib = Array.from((e.parentElement || document.body).children).find(x => {
+        if (x === e || getComputedStyle(x).position !== 'fixed' || !modalish(x)) return false;
+        const q = x.getBoundingClientRect();
+        return q.width >= vw * 0.6 && q.height >= vh * 0.3;   // 模态框本体尺寸, 贴底的 Cookie 条不算
+      });
+      if (!sib) continue;
+      hideEl(sib);
+    }
+    hideEl(e);
+  }
+  return n;
+}"""
+
+# 截图后还原(原站活体页随后还要冻结交付, 插屏层不能带着 display:none 落盘)
+INTERSTITIAL_RESTORE_JS = r"""() => {
+  document.querySelectorAll('[data-clone-ihide]').forEach(e => {
+    const [v, pri] = e.getAttribute('data-clone-ihide').split('|');
+    e.removeAttribute('data-clone-ihide');
+    if (v) e.style.setProperty('display', v, pri || ''); else e.style.removeProperty('display');
+    if (!e.getAttribute('style')) e.removeAttribute('style');
+  });
+}"""
+
+# rem 基准(lib-flexible 类脚本按 视口宽/N 写在 <html>/<body> 内联 font-size): 冻结后克隆里没有脚本重算,
+# 采集宽下的 px 被写死(手机版 390 采集 → 420 真机全站 rem 尺寸统一小 7%, 内容列 390 宽右侧留白)。
+# 读: 返回 [innerWidth, html 内联 px, html 计算 px, body 内联 px, body 计算 px]
+ROOT_FONT_READ_JS = r"""() => {
+  const px = v => { const m = /^([\d.]+)px$/.exec((v || '').trim()); return m ? parseFloat(m[1]) : 0; };
+  const h = document.documentElement, b = document.body;
+  return [innerWidth, px(h.style.fontSize), px(getComputedStyle(h).fontSize),
+          b ? px(b.style.fontSize) : 0, b ? px(getComputedStyle(b).fontSize) : 0];
+}"""
+# 写: {html: vw, body: vw} → 内联 font-size 改成 vw(保留优先级)
+ROOT_FONT_APPLY_JS = r"""(m) => {
+  let n = 0;
+  for (const [k, el] of [['html', document.documentElement], ['body', document.body]]) {
+    if (!el || !m[k]) continue;
+    el.style.setProperty('font-size', m[k].toFixed(4) + 'vw', el.style.getPropertyPriority('font-size'));
+    n++;
+  }
+  return n;
+}"""
+
+# 逐元素"随宽同比"探测(窄屏采集): 0.92 倍宽另开页面对照, 计算字号与宽度同比的元素字体烘焙不烘字号/
+# 行高/字距; 内联 px 几何值与宽度同比的改写成 vw。站点按容器宽算字号(wix 手机版 h1 = 宽 × 0.1056)
+# 时, 390 采集 → 420/440 真机全站字号钉在 390 的值(小 7~11%, 整页逐段上移, 像素分 ~40)。
+# 读: {路径: [标签, 计算字号 px, 内联 style]}
+FLUID_READ_JS = r"""() => {
+  const out = {}, pathOf = """ + CV_PATH_FN + r""";
+  const els = Array.from(document.body ? document.body.querySelectorAll('*') : []).slice(0, 20000);
+  for (const e of els) {
+    if (e.closest('svg')) continue;
+    const st = e.getAttribute('style') || '';
+    let fs = 0;
+    if (e.firstChild || st) fs = parseFloat(getComputedStyle(e).fontSize) || 0;
+    out[pathOf(e)] = [e.tagName, fs, st];
+  }
+  return out;
+}"""
+# 写: {paths: [字号随宽的路径], inline: {路径: {属性: 'Xvw'}}} → 标 data-cv-fluidsz(烘焙跳过字号类), 内联改 vw
+FLUID_APPLY_JS = r"""({paths, inline}) => {
+  const resolve = (path) => {
+    let e = document.body;
+    for (const seg of path ? path.split('>') : []) {
+      const [tag, n] = seg.split(':');
+      let k = 0, hit = null;
+      for (const c of e.children) if (c.tagName.toLowerCase() === tag && ++k === +n) { hit = c; break; }
+      if (!hit) return null;
+      e = hit;
+    }
+    return e;
+  };
+  let marked = 0, vw = 0;
+  for (const p of paths || []) { const e = resolve(p); if (e) { e.setAttribute('data-cv-fluidsz', ''); marked++; } }
+  for (const [p, props] of Object.entries(inline || {})) {
+    const e = resolve(p);
+    if (!e) continue;
+    for (const [k, v] of Object.entries(props)) { e.style.setProperty(k, v, e.style.getPropertyPriority(k)); vw++; }
+  }
+  return {marked, vw};
+}"""
+
+
+# 回顶(采集/评分前): html{scroll-behavior:smooth} 下 scrollTo(0,0) 是动画, 等 400ms 未必到顶, 截图/快照就带着滚动偏移。
+# behavior:'instant' 显式覆盖 CSS 的 smooth(不改 DOM 的 style 属性, 序列化不受影响)
+SCROLL_TOP_JS = r"""() => { window.scrollTo({top: 0, left: 0, behavior: 'instant'}); }"""

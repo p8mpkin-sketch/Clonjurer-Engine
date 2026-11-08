@@ -171,6 +171,51 @@ class LiveViewportScope(unittest.TestCase):
                 b.close()
 
 
+CLAMP_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width"></head><body>
+<h1 id="h" style="font-size:72px">Title</h1>
+<script>function f(){document.getElementById('h').style.fontSize = Math.min(72, innerWidth * 0.08) + 'px';}
+addEventListener('resize', f); f();</script></body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class PiecewiseFluid(unittest.TestCase):
+    """脚本按视口宽算、桌面被上限夹住的字号: 平板/手机两段同比 → 写 vw, 别的手机宽下跟着变; 桌面段仍是 px。"""
+
+    def test_tablet_phone_proportional_to_vw(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 1440, "height": 800})
+                page.set_content(CLAMP_PAGE)
+                page.evaluate(ce.CV_RECORD_JS, "d")
+                for tag, w in (("t", 768), ("m", 390)):
+                    page.set_viewport_size({"width": w, "height": 800})
+                    page.evaluate(ce.CV_QUIET_JS, 100)
+                    page.evaluate(ce.CV_RECORD_JS, tag)
+                page.set_viewport_size({"width": 1440, "height": 800})
+                page.evaluate(ce.CV_QUIET_JS, 100)
+                page.evaluate(ce.CV_RECORD_JS, "b")
+                out = page.evaluate(ce.CV_EMIT_JS)
+                self.assertEqual(out["vw"], 1)
+                css = page.evaluate("document.querySelector('style[data-clone-vp]').textContent")
+                self.assertIn("font-size:8.0000vw", css)
+                self.assertIn("font-size:72px", css)
+                html = page.content()
+            finally:
+                b.close()
+            html = ce.scope_viewport_css(html, 1000, 0)
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 420, "height": 912})
+                page.set_content(html.replace("<script>", "<script type='x'>"))
+                self.assertEqual(page.evaluate("getComputedStyle(document.getElementById('h')).fontSize"), "33.6px")
+                page.set_viewport_size({"width": 1440, "height": 800})
+                self.assertEqual(page.evaluate("getComputedStyle(document.getElementById('h')).fontSize"), "72px")
+            finally:
+                b.close()
+
+
 CLS_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
 <style>.big{font-size:40px}.small{font-size:18px}</style></head><body>
 <h2 id="h" class="big">Title</h2>
@@ -377,6 +422,226 @@ class InlineFluidSelfSized(unittest.TestCase):
                 self.assertEqual(out["width"], 1)
                 self.assertIn("160px", page.evaluate("document.getElementById('fixed').getAttribute('style')"))
                 self.assertIn("100%", page.evaluate("document.getElementById('full').getAttribute('style')"))
+            finally:
+                b.close()
+
+
+INTERSTITIAL_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width"></head><body style="margin:0">
+<div id="hdr" style="position:fixed;top:0;left:0;right:0;height:60px;z-index:9999"><iframe src="http://ads.invalid/x" width="300" height="50"></iframe></div>
+<div style="height:2000px">正文</div>
+<div id="pop" style="position:fixed;top:0;left:0;width:100%;height:110%;z-index:2147483647;background:rgba(0,0,0,.5)">
+<iframe src="http://ads.invalid/s?wid=336&hei=597" width="336" height="597"></iframe></div>
+<div id="own" style="position:fixed;inset:0;z-index:5000"><iframe src="/local" width="300" height="300"></iframe></div>
+</body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class InterstitialHide(unittest.TestCase):
+    """插屏广告层(fixed 全屏 + 跨源 iframe)评分截图时隐藏, 截完还原; 页头小广告条与同源全屏层不动。"""
+
+    def test_hide_and_restore(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 420, "height": 912})
+                page.route("**/*", lambda r: r.abort() if "ads.invalid" in r.request.url or "/local" in r.request.url else r.continue_())
+                page.set_content(INTERSTITIAL_PAGE)
+                self.assertEqual(page.evaluate(ce.INTERSTITIAL_HIDE_JS), 1)
+                disp = "id => getComputedStyle(document.getElementById(id)).display"
+                self.assertEqual(page.evaluate(disp, "pop"), "none")
+                self.assertEqual(page.evaluate(disp, "hdr"), "block")
+                self.assertEqual(page.evaluate(disp, "own"), "block")
+                page.evaluate(ce.INTERSTITIAL_RESTORE_JS)
+                self.assertEqual(page.evaluate(disp, "pop"), "block")
+                self.assertNotIn("display", page.evaluate("document.getElementById('pop').getAttribute('style')"))
+                self.assertIsNone(page.evaluate("document.getElementById('pop').getAttribute('data-clone-ihide')"))
+            finally:
+                b.close()
+
+    def test_marketing_modal_hidden_drawer_and_cookie_bar_kept(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 420, "height": 912})
+                page.set_content(MODAL_PAGE)
+                self.assertEqual(page.evaluate(ce.INTERSTITIAL_HIDE_JS), 2)
+                disp = "id => getComputedStyle(document.getElementById(id)).display"
+                self.assertEqual(page.evaluate(disp, "bd"), "none")
+                self.assertEqual(page.evaluate(disp, "dlg"), "none")
+                self.assertEqual(page.evaluate(disp, "cookie"), "block")
+                self.assertEqual(page.evaluate(disp, "hero"), "block")
+                page.evaluate(ce.INTERSTITIAL_RESTORE_JS)
+                self.assertEqual(page.evaluate(disp, "bd"), "block")
+                self.assertEqual(page.evaluate(disp, "dlg"), "block")
+            finally:
+                b.close()
+
+
+MODAL_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width"></head><body style="margin:0">
+<div id="hero" style="position:relative;height:900px;z-index:1">首屏大图</div>
+<div id="cookie" style="position:fixed;left:0;right:0;bottom:0;height:120px;z-index:999"><input type="checkbox">Cookie <button aria-label="Close">×</button></div>
+<div id="bd" style="position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.6)"></div>
+<div id="dlg" role="dialog" aria-modal="true" style="position:fixed;top:20%;left:10%;width:80%;height:50%;z-index:1001;background:#fff">
+<input type="email" placeholder="Email"><button aria-label="Close">×</button></div>
+</body></html>"""
+
+
+FLEXIBLE_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width"></head><body style="margin:0">
+<div id="col" style="max-width:10rem">内容</div>
+<script>function f(){document.documentElement.style.fontSize = (innerWidth / 10) + 'px';} addEventListener('resize', f); f();</script>
+</body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class RootFontFluid(unittest.TestCase):
+    """lib-flexible 类 rem 基准(内联 font-size = 宽/10): 窄屏采集时改写成 vw, 克隆在别的手机宽下跟着变。"""
+
+    def test_rem_base_to_vw(self):
+        from playwright.sync_api import sync_playwright
+        eng = ce.ClonerEngine.__new__(ce.ClonerEngine)
+        eng.cfg, logs = {}, []
+        eng.log = lambda level, msg: logs.append(msg)
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                ctx = b.new_context(viewport={"width": 390, "height": 800})
+                ctx.route("http://flex.test/", lambda r: r.fulfill(body=FLEXIBLE_PAGE, content_type="text/html"))
+                page = ctx.new_page()
+                page.goto("http://flex.test/")
+                eng._probe_root_font(page)
+                self.assertAlmostEqual(eng._root_fluid.get("html", 0), 10.0, places=3)
+                self.assertNotIn("body", eng._root_fluid)
+                self.assertEqual(page.viewport_size["width"], 390)
+                self.assertEqual(len(ctx.pages), 1)   # 对照页已关, 主页没被缩放/导航
+                page.evaluate(ce.ROOT_FONT_APPLY_JS, eng._root_fluid)
+                html = page.content().replace("addEventListener('resize', f); f();", "")
+                page2 = b.new_page(viewport={"width": 420, "height": 800})
+                page2.set_content(html)
+                self.assertAlmostEqual(page2.evaluate("document.getElementById('col').getBoundingClientRect().width"), 420, delta=1)
+                # 桌面宽采集不做
+                eng2 = ce.ClonerEngine.__new__(ce.ClonerEngine)
+                eng2.cfg, eng2.log = {}, (lambda *a: None)
+                page.set_viewport_size({"width": 1440, "height": 800})
+                eng2._probe_root_font(page)
+                self.assertEqual(eng2._root_fluid, {})
+            finally:
+                b.close()
+
+
+FLUID_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<style>#css{font-size:10vw}#fixed{font-size:18px}</style></head><body style="margin:0">
+<h1 id="css">CSS 随宽</h1><p id="fixed">定值</p>
+<h2 id="js">脚本随宽</h2><div id="box" style="color:red">盒</div>
+<script>function f(){document.getElementById('js').style.fontSize = (innerWidth * 0.1) + 'px';
+document.getElementById('box').style.width = (innerWidth * 0.8) + 'px';}
+addEventListener('resize', f); f();</script></body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class FluidSizeProbe(unittest.TestCase):
+    """字号/内联 px 随视口宽同比(0.92 倍宽对照): 烘焙不钉字号, 内联 px 改 vw; 定值照旧烘焙。"""
+
+    def test_fluid_elements_not_pinned(self):
+        from playwright.sync_api import sync_playwright
+        eng = ce.ClonerEngine.__new__(ce.ClonerEngine)
+        eng.cfg, logs = {}, []
+        eng.log = lambda level, msg: logs.append(msg)
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                ctx = b.new_context(viewport={"width": 390, "height": 800})
+                ctx.route("http://fluid.test/", lambda r: r.fulfill(body=FLUID_PAGE, content_type="text/html"))
+                page = ctx.new_page()
+                page.goto("http://fluid.test/")
+                eng._probe_root_font(page)
+                self.assertEqual(eng._root_fluid, {})
+                fl = eng._fluid
+                self.assertEqual(sorted(fl["paths"]), ["h1:1", "h2:1"])
+                self.assertEqual(fl["inline"], {"h2:1": {"font-size": "10.0000vw"}, "div:1": {"width": "80.0000vw"}})
+                self.assertEqual(len(ctx.pages), 1)
+                page.evaluate(ce.FLUID_APPLY_JS, fl)
+                self.assertEqual(page.evaluate("document.getElementById('js').style.fontSize"), "10vw")
+                self.assertGreater(page.evaluate(ce.FONT_BAKE_JS), 0)
+                self.assertEqual(page.evaluate("document.querySelectorAll('[data-cv-fluidsz]').length"), 0)
+                bake = page.evaluate("document.querySelector('style[data-clone-bake]').textContent")
+                self.assertIn("font-size:18px", bake)        # 定值照烘
+                self.assertNotIn("font-size:39px", bake)     # 随宽的不钉 390 宽的值
+                html = page.content().replace("addEventListener('resize', f); f();", "")
+                page2 = b.new_page(viewport={"width": 420, "height": 800})
+                page2.set_content(ce.scope_bake_css(html, 320))
+                self.assertEqual(page2.evaluate("getComputedStyle(document.getElementById('css')).fontSize"), "42px")
+                self.assertEqual(page2.evaluate("getComputedStyle(document.getElementById('js')).fontSize"), "42px")
+                self.assertAlmostEqual(page2.evaluate("document.getElementById('box').getBoundingClientRect().width"), 336, delta=1)
+                self.assertEqual(page2.evaluate("getComputedStyle(document.getElementById('fixed')).fontSize"), "18px")
+            finally:
+                b.close()
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class AltVariantImgFallback(unittest.TestCase):
+    """窄屏变体里没 src 的 <img>(抽取时脚本还没写)用主页同子树对应图补上: 先按 alt, 再按同数量按序。"""
+
+    def test_missing_src_filled_from_main(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 1440, "height": 800})
+                page.set_content('<!doctype html><body><section><img src="/a.png" alt="A"><img src="/b.png" alt="B"></section></body>')
+                alt = '<section><img alt="B"><img alt="A"><img alt="C" src="/c.png"></section>'
+                n = page.evaluate(ce.ALT_INJECT_JS, {"items": [{"path": "section:1", "own": "d", "alts": [{"bands": "t m", "html": alt}]}], "css": ""})
+                self.assertEqual(n, 1)
+                self.assertEqual(page.evaluate("window.__cvAltImgFixed"), 2)
+                srcs = page.evaluate("Array.from(document.querySelectorAll('[data-cv-vp=\"t m\"] img'), i => i.getAttribute('src'))")
+                self.assertEqual(srcs, ["/b.png", "/a.png", "/c.png"])
+            finally:
+                b.close()
+
+
+HIDDEN_FILL_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<style>@media (min-width:600px){.m{display:none}} @media (max-width:599px){.d{display:none}}</style></head><body>
+<img class="d" src="/desk.png" alt="hero"><img class="m" alt="hero">
+<span class="d">300M+</span><span class="m"></span><span class="m" id="keep"></span>
+<script>function f(){ if (innerWidth < 600) { document.querySelector('img.m').setAttribute('src', '/phone.png');
+ document.querySelectorAll('span.m')[0].textContent = '300M+'; } }
+f();</script></body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class HiddenElementFill(unittest.TestCase):
+    """桌面上 display:none 的手机版实例: 脚本只在可见时写 src/文本, 用窄屏首载页同路径元素的值补。"""
+
+    def test_src_and_text_filled_from_narrow_load(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                ctx = b.new_context(viewport={"width": 1440, "height": 800})
+                ctx.route("http://fill.test/", lambda r: r.fulfill(body=HIDDEN_FILL_PAGE, content_type="text/html"))
+                page = ctx.new_page()
+                page.goto("http://fill.test/")
+                page.evaluate(ce.CV_RECORD_JS, "d")
+                for tag, w in (("t", 768), ("m", 390)):
+                    page.set_viewport_size({"width": w, "height": 800})
+                    page.evaluate(ce.CV_QUIET_JS, 100)
+                    page.evaluate(ce.CV_RECORD_JS, tag)
+                page.set_viewport_size({"width": 1440, "height": 800})
+                page.evaluate(ce.CV_QUIET_JS, 100)
+                page.evaluate(ce.CV_RECORD_JS, "b")
+                p2 = ctx.new_page()
+                p2.set_viewport_size({"width": 390, "height": 800})
+                p2.goto("http://fill.test/")
+                loads = {"m": p2.evaluate(ce.CV_PATHS_JS)}
+                p2.close()
+                out = page.evaluate(ce.CV_EMIT_JS, loads)
+                self.assertEqual(out.get("srcFill"), 1)
+                self.assertEqual(out.get("textFill"), 1)
+                self.assertEqual(page.evaluate("document.querySelector('img.m').getAttribute('src')"), "/phone.png")
+                self.assertEqual(page.evaluate("document.querySelector('img.d').getAttribute('src')"), "/desk.png")
+                self.assertEqual(page.evaluate("document.querySelectorAll('span.m')[0].textContent"), "300M+")
+                self.assertEqual(page.evaluate("document.getElementById('keep').textContent"), "")
             finally:
                 b.close()
 
@@ -592,3 +857,82 @@ class LoadTimeSizeAttrs(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TransientHideRule(unittest.TestCase):
+    """窄屏页多出的"只藏元素"规则(入场动画初始态)不注入手机段(wix 手机端表单/计数被 #comp-x{visibility:hidden!important} 藏掉)。"""
+    def test_hide_only_rules_skipped(self):
+        from core.cloner_engine import _is_transient_hide_rule as f
+        self.assertTrue(f("#comp-molkru1x7 { visibility: hidden !important; }"))
+        self.assertTrue(f(".a, .b { opacity: 0; transform: translateY(40px); transition: opacity 0.6s; }"))
+        self.assertTrue(f("#x { display: none; }"))
+
+    def test_real_style_rules_kept(self):
+        from core.cloner_engine import _is_transient_hide_rule as f
+        self.assertFalse(f("#comp-x { visibility: hidden; width: 320px; }"))
+        self.assertFalse(f("a { text-decoration: underline; }"))
+        self.assertFalse(f("@media (max-width: 600px) { .m { display: none; } }"))
+        self.assertFalse(f(".k { opacity: 1; }"))
+        self.assertFalse(f("* { box-sizing: border-box; margin: 0px; padding: 0px; }"))
+
+
+class GlobalResetRule(unittest.TestCase):
+    """窄屏页多出的标签级全局重置/@font-face 不注入手机段(solidjs: 脚本注入的整张 normalize 让手机端链接全下划线、字体回落)。"""
+    def test_reset_rules_skipped(self):
+        from core.cloner_engine import _is_global_reset_rule as f
+        self.assertTrue(f("* { box-sizing: border-box; margin: 0px; padding: 0px; }"))
+        self.assertTrue(f("html { line-height: 1.15; text-size-adjust: 100%; }"))
+        self.assertTrue(f("body { display: flex; flex-direction: column; height: 100vh; }"))
+        self.assertTrue(f("a { text-decoration: underline; }"))
+        self.assertTrue(f("h1, h2, h3 { margin: 0px; }"))
+        self.assertTrue(f("a:hover, button::before { color: red; }"))
+        self.assertTrue(f('@font-face { font-family: Gordita; src: url("/Gordita-Regular.woff"); }'))
+
+    def test_scoped_rules_kept(self):
+        from core.cloner_engine import _is_global_reset_rule as f
+        self.assertFalse(f(".nav a { text-decoration: none; }"))
+        self.assertFalse(f("#menu { display: block; }"))
+        self.assertFalse(f("body.dark { background: #000; }"))
+        self.assertFalse(f("[data-x] { color: red; }"))
+        self.assertFalse(f("@keyframes spin { 0% { transform: rotate(0); } }"))
+        self.assertFalse(f("@media (max-width: 600px) { a { color: red; } }"))
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class FixedIframeInterstitial(unittest.TestCase):
+    """第三方营销弹窗 iframe(fixed 铺满视口, z-index auto, 跨域看不到内部)评分时隐藏; 小的嵌入 iframe 不动。"""
+    PAGE = ('<html><body style="margin:0"><div style="height:3000px">x</div>'
+            '<iframe id="promo" src="https://creative.example/x" style="position:fixed;inset:0;width:100vw;height:100vh;border:0"></iframe>'
+            '<iframe id="video" src="https://video.example/v" style="position:fixed;bottom:0;right:0;width:320px;height:180px"></iframe>'
+            '</body></html>')
+
+    def test_fixed_fullscreen_iframe_hidden(self):
+        from core.clone.js import INTERSTITIAL_HIDE_JS, INTERSTITIAL_RESTORE_JS
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch(); pg = b.new_page(viewport={"width": 420, "height": 900})
+            pg.route("**/*", lambda r: r.fulfill(status=200, content_type="text/html", body="<html></html>") if "example" in r.request.url else r.continue_())
+            pg.set_content(self.PAGE)
+            n = pg.evaluate(INTERSTITIAL_HIDE_JS)
+            self.assertEqual(n, 1)
+            self.assertEqual(pg.evaluate("getComputedStyle(document.getElementById('promo')).display"), "none")
+            self.assertNotEqual(pg.evaluate("getComputedStyle(document.getElementById('video')).display"), "none")
+            pg.evaluate(INTERSTITIAL_RESTORE_JS)
+            self.assertNotEqual(pg.evaluate("getComputedStyle(document.getElementById('promo')).display"), "none")
+            b.close()
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class VariantControlCount(unittest.TestCase):
+    """变体抽取与主页子树尺寸都带表单控件数: 窄屏版控件少于主页 → 视为未水合不采用(wix 手机端邮箱表单整块消失)。"""
+    def test_control_counts_reported(self):
+        from core.clone.js import ALT_EXTRACT_JS, SUBTREE_SIZE_JS
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch(); pg = b.new_page()
+            pg.set_content('<body><section><h1>Hi</h1><form><input placeholder="email"><input type="hidden" name="t"><button>Go</button></form></section></body>')
+            alt = pg.evaluate(ALT_EXTRACT_JS, ["section:1"])["section:1"]
+            size = pg.evaluate(SUBTREE_SIZE_JS, ["section:1"])["section:1"]
+            self.assertEqual(alt[3], 1, "hidden input 不计, button 不计")
+            self.assertEqual(size[2], 1)
+            b.close()

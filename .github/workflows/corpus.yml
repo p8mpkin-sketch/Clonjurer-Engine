@@ -27,6 +27,18 @@ on:
         description: "实例环境变量(空格分隔 K=V, 同时段 A/B 用, 如 CLONER_FONT_PLAN=0)"
         required: false
         default: ""
+      viewports:
+        description: "探针视口(留空=desktop,tablet,mobile; 可填 phones / phones4 / iphone-air,galaxy-s24 等)"
+        required: false
+        default: ""
+      probe_noise:
+        description: "探针加原站自比上限与稳健口径(true/false)"
+        required: false
+        default: "false"
+      probe_each:
+        description: "每站克隆一完成立即探针(true/false)"
+        required: false
+        default: "false"
   schedule:
     - cron: "30 18 * * *"   # 北京时间 02:30
 
@@ -56,9 +68,14 @@ jobs:
           echo "实例未就绪"; tail -50 logs/app_ci.log; exit 1
       - name: 跑语料
         run: |
+          extra=""
+          [ "${{ github.event.inputs.probe_noise }}" = "true" ] && extra="$extra --probe-noise"
+          [ "${{ github.event.inputs.probe_each }}" = "true" ] && extra="$extra --probe-each"
           python engine_bench/real_sites/run_corpus.py --base http://127.0.0.1:8897 \
             --timeout 3600 --tag "${{ github.event.inputs.tag || 'global' }}" \
-            --sites "${{ github.event.inputs.sites }}" || echo "有站点未完成(报告照常产出)"
+            --sites "${{ github.event.inputs.sites }}" \
+            --viewports "${{ github.event.inputs.viewports || 'desktop,tablet,mobile' }}" $extra \
+            || echo "有站点未完成(报告照常产出)"
       - name: 报告写入运行摘要
         if: always()
         run: |
@@ -72,9 +89,66 @@ jobs:
             python - "$j" <<'PY'
           import json, sys, pathlib
           run = json.load(open(sys.argv[1], encoding="utf-8"))
+          def _low_vps(r):
+              # 视口探针分(有稳健口径时看稳健分)低于 85 的视口: 这些宽度的原站/克隆截图进日志
+              vp = dict(r.get("vp") or {})
+              for k, v in (r.get("vp_robust") or {}).items():
+                  if v is not None:
+                      vp[k] = v
+              return [k for k, v in vp.items() if isinstance(v, (int, float)) and v < 85]
+          def _shot(path, tag, width=480, max_h=2400):
+              try:
+                  from PIL import Image
+                  import base64, io
+                  im = Image.open(path).convert("RGB")
+                  im = im.resize((width, max(1, round(im.height * width / im.width))))
+                  im = im.crop((0, 0, width, min(im.height, max_h)))
+                  buf = io.BytesIO(); im.save(buf, "JPEG", quality=60)
+                  print(f"::group::shot {tag}")
+                  b64 = base64.b64encode(buf.getvalue()).decode()
+                  for k in range(0, len(b64), 4000):
+                      print("SHOT64:" + b64[k:k + 4000])
+                  print("::endgroup::")
+              except Exception as exc:
+                  print(f"(缩略图失败 {path}: {exc})")
+          vp_dirs = sorted(pathlib.Path("engine_bench/real_sites/runs").glob("viewports_*"))
           for r in run.get("results", []):
+              low = _low_vps(r)
+              for v, d in (r.get("vp_diag") or {}).items():
+                  print(f"::group::vp-diag {r.get('task_id')} {v} {r.get('url')}")
+                  for side in ("clone", "orig"):
+                      dd = d.get(side) or {}
+                      print(f"[{side}] 图 {dd.get('nimg')} 张, 裂图 {len(dd.get('broken') or [])}, 失败请求 {len(dd.get('failed') or [])}, 脚本错误 {len(dd.get('errors') or [])}")
+                      for b in (dd.get("broken") or [])[:20]: print("  裂图", b)
+                      for f in (dd.get("failed") or [])[:30]: print("  失败", f)
+                      for e in (dd.get("errors") or [])[:5]: print("  错误", e)
+                      for e in (dd.get("exceptions") or [])[:6]: print("  异常定位", e)
+                      for sh in (dd.get("sheets") or [])[:40]: print("  样式表", sh)
+                      for k, v in (dd.get("probe") or {}).items(): print(f"  探 {k}: {v}")
+                      for ov in (dd.get("overlays") or [])[:12]: print("  盖屏层", ov)
+                      for hi in (dd.get("hiddenInputs") or [])[:12]: print("  隐藏控件", hi)
+                      for st in (dd.get("styles") or [])[:60]: print("  style块", st)
+                  # 可见文本行做差(忽略坐标): 原站有克隆没有 = 丢的表单/计数/文案; 反向 = 克隆多出的弹层/占位
+                  key = lambda l: l.rsplit(" @", 1)[0]
+                  co = {key(l): l for l in ((d.get("clone") or {}).get("lines") or [])}
+                  oo = {key(l): l for l in ((d.get("orig") or {}).get("lines") or [])}
+                  for l in [oo[k] for k in oo if k not in co][:14]: print("  原站独有文本", l)
+                  for l in [co[k] for k in co if k not in oo][:14]: print("  克隆独有文本", l)
+                  # 同一段文案两侧都有但纵向位置差 >40px: 从第一处位移看出哪一块高度/有无不同
+                  ypos = lambda l: int(l.rsplit(" @", 1)[1].split(",")[0]) if " @" in l else 0
+                  moved = [(ypos(oo[k]), ypos(co[k]), k) for k in oo if k in co and abs(ypos(oo[k]) - ypos(co[k])) > 40]
+                  for oy, cy, k in sorted(moved)[:12]: print(f"  位移文本 原 y={oy} 克隆 y={cy}: {k[:70]}")
+                  print("::endgroup::")
+              # 低分视口的探针截图(原站/克隆/遮罩后)进日志: 产物存储域名在部分环境不可达
+              for v in low:
+                  for kind in ("orig", "clone", "orig_rb", "clone_rb"):
+                      for d in vp_dirs:
+                          f = d / f"{r.get('task_id')}_{v}_{kind}.png"
+                          if f.is_file():
+                              _shot(f, f"{r.get('task_id')} vp {v} {kind} {r.get('url')}", width=300, max_h=5200)
+                              break
               # 慢站(>120s)也打日志: 远程做耗时归因
-              if r.get("status") == "completed" and isinstance(r.get("score"), (int, float)) and r["score"] >= 90 \
+              if r.get("status") == "completed" and isinstance(r.get("score"), (int, float)) and r["score"] >= 90 and not low \
                       and (r.get("elapsed_s") or 0) <= 120:
                   continue
               log = pathlib.Path("workspaces") / str(r.get("task_id")) / "engine.log"

@@ -36,6 +36,15 @@ from core import pixel_calibrator
 
 from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 import 路径不变
     AD_RECTS_JS,
+    INTERSTITIAL_HIDE_JS,
+    ROOT_FONT_APPLY_JS,
+    FLUID_READ_JS,
+    FLUID_APPLY_JS,
+    ROOT_FONT_READ_JS,
+    INTERSTITIAL_RESTORE_JS,
+    FONT_BAKE_NOSIZE_JS,
+    SCROLL_TOP_JS,
+    NARROW_STABLE_JS,
     ALT_EXTRACT_JS,
     ALT_INJECT_JS,
     ANIM_ALIGN_JS,
@@ -245,6 +254,7 @@ from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部
     text_overlap_score,
     write_diff_preview,
 )
+from core.clone.support import _fluid_elements, _is_global_reset_rule, _is_transient_hide_rule, _regroup_css_rules  # noqa: F401
 
 
 
@@ -257,11 +267,22 @@ class CaptureMixin:
 
     def _full_shot(self, page, path, label="截图", _fresh=False):
         """整页截图 + 第三方广告位遮罩(评分口径, 见 AD_RECTS_JS)。"""
+        hidden = 0
+        if config.SCORE_MASK_ADS and label in ("原站", "克隆页", "保真轨", "静态版"):
+            with suppress(Exception):
+                hidden = page.evaluate(INTERSTITIAL_HIDE_JS) or 0
+                if hidden and label == "原站":
+                    self.log("RENDER", f"评分截图: 插屏广告层 {hidden} 个两侧隐藏(不计分, 交付物保留)")
         if label == "原站" and config.SCORE_MASK_ADS:
             self._ad_rects = []
             with suppress(Exception):
                 self._ad_rects = page.evaluate(AD_RECTS_JS) or []
-        self._full_shot_raw(page, path, label, _fresh)
+        try:
+            self._full_shot_raw(page, path, label, _fresh)
+        finally:
+            if hidden:
+                with suppress(Exception):
+                    page.evaluate(INTERSTITIAL_RESTORE_JS)
         rects = getattr(self, "_ad_rects", None)
         if rects and label in ("原站", "克隆页", "保真轨"):
             with suppress(Exception):
@@ -391,7 +412,7 @@ class CaptureMixin:
                 break
             y = top + view_h
         with suppress(Exception):
-            page.evaluate("() => window.scrollTo(0, 0)")
+            page.evaluate(SCROLL_TOP_JS)
         canvas.save(str(path))
 
 
@@ -441,7 +462,7 @@ class CaptureMixin:
                 page.evaluate(CV_RECORD_JS, tag)
             page.set_viewport_size({"width": width, "height": height})
             page.evaluate(CV_QUIET_JS, 300)
-            page.evaluate("window.scrollTo(0, 0)")
+            page.evaluate(SCROLL_TOP_JS)
             page.evaluate(CV_RECORD_JS, "b")
             self.log("RENDER", f"多视口内联采集: {n} 个元素 × 平板/手机视口 {time.monotonic() - t0:.1f}s")
             if self.cfg.get("viewport_reload", True) and not getattr(self, "_cv_pages", None):
@@ -454,6 +475,51 @@ class CaptureMixin:
             self.log("WARN", f"多视口内联采集失败: {exc}")
 
 
+    def _probe_root_font(self, page):
+        """rem 基准随视口宽成正比(<html>/<body> 内联 font-size = 宽/N)时, 冻结后改写成 vw(见
+        ROOT_FONT_READ_JS)。证据: 0.92 倍宽另开页面重新加载, 计算字号同比变化(±1.5%)才认; 只认内联写的
+        (样式表里的 vw/媒体查询本就随视口)。认定后字体烘焙不烘字号/行高/字距(FONT_BAKE_NOSIZE_JS)。"""
+        self._root_fluid = {}
+        self._fluid = None
+        vp = page.viewport_size or {}
+        width, height = vp.get("width") or 0, vp.get("height") or 0
+        # 只在窄屏采集(手机版子克隆等)做: 桌面宽下按宽算的 rem 到了窄屏多半换公式/封顶, 改 vw 未必更近
+        if not width or width >= 1024 or not self.cfg.get("viewport_probe_root", True):
+            return
+        # 另开同上下文页面在 0.92 倍宽重新加载来对照, 不缩放主页: 有的站 resize 处理整页重载(搜狐手机版),
+        # 主页一旦被导航, 已滚动/懒加载的状态就丢了
+        p2 = None
+        try:
+            a = page.evaluate(ROOT_FONT_READ_JS)
+            fa = page.evaluate(FLUID_READ_JS) or {}
+            w2 = int(round(width * 0.92))
+            p2 = page.context.new_page()
+            p2.set_viewport_size({"width": w2, "height": height})
+            p2.goto(page.url, wait_until="domcontentloaded", timeout=10000)
+            with suppress(Exception):
+                p2.wait_for_load_state("load", timeout=4000)
+            p2.evaluate(CV_QUIET_JS, 300)
+            b = p2.evaluate(ROOT_FONT_READ_JS)
+            fb = p2.evaluate(FLUID_READ_JS) or {}
+        except Exception as exc:   # noqa: BLE001 探测失败不影响采集
+            self.log("WARN", f"随宽同比探测失败: {str(exc)[:120]}")
+            return
+        finally:
+            with suppress(Exception):
+                if p2 is not None:
+                    p2.close()
+        for k, i in (("html", 1), ("body", 3)):
+            f1, f2 = a[i + 1], b[i + 1]
+            if a[i] and f1 > 0 and f2 > 0 and a[0] and b[0] and abs((f2 / f1) / (b[0] / a[0]) - 1) <= 0.015:
+                self._root_fluid[k] = f1 / a[0] * 100
+        if self._root_fluid:
+            self.log("RENDER", "rem 基准随视口宽: " + ", ".join(f"{k} {v:.3f}vw" for k, v in self._root_fluid.items()))
+        self._fluid = _fluid_elements(fa, fb, a[0] or width, b[0] or w2)
+        if self._fluid and (self._fluid["paths"] or self._fluid["inline"]):
+            self.log("RENDER", f"随宽同比: {len(self._fluid['paths'])} 个元素字号随视口宽(不烘字号),"
+                               f" {sum(len(v) for v in self._fluid['inline'].values())} 个内联 px 改写为 vw"
+                               f"(0.92 倍宽对照, 同比 ±1.5%)")
+
     def _start_narrow_loads(self, page, height):
         """同上下文另开平板/手机宽的页面重新加载目标页(只等到响应提交, 与主页后续采集并行):
         只在加载时按宽度写一次的内联样式, 缩放采不到, 要靠窄屏首载对照(见 CV_EMIT_JS)。"""
@@ -462,6 +528,9 @@ class CaptureMixin:
             p2 = None
             try:
                 p2 = page.context.new_page()
+                # 窄屏才显示/才加载的图(手机版首屏图、按断点换的 picture 源)桌面活体从没请求过, 不登记就
+                # 进不了活体回补, 克隆在手机宽度下整块裂图(wix 手机首屏 ~40 分)
+                p2.on("response", lambda r: self._on_asset_response(r, bodies=False))
                 p2.set_viewport_size({"width": w, "height": height})
                 p2.goto(page.url, wait_until="commit", timeout=10000)
                 self._cv_pages.append((tag, p2))
@@ -520,8 +589,14 @@ class CaptureMixin:
             else:
                 p2.evaluate(CaptureMixin.AUTO_SCROLL_JS, [int(budget * 1000), 54000])
             p2.wait_for_timeout(400)
-            p2.evaluate("window.scrollTo(0, 0)")
+            p2.evaluate(SCROLL_TOP_JS)
             p2.evaluate(CV_QUIET_JS, 300)
+        # 滚完再等页面"到位": 网络静默 + 文字量/已出 src 的图片数连续两次不变(水合晚到的表单、计数动画、
+        # 懒加载图片组件写 src 都在这之后才稳定; 抽早了变体里只剩 alt 文字与空计数, wix 手机首屏 ~40 分)
+        with suppress(Exception):
+            p2.wait_for_load_state("networkidle", timeout=3000)
+        with suppress(Exception):
+            p2.evaluate(NARROW_STABLE_JS, 2500)
         with suppress(Exception):
             p2.evaluate(ANIM_PHASE_JS)
 
@@ -546,10 +621,17 @@ class CaptureMixin:
             with suppress(Exception):
                 htmls = pages[tag].evaluate(ALT_EXTRACT_JS, top) or {}
                 sizes = page.evaluate(SUBTREE_SIZE_JS, list(htmls))
-                for p, (h, alt_text, alt_n) in htmls.items():
-                    main_text, main_n = sizes.get(p, (0, 0))
+                for p, (h, alt_text, alt_n, *alt_rest) in htmls.items():
+                    main_text, main_n, *main_rest = sizes.get(p, (0, 0, 0))
+                    alt_ctrl = alt_rest[0] if alt_rest else 0
+                    main_ctrl = main_rest[0] if main_rest else 0
                     # 窄屏版明显"更空": 多半是异步内容(赞助位/推荐流)还没到, 不是换了结构
                     if alt_text < 0.5 * main_text or alt_n < 0.3 * main_n:
+                        continue
+                    # 窄屏版表单控件比主页少: 组件晚水合(wix 首屏邮箱表单在窄屏页里时有时无 → 手机端整块表单消失),
+                    # 不是响应式换结构; 退回主页子树 + 分视口样式
+                    if main_ctrl and alt_ctrl < main_ctrl:
+                        self.log("RENDER", f"窄屏 DOM 变体: {p[:60]} 的 {tag} 版表单控件 {alt_ctrl} < 主页 {main_ctrl}, 视为未水合, 不用")
                         continue
                     variants.setdefault(p, {})[tag] = h
         if not variants:
@@ -567,18 +649,44 @@ class CaptureMixin:
                 alts += [{"bands": t, "html": h} for t, h in v.items()]
             own = " ".join(["d"] + [t for t in ("t", "m") if t not in v])
             items.append({"path": p, "own": own, "alts": alts})
-        css_main = set(page.evaluate(STYLE_TEXTS_JS) or [])
-        extra = []
+        main_rows = page.evaluate(STYLE_TEXTS_JS) or []
+        css_main = {(g, t) for g, t, *_ in main_rows}
+        extra, by_sheet, hidden_skipped, reset_skipped = [], {}, 0, 0
         for tag in {t for v in variants.values() for t in v}:
             with suppress(Exception):
-                extra += [t for t in (pages[tag].evaluate(STYLE_TEXTS_JS) or []) if t not in css_main]
-        css = "\n".join(dict.fromkeys(extra))[:config.VIEWPORT_VARIANT_BYTES]
+                for g, t, *rest in (pages[tag].evaluate(STYLE_TEXTS_JS) or []):
+                    if (g, t) not in css_main:
+                        if _is_transient_hide_rule(t):
+                            hidden_skipped += 1
+                            continue
+                        if _is_global_reset_rule(t):
+                            reset_skipped += 1
+                            continue
+                        extra.append((g, t))
+                        by_sheet[(tag, rest[0] if rest else "")] = by_sheet.get((tag, rest[0] if rest else ""), 0) + 1
+        css = _regroup_css_rules(dict.fromkeys(extra))[:config.VIEWPORT_VARIANT_BYTES]
+        if hidden_skipped or reset_skipped:
+            self.log("RENDER", f"窄屏运行时样式: 跳过 {hidden_skipped} 条入场动画隐藏态规则(visibility/opacity/display/transform)"
+                               f", {reset_skipped} 条标签级全局重置/@font-face(不注入手机段)")
+        if extra:
+            # 归因: 多出的规则来自窄屏页哪些样式表, 主页又有哪些表(定位"主页没有"是真窄屏专属还是采集/序列化差异)
+            sheets_main = {}
+            for _g, _t, *rest in main_rows:
+                sheets_main[rest[0] if rest else ""] = sheets_main.get(rest[0] if rest else "", 0) + 1
+            src = "; ".join(f"{tag}:{sid[:110]}×{n}" for (tag, sid), n in sorted(by_sheet.items(), key=lambda kv: -kv[1])[:4])
+            mains = "; ".join(f"{sid[:110]}×{n}" for sid, n in sorted(sheets_main.items(), key=lambda kv: -kv[1])[:9])
+            sample = "; ".join((g.replace("\x00", ">")[:40] + " | " + t[:70]) for g, t in extra[:2])
+            self.log("RENDER", f"窄屏运行时样式: 主页没有的规则 {len(extra)} 条({len(css) // 1024}KB), 来源 [{src}]; 主页表 [{mains}]; 样例: {sample}")
         if re.search(r"</style", css, re.I):
             css = ""
         n = page.evaluate(ALT_INJECT_JS, {"items": items, "css": css})
         if n:
+            fixed = 0
+            with suppress(Exception):
+                fixed = page.evaluate("window.__cvAltImgFixed || 0")
             self.log("RENDER", f"窄屏 DOM 变体: {len(items)} 处子树结构随视口不同, 并列插入 {n} 个窄屏版"
-                               f"({total // 1024}KB, 附窄屏运行时样式 {len(css) // 1024}KB)")
+                               f"({total // 1024}KB, 附窄屏运行时样式 {len(css) // 1024}KB"
+                               + (f", 补 {fixed} 张无 src 的图" if fixed else "") + ")")
         return n
 
 
@@ -954,6 +1062,7 @@ class CaptureMixin:
         tp = self._phase("采集-懒加载滚动", tp)
         if screenshot:
             self._probe_viewports(page)
+            self._probe_root_font(page)
             tp = self._phase("采集-多视口内联", tp)
         # 评分基准(纯净原站): 必须在任何引擎 DOM 改动(表单激活/DEEP_FREEZE/
         # 水合剥离/字体烘焙)之前截取 —— 否则评分比较的是"克隆 vs 引擎改过的
@@ -974,6 +1083,14 @@ class CaptureMixin:
                 self.log("RENDER", f"冻结前等样式表: {ws_.get('ms')}ms, 直取补副本 {ws_.get('fetched', 0)} 张,"
                                    f" 仍未到 {ws_.get('pending', 0)} 张")
         counts = _safe_eval(DEEP_FREEZE_JS)
+        if getattr(self, "_root_fluid", None):
+            # 定时器已停, 页面脚本不会再改回 px
+            with suppress(Exception):
+                page.evaluate(ROOT_FONT_APPLY_JS, self._root_fluid)
+        fl = getattr(self, "_fluid", None)
+        if fl and (fl["paths"] or fl["inline"]):
+            with suppress(Exception):
+                page.evaluate(FLUID_APPLY_JS, fl)
         if layout_stable:
             # DEEP_FREEZE 已停掉定时器: 此后页面脚本不再改 DOM, 回撤结果能留到序列化
             with suppress(Exception):
@@ -1015,7 +1132,7 @@ class CaptureMixin:
         # A2 字体度量固化(W7): 活体 computed font 采样为 !important 覆盖,
         # 序列化进 HTML/MHTML —— 回放文本度量与采集态一致。
         try:
-            baked = _safe_eval(FONT_BAKE_JS)
+            baked = _safe_eval(FONT_BAKE_NOSIZE_JS if getattr(self, "_root_fluid", None) else FONT_BAKE_JS)
             if baked:
                 self.log("RENDER", f"字体度量固化: {baked} 个元素逐元素烘焙(差分继承)")
         except Exception:
@@ -1030,10 +1147,12 @@ class CaptureMixin:
             loads = self._collect_narrow_loads()
             try:
                 cv = page.evaluate(CV_EMIT_JS, loads) or {}
-                if cv.get("els") or cv.get("cls"):
+                if cv.get("els") or cv.get("cls") or cv.get("srcFill") or cv.get("textFill"):
                     self.log("RENDER", f"多视口内联样式: {cv['els']} 个元素, {cv.get('vw', 0)} 个按视口宽比例改写为 vw,"
                                        f" {cv.get('banded', 0)} 个移入分视口样式表(其中窄屏首载补采 {cv.get('reload', 0)})"
-                                       f"; 分视口 class {cv.get('cls', 0)} 个")
+                                       f"; 分视口 class {cv.get('cls', 0)} 个"
+                                       + (f"; 桌面隐藏元素补窄屏 src {cv['srcFill']} 个" if cv.get("srcFill") else "")
+                                       + (f", 补文本 {cv['textFill']} 个" if cv.get("textFill") else ""))
                 try:
                     self._inject_dom_variants(page, loads)
                 except Exception as exc:
@@ -1216,7 +1335,7 @@ class CaptureMixin:
                 self.log("RENDER", f"自动滚动达到时限({config.AUTO_SCROLL_BUDGET}s), "
                                    f"停在 {res.get('y')}/{res.get('h')}px")
             page.wait_for_timeout(600)
-            page.evaluate("window.scrollTo(0, 0)")
+            page.evaluate(SCROLL_TOP_JS)
             page.wait_for_timeout(400)
         except Exception as exc:
             self.log("WARN", f"自动滚动中断: {exc}")
@@ -1244,7 +1363,7 @@ class CaptureMixin:
                                        f"停在 {position}/{height}px")
                     break
             page.wait_for_timeout(600)
-            page.evaluate("window.scrollTo(0, 0)")
+            page.evaluate(SCROLL_TOP_JS)
             page.wait_for_timeout(400)
         except Exception as exc:
             self.log("WARN", f"自动滚动中断: {exc}")
@@ -1356,8 +1475,9 @@ class CaptureMixin:
             return
 
 
-    def _on_asset_response(self, response):
-        """活体资源采集: 浏览器渲染期真实成功加载的静态资源清单。"""
+    def _on_asset_response(self, response, bodies=True):
+        """活体资源采集: 浏览器渲染期真实成功加载的静态资源清单。
+        bodies=False 只登记 URL 不留响应对象(窄屏首载对照页先于收尾关闭, 响应体取不回, 交给回补下载)。"""
         try:
             if response.status >= 400:
                 return
@@ -1375,7 +1495,7 @@ class CaptureMixin:
             if rtype not in ASSET_RESOURCE_TYPES:
                 return
             self._live_seen[response.url] = rtype
-            if response.status == 200 and request.resource_type in _LIVE_BODY_TYPES \
+            if bodies and response.status == 200 and request.resource_type in _LIVE_BODY_TYPES \
                     and len(self._live_resp) < config.LIVE_BODY_MAX \
                     and response.url.startswith(("http://", "https://")):
                 self._live_resp.setdefault(response.url, response)

@@ -39,10 +39,48 @@ IOS_UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/60
 # iPadOS 13 起 Safari 默认「桌面级浏览」: 发 Mac Safari UA(不含 iPad/Mobile), 靠触屏区分
 IPAD_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
            "(KHTML, like Gecko) Version/18.6 Safari/605.1.15")
+# 主流安卓机型 UA(Chrome 移动版 / 三星浏览器 / 鸿蒙; 型号段按真机)
+ANDROID_UA = ("Mozilla/5.0 (Linux; Android 15; {model}) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36")
+SAMSUNG_UA = ("Mozilla/5.0 (Linux; Android 15; SAMSUNG SM-S931B) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) SamsungBrowser/27.0 Chrome/125.0.0.0 Mobile Safari/537.36")
+HARMONY_UA = ("Mozilla/5.0 (Phone; OpenHarmony 5.0) AppleWebKit/537.36 (KHTML, like Gecko) "
+              "Chrome/114.0.0.0 Safari/537.36 ArkWeb/4.1.6.1 Mobile HuaweiBrowser/5.0.1.300")
 DEVICE_OPTS = {
     "iphone-air": {"user_agent": IOS_UA, "device_scale_factor": 3, "is_mobile": True, "has_touch": True},
     "ipad-air": {"user_agent": IPAD_UA, "device_scale_factor": 2, "is_mobile": True, "has_touch": True},
 }
+# 主流手机机型矩阵(CSS 像素视口 × DPR × UA): 名字可直接用于 --viewports, 也可写 phones 展开全部
+PHONE_MATRIX = {
+    # 苹果
+    "iphone-se": (375, 667, 2, IOS_UA),
+    "iphone-15": (393, 852, 3, IOS_UA),
+    "iphone-16-pro": (402, 874, 3, IOS_UA),
+    "iphone-16-pro-max": (440, 956, 3, IOS_UA),
+    # 安卓
+    "pixel-8": (412, 915, 2.625, ANDROID_UA.format(model="Pixel 8")),
+    "galaxy-s24": (360, 780, 3, SAMSUNG_UA),
+    "xiaomi-14": (393, 873, 2.75, ANDROID_UA.format(model="24031PN0DC")),
+    "huawei-mate60": (360, 780, 3, HARMONY_UA),
+    "oppo-find-x7": (412, 915, 2.625, ANDROID_UA.format(model="PHZ110")),
+}
+for _n, (_w, _h, _dpr, _ua) in PHONE_MATRIX.items():
+    PROBE_VIEWPORTS[_n] = {"width": _w, "height": _h}
+    DEVICE_OPTS[_n] = {"user_agent": _ua, "device_scale_factor": _dpr, "is_mobile": True, "has_touch": True}
+VIEWPORT_GROUPS = {
+    "phones": ["iphone-air"] + list(PHONE_MATRIX),                     # 全机型表(发版前)
+    "phones4": ["galaxy-s24", "iphone-15", "pixel-8", "iphone-16-pro-max"],   # 4 档代表宽度 360/393/412/440(日常回归)
+}
+
+
+def expand_viewports(names):
+    """--viewports 里的组名(phones)展开为机型列表, 去重保序。"""
+    out = []
+    for n in names:
+        for v in VIEWPORT_GROUPS.get(n, [n]):
+            if v not in out:
+                out.append(v)
+    return out
 
 
 def context_opts(name):
@@ -62,8 +100,11 @@ SETTLE_CSS = ("*,*::before,*::after{animation-play-state:paused!important;"
 SCROLL_JS = r"""
 async (maxH) => {
   const h = () => Math.min(document.documentElement.scrollHeight, maxH);
-  for (let y = 0; y < h(); y += innerHeight * 0.8) { scrollTo(0, y); await new Promise(r => setTimeout(r, 320)); }
-  scrollTo(0, 0); await new Promise(r => setTimeout(r, 400));
+  // html{scroll-behavior:smooth} 下 scrollTo 是动画, 400ms 回不到顶(solidjs 克隆截在 -1650px); 滚动期间强制 auto, 回顶后等到 scrollY==0
+  const go = y => scrollTo({top: y, left: 0, behavior: 'instant'});
+  for (let y = 0; y < h(); y += innerHeight * 0.8) { go(y); await new Promise(r => setTimeout(r, 320)); }
+  go(0); await new Promise(r => setTimeout(r, 400));
+  for (let i = 0; i < 12 && scrollY; i++) { go(0); await new Promise(r => setTimeout(r, 100)); }
   return document.documentElement.scrollWidth;
 }
 """
@@ -85,9 +126,111 @@ async ([maxH, capMs]) => {
 """
 
 
-def _shoot(ctx, url, vp, out: Path, timeout_ms=45000):
+# 诊断: 该视口下加载失败/4xx+ 的请求、样式表装载情况、脚本错误 —— 远程只能读日志时, 这是
+# 定位"手机宽度下图裂/样式丢"的直接证据(产物存储域名在部分环境不可达)
+DIAG_JS = r"""() => {
+  const sheets = [];
+  for (const sh of document.styleSheets) {
+    let n = -1; try { n = sh.cssRules.length; } catch (e) {}
+    sheets.push([(sh.href || ('inline:' + ((sh.ownerNode && sh.ownerNode.getAttribute('data-clone-freeze')) || (sh.ownerNode && sh.ownerNode.getAttribute('data-cv-band')) || ''))).slice(-90), n, sh.media.mediaText.slice(0, 60), !!sh.disabled]);
+  }
+  const broken = [];
+  for (const im of document.images) {
+    if (im.complete && im.naturalWidth === 0 && im.currentSrc) {
+      const r = im.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) broken.push([im.currentSrc.slice(-120), Math.round(r.width), Math.round(r.height)]);
+    }
+  }
+  const styles = Array.from(document.querySelectorAll('style')).map(st => [
+    Array.from(st.attributes, a => a.name + '=' + a.value.slice(0, 30)).join(' ').slice(0, 120),
+    st.textContent.length, st.textContent.replace(/\s+/g, ' ').slice(0, 160)]);
+  const attrs = e => e ? Array.from(e.attributes, a => a.name + '=' + a.value.slice(0, 80)).join(' ').slice(0, 400) : '';
+  const h1 = document.querySelector('h1'), a = document.querySelector('main a, a[href]');
+  const cs = e => e ? getComputedStyle(e) : null;
+  const probe = {
+    html: attrs(document.documentElement), body: attrs(document.body),
+    bodyFont: cs(document.body) ? cs(document.body).fontFamily.slice(0, 80) + ' / ' + cs(document.body).fontSize + ' / ' + cs(document.body).color : '',
+    h1: h1 ? cs(h1).fontSize + ' / ' + cs(h1).lineHeight + ' / ' + cs(h1).fontWeight + ' / ' + cs(h1).fontFamily.slice(0, 60) : '',
+    a: a ? cs(a).textDecorationLine + ' / ' + cs(a).color : '',
+    band: getComputedStyle(document.documentElement).getPropertyValue('--cv-band'),
+    vw: innerWidth, dpr: devicePixelRatio,
+  };
+  // 可见文本行(评分覆盖的前 8 屏): 两侧做差直接看出克隆少了/多了哪些文案(表单/计数/弹层)
+  const lines = [];
+  try {
+    const lim = innerHeight * 8;
+    const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let t;
+    while ((t = w.nextNode()) && lines.length < 900) {
+      const s = (t.nodeValue || '').replace(/\s+/g, ' ').trim();
+      if (s.length < 2) continue;
+      const el = t.parentElement; if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height || r.top > lim) continue;
+      const c = cs(el); if (c.visibility === 'hidden' || c.display === 'none' || +c.opacity === 0) continue;
+      lines.push(s.slice(0, 80) + ' @' + Math.round(r.top) + ',' + Math.round(r.left) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height));
+    }
+  } catch (e) {}
+  // 表单控件也进文本行(占位符/值/aria-label): 表单整块丢失时文本做差才看得见; 另列 DOM 里有但不可见的控件及原因
+  const hiddenInputs = [];
+  try {
+    for (const el of document.querySelectorAll('input:not([type=hidden]),textarea,select,button')) {
+      const label = (el.placeholder || el.value || el.getAttribute('aria-label') || el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+      if (!label) continue;
+      const r = el.getBoundingClientRect(); const c = cs(el);
+      const vis = r.width > 0 && r.height > 0 && c.visibility !== 'hidden' && c.display !== 'none' && +c.opacity !== 0 && r.top < innerHeight * 8;
+      if (vis) { if (lines.length < 900) lines.push('[' + el.tagName.toLowerCase() + '] ' + label + ' @' + Math.round(r.top) + ',' + Math.round(r.left) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height)); continue; }
+      if (hiddenInputs.length >= 12 || r.top > innerHeight * 8) continue;
+      let why = c.display === 'none' ? 'display:none' : c.visibility === 'hidden' ? 'visibility' : +c.opacity === 0 ? 'opacity0' : (!r.width || !r.height ? 'zero-size' : 'other');
+      let anc = el, hop = 0;
+      while (anc && anc !== document.body && hop++ < 12) { const a = cs(anc); if (a.display === 'none' || a.visibility === 'hidden') { why += ' <- ' + anc.tagName.toLowerCase() + (anc.id ? '#' + anc.id : '') + (anc.hasAttribute('data-cv-vp') ? '[cv-vp=' + anc.getAttribute('data-cv-vp') + ']' : '') + (anc.hasAttribute('data-cv') ? '[cv]' : '') + ':' + (a.display === 'none' ? 'display:none' : 'visibility'); break; } anc = anc.parentElement; }
+      hiddenInputs.push('[' + el.tagName.toLowerCase() + '] ' + label + ' ' + why);
+    }
+  } catch (e) {}
+  // 盖住视口 ≥50% 的 fixed/sticky 层(弹窗/遮罩/抽屉): 标签#id.class z 尺寸 是否含输入框/关闭钮, 供评分口径的弹层识别对账
+  const overlays = [];
+  try {
+    for (const el of document.querySelectorAll('body *')) {
+      if (overlays.length >= 12) break;
+      const c = cs(el); if (c.position !== 'fixed' && c.position !== 'sticky') continue;
+      const r = el.getBoundingClientRect(); if (r.width < innerWidth * 0.5 || r.height < innerHeight * 0.5) continue;
+      if (c.visibility === 'hidden' || c.display === 'none' || +c.opacity === 0) continue;
+      const inp = el.querySelector('input:not([type=hidden]),textarea'), btn = el.querySelector('button,[role=button],[aria-label*="close" i],[class*="close" i]');
+      overlays.push((el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + '.' + String(el.className).slice(0, 40)) + ' z=' + c.zIndex
+        + ' ' + Math.round(r.width) + 'x' + Math.round(r.height) + '@' + Math.round(r.top) + ' bg=' + c.backgroundColor.slice(0, 24) + ' role=' + (el.getAttribute('role') || '') + (el.getAttribute('aria-modal') ? ' aria-modal' : '')
+        + (inp ? ' input' : '') + (btn ? ' btn' : '') + (el.hasAttribute('data-clone-ihide') ? ' ihide' : ''));
+    }
+  } catch (e) {}
+  return {sheets: sheets.slice(0, 40), broken: broken.slice(0, 30), nimg: document.images.length,
+          styles: styles.slice(0, 60), probe: probe, lines: lines, overlays: overlays, hiddenInputs: hiddenInputs};
+}"""
+
+
+def _shoot(ctx, url, vp, out: Path, timeout_ms=45000, extra_wait_ms=0):
     page = ctx.new_page()
     info = {"url": url}
+    failed, errors = [], []
+    page.on("requestfailed", lambda rq: len(failed) < 40 and failed.append(
+        [rq.url[-120:], (rq.failure or "")[:60], rq.resource_type]))
+    page.on("response", lambda rs: rs.status >= 400 and len(failed) < 40 and failed.append(
+        [rs.url[-120:], str(rs.status), rs.request.resource_type]))
+    page.on("pageerror", lambda e: len(errors) < 10 and errors.append(
+        (str(e)[:160] + " @ " + str(getattr(e, "stack", "") or "").split("\n")[1:2].__str__()[:200])))
+    # 语法错误没有栈: 走 CDP 拿到出错脚本的 URL 与行列, 再从页面源码截出那一行(定位是哪段注入/改写的脚本)
+    exc_locs = []
+    try:
+        cdp = ctx.new_cdp_session(page)
+        cdp.send("Runtime.enable")
+        cdp.on("Runtime.exceptionThrown", lambda ev: len(exc_locs) < 6 and exc_locs.append(
+            [((ev.get("exceptionDetails") or {}).get("text") or "")[:120],
+             (ev.get("exceptionDetails") or {}).get("url") or "",
+             (ev.get("exceptionDetails") or {}).get("lineNumber"),
+             (ev.get("exceptionDetails") or {}).get("columnNumber")]))
+    except Exception:   # noqa: BLE001
+        pass
+    page.on("console", lambda m: m.type == "error" and len(errors) < 10 and errors.append(
+        "console: " + m.text[:160] + " @ " + str((m.location or {}).get("url", ""))[-100:]
+        + ":" + str((m.location or {}).get("line_number", ""))))
     try:
         for attempt in range(4):   # 网络层抖动(RESET/CLOSED/断网)退避重试, 不当成克隆缺陷
             try:
@@ -107,8 +250,11 @@ def _shoot(ctx, url, vp, out: Path, timeout_ms=45000):
             page.wait_for_load_state("networkidle", timeout=4000)
         with suppress(Exception):
             page.evaluate(SETTLE_MEDIA_JS, [max_h, 6000])
+        if extra_wait_ms:
+            page.wait_for_timeout(extra_wait_ms)
         with suppress(Exception):
-            from core.cloner_engine import AD_RECTS_JS
+            from core.cloner_engine import AD_RECTS_JS, INTERSTITIAL_HIDE_JS
+            info["interstitial"] = page.evaluate(INTERSTITIAL_HIDE_JS) or 0
             info["ads"] = page.evaluate(AD_RECTS_JS) or []
         info["scroll_width"] = sw
         info["overflow_x"] = sw > vp["width"] + 2
@@ -118,6 +264,20 @@ def _shoot(ctx, url, vp, out: Path, timeout_ms=45000):
         page.screenshot(path=str(out), full_page=True, animations="disabled", scale="css",
                         clip={"x": 0, "y": 0, "width": vp["width"], "height": clip_h})
         info["text"] = page.evaluate("document.body ? document.body.innerText.slice(0, 200000) : ''")
+        with suppress(Exception):
+            d = page.evaluate(DIAG_JS) or {}
+            d["failed"] = failed
+            d["errors"] = errors
+            if exc_locs:
+                src_lines = None
+                with suppress(Exception):
+                    src_lines = page.request.get(url, timeout=15000).text().splitlines()
+                for ex in exc_locs:
+                    if src_lines and ex[1] in (url, page.url) and isinstance(ex[2], int) and 0 <= ex[2] < len(src_lines):
+                        col = ex[3] or 0
+                        ex.append(src_lines[ex[2]][max(0, col - 160):col + 120])
+                d["exceptions"] = exc_locs
+            info["diag"] = d
         info["ok"] = True
     except Exception as exc:   # noqa: BLE001 单侧失败记入结果
         info["ok"] = False
@@ -126,6 +286,74 @@ def _shoot(ctx, url, vp, out: Path, timeout_ms=45000):
         with suppress(Exception):
             page.close()
     return info
+
+
+# ---- 抗活体随机性的稳健口径(--noise 时一并给出) ----
+# 原站两次加载之间就不同的区域(轮播相位、实时新闻、计数器、A/B 实验位): 克隆不可能也不该
+# 复现某一次的状态。按 24px 网格比两次原站截图, 差异块(膨胀一格)三张图同处涂灰后再比;
+# 克隆分取与两次原站中较接近的一次(活体在两种状态间切换时, 克隆对上其中任一种都算对)。
+# 差异块超过公共区域一半时不遮(整页错位, 遮了就没有可比内容), 只报 dyn_frac 供参考。
+NOISE_PHASE_SHIFT_MS = 3500
+DYN_BLOCK = 24
+DYN_THRESH = 12.0
+DYN_MAX_FRAC = 0.5
+
+
+def dynamic_rects(a_path, a2_path, block=DYN_BLOCK, thresh=DYN_THRESH):
+    """两次原站截图的差异块 -> ([x, y, w, h], 差异块占公共区域比例)。"""
+    import numpy as np
+    from PIL import Image
+    with Image.open(a_path) as ia, Image.open(a2_path) as ib:
+        ga, gb = ia.convert("L"), ib.convert("L")
+    w, h = min(ga.width, gb.width), min(ga.height, gb.height)
+    if w < block or h < block:
+        return [], 0.0
+    A = np.asarray(ga, dtype=np.float32)[:h, :w]
+    B = np.asarray(gb, dtype=np.float32)[:h, :w]
+    nx, ny = w // block, h // block
+    d = np.abs(A[:ny * block, :nx * block] - B[:ny * block, :nx * block])
+    cells = d.reshape(ny, block, nx, block).mean(axis=(1, 3)) > thresh
+    if not cells.any():
+        return [], 0.0
+    grown = cells.copy()
+    grown[1:, :] |= cells[:-1, :]
+    grown[:-1, :] |= cells[1:, :]
+    grown[:, 1:] |= cells[:, :-1]
+    grown[:, :-1] |= cells[:, 1:]
+    frac = float(grown.mean())
+    rects = []
+    for y in range(ny):            # 每行合并连续块, 矩形数可控
+        x = 0
+        while x < nx:
+            if grown[y, x]:
+                x0 = x
+                while x < nx and grown[y, x]:
+                    x += 1
+                rects.append([x0 * block, y * block, (x - x0) * block, block])
+            else:
+                x += 1
+    return rects, frac
+
+
+def robust_scores(a, a2, b, outdir, tag, ia, i2, ib):
+    """返回 {robust, robust_ceiling, dyn_frac}; 原图不动, 遮罩写到 *_rb.png 副本。"""
+    import shutil
+    from core.cloner_engine import _mask_rects, compute_visual_similarity
+    rects, frac = dynamic_rects(a, a2)
+    out = {"dyn_frac": round(frac, 3)}
+    if frac > DYN_MAX_FRAC:
+        rects = []
+    am, a2m, bm = (outdir / f"{tag}_{k}_rb.png" for k in ("orig", "orig2", "clone"))
+    for src, dst in ((a, am), (a2, a2m), (b, bm)):
+        shutil.copyfile(src, dst)
+        if rects:
+            _mask_rects(dst, rects)
+    s1 = compute_visual_similarity(am, bm, None, orig_text=ia.get("text", ""), clone_text=ib.get("text", "")).get("score")
+    s2 = compute_visual_similarity(a2m, bm, None, orig_text=i2.get("text", ""), clone_text=ib.get("text", "")).get("score")
+    out["robust"] = max(x for x in (s1, s2) if x is not None) if (s1 is not None or s2 is not None) else None
+    out["robust_ceiling"] = compute_visual_similarity(
+        am, a2m, None, orig_text=ia.get("text", ""), clone_text=i2.get("text", "")).get("score")
+    return out
 
 
 def probe_one(browser, base, task_id, url, viewports, outdir: Path, clone_tpl=None, noise=False):
@@ -143,7 +371,9 @@ def probe_one(browser, base, task_id, url, viewports, outdir: Path, clone_tpl=No
         finally:
             ctx.close()
         row = {"orig_overflow_x": ia.get("overflow_x"), "clone_overflow_x": ib.get("overflow_x"),
-               "orig_h": ia.get("height"), "clone_h": ib.get("height")}
+               "orig_h": ia.get("height"), "clone_h": ib.get("height"),
+               "orig_interstitial": ia.get("interstitial", 0), "clone_interstitial": ib.get("interstitial", 0),
+               "clone_diag": ib.get("diag"), "orig_diag": ia.get("diag")}
         if ia.get("ok") and ib.get("ok"):
             rects = (ia.get("ads") or []) + (ib.get("ads") or [])
             if rects:   # 第三方竞价广告位两侧统一遮灰(与引擎评分同口径)
@@ -158,7 +388,9 @@ def probe_one(browser, base, task_id, url, viewports, outdir: Path, clone_tpl=No
                 ctx2 = browser.new_context(**context_opts(name))
                 try:
                     a2 = outdir / f"{task_id}_{name}_orig2.png"
-                    i2 = _shoot(ctx2, url, vp, a2)
+                    # 第二次原站多等几秒再截: 按定时轮换的区域(标签页/轮播由 setInterval 翻页)两次同相位
+                    # 加载看不出来, 错开相位才会落进动态区被遮
+                    i2 = _shoot(ctx2, url, vp, a2, extra_wait_ms=NOISE_PHASE_SHIFT_MS)
                 finally:
                     ctx2.close()
                 if i2.get("ok"):
@@ -167,6 +399,8 @@ def probe_one(browser, base, task_id, url, viewports, outdir: Path, clone_tpl=No
                         _mask_rects(a2, rects + (i2.get("ads") or []))
                     row["ceiling"] = compute_visual_similarity(
                         a, a2, None, orig_text=ia.get("text", ""), clone_text=i2.get("text", "")).get("score")
+                    with suppress(Exception):
+                        row.update(robust_scores(a, a2, b, outdir, f"{task_id}_{name}", ia, i2, ib))
         else:
             row["error"] = ia.get("error") or ib.get("error")
         res[name] = row
@@ -210,7 +444,8 @@ def main():
     ap.add_argument("--out", default="")
     ap.add_argument("--workers", type=int, default=3)
     ap.add_argument("--clone-url", default="", help="克隆地址模板, 默认 {base}/preview/{id}/")
-    ap.add_argument("--noise", action="store_true", help="另测原站自比上限(每视口多一次原站加载)")
+    ap.add_argument("--noise", action="store_true",
+                    help="另测原站自比上限(每视口多一次原站加载), 并给出抗活体随机的稳健分 robust")
     args = ap.parse_args()
     pairs = []
     if args.run:
@@ -223,7 +458,7 @@ def main():
             row = con.execute("select target_url from clone_tasks where id=?", (tid,)).fetchone()
             if row:
                 pairs.append((tid, row[0]))
-    vps = [v.strip() for v in args.viewports.split(",") if v.strip()]
+    vps = expand_viewports([v.strip() for v in args.viewports.split(",") if v.strip()])
     res, outdir = probe_tasks(args.base, pairs, vps, args.out or None, args.workers,
                               args.clone_url or None, args.noise)
     print(f"\n截图/热力图: {outdir}")

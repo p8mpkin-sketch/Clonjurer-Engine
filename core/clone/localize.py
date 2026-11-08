@@ -238,6 +238,7 @@ from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部
     os_ext,
     parse_css_refs,
     rewrite_js_navigation,
+    rewrite_module_imports,
     scope_bake_css,
     scope_viewport_css,
     slugify,
@@ -325,18 +326,21 @@ class LocalizeMixin:
                            json.dumps(redirect, ensure_ascii=False)))
         # W5 时间冻结(模式策略包): 回放统一到采集时刻, 消除时变内容的
         # 渲染分叉(倒计时/日期组件/限时横幅在回放时与采集态不一致)
+        # 只平移时钟不停表: Date 从采集时刻起继续走, 脚本里按 Date.now() 差值推进的
+        # 动画/节流/懒渲染(新闻列表分批显形)照常完成; 停表会让这类列表永不出现(techcrunch 92→59)
         if getattr(self._strategy_pack, "freeze_time", False) and self._captured_at:
             freeze_js = (
                 '<script data-clone-preview="time-freeze">(function(){try{'
                 'var __cap=new Date("__CAPTURE_ISO__");'
-                'if(!isNaN(__cap.getTime())){var _R=Date;'
-                'function FD(){var a=arguments;switch(a.length){case 0:return new _R(__cap.getTime());'
+                'if(!isNaN(__cap.getTime())){var _R=Date,__off=__cap.getTime()-_R.now();'
+                'function FD(){if(!(this instanceof FD))return new _R(_R.now()+__off).toString();'
+                'var a=arguments;switch(a.length){case 0:return new _R(_R.now()+__off);'
                 'case 1:return new _R(a[0]);case 2:return new _R(a[0],a[1]);case 3:return new _R(a[0],a[1],a[2]);'
                 'case 4:return new _R(a[0],a[1],a[2],a[3]);case 5:return new _R(a[0],a[1],a[2],a[3],a[4]);'
                 'case 6:return new _R(a[0],a[1],a[2],a[3],a[4],a[5]);default:return new _R(a[0],a[1],a[2],a[3],a[4],a[5],a[6]);}}'
-                'FD.prototype=_R.prototype;FD.now=function(){return __cap.getTime()};'
+                'FD.prototype=_R.prototype;FD.now=function(){return _R.now()+__off};'
                 'FD.parse=_R.parse;FD.UTC=_R.UTC;window.Date=FD;'
-                '}catch(e){}})();</script>')
+                '}}catch(e){}})();</script>')   # if 块与 try 块各收一个括号(此前少一个, 整段语法错误从未生效)
             script = freeze_js.replace("__CAPTURE_ISO__", self._captured_at) + script
         return script
 
@@ -478,7 +482,16 @@ class LocalizeMixin:
 
     def _rewrite_js_files(self, results: dict, pairs: list):
         """JS 内容本地化: URL 字面量替换 + 导航逃逸护栏改写(含原名副本)。"""
-        for info in results.values():
+        # 相对模块说明符查表: 先精确 URL, 再忽略查询串/锚(chunk?v=hash 与落地键不同)
+        by_stem = {}
+        for u, inf in results.items():
+            by_stem.setdefault(u.split("#", 1)[0].split("?", 1)[0], inf["local"])
+
+        def lookup(u):
+            inf = results.get(u)
+            return inf["local"] if inf else by_stem.get(u.split("#", 1)[0].split("?", 1)[0])
+
+        for url, info in results.items():
             if info["ext"] not in (".js", ".mjs", ".cjs"):
                 continue
             targets = [info["abs_path"]]
@@ -492,7 +505,8 @@ class LocalizeMixin:
                     if not path.is_file() or path.stat().st_size > config.JS_REWRITE_MAX_BYTES:
                         continue
                     text = path.read_text(encoding="utf-8", errors="replace")
-                    rewritten = rewrite_js_navigation(apply_replacements(text, pairs))
+                    rewritten = rewrite_js_navigation(
+                        rewrite_module_imports(apply_replacements(text, pairs), url, lookup))
                     if rewritten != text:
                         path.write_text(rewritten, encoding="utf-8")
                 except OSError:

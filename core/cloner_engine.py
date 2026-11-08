@@ -65,6 +65,15 @@ from core import pixel_calibrator
 
 from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 import 路径不变
     AD_RECTS_JS,
+    INTERSTITIAL_HIDE_JS,
+    ROOT_FONT_APPLY_JS,
+    FLUID_READ_JS,
+    FLUID_APPLY_JS,
+    ROOT_FONT_READ_JS,
+    INTERSTITIAL_RESTORE_JS,
+    FONT_BAKE_NOSIZE_JS,
+    SCROLL_TOP_JS,
+    NARROW_STABLE_JS,
     ALT_EXTRACT_JS,
     ALT_INJECT_JS,
     ANIM_ALIGN_JS,
@@ -272,6 +281,7 @@ from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部
     os_ext,
     parse_css_refs,
     rewrite_js_navigation,
+    rewrite_module_imports,
     scope_bake_css,
     scope_viewport_css,
     slugify,
@@ -279,6 +289,7 @@ from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部
     text_overlap_score,
     write_diff_preview,
 )
+from core.clone.support import _fluid_elements, _is_global_reset_rule, _is_transient_hide_rule, _regroup_css_rules  # noqa: F401
 
 
 from core.clone.support import (  # noqa: E402  手机版(按 UA 分发)

@@ -621,6 +621,32 @@ def _anchored_sub(pattern, template: str, text: str, anchor: str, lead: str = "w
     return "".join(out)
 
 
+# ES 模块相对说明符: import x from './chunk.js' / export * from '../y.js' / import('./z.js')。
+# 模块被本地化到 /static/js/<名>.js 后, 相对说明符按本地目录解析, 原 CDN 目录里的兄弟模块全部 404
+# (allbirds: Vite/Vue 主题 40 个 chunk 404, 应用不起, 手机端整页黄块)。字面量替换表只有绝对 URL, 改不到它们。
+_MOD_SPEC_RE = re.compile(
+    r"""((?:\bimport|\bexport)\s*(?:[\w$*{}\s,]{0,400}?\s*from\s*)?|\bimport\s*\(\s*)(['"])(\.{1,2}/[^'"\n]{1,300})\2""")
+
+
+def rewrite_module_imports(text: str, module_url: str, lookup) -> str:
+    """把模块里的相对 import/export 说明符按模块原地址绝对化, 命中资源池(lookup 返回本地路径)的改成本地路径。
+
+    未命中(未采到的 chunk)原样保留; 非模块文件(没有 import/export 字样或没有 ./ ../)直接返回。"""
+    if not module_url or not text or ("./" not in text) or ("import" not in text and "export" not in text):
+        return text
+
+    def rep(m):
+        try:
+            absolute = urljoin(module_url, m.group(3))
+        except ValueError:
+            return m.group(0)
+        local = lookup(absolute)
+        if not local or not isinstance(local, str):
+            return m.group(0)
+        return m.group(1) + m.group(2) + local + m.group(2)
+    return _MOD_SPEC_RE.sub(rep, text)
+
+
 def rewrite_js_navigation(text: str) -> str:
     """JS/内联脚本导航逃逸改写(见上方注释; 幂等, 可重复应用)。"""
     if "window.open(" in text:   # 模式以字面量开头, sre 自带前缀快速扫描
@@ -2566,3 +2592,86 @@ def fontface_plan(css_text: str, base_url: str, cps=None):
         skippable |= dead
     skippable -= needed
     return needed, skippable, fallback_of
+
+
+# ---- 窄屏/流式字号辅助(来自移动端适配线) ----
+_FLUID_GEOM_RE = re.compile(r"(?:^|;)\s*(width|height|min-width|max-width|min-height|max-height|font-size|line-height|"
+                            r"letter-spacing|top|left|right|bottom|margin-[a-z]+|padding-[a-z]+|gap|column-gap|row-gap)\s*:\s*"
+                            r"(-?\d+(?:\.\d+)?)px\s*(!important)?(?=;|$)", re.I)
+
+
+def _fluid_elements(fa: dict, fb: dict, w1: float, w2: float, tol: float = 0.015):
+    """两个宽度下的 FLUID_READ_JS 快照 → 字号随宽同比的元素路径 + 内联 px 同比的属性(改 vw)。
+    同比: 值比 ≈ 宽比(±tol), 且值不同(定值不算)。"""
+    paths, inline = [], {}
+    if not fa or not fb or not w1 or not w2 or w1 == w2:
+        return {"paths": paths, "inline": inline}
+    ratio = w2 / w1
+    for path, va in fa.items():
+        vb = fb.get(path)
+        if not vb or vb[0] != va[0]:
+            continue
+        f1, f2 = va[1] or 0, vb[1] or 0
+        if f1 >= 6 and f2 > 0 and f1 != f2 and abs((f2 / f1) / ratio - 1) <= tol:
+            paths.append(path)
+        if va[2] and vb[2] and va[2] != vb[2]:
+            pb = {m.group(1).lower(): float(m.group(2)) for m in _FLUID_GEOM_RE.finditer(vb[2])}
+            for m in _FLUID_GEOM_RE.finditer(va[2]):
+                k, v1 = m.group(1).lower(), float(m.group(2))
+                v2 = pb.get(k)
+                if v2 is None or v1 == 0 or v1 == v2 or abs((v2 / v1) / ratio - 1) > tol:
+                    continue
+                inline.setdefault(path, {})[k] = f"{v1 / w1 * 100:.4f}vw"
+    return {"paths": paths, "inline": inline}
+
+
+_HIDE_DECL_RE = re.compile(
+    r"^(?:visibility\s*:\s*hidden|opacity\s*:\s*0(?:\.0+)?|display\s*:\s*none|pointer-events\s*:\s*none"
+    r"|transform\s*:[^;]*|animation(?:-[\w-]+)?\s*:[^;]*|transition(?:-[\w-]+)?\s*:[^;]*|will-change\s*:[^;]*)"
+    r"\s*(?:!important)?$", re.I)
+
+
+_TYPE_SEL_RE = re.compile(r"^[a-z][a-z0-9-]*(?:::?[a-z-]+(?:\([^)]*\))?)*$", re.I)
+
+
+def _is_global_reset_rule(rule_text: str) -> bool:
+    """窄屏页多出的"全局重置"规则: 选择器全是 * / html / body / :root / 纯标签名(含伪元素), 或 @font-face。
+    媒体查询里的规则在任何视口都在 CSSOM 里, 所以"窄屏页才有"的只能是脚本注入/条件加载的整张表;
+    其中的标签级重置(`*{margin:0}` `a{text-decoration:underline}` `body{font-family}` 同名 @font-face 指向
+    404 字体)注入手机段会改写整页层叠(solidjs 手机端链接全下划线、字体回落), 不属于响应式差异, 跳过。"""
+    m = re.match(r"^\s*([^{}]+)\{", rule_text)
+    if not m:
+        return False
+    sel = m.group(1).strip()
+    if sel.lower().startswith("@font-face"):
+        return True
+    if sel.startswith("@"):
+        return False
+    parts = [p.strip() for p in sel.split(",") if p.strip()]
+    return bool(parts) and all(p in ("*", ":root") or _TYPE_SEL_RE.match(p) for p in parts)
+
+
+def _is_transient_hide_rule(rule_text: str) -> bool:
+    """窄屏页采到的"只把元素藏起来"的规则: 声明块全是 visibility:hidden / opacity:0 / display:none /
+    transform / animation / transition。这是入场动画的初始态(wix 组件滚入视口前 `#comp-x{visibility:hidden!important}`),
+    窄屏首载页截取时动画还没跑, 若当成"窄屏专属样式"注入手机段, 克隆手机端整块表单/计数永远不显形。"""
+    m = re.match(r"^\s*([^{}]+)\{(.*)\}\s*$", rule_text, re.S)
+    if not m or "{" in m.group(2):
+        return False
+    decls = [d.strip() for d in m.group(2).split(";") if d.strip()]
+    return bool(decls) and all(_HIDE_DECL_RE.match(d) for d in decls)
+
+
+def _regroup_css_rules(pairs) -> str:
+    """[(分组前缀 'head\x00head', 规则文本)] → 按前缀重新包回 @media/@supports/@layer 块的 CSS 文本。"""
+    groups = {}
+    for g, t in pairs:
+        groups.setdefault(g, []).append(t)
+    out = []
+    for g, rules in groups.items():
+        heads = [h for h in g.split("\x00") if h]
+        body = "\n".join(rules)
+        for h in reversed(heads):
+            body = h + "{\n" + body + "\n}"
+        out.append(body)
+    return "\n".join(out)
