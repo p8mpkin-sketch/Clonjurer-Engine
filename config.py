@@ -215,3 +215,5 @@ AUDIT_RETENTION_DAYS = int(os.environ.get("CLONER_AUDIT_RETENTION_DAYS", "90"))
 FONT_PLAN = os.environ.get("CLONER_FONT_PLAN", "1") != "0"
 # 回补预取: 活体差集回补 / Mock 资产收割的回源在 CAS 下载期间并发发起
 BACKFILL_PREFETCH = os.environ.get("CLONER_BACKFILL_PREFETCH", "1") != "0"
+# 首导航静置: 导航前挂请求追踪, load 只被挂起请求拖住时不再等满上限
+NAV_STALE_GATE = os.environ.get("CLONER_NAV_STALE_GATE", "1") != "0"

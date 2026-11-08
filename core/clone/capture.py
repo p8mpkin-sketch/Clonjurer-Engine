@@ -646,6 +646,61 @@ class CaptureMixin:
 
 
     @staticmethod
+    def _nav_tracker(page) -> dict:
+        """导航前挂上的请求追踪(与 _wait_quiet 同口径): 从 goto 起就记在途请求与 load 事件,
+        静置判定不再漏掉 DOMContentLoaded 之前发出的请求。"""
+        skip = ("websocket", "eventsource", "media", "manifest", "other")
+        tr = {"inflight": {}, "ignored": {}, "last": [time.monotonic()], "load": [None],
+              "t0": time.monotonic()}
+
+        def _on_req(req):
+            if req.resource_type in skip or beacon_like(req.url):
+                tr["ignored"][id(req)] = time.monotonic()   # 不计静置, 但会拖住 load
+                return
+            tr["inflight"][id(req)] = time.monotonic()
+            tr["last"][0] = time.monotonic()
+
+        def _on_done(req):
+            tr["inflight"].pop(id(req), None)
+            tr["ignored"].pop(id(req), None)
+
+        def _on_load(*_a):
+            if tr["load"][0] is None:
+                tr["load"][0] = time.monotonic()
+
+        tr["handlers"] = (("request", _on_req), ("requestfinished", _on_done),
+                          ("requestfailed", _on_done), ("load", _on_load))
+        for ev, fn in tr["handlers"]:
+            page.on(ev, fn)
+        return tr
+
+    @staticmethod
+    def _wait_quiet_tracked(page, cap_ms: int, tr: dict) -> bool:
+        """静置等待(导航前已挂追踪): load 已触发 + 静置即走; load 未触发但在途的只剩挂起超过
+        STALE_MS 的请求(慢第三方像素/长连接拖住 load 事件)且静置, 也放行 —— 旧实现先阻塞等 load
+        (上限 9s)再判静置, 这类站每次白等到上限。首屏图没到齐由基准截图前的等图兜底。"""
+        quiet_s, stale_s = config.NAV_QUIET_MS / 1000, config.NAV_STALE_MS / 1000
+        deadline = time.monotonic() + cap_ms / 1000
+        try:
+            while time.monotonic() < deadline:
+                now = time.monotonic()
+                inflight = tr["inflight"]
+                live = sum(1 for t in list(inflight.values()) if now - t < stale_s)
+                if not live and now - tr["last"][0] >= quiet_s:
+                    if tr["load"][0] is not None or inflight or tr["ignored"]:
+                        return True   # load 已到, 或只剩挂起的请求/信标/长连接在拖 load
+                    # 追踪表空却没等到 load: 可能是不追踪的类型(媒体/长连接)在拖, 退回旧口径再等 load
+                    with suppress(Exception):
+                        page.wait_for_load_state("load", timeout=max(1, int((deadline - now) * 1000)))
+                    return True
+                page.wait_for_timeout(100)
+            return False
+        finally:
+            for ev, fn in tr.get("handlers", ()):
+                with suppress(Exception):
+                    page.remove_listener(ev, fn)
+
+    @staticmethod
     def _wait_quiet(page, cap_ms: int) -> bool:
         """渲染相关请求静置: QUIET_MS 内无新请求且在途请求都已完成或已挂起超过 STALE_MS。
 
@@ -808,6 +863,10 @@ class CaptureMixin:
         page.on("response", self._on_asset_response)  # 活体资源采集(恒开)
         self.log("RENDER", f"导航 {url}")
         t_nav, t_nav_m = time.time(), time.monotonic()
+        nav_tr = None
+        if getattr(config, "NAV_STALE_GATE", True):
+            with suppress(Exception):
+                nav_tr = self._nav_tracker(page)
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=config.PAGELOAD_TIMEOUT)
         except Exception as exc:
@@ -832,9 +891,19 @@ class CaptureMixin:
             if (vp.get("width") or 0) >= 1024 and self.cfg.get("viewport_probe", True) \
                     and self.cfg.get("viewport_reload", True):
                 self._start_narrow_loads(page, vp.get("height") or 0)
-        if not self._wait_quiet(page, config.NETWORK_IDLE_TIMEOUT):
+        quiet_ok = (self._wait_quiet_tracked(page, config.NETWORK_IDLE_TIMEOUT, nav_tr) if nav_tr
+                    else self._wait_quiet(page, config.NETWORK_IDLE_TIMEOUT))
+        if not quiet_ok:
             self.log("RENDER", "网络静置等待超时, 继续后续固化流程")
-        self.log("RENDER", f"页面就绪 {time.time() - t_nav:.1f}s")
+        if nav_tr:
+            t_load = nav_tr["load"][0]
+            hang = len(nav_tr["ignored"]) + sum(1 for t in nav_tr["inflight"].values()
+                                                if time.monotonic() - t >= config.NAV_STALE_MS / 1000)
+            self.log("RENDER", f"页面就绪 {time.time() - t_nav:.1f}s ("
+                     + (f"load {t_load - nav_tr['t0']:.1f}s" if t_load else f"load 未触发, 挂起请求 {hang} 个")
+                     + ")")
+        else:
+            self.log("RENDER", f"页面就绪 {time.time() - t_nav:.1f}s")
         if screenshot:
             with suppress(Exception):
                 rt = page.evaluate(RUNTIME_FP_JS) or []

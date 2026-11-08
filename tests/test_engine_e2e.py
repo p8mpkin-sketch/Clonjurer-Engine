@@ -109,6 +109,9 @@ for(var k=0;k<3;k++){var d=document.createElement('div');d.className='item';d.te
 }
 
 
+SITE["hang.html"] = """<!doctype html><html><head><meta charset="utf-8"><title>Hang</title></head>
+<body><h1>Content ready early</h1><p>Body text that renders before a hung pixel.</p>
+<img src="/hang/pixel.gif" width="1" height="1" alt=""></body></html>"""
 SITE["fonts.html"] = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>Fonts</title><link rel="stylesheet" href="/css/fonts.css"></head>
 <body><h1 class="ff">Plain latin heading only</h1><p class="ff">Second paragraph</p></body></html>"""
@@ -127,6 +130,11 @@ class _Quiet(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         REQUESTED.append(self.path)
+        if self.path.startswith("/hang/"):
+            time.sleep(8)   # 慢第三方像素: 拖住 load 事件
+            self.send_response(204)
+            self.end_headers()
+            return None
         return super().do_GET()
 
 
@@ -280,6 +288,19 @@ class EngineEndToEnd(unittest.TestCase):
         css = "".join(p.read_text(encoding="utf-8", errors="replace") for p in (ws / "static" / "css").glob("*.css"))
         self.assertNotIn("/fonts/fx.woff2", css.replace(f"localhost:{port}", "X"))  # 首选已本地化
         self.assertIn("fx-cyr.woff2", css)   # 未下载的切片保留原地址
+
+    def test_nav_not_blocked_by_hung_request(self):
+        """load 只被挂起的第三方请求拖住时, 首导航静置不等满上限。"""
+        port = self.httpd.server_address[1]
+        db, task = self._run_direct(f"http://localhost:{port}/hang.html")
+        self.assertEqual(task["status"], "completed", task.get("error_msg"))
+        ws = config.WORKSPACE_ROOT / str(task["id"])
+        log = (ws / "engine.log").read_text(encoding="utf-8")
+        import re as _re
+        m = _re.search(r"页面就绪 ([\d.]+)s", log)
+        self.assertIsNotNone(m, log[:2000])
+        self.assertLess(float(m.group(1)), 6.0, "\n".join(log.splitlines()[:12]))
+        self.assertIn("Content ready early", (ws / "index.html").read_text(encoding="utf-8"))
 
     def test_rich_page_crawler_mode(self):
         from core.browser_pool import SyncBrowserPool
