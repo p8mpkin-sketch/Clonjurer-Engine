@@ -213,7 +213,11 @@ DEEP_FREEZE_JS = r"""
     try {
       const data = cv.toDataURL('image/png');
       if (data && data.length > 128) {
-        cv.replaceWith((__CANVAS_IMG__)(cv, data));
+        const img = (__CANVAS_IMG__)(cv, data);
+        cv.replaceWith(img);
+        // 多视口记录(CV_RECORD_JS)在固化之前抓的元素表里还是这个 canvas: 换成 img, 否则 CV_EMIT 见它已脱离文档就跳过,
+        // canvas 的分视口盒高(图表库按宽算、不成比例的平板/手机高)一条都写不出(vite 平板 312 vs 347)
+        try { const R = window.__cvRec, k = R && R.els ? R.els.indexOf(cv) : -1; if (k >= 0) R.els[k] = img; } catch (e) {}
         result.canvas++;
       }
     } catch (err) {
