@@ -365,7 +365,8 @@ def _probe_viewports(args, results, vps, pre=None):
             for v in vps:
                 row = p.get(v) or {}
                 sc = row.get("robust") if row.get("robust") is not None else row.get("score")
-                if isinstance(sc, (int, float)) and sc < 85 and row.get("clone_diag"):
+                # 小规模运行(≤3 站, 手动派发做归因)连高分视口也留: 双峰站高分那次长什么样才有对照
+                if isinstance(sc, (int, float)) and (sc < 85 or len(results) <= 3) and row.get("clone_diag"):
                     diag[v] = {"clone": row["clone_diag"], "orig": row.get("orig_diag"),
                                "metrics": {k: row.get(k) for k in ("score", "structure", "edge", "text", "height_ratio",
                                                                   "orig_h", "clone_h", "seg_detail", "robust", "ceiling")}}

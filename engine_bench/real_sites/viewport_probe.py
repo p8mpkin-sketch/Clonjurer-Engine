@@ -154,6 +154,8 @@ DIAG_JS = r"""() => {
     h1: h1 ? cs(h1).fontSize + ' / ' + cs(h1).lineHeight + ' / ' + cs(h1).fontWeight + ' / ' + cs(h1).fontFamily.slice(0, 60) : '',
     a: a ? cs(a).textDecorationLine + ' / ' + cs(a).color : '',
     band: getComputedStyle(document.documentElement).getPropertyValue('--cv-band'),
+    // 网页字体是否真的到了(fallback 字体行高不同, 整页逐行位移): 各 FontFace 的 family/weight/status
+    fonts: (() => { try { const o = {}; for (const f of document.fonts) { const k = f.family.replace(/["']/g, '') + ' ' + f.weight; o[k] = (o[k] ? o[k] + ',' : '') + f.status[0]; } return Object.entries(o).slice(0, 24).map(([k, v]) => k + ':' + v).join(' | '); } catch (e) { return ''; } })(),
     vw: innerWidth, dpr: devicePixelRatio,
   };
   // 可见文本行(评分覆盖的前 8 屏): 两侧做差直接看出克隆少了/多了哪些文案(表单/计数/弹层)
