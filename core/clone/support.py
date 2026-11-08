@@ -2726,6 +2726,25 @@ URL_REPL_TRACE = os.environ.get("CLONER_URL_REPL_TRACE", "0") == "1"
 URL_REPL_BLOCKED: list = []
 
 
+def _rel_prefix_ok(text: str, s: int, k: str) -> bool:
+    """左侧是独立的相对前缀 ./ 或 ../(前面是引号/括号等非路径字符)时照旧替换, 与旧行为一致。
+
+    模块说明符 from"./chunk-x.js" 里根相对键 "/chunk-x.js" 紧跟在 "." 之后; 挡下它会让同一 chunk
+    经说明符改写与运行时原路径镜像两条路各加载一份(Angular 整页渲染两遍, 交互轨 100→42.6)。"""
+    j = s
+    if not k.startswith("/"):
+        if j < 1 or text[j - 1] != "/":
+            return False
+        j -= 1
+    dots = 0
+    while j > 0 and text[j - 1] == "." and dots < 3:
+        j -= 1
+        dots += 1
+    if dots not in (1, 2):
+        return False
+    return j == 0 or text[j - 1] not in _URL_MID_CHARS
+
+
 def apply_url_replacements(text: str, pairs) -> str:
     """apply_replacements + 无协议键的左边界约束(见上)。"""
     if not pairs or not URL_REPL_BOUNDARY:
@@ -2736,7 +2755,8 @@ def apply_url_replacements(text: str, pairs) -> str:
     def _sub(m):
         k = m.group(0)
         s = m.start()
-        if s and text[s - 1] in mid and not k.startswith(("http:", "https:", "//")):
+        if s and text[s - 1] in mid and not k.startswith(("http:", "https:", "//")) \
+                and not _rel_prefix_ok(text, s, k):
             if URL_REPL_TRACE and len(URL_REPL_BLOCKED) < 60:
                 URL_REPL_BLOCKED.append(f"{text[max(0, s - 40):s]!r}+{k!r} => {mapping.get(k, k)!r}")
             return k

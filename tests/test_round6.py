@@ -193,3 +193,23 @@ class ImgShardResolve(unittest.TestCase):
         self.assertIn('src="/static/img/a.avif" srcset="/static/img/a.avif 2x, /local/y.png 1x"', out)
         self.assertIn('<img src="//i1.cdn.test/bfs/static/logo.png">', out)   # 跨主机无哈希不动
         self.assertIn(f'<a href="//i1.cdn.test/bfs/archive/{HASH}.jpg">', out)  # 只动 img/source
+
+
+class UrlReplBoundary(unittest.TestCase):
+    """无协议键的左边界: 挡住长路径中段误改, 但独立的 ./ ../ 相对前缀照旧替换(与旧行为一致)。"""
+
+    def test_cases(self):
+        from core.clone.support import apply_url_replacements
+        pairs = sorted([("/airpods-pro/", "/static/misc/x.bin"), ("/chunk-A.js", "/static/js/a.js"),
+                        ("chunk-B.js", "/static/js/b.js")], key=lambda p: -len(p[0]))
+        cases = {
+            '"/105/media/us/airpods-pro/2025/large.mp4"': '"/105/media/us/airpods-pro/2025/large.mp4"',
+            'from"./chunk-A.js"': 'from"./static/js/a.js"',
+            'import(`../chunk-A.js`)': 'import(`../static/js/a.js`)',
+            'from"./chunk-B.js"': 'from".//static/js/b.js"',
+            'x/y./chunk-A.js': 'x/y./chunk-A.js',
+            '"/airpods-pro/"': '"/static/misc/x.bin"',
+            "url(chunk-B.js)": "url(/static/js/b.js)",
+        }
+        for src, want in cases.items():
+            self.assertEqual(apply_url_replacements(src, pairs), want, src)
