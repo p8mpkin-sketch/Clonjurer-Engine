@@ -301,13 +301,14 @@ DIAG_JS = r"""() => {
       for (const sh of document.styleSheets) { try { walk(sh.cssRules, ''); } catch (e) {} } } catch (e) {} return out; })();
     const gtrSrc = (el) => { const hits = []; for (const [sel, v, media, on] of gtrRules) { try { if (el.matches(sel)) hits.push(v + (media ? '@' + media.slice(0, 30) : '') + (on ? '' : '(off)')); } catch (e) {} if (hits.length >= 3) break; } return hits.join(';'); };
     // 带 0px 行的 grid 容器(内容在、行却是 0: 子项没参与行尺寸, 原因在作者样式里): 列出命中该容器及其子项的全部规则声明
-    let dumped = 0;
+    let dumped = 0; const dumpedSet = new Map();
+    const LAYP = /^(display|position|height|min-height|max-height|grid-row|grid-row-start|grid-row-end|grid-area|grid-template-rows|grid-auto-rows|margin-top|margin-bottom|contain|content-visibility|visibility|overflow|overflow-y|align-self|place-self|top|bottom|transform|--l_display|--comp-display|--container-display|--display)$/;
     const rulesOf = (el, cap) => { const hits = []; try { for (const sh of document.styleSheets) { let rules; try { rules = sh.cssRules; } catch (e) { continue; }
       const walk = (rs, on) => { for (const r of rs) { if (hits.length >= cap) return; if (r.type === 4) { walk(r.cssRules, on && matchMedia(r.conditionText).matches); continue; } if (r.type === 12 || r.type === 3) { try { walk(r.cssRules, on); } catch (e) {} continue; }
-        if (r.type === 1 && on) { try { if (el.matches(r.selectorText)) hits.push(r.selectorText.slice(0, 60) + '{' + r.style.cssText.slice(0, 160) + '}'); } catch (e) {} } } };
+        if (r.type === 1 && on) { try { if (el.matches(r.selectorText)) { const ds = []; for (const pn of r.style) if (LAYP.test(pn)) ds.push(pn + ':' + r.style.getPropertyValue(pn).slice(0, 60) + (r.style.getPropertyPriority(pn) ? '!' : '')); const h = r.selectorText.slice(0, 50) + '{' + ds.join(';') + '}'; if (ds.length && !hits.includes(h)) hits.push(h); } } catch (e) {} } } };
       walk(rules, true); if (hits.length >= cap) break; } } catch (e) {} return hits.join(' '); };
-    const zeroRowDump = (ch, c) => { if (dumped >= 6 || !/(^| )0px( |$)/.test(c.gridTemplateRows) || ch.children.length > 8) return ''; dumped++;
-      let out = ' RULES[' + rulesOf(ch, 8) + ']'; for (const k of ch.children) { const kc = cs(k); out += ' CHILD ' + (k.id ? '#' + k.id.slice(0, 24) : k.tagName) + ' gr=' + kc.gridRowStart + '/' + kc.gridRowEnd + ' h=' + Math.round(k.getBoundingClientRect().height) + ' style=' + (k.getAttribute('style') || '').slice(0, 80) + ' [' + rulesOf(k, 6) + ']'; } return out; };
+    const zeroRowDump = (ch, c) => { if (dumped >= 30 || !/(^| )0px( |$)/.test(c.gridTemplateRows) || ch.children.length > 8) return ''; dumped++;
+      let out = ' RULES[' + rulesOf(ch, 10) + ']'; for (const k of ch.children) { const kc = cs(k); out += ' CHILD ' + (k.id ? '#' + k.id.slice(0, 24) : k.tagName) + ' gr=' + kc.gridRowStart + '/' + kc.gridRowEnd + ' h=' + Math.round(k.getBoundingClientRect().height) + ' style=' + (k.getAttribute('style') || '').slice(0, 80) + ' [' + rulesOf(k, 8) + ']'; } if (dumpedSet.has(out)) return ' RULES=same#' + dumpedSet.get(out); dumpedSet.set(out, dumped); return out; };
     const walkT = (el, depth, pidx) => {
       if (tops.length >= 12000 || depth > 40) return;
       for (const ch of el.children) {
