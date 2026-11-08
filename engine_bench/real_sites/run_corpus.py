@@ -366,7 +366,9 @@ def _probe_viewports(args, results, vps, pre=None):
                 row = p.get(v) or {}
                 sc = row.get("robust") if row.get("robust") is not None else row.get("score")
                 if isinstance(sc, (int, float)) and sc < 85 and row.get("clone_diag"):
-                    diag[v] = {"clone": row["clone_diag"], "orig": row.get("orig_diag")}
+                    diag[v] = {"clone": row["clone_diag"], "orig": row.get("orig_diag"),
+                               "metrics": {k: row.get(k) for k in ("score", "structure", "edge", "text", "height_ratio",
+                                                                  "orig_h", "clone_h", "seg_detail", "robust", "ceiling")}}
             if diag:
                 r["vp_diag"] = diag
             r["vp_overflow"] = [v for v in vps if (p.get(v) or {}).get("clone_overflow_x")

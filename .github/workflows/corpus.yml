@@ -112,6 +112,12 @@ jobs:
               low = _low_vps(r)
               for v, d in (r.get("vp_diag") or {}).items():
                   print(f"::group::vp-diag {r.get('task_id')} {v} {r.get('url')}")
+                  m = d.get("metrics") or {}
+                  if m:
+                      print(f"  分项 score={m.get('score')} robust={m.get('robust')} ceiling={m.get('ceiling')} 结构={m.get('structure')} 边缘={m.get('edge')} 文本={m.get('text')} 高度比={m.get('height_ratio')} 原高={m.get('orig_h')} 克隆高={m.get('clone_h')}")
+                      segs = m.get("seg_detail") or []
+                      if segs:
+                          print("  逐段(512px: 结构/边缘) " + " ".join(f"{i}:{a:.2f}/{b:.2f}" for i, (a, b) in enumerate(segs)))
                   for side in ("clone", "orig"):
                       dd = d.get(side) or {}
                       print(f"[{side}] 图 {dd.get('nimg')} 张, 裂图 {len(dd.get('broken') or [])}, 失败请求 {len(dd.get('failed') or [])}, 脚本错误 {len(dd.get('errors') or [])}")

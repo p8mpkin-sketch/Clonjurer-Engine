@@ -1423,7 +1423,7 @@ _DIFF_DIM_LUT = [int(p * 0.45) for p in range(256)]
 
 def compute_visual_similarity(image_a: Path, image_b: Path, diff_path: Path = None,
                               orig_text: str = "", clone_text: str = "",
-                              prime_calibration: bool = False) -> dict:
+                              prime_calibration: bool = False, seg_detail: bool = False) -> dict:
     """诚实相似度 v3。返回 {score, structure, edge, text, ..., warnings[]}。
 
     v3 相对 v2 的口径修正:
@@ -1458,6 +1458,7 @@ def compute_visual_similarity(image_a: Path, image_b: Path, diff_path: Path = No
             diff_job = pool.submit(_write_diff, ra, rb, view_h, diff_path)
 
     s_sum = e_sum = w_sum = 0.0
+    segs = []
     if _np is not None:
         arr_b = _np.asarray(rb.convert("L"))
         # 参考图侧中间量(边缘掩码/NCC 去均值块)按内容缓存; 克隆图侧边缘 /
@@ -1474,6 +1475,7 @@ def compute_visual_similarity(image_a: Path, image_b: Path, diff_path: Path = No
             s_sum += w * nccs[k]
             e_sum += w * edges[k]
             w_sum += w
+            segs.append((round(float(nccs[k]), 3), round(float(edges[k]), 3)))
     else:  # pragma: no cover
         ga, gb = ra.convert("L"), rb.convert("L")
         for k in range(seg_count):
@@ -1517,7 +1519,7 @@ def compute_visual_similarity(image_a: Path, image_b: Path, diff_path: Path = No
     if structure < 0.5:
         warnings.append(f"块级结构相关性仅 {structure:.0%}: 存在大面积错位/缺失区域")
 
-    return {
+    out = {
         "score": round(max(0.0, min(100.0, score)), 1),
         "structure": round(structure, 3),
         "edge": round(edge, 3),
@@ -1529,6 +1531,9 @@ def compute_visual_similarity(image_a: Path, image_b: Path, diff_path: Path = No
         "scoring": "v3-segmented",
         "warnings": warnings,
     }
+    if seg_detail:   # 逐 512 段 (块级NCC, 边缘IoU): 定位失分落在整页哪一段(探针诊断用, 默认不加键, 基线等价闸门不变)
+        out["seg_detail"] = segs
+    return out
 
 
 def write_diff_preview(image_a: Path, image_b: Path, diff_path: Path) -> None:

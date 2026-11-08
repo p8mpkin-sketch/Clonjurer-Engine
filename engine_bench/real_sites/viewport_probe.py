@@ -381,8 +381,9 @@ def probe_one(browser, base, task_id, url, viewports, outdir: Path, clone_tpl=No
                 _mask_rects(a, rects)
                 _mask_rects(b, rects)
             sim = compute_visual_similarity(a, b, outdir / f"{task_id}_{name}_diff.png",
-                                            orig_text=ia.get("text", ""), clone_text=ib.get("text", ""))
-            row.update({k: sim.get(k) for k in ("score", "structure", "edge", "text", "height_ratio")})
+                                            orig_text=ia.get("text", ""), clone_text=ib.get("text", ""),
+                                            seg_detail=True)
+            row.update({k: sim.get(k) for k in ("score", "structure", "edge", "text", "height_ratio", "seg_detail")})
             if noise:
                 # 原站自比: 隔一次重新加载原站再比, 得到本口径下的可达上限(活体随机性)
                 ctx2 = browser.new_context(**context_opts(name))
