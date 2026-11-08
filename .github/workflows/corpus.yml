@@ -180,6 +180,8 @@ jobs:
                   for k in [k for k in cbk if cbk[k][1] == "vis" and k not in obk][:6]: print(f"  克隆独有大块 {k[-110:]} @{cbk[k][2]} 高{cbk[k][3]} 图{cbk[k][4]} [{how(cbk[k])}]")
                   drift = [(ypos(oo[k]), ypos(co[k]), k) for k in oo if k in co and 3 <= abs(ypos(oo[k]) - ypos(co[k])) <= 40]
                   for oy, cy, k in sorted(drift)[:10]: print(f"  微位移文本 原 y={oy} 克隆 y={cy}: {k[:70]}")
+                  for side, dd in (("原站", d.get("orig") or {}), ("克隆", d.get("clone") or {})):
+                      for tg in (dd.get("src_tags") or []): print(f"  源码开标签[{side}] {tg[:260]}")
                   # 位移源头: 两侧逐元素顶边按路径对齐, 相邻元素间 Δy 跳变 ≥4px 处 = 其前一个元素(或祖先)两侧高度不同
                   ot = [(b[0], b) for b in ((d.get("orig") or {}).get("tops") or [])]
                   ctm = {b[0]: b for b in ((d.get("clone") or {}).get("tops") or [])}

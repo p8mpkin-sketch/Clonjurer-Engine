@@ -14,6 +14,7 @@ desktop 探针分是本方法的噪声基线, tablet/mobile 与它的差才是�
 """
 import argparse
 import json
+import re
 import sys
 import tempfile
 import time
@@ -360,6 +361,11 @@ def _shoot(ctx, url, vp, out: Path, timeout_ms=45000, extra_wait_ms=0):
             d = page.evaluate(DIAG_JS) or {}
             d["failed"] = failed
             d["errors"] = errors
+            # 源码里的 <html>/<body> 开标签(脚本跑之前的内联 style/class): 与上面"探 html/body"(运行后)对照,
+            # 分得清滚动锁/状态类是序列化时就烘进交付 HTML 的, 还是克隆里脚本重跑又写上去的
+            with suppress(Exception):
+                raw = page.request.get(url, timeout=15000).text()
+                d["src_tags"] = [m.group(0)[:300] for m in re.finditer(r"<(?:html|body)\b[^>]*>", raw[:400000], re.I)][:2]
             if exc_locs:
                 src_lines = None
                 with suppress(Exception):
