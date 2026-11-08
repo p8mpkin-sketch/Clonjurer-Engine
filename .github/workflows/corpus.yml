@@ -23,6 +23,18 @@ on:
         description: "逗号分隔 URL, 覆盖语料(可选)"
         required: false
         default: ""
+      viewports:
+        description: "探针视口(留空=desktop,tablet,mobile; 可填 phones / phones4 / iphone-air,galaxy-s24 等)"
+        required: false
+        default: ""
+      probe_noise:
+        description: "探针加原站自比上限与稳健口径(true/false)"
+        required: false
+        default: "false"
+      probe_each:
+        description: "每站克隆一完成立即探针(true/false)"
+        required: false
+        default: "false"
   schedule:
     - cron: "30 18 * * *"   # 北京时间 02:30
 
@@ -52,9 +64,14 @@ jobs:
           echo "实例未就绪"; tail -50 logs/app_ci.log; exit 1
       - name: 跑语料
         run: |
+          extra=""
+          [ "${{ github.event.inputs.probe_noise }}" = "true" ] && extra="$extra --probe-noise"
+          [ "${{ github.event.inputs.probe_each }}" = "true" ] && extra="$extra --probe-each"
           python engine_bench/real_sites/run_corpus.py --base http://127.0.0.1:8897 \
             --timeout 3600 --tag "${{ github.event.inputs.tag || 'global' }}" \
-            --sites "${{ github.event.inputs.sites }}" || echo "有站点未完成(报告照常产出)"
+            --sites "${{ github.event.inputs.sites }}" \
+            --viewports "${{ github.event.inputs.viewports || 'desktop,tablet,mobile' }}" $extra \
+            || echo "有站点未完成(报告照常产出)"
       - name: 报告写入运行摘要
         if: always()
         run: |
@@ -68,8 +85,40 @@ jobs:
             python - "$j" <<'PY'
           import json, sys, pathlib
           run = json.load(open(sys.argv[1], encoding="utf-8"))
+          def _low_vps(r):
+              # 视口探针分(有稳健口径时看稳健分)低于 85 的视口: 这些宽度的原站/克隆截图进日志
+              vp = dict(r.get("vp") or {})
+              for k, v in (r.get("vp_robust") or {}).items():
+                  if v is not None:
+                      vp[k] = v
+              return [k for k, v in vp.items() if isinstance(v, (int, float)) and v < 85]
+          def _shot(path, tag, width=480, max_h=2400):
+              try:
+                  from PIL import Image
+                  import base64, io
+                  im = Image.open(path).convert("RGB")
+                  im = im.resize((width, max(1, round(im.height * width / im.width))))
+                  im = im.crop((0, 0, width, min(im.height, max_h)))
+                  buf = io.BytesIO(); im.save(buf, "JPEG", quality=60)
+                  print(f"::group::shot {tag}")
+                  b64 = base64.b64encode(buf.getvalue()).decode()
+                  for k in range(0, len(b64), 4000):
+                      print("SHOT64:" + b64[k:k + 4000])
+                  print("::endgroup::")
+              except Exception as exc:
+                  print(f"(缩略图失败 {path}: {exc})")
+          vp_dirs = sorted(pathlib.Path("engine_bench/real_sites/runs").glob("viewports_*"))
           for r in run.get("results", []):
-              if r.get("status") == "completed" and isinstance(r.get("score"), (int, float)) and r["score"] >= 90:
+              low = _low_vps(r)
+              # 低分视口的探针截图(原站/克隆/遮罩后)进日志: 产物存储域名在部分环境不可达
+              for v in low:
+                  for kind in ("orig", "clone", "orig_rb", "clone_rb"):
+                      for d in vp_dirs:
+                          f = d / f"{r.get('task_id')}_{v}_{kind}.png"
+                          if f.is_file():
+                              _shot(f, f"{r.get('task_id')} vp {v} {kind} {r.get('url')}", width=360, max_h=1600)
+                              break
+              if r.get("status") == "completed" and isinstance(r.get("score"), (int, float)) and r["score"] >= 90 and not low:
                   continue
               log = pathlib.Path("workspaces") / str(r.get("task_id")) / "engine.log"
               print(f"::group::engine.log {r.get('url')} ({r.get('status')})")
