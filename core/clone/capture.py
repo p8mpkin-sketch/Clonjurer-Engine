@@ -456,16 +456,22 @@ class CaptureMixin:
             return
         t0 = time.monotonic()
         try:
+            parts = []   # 分步耗时(缩放/静置/记录, 秒): 远程归因慢站在哪一步
+            tq = time.monotonic()
             n = page.evaluate(CV_RECORD_JS, "d")
-            for tag, w in (("t", 768), ("m", 390)):
+            parts.append(f"d 记录 {time.monotonic() - tq:.1f}")
+            for tag, w in (("t", 768), ("m", 390), ("b", width)):
+                t1 = time.monotonic()
                 page.set_viewport_size({"width": w, "height": height})
-                page.evaluate(CV_QUIET_JS, 250)
+                t2 = time.monotonic()
+                page.evaluate(CV_QUIET_JS, 300 if tag == "b" else 250)
+                t3 = time.monotonic()
+                if tag == "b":
+                    page.evaluate(SCROLL_TOP_JS)
                 page.evaluate(CV_RECORD_JS, tag)
-            page.set_viewport_size({"width": width, "height": height})
-            page.evaluate(CV_QUIET_JS, 300)
-            page.evaluate(SCROLL_TOP_JS)
-            page.evaluate(CV_RECORD_JS, "b")
-            self.log("RENDER", f"多视口内联采集: {n} 个元素 × 平板/手机视口 {time.monotonic() - t0:.1f}s")
+                parts.append(f"{tag} 缩放 {t2 - t1:.1f}/静置 {t3 - t2:.1f}/记录 {time.monotonic() - t3:.1f}")
+            self.log("RENDER", f"多视口内联采集: {n} 个元素 × 平板/手机视口 {time.monotonic() - t0:.1f}s"
+                               f"({'; '.join(parts)})")
             if self.cfg.get("viewport_reload", True) and not getattr(self, "_cv_pages", None):
                 self._start_narrow_loads(page, height)
         except Exception as exc:
