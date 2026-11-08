@@ -10,6 +10,7 @@ PAGE = """<!doctype html><html><head>GUARD</head><body style="margin:0">
 <div id="sec"><div id="title" style="height:22px">Best Sellers</div><div id="car" style="height:394px">carousel</div></div>
 <div id="foot"><footer id="f1" style="height:800px">footer</footer></div>
 <div id="lazy"><div id="ph" style="height:300px">placeholder</div></div>
+<div id="sec2"><div id="car2" style="height:394px">carousel2</div></div>
 <button id="b" onclick="document.getElementById('top').remove()">x</button>
 <script>
   // 水合重建: 轮播整块被拆掉, 没有东西补上
@@ -20,6 +21,10 @@ PAGE = """<!doctype html><html><head>GUARD</head><body style="margin:0">
   // 占位块先拆, 1.4s 后异步内容才到
   document.getElementById('ph').remove();
   setTimeout(function(){ var d = document.createElement('div'); d.id = 'real'; d.style.height = '300px'; d.textContent = 'real'; document.getElementById('lazy').appendChild(d); }, 1400);
+  // Vue 式: 拆掉旧块后立刻插入空壳, 1.5s 后壳内才长出内容(父元素 childList 不再变, 只有尺寸变)
+  document.getElementById('car2').remove();
+  var shell = document.createElement('div'); shell.id = 'shell'; document.getElementById('sec2').appendChild(shell);
+  setTimeout(function(){ var d = document.createElement('div'); d.style.height = '394px'; shell.appendChild(d); }, 1500);
 </script></body></html>"""
 
 
@@ -37,9 +42,11 @@ class ContentKeep(unittest.TestCase):
                 self.assertEqual(page.evaluate("document.getElementById('sec').children[1].id"), "car", "放回原位(标题之后)")
                 self.assertEqual(page.evaluate("!!document.getElementById('f1')"), False, "换了一份的页脚不放回")
                 self.assertEqual(page.evaluate("!!document.getElementById('ph')"), True, "占位块先放回")
+                self.assertEqual(page.evaluate("!!document.getElementById('car2')"), True, "空壳未长高前旧块先放回")
                 page.wait_for_timeout(1400)
                 self.assertEqual(page.evaluate("!!document.getElementById('real')"), True)
                 self.assertEqual(page.evaluate("!!document.getElementById('ph')"), False, "异步内容到了, 放回的占位块撤掉")
+                self.assertEqual(page.evaluate("!!document.getElementById('car2')"), False, "壳内长出内容(父元素只变尺寸)后旧块撤掉")
                 self.assertEqual(page.evaluate("window.__cloneKept"), 1)
                 page.click("#b")   # 用户手势之后的移除不管
                 page.wait_for_timeout(900)

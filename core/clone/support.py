@@ -2128,7 +2128,8 @@ def relax_font_display(text):
 # innerHTML/textContent): 加载后 12s 内、用户没有任何激活手势时, 移除一块 ≥100px 高的已连接元素, 先量下它和
 # 父元素的高; 600ms 后若该块没有被放回文档、父元素又真的塌掉了被移除块 60% 以上的高度(即不是"拆了再换一份"),
 # 就把原块放回原位。放回后一直看着(不限时): 父元素后来又长回来(异步数据到了 / 滚到视口才挂载, 新内容补上), 再把放回的
-# 旧块撤掉, 避免双份(allbirds 轮播在滚动到位后由 Vue 重新渲染, 曾与放回块并存 394px×2)。
+# 旧块撤掉, 避免双份(allbirds 轮播: Vue 先插入空壳、图片到了/swiper 初始化后才长高, 父元素 childList 不再变 —— 用
+# ResizeObserver 盯父元素尺寸 + 子树变动兜底; 曾与放回块并存 394px×2)。
 CONTENT_KEEP_GUARD_JS = r"""<script data-clone-preview="content-keep">(function(){try{if(window.__cloneKeep)return;window.__cloneKeep=1;var T0=Date.now(),WIN=12000,MIN=100,REC=[],KEPT=[],measured=0,done=false;
 function active(){return !!window.__cloneUserAct;}if(!window.__cloneActHook){window.__cloneActHook=1;['pointerdown','keydown','touchstart','wheel'].forEach(function(t){try{addEventListener(t,function(e){if(e.isTrusted)window.__cloneUserAct=1;},{capture:true,passive:true});}catch(e){}});}
 function over(){return done||active()||Date.now()-T0>WIN;}
@@ -2136,7 +2137,7 @@ function hOf(el){try{var r=el.getBoundingClientRect();return r.width>=60?r.heigh
 function note(n,parent){if(over()||measured>300||!n||n.nodeType!==1||!n.isConnected||!parent||parent.nodeType!==1)return;var t=n.tagName;if(/^(SCRIPT|STYLE|LINK|TEMPLATE|NOSCRIPT|META|HTML|HEAD|BODY)$/.test(t)||n.closest('svg'))return;measured++;var h=hOf(n);if(h<MIN)return;REC.push({n:n,p:parent,next:n.nextElementSibling,h:h,ph:hOf(parent),t:Date.now()});sched();}
 function noteAll(parent){if(over()||!parent||parent.nodeType!==1||!parent.isConnected||!parent.children)return;var ch=parent.children;for(var i=0;i<ch.length;i++)note(ch[i],parent);}
 var tm=0;function sched(){if(tm)return;tm=setTimeout(check,600);}
-function check(){tm=0;if(over()){return;}var now=Date.now(),rest=[];for(var i=0;i<REC.length;i++){var r=REC[i];if(r.back){rest.push(r);continue;}if(now-r.t<550){rest.push(r);continue;}if(r.n.isConnected||!r.p.isConnected)continue;var ph=hOf(r.p);if(ph>r.ph-r.h*0.6)continue;try{var nx=r.next&&r.next.parentNode===r.p?r.next:null;r.p.insertBefore(r.n,nx);r.back=1;KEPT.push(r);r.phBack=hOf(r.p);window.__cloneKept=(window.__cloneKept||0)+1;rest.push(r);try{mo.observe(r.p,{childList:true});}catch(e){}}catch(e){}}
+function check(){tm=0;if(over()){return;}var now=Date.now(),rest=[];for(var i=0;i<REC.length;i++){var r=REC[i];if(r.back){rest.push(r);continue;}if(now-r.t<550){rest.push(r);continue;}if(r.n.isConnected||!r.p.isConnected)continue;var ph=hOf(r.p);if(ph>r.ph-r.h*0.6)continue;try{var nx=r.next&&r.next.parentNode===r.p?r.next:null;r.p.insertBefore(r.n,nx);r.back=1;KEPT.push(r);r.phBack=hOf(r.p);window.__cloneKept=(window.__cloneKept||0)+1;rest.push(r);try{mo.observe(r.p,{childList:true,subtree:true});if(ro)ro.observe(r.p);}catch(e){}}catch(e){}}
 REC=rest;if(REC.length)sched();}
 function undo(){for(var i=0;i<KEPT.length;i++){var r=KEPT[i];if(!r.back||!r.n.isConnected)continue;var ph=hOf(r.p);if(ph-r.h>=r.ph*0.7){try{r.n.remove();r.back=0;window.__cloneKept=(window.__cloneKept||0)-1;}catch(e){}}}}
 function wrap(P,k,pick){var d=Object.getOwnPropertyDescriptor(P,k);if(!d||typeof d.value!=='function')return;var f=d.value;P[k]=function(){try{pick(this,arguments);}catch(e){}return f.apply(this,arguments);};}
@@ -2148,7 +2149,7 @@ wrap(Element.prototype,'replaceChildren',function(self){noteAll(self);});
 wrap(Element.prototype,'replaceWith',function(self){note(self,self.parentNode);});
 wrapSet(Element.prototype,'innerHTML');wrapSet(Node.prototype,'textContent');
 // 放回后的撤销不限时: 父元素里后来又长出新内容(懒挂载/滚到视口才渲染, 可能远在 12s 之后), 旧块必须撤, 否则双份
-var ud=0,mo=new MutationObserver(function(){clearTimeout(ud);ud=setTimeout(undo,500);});
+var ud=0,bump=function(){clearTimeout(ud);ud=setTimeout(undo,400);},mo=new MutationObserver(bump),ro=window.ResizeObserver?new ResizeObserver(bump):null;
 setTimeout(function(){done=true;},WIN+500);}catch(e){}})();</script>"""
 
 REPLAY_DEDUPE_JS = r"""<script data-clone-preview="replay-dedupe">(function(){try{if(window.__cloneDedupe)return;window.__cloneDedupe=1;var M=[],mark=new WeakSet(),mo=new MutationObserver(function(){});mo.observe(document.documentElement,{childList:true,subtree:true});
