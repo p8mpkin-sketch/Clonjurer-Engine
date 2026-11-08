@@ -845,11 +845,11 @@ HIDDEN_ROOTS_JS = r"""() => {
 # 与 AD_RECTS_JS 同口径)的那些: 广告位在窄屏首载页里是 250px 占位态, 原站评分时要么空着要么被遮, 换成窄屏版
 # 反把占位高度带进克隆(techcrunch 手机 96→62)
 VISIBLE_PATHS_JS = r"""(paths) => {
-  const AD_SRC = /doubleclick\.net|googlesyndication\.com|adservice\.google|amazon-adsystem\.com|adnxs\.com|taboola\.com|outbrain\.com|criteo\.(?:com|net)|pubmatic\.com|rubiconproject\.com/i;
+  const AD_SRC = /doubleclick\.net|googlesyndication\.com|adservice\.google|amazon-adsystem\.com|adnxs\.com|taboola\.com|outbrain\.com|criteo\.(?:com|net)|pubmatic\.com|rubiconproject\.com|carbonads\.net|buysellads\.(?:net|com)/i;
+  const AD_SEL = '[id^="div-gpt-ad"],[data-google-query-id],iframe[id^="google_ads_iframe"],#carbonads,[id^="carbonads"]';
   const isAd = el => {
-    if (el.matches('[id^="div-gpt-ad"],[data-google-query-id],iframe[id^="google_ads_iframe"]')) return true;
-    if (el.querySelector('[id^="div-gpt-ad"],[data-google-query-id],iframe[id^="google_ads_iframe"]')) return true;
-    for (const f of el.querySelectorAll('iframe')) if (AD_SRC.test(f.getAttribute('src') || '')) return true;
+    if (el.matches(AD_SEL) || el.closest(AD_SEL) || el.querySelector(AD_SEL)) return true;
+    for (const f of el.querySelectorAll('iframe,img')) if (AD_SRC.test(f.getAttribute('src') || '')) return true;
     return false;
   };
   const hasContent = el => {
@@ -1998,7 +1998,7 @@ COLLECT_LINKS_JS = r"""
 # 站点自有的推广位不在此列。techcrunch 每轮 3~8 分的随机抖动全来自这里
 AD_RECTS_JS = r"""() => {
   const out = [], sx = window.scrollX || 0, sy = window.scrollY || 0;
-  const AD_SRC = /doubleclick\.net|googlesyndication\.com|adservice\.google|amazon-adsystem\.com|adnxs\.com|taboola\.com|outbrain\.com|criteo\.(?:com|net)|pubmatic\.com|rubiconproject\.com/i;
+  const AD_SRC = /doubleclick\.net|googlesyndication\.com|adservice\.google|amazon-adsystem\.com|adnxs\.com|taboola\.com|outbrain\.com|criteo\.(?:com|net)|pubmatic\.com|rubiconproject\.com|carbonads\.net|buysellads\.(?:net|com)/i;
   const seen = new Set();
   const add = (el) => {
     if (!el || seen.has(el)) return;
@@ -2012,6 +2012,9 @@ AD_RECTS_JS = r"""() => {
     if (id.startsWith('google_ads_iframe') || AD_SRC.test(src)) add(f);
   });
   document.querySelectorAll('[id^="div-gpt-ad"], [data-google-query-id]').forEach(add);
+  // Carbon/BuySellAds(开发者站常见, 非 iframe 投放): 容器 id 固定为 carbonads, 素材来自 srv.carbonads.net / cdn4.buysellads.net
+  document.querySelectorAll('#carbonads, [id^="carbonads"]').forEach(add);
+  document.querySelectorAll('img[src]').forEach(im => { if (AD_SRC.test(im.getAttribute('src') || '')) add(im.closest('#carbonads, [id^="carbonads"], a') || im); });
   return out.slice(0, 80);
 }"""
 
