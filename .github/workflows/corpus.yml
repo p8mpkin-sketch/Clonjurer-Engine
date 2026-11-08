@@ -119,6 +119,8 @@ jobs:
                       for f in (dd.get("failed") or [])[:30]: print("  失败", f)
                       for e in (dd.get("errors") or [])[:5]: print("  错误", e)
                       for sh in (dd.get("sheets") or [])[:40]: print("  样式表", sh)
+                      for k, v in (dd.get("probe") or {}).items(): print(f"  探 {k}: {v}")
+                      for st in (dd.get("styles") or [])[:60]: print("  style块", st)
                   print("::endgroup::")
               # 低分视口的探针截图(原站/克隆/遮罩后)进日志: 产物存储域名在部分环境不可达
               for v in low:

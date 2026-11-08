@@ -138,7 +138,22 @@ DIAG_JS = r"""() => {
       if (r.width > 0 && r.height > 0) broken.push([im.currentSrc.slice(-120), Math.round(r.width), Math.round(r.height)]);
     }
   }
-  return {sheets: sheets.slice(0, 40), broken: broken.slice(0, 30), nimg: document.images.length};
+  const styles = Array.from(document.querySelectorAll('style')).map(st => [
+    Array.from(st.attributes, a => a.name + '=' + a.value.slice(0, 30)).join(' ').slice(0, 120),
+    st.textContent.length, st.textContent.replace(/\s+/g, ' ').slice(0, 160)]);
+  const attrs = e => e ? Array.from(e.attributes, a => a.name + '=' + a.value.slice(0, 80)).join(' ').slice(0, 400) : '';
+  const h1 = document.querySelector('h1'), a = document.querySelector('main a, a[href]');
+  const cs = e => e ? getComputedStyle(e) : null;
+  const probe = {
+    html: attrs(document.documentElement), body: attrs(document.body),
+    bodyFont: cs(document.body) ? cs(document.body).fontFamily.slice(0, 80) + ' / ' + cs(document.body).fontSize + ' / ' + cs(document.body).color : '',
+    h1: h1 ? cs(h1).fontSize + ' / ' + cs(h1).lineHeight + ' / ' + cs(h1).fontWeight + ' / ' + cs(h1).fontFamily.slice(0, 60) : '',
+    a: a ? cs(a).textDecorationLine + ' / ' + cs(a).color : '',
+    band: getComputedStyle(document.documentElement).getPropertyValue('--cv-band'),
+    vw: innerWidth, dpr: devicePixelRatio,
+  };
+  return {sheets: sheets.slice(0, 40), broken: broken.slice(0, 30), nimg: document.images.length,
+          styles: styles.slice(0, 60), probe: probe};
 }"""
 
 
@@ -150,7 +165,11 @@ def _shoot(ctx, url, vp, out: Path, timeout_ms=45000, extra_wait_ms=0):
         [rq.url[-120:], (rq.failure or "")[:60], rq.resource_type]))
     page.on("response", lambda rs: rs.status >= 400 and len(failed) < 40 and failed.append(
         [rs.url[-120:], str(rs.status), rs.request.resource_type]))
-    page.on("pageerror", lambda e: len(errors) < 10 and errors.append(str(e)[:160]))
+    page.on("pageerror", lambda e: len(errors) < 10 and errors.append(
+        (str(e)[:160] + " @ " + str(getattr(e, "stack", "") or "").split("\n")[1:2].__str__()[:200])))
+    page.on("console", lambda m: m.type == "error" and len(errors) < 10 and errors.append(
+        "console: " + m.text[:160] + " @ " + str((m.location or {}).get("url", ""))[-100:]
+        + ":" + str((m.location or {}).get("line_number", ""))))
     try:
         for attempt in range(4):   # 网络层抖动(RESET/CLOSED/断网)退避重试, 不当成克隆缺陷
             try:

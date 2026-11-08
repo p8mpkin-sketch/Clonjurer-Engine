@@ -1364,6 +1364,9 @@ class ClonerEngine:
             p2 = None
             try:
                 p2 = page.context.new_page()
+                # 窄屏才显示/才加载的图(手机版首屏图、按断点换的 picture 源)桌面活体从没请求过, 不登记就
+                # 进不了活体回补, 克隆在手机宽度下整块裂图(wix 手机首屏 ~40 分)
+                p2.on("response", lambda r: self._on_asset_response(r, bodies=False))
                 p2.set_viewport_size({"width": w, "height": height})
                 p2.goto(page.url, wait_until="commit", timeout=10000)
                 self._cv_pages.append((tag, p2))
@@ -2140,8 +2143,9 @@ class ClonerEngine:
         except Exception:
             return
 
-    def _on_asset_response(self, response):
-        """活体资源采集: 浏览器渲染期真实成功加载的静态资源清单。"""
+    def _on_asset_response(self, response, bodies=True):
+        """活体资源采集: 浏览器渲染期真实成功加载的静态资源清单。
+        bodies=False 只登记 URL 不留响应对象(窄屏首载对照页先于收尾关闭, 响应体取不回, 交给回补下载)。"""
         try:
             if response.status >= 400:
                 return
@@ -2159,7 +2163,7 @@ class ClonerEngine:
             if rtype not in ASSET_RESOURCE_TYPES:
                 return
             self._live_seen[response.url] = rtype
-            if response.status == 200 and request.resource_type in _LIVE_BODY_TYPES \
+            if bodies and response.status == 200 and request.resource_type in _LIVE_BODY_TYPES \
                     and len(self._live_resp) < config.LIVE_BODY_MAX \
                     and response.url.startswith(("http://", "https://")):
                 self._live_resp.setdefault(response.url, response)
