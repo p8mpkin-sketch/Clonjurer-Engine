@@ -1094,7 +1094,8 @@ class VariantFinishesTransitions(unittest.TestCase):
                 pg.set_content(html)
                 shown = pg.evaluate("Array.from(document.querySelectorAll('.xs .item')).filter(e => e.checkVisibility()).length")
                 self.assertEqual(shown, 1)
-                self.assertEqual(pg.evaluate("document.querySelector('[data-cv-vp=m] .item.active').textContent.trim()"), "乙")
+                # 过渡收尾后当前项是乙, 再按互斥组规则对调回第一项: 克隆与原站同从甲起播
+                self.assertEqual(pg.evaluate("document.querySelector('[data-cv-vp=m] .item.active').textContent.trim()"), "甲")
             finally:
                 b.close()
 
@@ -1128,5 +1129,55 @@ class HiddenRootSkipsAdSlots(unittest.TestCase):
                 n = ce.ClonerEngine._inject_dom_variants(eng, page, loads)
                 self.assertEqual(n, 0)
                 self.assertFalse(page.evaluate("!!document.querySelector('[data-cv-vp]')"))
+            finally:
+                b.close()
+
+
+CYCLED_CAROUSEL_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<style>body{margin:0}.xs{display:none}@media (max-width:767px){.xs{display:block}}
+.item{display:none}.item.active{display:block;height:100px}</style></head><body>
+<header>站头</header>
+<div class="xs"><div class="inner"><div class="item">甲<img alt="" width="100" height="50"></div><div class="item">乙<img alt="" width="100" height="50"></div><div class="item">丙<img alt="" width="100" height="50"></div></div></div>
+<p>正文</p>
+<script>
+// 站点脚本: 无条件给第一项加 active(原站首载是空操作); 窄屏页模拟已翻到第二项
+var items = document.querySelectorAll('.xs .item');
+items[0].classList.add('active');
+if (innerWidth < 768) { items[0].classList.remove('active'); items[1].classList.add('active'); }
+</script></body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class VariantNormalizesCycledGroup(unittest.TestCase):
+    """窄屏页里轮播已翻到第 k 项: 变体里把第一项与当前项的 class 对调, 克隆重跑站点脚本(给第一项加 active)后仍只一项可见。"""
+
+    def test_cycled_item_swapped_to_first(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 1440, "height": 800})
+                page.set_content(CYCLED_CAROUSEL_PAGE)
+                eng = _FakeEngine()
+                logs = []
+                eng.log = lambda *a: logs.append(a[-1])
+                eng._cv_pages = []
+                p2 = b.new_page(viewport={"width": 390, "height": 800})
+                p2.set_content(CYCLED_CAROUSEL_PAGE)
+                eng._cv_pages.append(("m", p2))
+                loads = {"m": p2.evaluate(ce.CV_PATHS_JS)}
+                n = ce.ClonerEngine._inject_dom_variants(eng, page, loads)
+                self.assertEqual(n, 1)
+                self.assertTrue(any("对调到第一项" in l for l in logs), logs)
+                html = page.content()
+            finally:
+                b.close()
+            html = ce.scope_viewport_css(html, 1000, 0)
+            b = p.chromium.launch()
+            try:
+                pg = b.new_page(viewport={"width": 390, "height": 800})
+                pg.set_content(html)       # 脚本照常重跑: 给第一项加 active
+                shown = pg.evaluate("Array.from(document.querySelectorAll('[data-cv-vp=m] .item')).filter(e => e.checkVisibility()).map(e => e.textContent.trim())")
+                self.assertEqual(shown, ["甲"])
             finally:
                 b.close()

@@ -1678,6 +1678,9 @@ class ClonerEngine:
             with suppress(Exception):
                 htmls = pages[tag].evaluate(ALT_EXTRACT_JS, top) or {}
                 sizes = page.evaluate(SUBTREE_SIZE_JS, list(htmls))
+                normed = sum((v[4] if len(v) > 4 else 0) for v in htmls.values())
+                if normed:
+                    self.log("RENDER", f"窄屏首载页 {tag}: {normed} 个互斥兄弟组(轮播项/标签页)当前项对调到第一项(与原站首载同相位)")
                 for p, (h, alt_text, alt_n, *alt_rest) in htmls.items():
                     main_text, main_n, *main_rest = sizes.get(p, (0, 0, 0))
                     alt_ctrl = alt_rest[0] if alt_rest else 0

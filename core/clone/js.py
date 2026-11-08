@@ -685,11 +685,46 @@ ALT_EXTRACT_JS = r"""(paths) => {
     }
     return e;
   };
+  // 互斥兄弟组(轮播项/标签页: ≥2 个同标签兄弟, 恰一个渲染、其余 display:none, 只差状态类)当前显示的不是第一个时,
+  // 把第一个与当前项的 class/内联 style 对调 —— 窄屏页已跑了几秒, 轮播翻到了第 k 项; 站点脚本在克隆里重跑时常
+  // 无条件给第一项加 active(原站首载本就是第一项, 无副作用), 克隆就两项同时可见(cgnpc 手机横幅下多出一整项)。
+  // 对调后克隆与原站同从第一项起播, 脚本加 active 成为空操作
+  const STATE = /^(active|current|cur|on|show|shown|selected|open|opened|in|visible|is-active|is-current|is-selected|slick-active|slick-current|swiper-slide-active|next|prev|left|right)$/i;
+  const normalize = (live, copy) => {
+    let n = 0;
+    const walk = (a, b) => {
+      const ac = a.children, bc = b.children;
+      if (ac.length !== bc.length) return;
+      if (ac.length >= 2 && Array.from(ac).every(x => x.tagName === ac[0].tagName)) {
+        const shown = Array.from(ac).filter(x => x.getClientRects().length);
+        const hidden = Array.from(ac).filter(x => !x.getClientRects().length && getComputedStyle(x).display === 'none');
+        if (shown.length === 1 && hidden.length === ac.length - 1 && shown[0] !== ac[0]) {
+          const k = Array.prototype.indexOf.call(ac, shown[0]);
+          const toks = x => new Set((x.getAttribute('class') || '').split(/\s+/).filter(Boolean));
+          const ts = toks(shown[0]), tf = toks(ac[0]);
+          const diff = [...ts].filter(x => !tf.has(x)).concat([...tf].filter(x => !ts.has(x)));
+          if (diff.length && diff.every(x => STATE.test(x))) {
+            const f = bc[0], s = bc[k];
+            for (const at of ['class', 'style']) {
+              const fv = f.getAttribute(at), sv = s.getAttribute(at);
+              if (sv === null) f.removeAttribute(at); else f.setAttribute(at, sv);
+              if (fv === null) s.removeAttribute(at); else s.setAttribute(at, fv);
+            }
+            n++;
+          }
+        }
+      }
+      for (let i = 0; i < ac.length; i++) walk(ac[i], bc[i]);
+    };
+    walk(live, copy);
+    return n;
+  };
   const out = {};
   for (const p of paths) {
     const el = resolve(p);
     if (!el) continue;
     const c = el.cloneNode(true);
+    const normed = normalize(el, c);
     // cloneNode 不带 canvas 位图: 按原节点逐个固化成 <img>(与 DEEP_FREEZE 第 5 步同口径), 否则窄屏版
     // 的图表/插画整块空白
     const cvs = el.querySelectorAll('canvas'), cvc = c.querySelectorAll('canvas');
@@ -719,7 +754,7 @@ ALT_EXTRACT_JS = r"""(paths) => {
         if (v && !/^(data:|blob:|#|javascript:|mailto:|tel:)/i.test(v)) { try { x.setAttribute(a, new URL(v, document.baseURI).href); } catch (e) {} }
       }
     });
-    out[p] = [c.outerHTML, (el.innerText || '').trim().length, el.getElementsByTagName('*').length, el.querySelectorAll('input:not([type=hidden]),textarea,select').length];
+    out[p] = [c.outerHTML, (el.innerText || '').trim().length, el.getElementsByTagName('*').length, el.querySelectorAll('input:not([type=hidden]),textarea,select').length, normed];
   }
   return out;
 }""".replace("__CANVAS_IMG__", CANVAS_IMG_FN)
