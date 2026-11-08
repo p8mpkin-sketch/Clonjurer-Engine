@@ -565,6 +565,29 @@ class CaptureMixin:
         return loads
 
 
+    def _mhtml_retry(self, page, cdp, impl):
+        """MHTML 快照首次超时: 探测卡住的 frame(document.readyState 1s 内不返回)写进日志,
+        Page.stopLoading 取消挂起的导航/请求后重试一次; 仍超时则抛出, 走既有"快照失败"分支。"""
+        t0 = time.monotonic()
+        stuck, states = [], {}
+        for fr in list(page.frames)[:80]:
+            if time.monotonic() - t0 > 8:
+                break
+            try:
+                st = bounded_call(fr, fr._impl_obj.evaluate("document.readyState"), 1.0)
+                states[st] = states.get(st, 0) + 1
+            except TimeoutError:
+                stuck.append(fr.url[:120])
+            except Exception:
+                states["err"] = states.get("err", 0) + 1
+        self.log("WARN", f"MHTML 快照 {config.MHTML_SNAPSHOT_TIMEOUT_S:.0f}s 未返回: frame {len(page.frames)} 个, "
+                         f"状态 {states}, 无响应 {len(stuck)} 个 {stuck[:5]}; 停止加载后重试")
+        self._diag_mark("保真轨 MHTML 快照重试")
+        with suppress(Exception):
+            bounded_call(cdp, impl.send('Page.stopLoading'), 5.0)
+        return bounded_call(cdp, impl.send('Page.captureSnapshot', {'format': 'mhtml'}),
+                            config.MHTML_RETRY_TIMEOUT_S)
+
     def _diag_mark(self, what: str):
         """只写文件不进日志总线的进度标记(engine.diag): 任务挂死时据最后一行定位卡点, 正常日志不变。"""
         with suppress(Exception):
@@ -1206,9 +1229,14 @@ class CaptureMixin:
                 # 卡死归因: CDP 调用没有超时, 163/wix 偶发在窄屏变体之后整任务无日志挂死(疑在此处或关窄屏页)
                 self._diag_mark("保真轨 MHTML 快照开始")
                 impl = getattr(cdp, "_impl_obj", None)
-                snap = bounded_call(cdp, impl.send('Page.captureSnapshot', {'format': 'mhtml'}),
-                                    config.MHTML_SNAPSHOT_TIMEOUT_S) if impl is not None else \
-                    cdp.send('Page.captureSnapshot', {'format': 'mhtml'})
+                if impl is None:
+                    snap = cdp.send('Page.captureSnapshot', {'format': 'mhtml'})
+                else:
+                    try:
+                        snap = bounded_call(cdp, impl.send('Page.captureSnapshot', {'format': 'mhtml'}),
+                                            config.MHTML_SNAPSHOT_TIMEOUT_S)
+                    except TimeoutError:
+                        snap = self._mhtml_retry(page, cdp, impl)
                 (self.ws / 'capture.mhtml').write_text(snap['data'], encoding='utf-8')
                 self.log("RENDER", f"保真轨 MHTML 快照: {len(snap['data']) // 1024} KB")
             except Exception as exc:

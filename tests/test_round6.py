@@ -213,3 +213,46 @@ class UrlReplBoundary(unittest.TestCase):
         }
         for src, want in cases.items():
             self.assertEqual(apply_url_replacements(src, pairs), want, src)
+
+
+class MhtmlRetry(unittest.TestCase):
+    """MHTML 快照首次超时: 探测 frame 状态进日志, 停止加载后重试一次拿到快照。"""
+
+    def test_retry_after_timeout(self):
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("无 playwright")
+        import config
+        from core.clone.capture import CaptureMixin
+        from core.clone.support import bounded_call
+
+        class Stub:
+            logs: list = []
+
+            def log(self, kind, msg):
+                self.logs.append((kind, msg))
+
+            def _diag_mark(self, what):
+                pass
+        stub = Stub()
+        try:
+            pw = sync_playwright().start()
+            browser = pw.chromium.launch()
+        except Exception as exc:
+            self.skipTest(f"无 chromium: {exc}")
+        try:
+            page = browser.new_page()
+            page.set_content("<p>x</p><iframe srcdoc='<b>y</b>'></iframe>")
+            cdp = page.context.new_cdp_session(page)
+            impl = cdp._impl_obj
+            with self.assertRaises(TimeoutError):
+                bounded_call(cdp, impl.send('Page.captureSnapshot', {'format': 'mhtml'}), 0.0)
+            snap = CaptureMixin._mhtml_retry(stub, page, cdp, impl)
+            self.assertIn("MIME", snap["data"][:400])
+            self.assertTrue(any("未返回" in m and "complete" in m for _k, m in stub.logs), stub.logs)
+            self.assertEqual(page.evaluate("1 + 1"), 2)
+            self.assertGreater(config.MHTML_RETRY_TIMEOUT_S, 0)
+        finally:
+            browser.close()
+            pw.stop()

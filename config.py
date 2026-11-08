@@ -224,4 +224,7 @@ REPAIR_STRUCT_SAME_STOP = os.environ.get("CLONER_REPAIR_STRUCT_SAME_STOP", "1") 
 REPAIR_NEED_STRUCT_GAIN = os.environ.get("CLONER_REPAIR_NEED_STRUCT_GAIN", "1") != "0"  # 回补没补回样式表/字体就不再重渲染
 # 无超时的 CDP/关页调用设时限(页面渲染进程卡住时任务不再永久挂起)
 NARROW_CLOSE_TIMEOUT_S = float(os.environ.get("CLONER_NARROW_CLOSE_TIMEOUT_S", "15"))
-MHTML_SNAPSHOT_TIMEOUT_S = float(os.environ.get("CLONER_MHTML_SNAPSHOT_TIMEOUT_S", "90"))
+# 干净环境下 163/sohu(7.5MB/3.7MB)快照 0.1~0.2s; 引擎里偶发 90s 不返回。首次 45s 超时后
+# 先探测哪些 frame 卡住(进日志), 再 Page.stopLoading 取消挂起的导航/请求重试一次(MHTML_RETRY_TIMEOUT_S)
+MHTML_SNAPSHOT_TIMEOUT_S = float(os.environ.get("CLONER_MHTML_SNAPSHOT_TIMEOUT_S", "45"))
+MHTML_RETRY_TIMEOUT_S = float(os.environ.get("CLONER_MHTML_RETRY_TIMEOUT_S", "30"))
