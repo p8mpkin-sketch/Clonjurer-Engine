@@ -1042,3 +1042,58 @@ class HiddenRootVariant(unittest.TestCase):
                 self.assertEqual(pg.evaluate("Array.from(document.querySelectorAll('.xs')).filter(e => e.checkVisibility()).length"), 0)
             finally:
                 b.close()
+
+
+MID_TRANSITION_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<style>body{margin:0}.xs{display:none}@media (max-width:767px){.xs{display:block}}
+.inner{position:relative;overflow:hidden}.item{display:none;transition:transform 30s linear}
+.item.active,.item.next{display:block;height:100px}.item.next{position:absolute;top:0;width:100%;transform:translateX(100%)}
+.item.next.left{transform:translateX(0)}.item.active.left{transform:translateX(-100%)}</style></head><body>
+<header>站头</header>
+<div class="xs"><div class="inner"><div class="item active">甲<img alt=""></div><div class="item">乙<img alt=""></div><div class="item">丙<img alt=""></div></div></div>
+<p>正文</p>
+<script>
+// 窄屏页: 加载后立刻开始一段 30s 的翻页过渡(Bootstrap 轮播写法), transitionend 时收尾 class
+if (innerWidth < 768) {
+  var items = document.querySelectorAll('.xs .item'), a = items[0], b = items[1];
+  b.classList.add('next'); void b.offsetWidth; a.classList.add('left'); b.classList.add('left');
+  a.addEventListener('transitionend', function () { b.classList.remove('next', 'left'); b.classList.add('active'); a.classList.remove('active', 'left'); });
+}
+</script></body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class VariantFinishesTransitions(unittest.TestCase):
+    """抽取窄屏变体前把进行中的 CSS 过渡跳到终点: 轮播翻页半途抽到的是两项同时有盒, 收尾后只剩一项。"""
+
+    def test_mid_transition_finished_before_extract(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 1440, "height": 800})
+                page.set_content(MID_TRANSITION_PAGE)
+                eng = _FakeEngine()
+                logs = []
+                eng.log = lambda *a: logs.append(a[-1])
+                eng._cv_pages = []
+                p2 = b.new_page(viewport={"width": 390, "height": 800})
+                p2.set_content(MID_TRANSITION_PAGE)
+                eng._cv_pages.append(("m", p2))
+                loads = {"m": p2.evaluate(ce.CV_PATHS_JS)}
+                n = ce.ClonerEngine._inject_dom_variants(eng, page, loads)
+                self.assertEqual(n, 1)
+                self.assertTrue(any("过渡跳到终点" in l for l in logs), logs)
+                html = page.content()
+            finally:
+                b.close()
+            html = ce.scope_viewport_css(html, 1000, 0).replace("<script>", "<script type='x'>")
+            b = p.chromium.launch()
+            try:
+                pg = b.new_page(viewport={"width": 390, "height": 800})
+                pg.set_content(html)
+                shown = pg.evaluate("Array.from(document.querySelectorAll('.xs .item')).filter(e => e.checkVisibility()).length")
+                self.assertEqual(shown, 1)
+                self.assertEqual(pg.evaluate("document.querySelector('[data-cv-vp=m] .item.active').textContent.trim()"), "乙")
+            finally:
+                b.close()

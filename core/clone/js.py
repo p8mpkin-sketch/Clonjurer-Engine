@@ -822,6 +822,23 @@ VISIBLE_PATHS_JS = r"""(paths) => {
   return paths.filter(p => { const el = resolve(p); return !!(el && el.getClientRects().length); });
 }"""
 
+# 窄屏首载页抽取变体前: 进行中的 CSS 过渡跳到终点(与主页 TIME_FREEZE_JS 同理)。轮播翻页是两个稳态之间的一段,
+# 抽在半途就是「上一项 active left + 下一项 next left」两项同时有盒(cgnpc 手机横幅下多出一整项, 整页下移 210px);
+# finish() 会派发 transitionend, 轮播脚本据此收尾 class。收尾可能再起一段过渡, 最多三轮
+TRANSITION_FINISH_JS = r"""async () => {
+  let n = 0;
+  for (let round = 0; round < 3; round++) {
+    let ts = [];
+    try {
+      ts = document.getAnimations().filter(a => typeof CSSTransition !== 'undefined' && a instanceof CSSTransition && a.playState === 'running');
+    } catch (e) { break; }
+    if (!ts.length) break;
+    for (const a of ts) { try { a.finish(); n++; } catch (e) {} }
+    await new Promise(r => setTimeout(r, 120));
+  }
+  return n;
+}"""
+
 DOM_COUNTS_JS = r"""() => { const im = document.images; let s = 0; for (const i of im) if (i.currentSrc) s++;
   return { text: document.body ? document.body.innerText.length : 0, imgs: im.length, imgsrc: s,
     ctrl: document.querySelectorAll('input:not([type=hidden]),textarea,select').length,

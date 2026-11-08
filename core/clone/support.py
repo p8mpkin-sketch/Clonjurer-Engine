@@ -51,6 +51,7 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     CV_EMIT_JS,
     CV_PATHS_JS,
     HIDDEN_ROOTS_JS,
+    TRANSITION_FINISH_JS,
     VISIBLE_PATHS_JS,
     CV_PATH_FN,
     CV_QUIET_JS,

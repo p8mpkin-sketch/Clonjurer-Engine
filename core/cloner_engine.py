@@ -123,6 +123,7 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     NARROW_STABLE_JS,
     DOM_COUNTS_JS,
     HIDDEN_ROOTS_JS,
+    TRANSITION_FINISH_JS,
     VISIBLE_PATHS_JS,
     SUBTREE_SIZE_JS,
     TEXT_EXTRACT_JS,
@@ -1670,6 +1671,10 @@ class ClonerEngine:
                                f"(主页 {mc.get('ctrl', '?')}) / 按钮 {counts.get('btn', '?')}(主页 {mc.get('btn', '?')})"
                                f" / 文字 {counts.get('text', '?')}(主页 {mc.get('text', '?')}); 结构不同子树 {len(top) - len(hidden_tops)}"
                                + (f", 桌面不渲染而窄屏状态不同的子树 {len(hidden_tops)}" if hidden_tops else ""))
+            with suppress(Exception):
+                fin = pages[tag].evaluate(TRANSITION_FINISH_JS) or 0
+                if fin:
+                    self.log("RENDER", f"窄屏首载页 {tag}: 抽取前 {fin} 个进行中的 CSS 过渡跳到终点(轮播翻页半途两项同时可见)")
             with suppress(Exception):
                 htmls = pages[tag].evaluate(ALT_EXTRACT_JS, top) or {}
                 sizes = page.evaluate(SUBTREE_SIZE_JS, list(htmls))
