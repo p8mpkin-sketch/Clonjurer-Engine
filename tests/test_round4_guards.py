@@ -152,3 +152,40 @@ class BeaconLike(unittest.TestCase):
             self.assertTrue(beacon_like(u), u)
         for u in no:
             self.assertFalse(beacon_like(u), u)
+
+
+class ModuleImportLocalize(unittest.TestCase):
+    """ES 模块相对说明符按模块原地址解析并改成本地路径(allbirds: Vite chunk 相对 import 404 → 应用不起)。"""
+    URL = "https://cdn.shop.example/s/files/1/assets/theme.esm.js?v=123"
+    POOL = {
+        "https://cdn.shop.example/s/files/1/assets/chunk.window_CAbVMZox.esm.js": "/static/js/1a2b.js",
+        "https://cdn.shop.example/s/files/1/vendor/ScrollTrigger.js?v=9": "/static/js/3c4d.js",
+    }
+
+    def lookup(self, u):
+        stem = u.split("#", 1)[0].split("?", 1)[0]
+        for k, v in self.POOL.items():
+            if k.split("?", 1)[0] == stem:
+                return v
+        return None
+
+    def test_static_dynamic_and_reexport(self):
+        from core.clone.support import rewrite_module_imports
+        src = ('import{a as b,c}from"./chunk.window_CAbVMZox.esm.js";'
+               "import * as ST from '../vendor/ScrollTrigger.js';"
+               'export*from"./chunk.window_CAbVMZox.esm.js";'
+               "const m=()=>import('./missing.js');"
+               'import x from"https://other.cdn/abs.js";'
+               "const s='./not-an-import.js';")
+        out = rewrite_module_imports(src, self.URL, self.lookup)
+        self.assertIn('from"/static/js/1a2b.js"', out)
+        self.assertIn("from '/static/js/3c4d.js'", out)
+        self.assertIn('export*from"/static/js/1a2b.js"', out)
+        self.assertIn("import('./missing.js')", out, "未采到的 chunk 原样保留")
+        self.assertIn('"https://other.cdn/abs.js"', out)
+        self.assertIn("'./not-an-import.js'", out, "普通字符串不动")
+
+    def test_non_module_untouched(self):
+        from core.clone.support import rewrite_module_imports
+        src = "var a='./x.js'; function f(){return 1}"
+        self.assertEqual(rewrite_module_imports(src, self.URL, self.lookup), src)

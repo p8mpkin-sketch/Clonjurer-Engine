@@ -621,6 +621,32 @@ def _anchored_sub(pattern, template: str, text: str, anchor: str, lead: str = "w
     return "".join(out)
 
 
+# ES 模块相对说明符: import x from './chunk.js' / export * from '../y.js' / import('./z.js')。
+# 模块被本地化到 /static/js/<名>.js 后, 相对说明符按本地目录解析, 原 CDN 目录里的兄弟模块全部 404
+# (allbirds: Vite/Vue 主题 40 个 chunk 404, 应用不起, 手机端整页黄块)。字面量替换表只有绝对 URL, 改不到它们。
+_MOD_SPEC_RE = re.compile(
+    r"""((?:\bimport|\bexport)\s*(?:[\w$*{}\s,]{0,400}?\s*from\s*)?|\bimport\s*\(\s*)(['"])(\.{1,2}/[^'"\n]{1,300})\2""")
+
+
+def rewrite_module_imports(text: str, module_url: str, lookup) -> str:
+    """把模块里的相对 import/export 说明符按模块原地址绝对化, 命中资源池(lookup 返回本地路径)的改成本地路径。
+
+    未命中(未采到的 chunk)原样保留; 非模块文件(没有 import/export 字样或没有 ./ ../)直接返回。"""
+    if not module_url or not text or ("./" not in text) or ("import" not in text and "export" not in text):
+        return text
+
+    def rep(m):
+        try:
+            absolute = urljoin(module_url, m.group(3))
+        except ValueError:
+            return m.group(0)
+        local = lookup(absolute)
+        if not local or not isinstance(local, str):
+            return m.group(0)
+        return m.group(1) + m.group(2) + local + m.group(2)
+    return _MOD_SPEC_RE.sub(rep, text)
+
+
 def rewrite_js_navigation(text: str) -> str:
     """JS/内联脚本导航逃逸改写(见上方注释; 幂等, 可重复应用)。"""
     if "window.open(" in text:   # 模式以字面量开头, sre 自带前缀快速扫描

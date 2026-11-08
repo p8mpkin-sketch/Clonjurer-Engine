@@ -274,6 +274,7 @@ from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部
     os_ext,
     parse_css_refs,
     rewrite_js_navigation,
+    rewrite_module_imports,
     scope_bake_css,
     scope_viewport_css,
     slugify,
@@ -3385,7 +3386,16 @@ class ClonerEngine:
 
     def _rewrite_js_files(self, results: dict, pairs: list):
         """JS 内容本地化: URL 字面量替换 + 导航逃逸护栏改写(含原名副本)。"""
-        for info in results.values():
+        # 相对模块说明符查表: 先精确 URL, 再忽略查询串/锚(chunk?v=hash 与落地键不同)
+        by_stem = {}
+        for u, inf in results.items():
+            by_stem.setdefault(u.split("#", 1)[0].split("?", 1)[0], inf["local"])
+
+        def lookup(u):
+            inf = results.get(u)
+            return inf["local"] if inf else by_stem.get(u.split("#", 1)[0].split("?", 1)[0])
+
+        for url, info in results.items():
             if info["ext"] not in (".js", ".mjs", ".cjs"):
                 continue
             targets = [info["abs_path"]]
@@ -3399,7 +3409,8 @@ class ClonerEngine:
                     if not path.is_file() or path.stat().st_size > config.JS_REWRITE_MAX_BYTES:
                         continue
                     text = path.read_text(encoding="utf-8", errors="replace")
-                    rewritten = rewrite_js_navigation(apply_replacements(text, pairs))
+                    rewritten = rewrite_js_navigation(
+                        rewrite_module_imports(apply_replacements(text, pairs), url, lookup))
                     if rewritten != text:
                         path.write_text(rewritten, encoding="utf-8")
                 except OSError:
