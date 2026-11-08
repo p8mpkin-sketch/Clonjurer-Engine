@@ -820,3 +820,20 @@ class LoadTimeSizeAttrs(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TransientHideRule(unittest.TestCase):
+    """窄屏页多出的"只藏元素"规则(入场动画初始态)不注入手机段(wix 手机端表单/计数被 #comp-x{visibility:hidden!important} 藏掉)。"""
+    def test_hide_only_rules_skipped(self):
+        from core.cloner_engine import _is_transient_hide_rule as f
+        self.assertTrue(f("#comp-molkru1x7 { visibility: hidden !important; }"))
+        self.assertTrue(f(".a, .b { opacity: 0; transform: translateY(40px); transition: opacity 0.6s; }"))
+        self.assertTrue(f("#x { display: none; }"))
+
+    def test_real_style_rules_kept(self):
+        from core.cloner_engine import _is_transient_hide_rule as f
+        self.assertFalse(f("#comp-x { visibility: hidden; width: 320px; }"))
+        self.assertFalse(f("a { text-decoration: underline; }"))
+        self.assertFalse(f("@media (max-width: 600px) { .m { display: none; } }"))
+        self.assertFalse(f(".k { opacity: 1; }"))
+        self.assertFalse(f("* { box-sizing: border-box; margin: 0px; padding: 0px; }"))

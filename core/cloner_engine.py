@@ -336,6 +336,23 @@ def _fluid_elements(fa: dict, fb: dict, w1: float, w2: float, tol: float = 0.015
     return {"paths": paths, "inline": inline}
 
 
+_HIDE_DECL_RE = re.compile(
+    r"^(?:visibility\s*:\s*hidden|opacity\s*:\s*0(?:\.0+)?|display\s*:\s*none|pointer-events\s*:\s*none"
+    r"|transform\s*:[^;]*|animation(?:-[\w-]+)?\s*:[^;]*|transition(?:-[\w-]+)?\s*:[^;]*|will-change\s*:[^;]*)"
+    r"\s*(?:!important)?$", re.I)
+
+
+def _is_transient_hide_rule(rule_text: str) -> bool:
+    """窄屏页采到的"只把元素藏起来"的规则: 声明块全是 visibility:hidden / opacity:0 / display:none /
+    transform / animation / transition。这是入场动画的初始态(wix 组件滚入视口前 `#comp-x{visibility:hidden!important}`),
+    窄屏首载页截取时动画还没跑, 若当成"窄屏专属样式"注入手机段, 克隆手机端整块表单/计数永远不显形。"""
+    m = re.match(r"^\s*([^{}]+)\{(.*)\}\s*$", rule_text, re.S)
+    if not m or "{" in m.group(2):
+        return False
+    decls = [d.strip() for d in m.group(2).split(";") if d.strip()]
+    return bool(decls) and all(_HIDE_DECL_RE.match(d) for d in decls)
+
+
 def _regroup_css_rules(pairs) -> str:
     """[(分组前缀 'head\x00head', 规则文本)] → 按前缀重新包回 @media/@supports/@layer 块的 CSS 文本。"""
     groups = {}
@@ -1532,14 +1549,19 @@ class ClonerEngine:
             items.append({"path": p, "own": own, "alts": alts})
         main_rows = page.evaluate(STYLE_TEXTS_JS) or []
         css_main = {(g, t) for g, t, *_ in main_rows}
-        extra, by_sheet = [], {}
+        extra, by_sheet, hidden_skipped = [], {}, 0
         for tag in {t for v in variants.values() for t in v}:
             with suppress(Exception):
                 for g, t, *rest in (pages[tag].evaluate(STYLE_TEXTS_JS) or []):
                     if (g, t) not in css_main:
+                        if _is_transient_hide_rule(t):
+                            hidden_skipped += 1
+                            continue
                         extra.append((g, t))
                         by_sheet[(tag, rest[0] if rest else "")] = by_sheet.get((tag, rest[0] if rest else ""), 0) + 1
         css = _regroup_css_rules(dict.fromkeys(extra))[:config.VIEWPORT_VARIANT_BYTES]
+        if hidden_skipped:
+            self.log("RENDER", f"窄屏运行时样式: 跳过 {hidden_skipped} 条入场动画隐藏态规则(visibility/opacity/display/transform, 不注入手机段)")
         if extra:
             # 归因: 多出的规则来自窄屏页哪些样式表, 主页又有哪些表(定位"主页没有"是真窄屏专属还是采集/序列化差异)
             sheets_main = {}
