@@ -300,6 +300,14 @@ DIAG_JS = r"""() => {
       if (r.style && r.style.gridTemplateRows) out.push([r.selectorText, r.style.gridTemplateRows.slice(0, 60), media, (media ? matchMedia(media.split(' & ').pop()).matches : true)]); } };
       for (const sh of document.styleSheets) { try { walk(sh.cssRules, ''); } catch (e) {} } } catch (e) {} return out; })();
     const gtrSrc = (el) => { const hits = []; for (const [sel, v, media, on] of gtrRules) { try { if (el.matches(sel)) hits.push(v + (media ? '@' + media.slice(0, 30) : '') + (on ? '' : '(off)')); } catch (e) {} if (hits.length >= 3) break; } return hits.join(';'); };
+    // 带 0px 行的 grid 容器(内容在、行却是 0: 子项没参与行尺寸, 原因在作者样式里): 列出命中该容器及其子项的全部规则声明
+    let dumped = 0;
+    const rulesOf = (el, cap) => { const hits = []; try { for (const sh of document.styleSheets) { let rules; try { rules = sh.cssRules; } catch (e) { continue; }
+      const walk = (rs, on) => { for (const r of rs) { if (hits.length >= cap) return; if (r.type === 4) { walk(r.cssRules, on && matchMedia(r.conditionText).matches); continue; } if (r.type === 12 || r.type === 3) { try { walk(r.cssRules, on); } catch (e) {} continue; }
+        if (r.type === 1 && on) { try { if (el.matches(r.selectorText)) hits.push(r.selectorText.slice(0, 60) + '{' + r.style.cssText.slice(0, 160) + '}'); } catch (e) {} } } };
+      walk(rules, true); if (hits.length >= cap) break; } } catch (e) {} return hits.join(' '); };
+    const zeroRowDump = (ch, c) => { if (dumped >= 6 || !/(^| )0px( |$)/.test(c.gridTemplateRows) || ch.children.length > 8) return ''; dumped++;
+      let out = ' RULES[' + rulesOf(ch, 8) + ']'; for (const k of ch.children) { const kc = cs(k); out += ' CHILD ' + (k.id ? '#' + k.id.slice(0, 24) : k.tagName) + ' gr=' + kc.gridRowStart + '/' + kc.gridRowEnd + ' h=' + Math.round(k.getBoundingClientRect().height) + ' style=' + (k.getAttribute('style') || '').slice(0, 80) + ' [' + rulesOf(k, 6) + ']'; } return out; };
     const walkT = (el, depth, pidx) => {
       if (tops.length >= 12000 || depth > 40) return;
       for (const ch of el.children) {
@@ -314,7 +322,7 @@ DIAG_JS = r"""() => {
           tops.push([key12(ch), Math.round(r.top + scrollY), Math.round(r.height), (ch.getAttribute('class') || '').slice(0, 50) + ' | ' + (ch.getAttribute('style') || '').slice(0, 100)
             + (ch.hasAttribute('data-cv-vp') ? ' cv-vp=' + ch.getAttribute('data-cv-vp') : '') + (ch.hasAttribute('data-cv') ? ' cv' : '')
             + (c.maxHeight !== 'none' ? ' mh=' + c.maxHeight : '') + (c.overflow !== 'visible' ? ' ov=' + c.overflow : '')
-            + (c.display.indexOf('grid') >= 0 ? ' grid gtr=' + c.gridTemplateRows.slice(0, 80) + ' gtrSrc=' + gtrSrc(ch) : '') + (c.minHeight !== '0px' && c.minHeight !== 'auto' ? ' minh=' + c.minHeight : '')
+            + (c.display.indexOf('grid') >= 0 ? ' grid gtr=' + c.gridTemplateRows.slice(0, 80) + ' gtrSrc=' + gtrSrc(ch) + zeroRowDump(ch, c) : '') + (c.minHeight !== '0px' && c.minHeight !== 'auto' ? ' minh=' + c.minHeight : '')
             + ((ch.firstChild && ch.firstChild.nodeType === 3 && ch.firstChild.nodeValue.trim().length >= 3) ? ' f=' + c.fontSize + '/' + c.lineHeight + '/' + c.fontFamily.split(',')[0].slice(0, 16) : '')
             + (c.position !== 'static' ? ' pos=' + c.position + (c.position === 'absolute' ? '@' + c.top : '') : '') + (c.marginTop !== '0px' ? ' mt=' + c.marginTop : '')
             + (cs(el).display.indexOf('grid') >= 0 ? ' gr=' + c.gridRowStart + '/' + c.gridRowEnd + (c.alignSelf !== 'auto' && c.alignSelf !== 'normal' ? ' as=' + c.alignSelf : '') : '')
