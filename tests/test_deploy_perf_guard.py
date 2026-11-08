@@ -204,6 +204,8 @@ class GeneratedFlaskPerf(unittest.TestCase):
     def test_dev_server_is_threaded(self):
         self.assertRegex(flask_generator.GENERATED_APP_PY, r"app\.run\([^)]*threaded\s*=\s*True")
 
+    @unittest.skipUnless(importlib.util.find_spec("flask") and importlib.util.find_spec("requests"),
+                         "生成工程需要 flask/requests(CI 精简环境跳过)")
     def test_generated_app_dead_paths_gzip_cache(self):
         """真实生成工程: 已知死路径秒 404 不回源; 文本 gzip; 静态长缓存。"""
         with tempfile.TemporaryDirectory() as d:
