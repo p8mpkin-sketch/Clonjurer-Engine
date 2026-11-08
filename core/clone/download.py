@@ -236,6 +236,7 @@ from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部
     layout_fix_css,
     os_ext,
     parse_css_refs,
+    fontface_plan,
     rewrite_js_navigation,
     scope_bake_css,
     scope_viewport_css,
@@ -291,6 +292,19 @@ class DownloadMixin:
 
 
     # ------------------------------------------------------------------
+    def _font_plan_add(self, css_text: str, base_url: str):
+        """累积 @font-face 下载计划(见 support.fontface_plan): 任一样式表把某 URL 当首选即必下。"""
+        if not getattr(config, "FONT_PLAN", True):
+            return
+        with suppress(Exception):
+            needed, skip, fb_of = fontface_plan(css_text, base_url, self._ff_cps)
+            self._ff_needed |= needed
+            self._ff_skip |= skip
+            for fb, prim in fb_of.items():
+                lst = self._ff_fallbacks.setdefault(prim, [])
+                if fb not in lst:
+                    lst.append(fb)
+
     def _materialize(self, assets: set, origin: str, ctx=None, results: dict = None):
         """CAS 并发下载(L1 requests 线程池) + 失败 URL 浏览器会话降级(L2)
         + CSS 深度递归。results 可跨调用累积(回补循环复用)。"""
@@ -306,8 +320,20 @@ class DownloadMixin:
         # 名额优先级: 样式/字体/图片/媒体先排, 脚本最后(单任务条目上限下, 字母序曾让
         # 数百个同源 JS 分包吃光名额而图片 0 张; 且应用脚本多半会被水合剥离)
         live = getattr(self, "_live_seen", None) or {}
+        font_skipped = [0]
+
+        def _font_unused(u):
+            # @font-face 计划判定浏览器不会请求的字体(兜底格式/字符不在页面里的切片): 不排队。
+            # 不进 seen —— 之后别的样式表若把它当首选, 照常排队
+            if u in live or u not in self._ff_skip or u in self._ff_needed:
+                return False
+            font_skipped[0] += 1
+            return True
+
         for url in sorted(assets, key=lambda u: _asset_priority(u, live)):
             if url.startswith(("http://", "https://")) and url not in seeded:
+                if _font_unused(url):
+                    continue
                 (css_jobs if _asset_priority(url)[1] == 0 else jobs).append(
                     {"url": url, "referer": origin + "/"})
         seen = set(seeded)
@@ -362,6 +388,12 @@ class DownloadMixin:
                             _pump()
                             continue
                         self.log("WARN", f"跳过 {job['url']}: {out['error']}")
+                        # 首选字体下不来: 浏览器会往 src 列表后面走, 兜底份补进队列
+                        for fb in self._ff_fallbacks.get(job["url"], ()):
+                            self._ff_needed.add(fb)
+                            if fb not in seen:
+                                jobs.appendleft({"url": fb, "referer": job.get("referer") or origin + "/"})
+                                total += 1
                         if out.get("status"):
                             self._dead_urls.add(job["url"])   # 源站明确 4xx/5xx: 交付侧不再回源
                         if out.get("status") and ctx is not None:
@@ -397,8 +429,9 @@ class DownloadMixin:
                         css_sources[out["url"]] = text
                         refs = parse_css_refs(text, out["url"])
                         css_refs[out["url"]] = refs
+                        self._font_plan_add(text, out["url"])
                         for raw, absolute in refs:
-                            if absolute not in seen:
+                            if absolute not in seen and not _font_unused(absolute):
                                 # 样式内引用: 活体加载过的或图片插队; 未用到的字体切片排队尾
                                 job2 = {"url": absolute, "referer": out["url"]}
                                 pr = _asset_priority(absolute, live)
@@ -436,6 +469,9 @@ class DownloadMixin:
         finally:
             # 熔断放弃的在飞请求不阻塞收尾(工作线程超时后自行结束, 结果丢弃)
             executor.shutdown(wait=not tripped, cancel_futures=True)
+        if font_skipped[0]:
+            self.log("SMART-DL", f"字体按需: {font_skipped[0]} 个 @font-face 兜底格式/页面无对应字符的切片"
+                                 f"浏览器不会请求, 不下载(交付里保持原地址)")
 
         # CSS 内部引用本地化(@import 与 url()/mask/image-set 引用改写为本地路径)
         for css_url, text in css_sources.items():

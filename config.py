@@ -211,3 +211,5 @@ PLATFORM_PUBLIC_URL = os.environ.get("CLONER_PUBLIC_URL", f"http://127.0.0.1:{PO
 # 审计日志保留天数(超过自动清理; 0 = 永久保留)
 AUDIT_RETENTION_DAYS = int(os.environ.get("CLONER_AUDIT_RETENTION_DAYS", "90"))
 
+# @font-face 下载计划: 只下浏览器会请求的字体(src 首个受支持格式 + 页面有对应字符的 unicode-range 切片)
+FONT_PLAN = os.environ.get("CLONER_FONT_PLAN", "1") != "0"

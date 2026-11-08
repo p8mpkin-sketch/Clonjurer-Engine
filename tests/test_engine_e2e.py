@@ -109,9 +109,25 @@ for(var k=0;k<3;k++){var d=document.createElement('div');d.className='item';d.te
 }
 
 
+SITE["fonts.html"] = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Fonts</title><link rel="stylesheet" href="/css/fonts.css"></head>
+<body><h1 class="ff">Plain latin heading only</h1><p class="ff">Second paragraph</p></body></html>"""
+SITE["css/fonts.css"] = """@font-face{font-family:Fx;src:url(/fonts/fx.eot);
+src:url(/fonts/fx.eot?#iefix) format("embedded-opentype"),url(/fonts/fx.woff2) format("woff2"),
+url(/fonts/fx.woff) format("woff"),url(/fonts/fx.ttf) format("truetype")}
+@font-face{font-family:Fx;src:url(/fonts/fx-cyr.woff2) format("woff2");unicode-range:U+0400-045F}
+@font-face{font-family:Fx;src:url(/fonts/fx-lat.woff2) format("woff2");unicode-range:U+0000-00FF}
+.ff{font-family:Fx,sans-serif}"""
+REQUESTED = []
+
+
 class _Quiet(SimpleHTTPRequestHandler):
     def log_message(self, *a):
         pass
+
+    def do_GET(self):
+        REQUESTED.append(self.path)
+        return super().do_GET()
 
 
 @unittest.skipUnless(chromium_available() and has_modules("flask", "cryptography"), "需要 Playwright Chromium 与平台依赖")
@@ -130,6 +146,11 @@ class EngineEndToEnd(unittest.TestCase):
                           ("c2", (60, 60, 220)), ("small", (90, 90, 90))):
             (img / f"{name}.png").write_bytes(_png(200, 120, rgb))
         (img / "bg.png").write_bytes(PNG_1PX)
+        fonts = site / "fonts"
+        fonts.mkdir(parents=True, exist_ok=True)
+        real = next((Path(__file__).resolve().parent.parent / "static_vendor" / "fonts").glob("*.woff2")).read_bytes()
+        for name in ("fx.woff2", "fx.woff", "fx.ttf", "fx.eot", "fx-cyr.woff2", "fx-lat.woff2"):
+            (fonts / name).write_bytes(real)
         cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), partial(_Quiet, directory=str(site)))
         threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
         cls.url = f"http://localhost:{cls.httpd.server_address[1]}/index.html"
@@ -238,6 +259,22 @@ class EngineEndToEnd(unittest.TestCase):
         html = (ws / "index.html").read_text(encoding="utf-8")
         self.assertIn("Gamma item", html)
         self.assertGreaterEqual(float(task.get("similarity_score") or 0), 90.0)
+
+    def test_font_plan_downloads_only_used_files(self):
+        """@font-face 兜底格式与页面无对应字符的 unicode-range 切片不下载, 首选与命中切片照常本地化。"""
+        port = self.httpd.server_address[1]
+        REQUESTED.clear()
+        db, task = self._run_direct(f"http://localhost:{port}/fonts.html")
+        self.assertEqual(task["status"], "completed", task.get("error_msg"))
+        got = {p.split("?")[0] for p in REQUESTED if p.startswith("/fonts/")}
+        self.assertIn("/fonts/fx.woff2", got)
+        self.assertIn("/fonts/fx-lat.woff2", got)
+        for never in ("/fonts/fx.woff", "/fonts/fx.ttf", "/fonts/fx-cyr.woff2"):
+            self.assertNotIn(never, got, f"浏览器不会请求的字体被下载了: {never}")
+        ws = config.WORKSPACE_ROOT / str(task["id"])
+        css = "".join(p.read_text(encoding="utf-8", errors="replace") for p in (ws / "static" / "css").glob("*.css"))
+        self.assertNotIn("/fonts/fx.woff2", css.replace(f"localhost:{port}", "X"))  # 首选已本地化
+        self.assertIn("fx-cyr.woff2", css)   # 未下载的切片保留原地址
 
     def test_rich_page_crawler_mode(self):
         from core.browser_pool import SyncBrowserPool

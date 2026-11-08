@@ -128,6 +128,8 @@ from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部
     beacon_like,
     neutralize_deploy_hazards,
     deploy_hazard_audit,
+    page_codepoints,
+    _STYLE_BLOCK_RE,
     fontface_swap_for_remote,
     ASSET_RESOURCE_TYPES,
     ASSET_SKIP_PREFIXES,
@@ -336,6 +338,9 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
         self._layout_calibrated = False      # 布局校准已尝试(每任务一次)
         self._backfill_dead = set()          # 修复回补回源失败的 URL(跨轮负缓存)
         self._dead_urls = set()              # 下载期确认 HTTP 4xx/5xx 的资源 URL(交付侧秒 404 用)
+        self._ff_needed, self._ff_skip = set(), set()   # @font-face 下载计划: 必下 / 证明不会被请求
+        self._ff_fallbacks = {}              # 首选字体 URL -> 兜底 URL 列表(首选下不来时补下)
+        self._ff_cps = None                  # 页面可能出现的字符码位(已排序); None = 不按 unicode-range 剔除
         self._calibrations = 0               # A1 像素校准执行次数
         self._phase_acc = {}                 # 子阶段累计耗时(秒): 提速定位用
         self._calib_css = ""                 # A1 校准覆盖(跨修复轮持久, _localize 注入)
@@ -840,6 +845,16 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
             if swept:
                 self.log("SMART-DL", f"静态补扫: 固化 HTML 里 {swept} 个未进采集集合的资源引用补入下载队列")
             assets.add(origin.rstrip("/") + "/favicon.ico")
+            # @font-face 下载计划: 页面字符全集(含 Mock 接口响应) + 内联样式里的字体声明
+            if getattr(config, "FONT_PLAN", True):
+                with suppress(Exception):
+                    texts = [h for _r, h in pages]
+                    texts += [str(e.get("response_body") or "") for e in self._mock_raw
+                              if isinstance(e, dict)]
+                    self._ff_cps = page_codepoints(texts)
+                    for _route, _html in pages:
+                        for m in _STYLE_BLOCK_RE.finditer(_html):
+                            self._font_plan_add(m.group(2), self._target)
             # 保真轨(MHTML 禁脚本回放)只依赖采集产物: 下载期间浏览器空闲, 先在后台页里加载起来,
             # 评分时直接截图(旧实现在评分阶段才加载 + 固定 2s 静置, 每站串行 1.5~3s)
             if self.cfg.get("similarity", True) and getattr(config, "FIDELITY_PRESTART", True):

@@ -2219,6 +2219,19 @@ def fontface_swap_for_remote(css: str) -> str:
         urls = [u.strip() for u in _CSS_REMOTE_URL_RE.findall(body)]
         if not any(not _script_src_is_localized(u) for u in urls):
             return m.group(0)
+        # 浏览器实际取用的是最后一条 src 里首个受支持格式的 url(): 它已本地化时, 后面留着远程地址的
+        # 兜底格式(字体按需下载不取)永不请求, 不必改 font-display
+        srcs = list(_FF_SRC_RE.finditer(body))
+        if srcs:
+            for entry in _split_top_commas(srcs[-1].group(1)):
+                um = _FF_URL_RE.search(entry)
+                if not um:
+                    continue
+                u = (um.group(1) or um.group(2) or um.group(3) or "").strip()
+                if _font_entry_supported(entry, u):
+                    if _script_src_is_localized(u):
+                        return m.group(0)
+                    break
         sep = "" if body.rstrip().endswith(";") or not body.strip() else ";"
         return "@font-face{" + body.rstrip() + sep + "font-display:swap;}"
 
@@ -2392,3 +2405,164 @@ def merge_static_tree(src: Path, dst: Path) -> int:
         shutil.copy2(f, target)
         n += 1
     return n
+
+
+# ---------------------------------------------------------------------------
+# @font-face 下载计划: 只下浏览器确实会用到的那份字体文件
+# ---------------------------------------------------------------------------
+# 实测(cz 本机 250 任务): apple.com.cn 每次下 164 个字体文件 42.6MB(同一字重 woff2/woff/ttf/eot
+# 四份兜底, 占全部下载字节 83%), wordpress.org 156 个 17.9MB(unicode-range 切片: 西里尔/希腊/越南
+# 等页面根本没有的字符)。浏览器的取用规则是确定的:
+#   ① src 列表按序取第一个"格式受支持"的 url(), 之后的兜底格式永不请求(该份加载失败才会往后走);
+#   ② 带 unicode-range 的切片只在页面里出现落在范围内的字符时才请求。
+# 据此把"证明不会被请求"的字体 URL 从下载队列剔除: 交付产物里它们保持原远程地址(部署环境在线时
+# 浏览器照常可取, 离线时与评分渲染一致), 画面与浏览器实际行为逐字节相同。
+# 保守边界: 首选份下载失败时兜底份照常补下; 含私用区(图标字体)的切片不按字符剔除; 活体加载过的一律保留。
+_FONT_OK_FMT = ("woff2", "woff", "truetype", "opentype", "collection")
+_FONT_BAD_EXT = (".eot", ".svg", ".svgz")
+_FF_BLOCK_RE = re.compile(r"@font-face\s*\{([^{}]*)\}", re.I | re.S)
+_FF_SRC_RE = re.compile(r"(?:^|[;{\s])src\s*:\s*((?:[^;\"'()]|\"[^\"]*\"|'[^']*'|\([^()]*\))+)", re.I)
+_FF_URANGE_RE = re.compile(r"unicode-range\s*:\s*([^;}]+)", re.I)
+_FF_URL_RE = re.compile(r"""url\(\s*(?:"([^"]*)"|'([^']*)'|([^)'"\s]+))\s*\)""", re.I)
+_FF_FMT_RE = re.compile(r"""format\(\s*["']?([^"')]+)""", re.I)
+_CSS_ESC_RE = re.compile(r"\\([0-9a-fA-F]{1,6})")
+
+
+def _split_top_commas(text: str):
+    parts, depth, quote, cur = [], 0, "", []
+    for ch in text:
+        if quote:
+            cur.append(ch)
+            if ch == quote:
+                quote = ""
+            continue
+        if ch in "\"'":
+            quote = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+        elif ch == "," and depth == 0:
+            parts.append("".join(cur))
+            cur = []
+            continue
+        cur.append(ch)
+    if cur:
+        parts.append("".join(cur))
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _font_entry_supported(entry: str, url: str) -> bool:
+    m = _FF_FMT_RE.search(entry)
+    if m:
+        fmt = m.group(1).strip().lower()
+        return any(fmt.startswith(f) for f in _FONT_OK_FMT)
+    path = urlsplit(url).path.lower()
+    return not path.endswith(_FONT_BAD_EXT)
+
+
+def _parse_unicode_range(text: str):
+    out = []
+    for tok in text.split(","):
+        tok = tok.strip().upper()
+        if not tok.startswith("U+"):
+            continue
+        tok = tok[2:]
+        try:
+            if "?" in tok:
+                lo, hi = int(tok.replace("?", "0"), 16), int(tok.replace("?", "F"), 16)
+            elif "-" in tok:
+                a, b = tok.split("-", 1)
+                lo, hi = int(a, 16), int(b, 16)
+            else:
+                lo = hi = int(tok, 16)
+        except ValueError:
+            return None   # 解析不了: 当作全范围(保守)
+        out.append((lo, hi))
+    return out or None
+
+
+def _is_private_use(lo: int, hi: int) -> bool:
+    return (lo <= 0xF8FF and hi >= 0xE000) or hi >= 0xF0000
+
+
+def page_codepoints(texts) -> list:
+    """页面可能出现的字符全集(已排序码位): HTML 原文(含反转义) + CSS content 的 \\XXXX 转义。
+    原文含脚本/JSON/属性值, 是渲染文字的超集 —— 只会多留切片, 不会少留。"""
+    import html as _h
+    cps = set()
+    for t in texts:
+        if not t:
+            continue
+        cps.update(map(ord, t))
+        if "&" in t:
+            cps.update(map(ord, _h.unescape(t)))
+        if "\\" in t:
+            for m in _CSS_ESC_RE.finditer(t):
+                with suppress(ValueError):
+                    cps.add(int(m.group(1), 16))
+    return sorted(cps)
+
+
+def _range_hits(ranges, cps) -> bool:
+    import bisect
+    for lo, hi in ranges:
+        i = bisect.bisect_left(cps, lo)
+        if i < len(cps) and cps[i] <= hi:
+            return True
+    return False
+
+
+def fontface_plan(css_text: str, base_url: str, cps=None):
+    """返回 (needed, skippable, fallback_of): 浏览器会请求的字体 URL / 证明不会请求的 URL /
+    {兜底 URL: 它前面的首选 URL}(首选下载失败时据此补下兜底)。cps=None 时不按字符剔除。"""
+    needed, skippable, fallback_of = set(), set(), {}
+    if not css_text or "@font-face" not in css_text.lower():
+        return needed, skippable, fallback_of
+    for block in _FF_BLOCK_RE.finditer(css_text):
+        body = block.group(1)
+        srcs = list(_FF_SRC_RE.finditer(body))
+        if not srcs:
+            continue
+        entries = []   # (abs_url, supported)
+        for sm in srcs:
+            for entry in _split_top_commas(sm.group(1)):
+                um = _FF_URL_RE.search(entry)
+                if not um:
+                    continue
+                raw = (um.group(1) or um.group(2) or um.group(3) or "").strip()
+                if not raw or raw.startswith(("blob:", "#")):
+                    continue
+                if raw.startswith("data:"):
+                    entries.append(("data:", _font_entry_supported(entry, ""), sm is srcs[-1]))
+                    continue
+                absu = _urljoin(base_url, raw)
+                if not absu.startswith(("http://", "https://")):
+                    continue
+                entries.append((absu, _font_entry_supported(entry, absu), sm is srcs[-1]))
+        if not entries:
+            continue
+        # 同一规则里多条 src 声明: 只有最后一条生效
+        live_entries = [(u, ok) for u, ok, last in entries if last]
+        dead = {u for u, ok, last in entries if not last}
+        out_of_range = False
+        if cps is not None:
+            um = _FF_URANGE_RE.search(body)
+            ranges = _parse_unicode_range(um.group(1)) if um else None
+            if ranges and not any(_is_private_use(lo, hi) for lo, hi in ranges) \
+                    and not _range_hits(ranges, cps):
+                out_of_range = True
+        primary = None
+        for u, ok in live_entries:
+            if primary is None and ok and not out_of_range:
+                primary = u
+                if u != "data:":
+                    needed.add(u)
+            else:
+                dead.add(u)
+                if primary not in (None, "data:") and ok:
+                    fallback_of.setdefault(u, primary)
+        dead.discard("data:")
+        skippable |= dead
+    skippable -= needed
+    return needed, skippable, fallback_of
