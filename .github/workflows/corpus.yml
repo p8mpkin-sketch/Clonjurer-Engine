@@ -220,6 +220,14 @@ jobs:
                       ck = [b for b in ctl if pidx(b) == cidx.get(k, -2)]
                       for b in kids[:8]: print(f"      子 {b[0].split('>')[-1][:60]} 原 y={b[1]} 高{b[2]} / 克隆 {'高' + str(ctm[b[0]][2]) if b[0] in ctm else '无'} [{b[3][:80]}]")
                       for b in [x for x in ck if x[0] not in obm][:4]: print(f"      子(克隆独有) {b[0].split('>')[-1][:60]} 克隆 y={b[1]} 高{b[2]} [{b[3][:80]}]")
+                      # 变高的常是撑满格子的背景/内盒, 真正的内容是它的兄弟, 高度由父格子的行模板决定: 列父元素及其全部子项
+                      pj = pidx(ob)
+                      if 0 <= pj < len(otl):
+                          pb = otl[pj]; pc = ctm.get(pb[0])
+                          print(f"      父 {pb[0].split('>')[-1][:60]} 原 y={pb[1]} 高{pb[2]} / 克隆 {'高' + str(pc[2]) if pc else '无'} [{pb[3][:160]}] | 克隆侧 [{pc[3][:160] if pc else ''}]")
+                          for b in [x for x in otl if pidx(x) == pj and x[0] != k][:8]:
+                              cb = ctm.get(b[0])
+                              print(f"      兄弟 {b[0].split('>')[-1][:60]} 原 y={b[1]} 高{b[2]} / 克隆 {'y=' + str(cb[1]) + ' 高' + str(cb[2]) if cb else '无'} [{b[3][:100]}]")
                       # 直接子项都是薄包装时看不出谁变高: 再列该块内所有两侧高度差 ≥20 的后代(沿父链判定)
                       def _under(b, root):
                           j = pidx(b)
