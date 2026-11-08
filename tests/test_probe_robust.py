@@ -53,3 +53,18 @@ class DynamicMask(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PhoneMatrix(unittest.TestCase):
+    def test_groups_expand_and_router_covers_all_uas(self):
+        import re
+        sys.path.insert(0, str(ROOT))
+        from core.clone.support import EDITION_ROUTER_SCRIPT
+        pat = re.search(r"if\(!/(.+?)/i\.test\(u\)\)return;", EDITION_ROUTER_SCRIPT).group(1)
+        for n in vp.PHONE_MATRIX:
+            self.assertIn(n, vp.PROBE_VIEWPORTS)
+            opts = vp.context_opts(n)
+            self.assertTrue(opts["is_mobile"] and opts["has_touch"])
+            self.assertTrue(re.search(pat, opts["user_agent"], re.I), n)   # 手机版入口路由认得每个机型 UA
+        self.assertEqual(len(vp.expand_viewports(["phones4"])), 4)
+        self.assertEqual(vp.expand_viewports(["desktop", "phones", "iphone-air"])[:2], ["desktop", "iphone-air"])

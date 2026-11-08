@@ -142,6 +142,10 @@ def run(args):
     started = time.time()
     tasks = []
     vps = [v.strip() for v in (args.viewports or "").split(",") if v.strip() and v.strip() != "none"]
+    if vps:
+        sys.path.insert(0, str(HERE))
+        from viewport_probe import expand_viewports
+        vps = expand_viewports(vps)
     early = None
     if vps and args.probe_each:
         sys.path.insert(0, str(HERE))
@@ -430,7 +434,10 @@ def _vp_means(results, key="vp"):
 
 
 _VP_NAMES = {"desktop": "桌面", "tablet": "平板768", "mobile": "手机390",
-             "iphone-air": "iPhone Air 真机口径", "ipad-air": "iPad Air 真机口径"}
+             "iphone-air": "iPhone Air 真机口径", "ipad-air": "iPad Air 真机口径",
+             "iphone-se": "iPhone SE", "iphone-15": "iPhone 15", "iphone-16-pro": "iPhone 16 Pro", "iphone-16-pro-max": "iPhone 16 Pro Max",
+             "pixel-8": "Pixel 8", "galaxy-s24": "Galaxy S24", "xiaomi-14": "小米 14",
+             "huawei-mate60": "华为 Mate 60", "oppo-find-x7": "OPPO Find X7"}
 
 
 def _vp_line(g):
@@ -573,7 +580,8 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--viewport", default="desktop", choices=["desktop", "laptop", "mobile"])
     ap.add_argument("--viewports", default="desktop,tablet,mobile",
-                    help="视口分项探针(逗号分隔 desktop/tablet/mobile; none 关闭)")
+                    help="视口分项探针(逗号分隔 desktop/tablet/mobile/iphone-air/ipad-air/机型名; "
+                         "phones=主流安卓+苹果机型矩阵, phones4=360/393/412/440 四档代表机型; none 关闭)")
     ap.add_argument("--probe-workers", type=int, default=3)
     ap.add_argument("--probe-noise", action="store_true", help="视口探针另测原站自比上限(多一倍原站加载)")
     ap.add_argument("--probe-each", action="store_true",

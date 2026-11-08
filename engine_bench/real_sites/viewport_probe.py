@@ -39,10 +39,48 @@ IOS_UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/60
 # iPadOS 13 起 Safari 默认「桌面级浏览」: 发 Mac Safari UA(不含 iPad/Mobile), 靠触屏区分
 IPAD_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
            "(KHTML, like Gecko) Version/18.6 Safari/605.1.15")
+# 主流安卓机型 UA(Chrome 移动版 / 三星浏览器 / 鸿蒙; 型号段按真机)
+ANDROID_UA = ("Mozilla/5.0 (Linux; Android 15; {model}) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36")
+SAMSUNG_UA = ("Mozilla/5.0 (Linux; Android 15; SAMSUNG SM-S931B) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) SamsungBrowser/27.0 Chrome/125.0.0.0 Mobile Safari/537.36")
+HARMONY_UA = ("Mozilla/5.0 (Phone; OpenHarmony 5.0) AppleWebKit/537.36 (KHTML, like Gecko) "
+              "Chrome/114.0.0.0 Safari/537.36 ArkWeb/4.1.6.1 Mobile HuaweiBrowser/5.0.1.300")
 DEVICE_OPTS = {
     "iphone-air": {"user_agent": IOS_UA, "device_scale_factor": 3, "is_mobile": True, "has_touch": True},
     "ipad-air": {"user_agent": IPAD_UA, "device_scale_factor": 2, "is_mobile": True, "has_touch": True},
 }
+# 主流手机机型矩阵(CSS 像素视口 × DPR × UA): 名字可直接用于 --viewports, 也可写 phones 展开全部
+PHONE_MATRIX = {
+    # 苹果
+    "iphone-se": (375, 667, 2, IOS_UA),
+    "iphone-15": (393, 852, 3, IOS_UA),
+    "iphone-16-pro": (402, 874, 3, IOS_UA),
+    "iphone-16-pro-max": (440, 956, 3, IOS_UA),
+    # 安卓
+    "pixel-8": (412, 915, 2.625, ANDROID_UA.format(model="Pixel 8")),
+    "galaxy-s24": (360, 780, 3, SAMSUNG_UA),
+    "xiaomi-14": (393, 873, 2.75, ANDROID_UA.format(model="24031PN0DC")),
+    "huawei-mate60": (360, 780, 3, HARMONY_UA),
+    "oppo-find-x7": (412, 915, 2.625, ANDROID_UA.format(model="PHZ110")),
+}
+for _n, (_w, _h, _dpr, _ua) in PHONE_MATRIX.items():
+    PROBE_VIEWPORTS[_n] = {"width": _w, "height": _h}
+    DEVICE_OPTS[_n] = {"user_agent": _ua, "device_scale_factor": _dpr, "is_mobile": True, "has_touch": True}
+VIEWPORT_GROUPS = {
+    "phones": ["iphone-air"] + list(PHONE_MATRIX),                     # 全机型表(发版前)
+    "phones4": ["galaxy-s24", "iphone-15", "pixel-8", "iphone-16-pro-max"],   # 4 档代表宽度 360/393/412/440(日常回归)
+}
+
+
+def expand_viewports(names):
+    """--viewports 里的组名(phones)展开为机型列表, 去重保序。"""
+    out = []
+    for n in names:
+        for v in VIEWPORT_GROUPS.get(n, [n]):
+            if v not in out:
+                out.append(v)
+    return out
 
 
 def context_opts(name):
@@ -295,7 +333,7 @@ def main():
             row = con.execute("select target_url from clone_tasks where id=?", (tid,)).fetchone()
             if row:
                 pairs.append((tid, row[0]))
-    vps = [v.strip() for v in args.viewports.split(",") if v.strip()]
+    vps = expand_viewports([v.strip() for v in args.viewports.split(",") if v.strip()])
     res, outdir = probe_tasks(args.base, pairs, vps, args.out or None, args.workers,
                               args.clone_url or None, args.noise)
     print(f"\n截图/热力图: {outdir}")
