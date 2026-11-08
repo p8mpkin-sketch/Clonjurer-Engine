@@ -200,6 +200,12 @@ jobs:
                           if prev is not None:
                               pk, pb = prev
                               print(f"    其前元素 @原 y={pb[1]}: {pk[-120:]} 高 原{pb[2]}/克隆{ctm[pk][2]} [{pb[3][:150]}] | 克隆侧 [{ctm[pk][3][:150]}]")
+                          # 克隆独有(路径对不上原站)且落在跳变前的元素: 多插了一个兄弟时其后同级下标全错位, "其前元素"找不到它
+                          okeys = {kk for kk, _ in ot}
+                          lo = ctm[prev[0]][1] if prev is not None else -1
+                          extra = [c for kk, c in ctm.items() if kk not in okeys and lo <= c[1] <= cb[1] and c[2] >= 20]
+                          for c in sorted(extra, key=lambda c: (c[1], -c[2]))[:5]:
+                              print(f"    克隆独有元素 @克隆 y={c[1]} 高{c[2]}: {c[0][-120:]} [{c[3][:150]}]")
                       prev_dy, prev = dy, (k, ob)
                   # 高度不同元素只列"最深"的: 某后代已承担 ≥60% 的高度差就不重复列祖先(祖先只是跟着变高)。
                   # 祖先/子孙关系用第 5 项(父下标)判断: 路径只留 12 层, 深处元素的路径不是祖先路径的前缀
