@@ -165,16 +165,19 @@ jobs:
                   obk = {b[0]: b for b in ((d.get("orig") or {}).get("blocks") or [])}
                   cbk = {b[0]: b for b in ((d.get("clone") or {}).get("blocks") or [])}
                   vis = lambda bk, k: next((v for p, v in bk.items() if v[1] == "vis" and (p == k or p.startswith(k + ">"))), None)
+                  how = lambda b: (b[5] if len(b) > 5 else "")
                   n = 0
                   for k, v in obk.items():
-                      if v[1] != "vis" and k not in cbk and n < 8 and (cv := vis(cbk, k)):
-                          print(f"  原站隐藏/克隆显示 {k[-110:]}: 原 {v[1]} 图{v[4]} | 克隆 @{cv[2]} 高{cv[3]} 图{cv[4]}"); n += 1
+                      cv = cbk.get(k) if (cbk.get(k) or ["", ""])[1] == "vis" else (None if k in cbk else vis(cbk, k))
+                      if v[1] != "vis" and cv and n < 8:
+                          print(f"  原站隐藏/克隆显示 {k[-110:]}: 原 {v[1]} 图{v[4]} [{how(v)}] | 克隆 @{cv[2]} 高{cv[3]} 图{cv[4]} [{how(cv)}]"); n += 1
                   n = 0
                   for k, v in cbk.items():
-                      if v[1] != "vis" and k not in obk and n < 8 and (ov := vis(obk, k)):
-                          print(f"  克隆隐藏/原站显示 {k[-110:]}: 克隆 {v[1]} 图{v[4]} | 原 @{ov[2]} 高{ov[3]} 图{ov[4]}"); n += 1
-                  for k in [k for k in obk if obk[k][1] == "vis" and k not in cbk][:6]: print(f"  原站独有大块 {k[-110:]} @{obk[k][2]} 高{obk[k][3]} 图{obk[k][4]}")
-                  for k in [k for k in cbk if cbk[k][1] == "vis" and k not in obk][:6]: print(f"  克隆独有大块 {k[-110:]} @{cbk[k][2]} 高{cbk[k][3]} 图{cbk[k][4]}")
+                      ov = obk.get(k) if (obk.get(k) or ["", ""])[1] == "vis" else (None if k in obk else vis(obk, k))
+                      if v[1] != "vis" and ov and n < 8:
+                          print(f"  克隆隐藏/原站显示 {k[-110:]}: 克隆 {v[1]} 图{v[4]} [{how(v)}] | 原 @{ov[2]} 高{ov[3]} 图{ov[4]} [{how(ov)}]"); n += 1
+                  for k in [k for k in obk if obk[k][1] == "vis" and k not in cbk][:6]: print(f"  原站独有大块 {k[-110:]} @{obk[k][2]} 高{obk[k][3]} 图{obk[k][4]} [{how(obk[k])}]")
+                  for k in [k for k in cbk if cbk[k][1] == "vis" and k not in obk][:6]: print(f"  克隆独有大块 {k[-110:]} @{cbk[k][2]} 高{cbk[k][3]} 图{cbk[k][4]} [{how(cbk[k])}]")
                   drift = [(ypos(oo[k]), ypos(co[k]), k) for k in oo if k in co and 3 <= abs(ypos(oo[k]) - ypos(co[k])) <= 40]
                   for oy, cy, k in sorted(drift)[:10]: print(f"  微位移文本 原 y={oy} 克隆 y={cy}: {k[:70]}")
                   print("::endgroup::")

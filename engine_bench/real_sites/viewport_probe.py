@@ -240,14 +240,18 @@ DIAG_JS = r"""() => {
       for (const ch of el.children) {
         if (blocks.length >= 120) break;
         const c = cs(ch); const r = ch.getBoundingClientRect();
+        // 第 6 项: class / 内联 style / 定位 / transform / 分视口标记 —— 两侧同路径块一显一隐时看出是类状态(轮播 next/active)、
+        // 脚本写的内联样式还是引擎分视口规则(data-cv)造成
+        const how = (ch.getAttribute('class') || '').slice(0, 60) + ' | ' + (ch.getAttribute('style') || '').slice(0, 90) + ' | ' + c.position
+          + (c.transform !== 'none' ? ' tf=' + c.transform.slice(0, 40) : '') + (ch.hasAttribute('data-cv') ? ' cv=' + ch.getAttribute('data-cv') : '')
+          + (ch.hasAttribute('data-cv-vp') ? ' cv-vp=' + ch.getAttribute('data-cv-vp') : '') + (ch.hasAttribute('data-cv-cls-d') ? ' cv-cls' : '');
         if (c.display === 'none' || c.visibility === 'hidden') {
           if (ch.querySelector('img,video,a') && (ch.textContent.trim().length + ch.querySelectorAll('img').length * 100) > 60)
-            blocks.push([key(ch), 'hidden:' + (c.display === 'none' ? 'display' : 'visibility') + (ch.style.display || ch.style.visibility ? ' inline=' + (ch.style.display || ch.style.visibility) : '')
-                         + (ch.hasAttribute('data-cv-vp') ? ' cv-vp=' + ch.getAttribute('data-cv-vp') : '') + (ch.hasAttribute('data-cv') ? ' cv' : ''), 0, 0, ch.querySelectorAll('img').length]);
+            blocks.push([key(ch), 'hidden:' + (c.display === 'none' ? 'display' : 'visibility'), 0, 0, ch.querySelectorAll('img').length, how]);
           continue;
         }
         if (r.top > innerHeight * 8) continue;
-        if (r.height >= 150 && r.width >= innerWidth * 0.5) blocks.push([key(ch), 'vis', Math.round(r.top), Math.round(r.height), ch.querySelectorAll('img').length]);
+        if (r.height >= 150 && r.width >= innerWidth * 0.5) blocks.push([key(ch), 'vis', Math.round(r.top), Math.round(r.height), ch.querySelectorAll('img').length, how]);
         walk(ch, depth + 1);
       }
     };
