@@ -55,6 +55,7 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     CV_QUIET_JS,
     CV_RECORD_JS,
     DEEP_FREEZE_JS,
+    CSSOM_LINK_DEDUPE_JS,
     WAIT_SHEETS_JS,
     FONT_BAKE_JS,
     FORM_ACTIVATE_JS,
@@ -914,7 +915,17 @@ class CaptureMixin:
                  f"固化 {counts.get('css', 0)} 组运行时样式 / "
                  f"{counts.get('canvas', 0)} 个 Canvas / "
                  f"{counts.get('revealed', 0)} 个动画元素显形 / "
-                 f"{counts.get('crossOriginSheets', 0)} 个跨域样式表")
+                 f"{counts.get('crossOriginSheets', 0)} 个跨域样式表"
+                 + (f" / 内联表原样 {counts.get('cssSkipped')} 组未重复序列化" if counts.get("cssSkipped") else ""))
+        # 外链样式表的内联副本去重: 文件本身已随包, 运行时未改动的表其序列化副本是纯重复
+        # (全语料均值 215KB/页, 占交付 HTML 37%)。浏览器自己解析比对, 不一致/取不到原文的保留。
+        if counts.get("css"):
+            dd = {}
+            with suppress(Exception):
+                dd = page.evaluate(CSSOM_LINK_DEDUPE_JS) or {}
+            if dd.get("removed"):
+                self.log("CSSOM", f"外链表内联副本去重: 移除 {dd['removed']}/{dd.get('checked', 0)} 块"
+                                  f"({int(dd.get('bytes', 0)) // 1024} KB), 保留 {dd.get('kept', 0)} 块(运行时改过/取不到原文)")
         # W7: 水合剥离决策(模式策略包 + 活体早识别)。
         # SSR/水合模式的静态 DOM 是权威渲染(采集期已完整), 而水合重渲染
         # 会用客户端数据替换它(实证: tailwind marquee 87→44 退化链)。
@@ -1311,8 +1322,33 @@ class CaptureMixin:
         (含 Accept 协商出的 webp/avif), 比重下更忠实; 取不到(已被逐出/重定向)的照常走网络。"""
         t0, n = time.monotonic(), 0
         pending, self._live_resp = self._live_resp, {}
-        for url, resp in pending.items():
+        # resp.body() 会阻塞到该响应下载完: 慢链路上几张还在传的大图曾让这一步串行等 91s
+        # (cgnpc 高负载复盘, 原本毫秒级)。先只取已传完的(timing.responseEnd>=0), 未传完的交给
+        # 并发 CAS 下载(本就要跑); 再给整步一个时限, 超时剩余的也交给 CAS。
+        def _finished(r):
+            try:
+                t = r.request.timing
+                t = t() if callable(t) else t
+                return (t or {}).get("responseEnd", -1) != -1
+            except Exception:
+                return True   # 拿不到时序: 按旧行为处理(多半是小资源)
+        def _size(r):
+            try:
+                return int(r.headers.get("content-length") or 0)
+            except Exception:
+                return 0
+        # 小的先取: 单次 body() 在慢链路/高负载下可能阻塞数秒且无法中途打断, 把大响应排到最后,
+        # 时限一到整体止损; 超过 LIVE_BODY_SINGLE_MAX 的大文件一律不经 CDP 取, 交并发 CAS 下载
+        ordered = sorted(pending.items(), key=lambda kv: (not _finished(kv[1]), _size(kv[1]) or 1 << 20))
+        skipped_unfinished = skipped_budget = 0
+        for url, resp in ordered:
             if url in self._live_bodies or self._live_body_bytes >= config.LIVE_BODY_BYTES:
+                continue
+            if time.monotonic() - t0 > config.LIVE_BODY_HARVEST_BUDGET:
+                skipped_budget += 1
+                continue
+            if not _finished(resp) or _size(resp) > config.LIVE_BODY_SINGLE_MAX:
+                skipped_unfinished += 1
                 continue
             try:
                 body = resp.body()
@@ -1328,9 +1364,13 @@ class CaptureMixin:
                                       "is_css": False, "status": 200, "via": "live"}
             self._live_body_bytes += len(body)
             n += 1
-        if n:
+        if n or skipped_unfinished or skipped_budget:
+            extra = ""
+            if skipped_unfinished or skipped_budget:
+                extra = (f"; 跳过 {skipped_unfinished} 个未传完 / {skipped_budget} 个超时限, "
+                         f"交并发 CAS 下载")
             self.log("SMART-DL", f"活体响应体复用: 取回 {n} 个已加载资源 "
-                                 f"({self._live_body_bytes // 1024} KB, {time.monotonic() - t0:.1f}s)")
+                                 f"({self._live_body_bytes // 1024} KB, {time.monotonic() - t0:.1f}s){extra}")
 
 
     def _finalize_mocks(self):

@@ -362,6 +362,8 @@ class DownloadMixin:
                             _pump()
                             continue
                         self.log("WARN", f"跳过 {job['url']}: {out['error']}")
+                        if out.get("status"):
+                            self._dead_urls.add(job["url"])   # 源站明确 4xx/5xx: 交付侧不再回源
                         if out.get("status") and ctx is not None:
                             failed_for_browser.append(job)
                         elif not out.get("status") and str(out.get("error") or "").endswith(

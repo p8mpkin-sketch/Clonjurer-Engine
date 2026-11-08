@@ -85,6 +85,7 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     CV_RECORD_JS,
     DEEP_FREEZE_JS,
     WAIT_SHEETS_JS,
+    CSSOM_LINK_DEDUPE_JS,
     FONT_BAKE_JS,
     FORM_ACTIVATE_JS,
     IFRAME_EXTRACT_JS,
@@ -125,6 +126,9 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
 )
 from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部 import 路径不变
     beacon_like,
+    neutralize_deploy_hazards,
+    deploy_hazard_audit,
+    fontface_swap_for_remote,
     ASSET_RESOURCE_TYPES,
     ASSET_SKIP_PREFIXES,
     BLOB_INLINE_MAX,
@@ -331,6 +335,7 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
         self._fidelity_rendered = False      # 保真轨 MHTML 已渲染(每任务一次)
         self._layout_calibrated = False      # 布局校准已尝试(每任务一次)
         self._backfill_dead = set()          # 修复回补回源失败的 URL(跨轮负缓存)
+        self._dead_urls = set()              # 下载期确认 HTTP 4xx/5xx 的资源 URL(交付侧秒 404 用)
         self._calibrations = 0               # A1 像素校准执行次数
         self._phase_acc = {}                 # 子阶段累计耗时(秒): 提速定位用
         self._calib_css = ""                 # A1 校准覆盖(跨修复轮持久, _localize 注入)
@@ -824,6 +829,16 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
 
             # ---- CAS 并发下载 + CSS 递归解析(requests -> 浏览器会话降级) ----
             self._set(progress=30, stage="CAS并发下载")
+            # 静态补扫(完整性网): 固化 HTML 里仍引用、却没进采集集合的媒体/样式(水合后期插入、
+            # 视口外 loading=lazy 的 img 等, 浏览器侧采集与评分重放都碰不到它们)。全语料复盘:
+            # gitee 首页 62 张 <img src=https://e-assets...> 从未尝试下载, 交付后逐张回源外联。
+            swept = 0
+            for _route, _html in pages:
+                before_n = len(assets)
+                merge_page_assets(_static_refs(_html, self._target))
+                swept += len(assets) - before_n
+            if swept:
+                self.log("SMART-DL", f"静态补扫: 固化 HTML 里 {swept} 个未进采集集合的资源引用补入下载队列")
             assets.add(origin.rstrip("/") + "/favicon.ico")
             # 保真轨(MHTML 禁脚本回放)只依赖采集产物: 下载期间浏览器空闲, 先在后台页里加载起来,
             # 评分时直接截图(旧实现在评分阶段才加载 + 固定 2s 静置, 每站串行 1.5~3s)
@@ -997,6 +1012,28 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
                 "slots": tracker_cfg.get("slots") or [],
                 "mask": bool(tracker_cfg.get("mask", True)),
             }
+        # 交付侧已知死路径: 下载期/回补期源站明确 4xx/5xx 的同源路径, 生成应用对其秒 404,
+        # 不再走反代兜底回源(favicon/缺图/计数接口等每次加载都白等一轮超时)
+        # 远程字体 swap: 本地化后的样式表里仍引用未本地化字体(采集时 CDN 连不上)的 @font-face
+        # 补 font-display:swap, 部署后文字不再隐形等字体超时(评分渲染拦截外联, 画面不变)
+        swapped_css = 0
+        for css_file in (self.ws / "static" / "css").glob("*.css") if (self.ws / "static" / "css").is_dir() else []:
+            with suppress(OSError, UnicodeDecodeError):
+                text = css_file.read_text(encoding="utf-8", errors="replace")
+                new_text = fontface_swap_for_remote(text)
+                if new_text != text:
+                    css_file.write_text(new_text, encoding="utf-8")
+                    swapped_css += 1
+        if swapped_css:
+            self.log("DEPLOY", f"远程字体 swap: {swapped_css} 个样式表的未本地化 @font-face 补 font-display:swap")
+        page_netloc = urlsplit(origin).netloc.lower()
+        dead_paths = sorted({
+            urlsplit(u).path for u in (self._dead_urls | self._backfill_dead)
+            if (urlsplit(u).netloc or "").lower() == page_netloc and urlsplit(u).path
+        })
+        with suppress(OSError):
+            (self.ws / "known_dead.json").write_text(
+                json.dumps(dead_paths, ensure_ascii=False), encoding="utf-8")
         zip_path = flask_generator.generate_project(
             self.task_id, origin, self.ws, pages_map,
             mock_entries, bool(self.cfg.get("proxy_fallback", True)),
@@ -1007,6 +1044,23 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
 
         stats = self._collect_stats()
         stats["api"] = len(mock_entries)
+        # 部署隐患审计(交付侧度量, 评分口径之外): 交付首页里仍会阻塞首屏的未本地化脚本/样式。
+        # 此前评分只量克隆耗时与还原度, 离线渲染对非本地请求瞬时 abort, 交付产物却等满代理
+        # 超时 —— 这里把交付侧也量进 stats, 语料跑分据此汇总, 不再有盲区。
+        try:
+            main_html = (self.ws / pages_map.get("/", "index.html")).read_text(
+                encoding="utf-8", errors="replace")
+            audit = deploy_hazard_audit(main_html, urlsplit(origin).netloc)
+            audit["dead_paths"] = len(dead_paths)
+            stats["deploy_audit"] = audit
+            if audit["blocking_scripts"] or audit["blocking_styles"]:
+                self.log("DEPLOY", f"部署隐患: 阻塞脚本 {audit['blocking_scripts']} / "
+                                   f"阻塞样式 {audit['blocking_styles']} 仍未本地化")
+            else:
+                self.log("DEPLOY", f"部署审计通过: 未本地化引用 {audit['uncaptured_refs']} 个均已去阻塞, "
+                                   f"已知死路径 {len(dead_paths)} 条交付侧秒 404")
+        except Exception as exc:   # noqa: BLE001 审计不阻断交付
+            self.log("DEPLOY", f"部署审计跳过: {type(exc).__name__}: {exc}")
         if detail is not None:
             stats["similarity_detail"] = detail
         # 端到端度量: 识别结果与阶段耗时随任务落库, 真实语料跑分直接读取, 不翻日志

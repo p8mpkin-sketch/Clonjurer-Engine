@@ -108,6 +108,48 @@ CANVAS_IMG_FN = r"""(cv, data) => {
   return img;
 }"""
 
+# 外链样式表的内联 CSSOM 副本去重(异步, 固化后单独执行): 对每个带 data-cssom-href 的序列化块,
+# 从浏览器缓存取回样式表原文(force-cache, 刚加载过, 毫秒级), 用浏览器自己的解析器解析并做同样的
+# url() 绝对化, 与块文本逐条 cssText 比对; 完全一致说明该表运行时未被改动, 文件本身已随包本地化,
+# 内联副本是纯重复 → 移除。跨域无 CORS(fetch 失败)/解析不一致的保留。
+# 全语料 120 页均值: data-cssom 内联 215KB/页, 占交付 HTML 37%, 绝大多数就是这类副本。
+CSSOM_LINK_DEDUPE_JS = r"""
+async () => {
+  const out = { checked: 0, removed: 0, bytes: 0, kept: 0 };
+  const abs = (text, base) => text.replace(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^'")\s]+))\s*\)/g,
+    function (m, d, s1, b) {
+      const q = d !== undefined ? '"' : (s1 !== undefined ? "'" : '');
+      const u = (d !== undefined ? d : (s1 !== undefined ? s1 : b)).trim();
+      if (/^(data:|blob:|about:|#|%23|https?:)/i.test(u)) return m;
+      try { return 'url(' + q + new URL(u, base).href + q + ')'; } catch (e) { return m; }
+    });
+  const canon = (text) => {
+    const s = new CSSStyleSheet(); s.replaceSync(text);
+    const parts = []; for (let i = 0; i < s.cssRules.length; i++) parts.push(s.cssRules[i].cssText);
+    return parts;
+  };
+  const blocks = Array.from(document.querySelectorAll('style[data-cssom="true"][data-cssom-href]'));
+  await Promise.all(blocks.map(async (st) => {
+    const href = st.getAttribute('data-cssom-href');
+    out.checked++;
+    try {
+      const r = await fetch(href, { cache: 'force-cache', credentials: 'include' });
+      if (!r.ok) { out.kept++; return; }
+      let src = await r.text();
+      const body = st.textContent || '';
+      const mm = body.match(/^\s*@media\s+([^{]+)\{/);
+      if (mm) src = '@media ' + mm[1].trim() + ' {\n' + src + '\n}';
+      const a = canon(abs(src, href).replace(/\n/g, '\n'));
+      const b = canon(body);
+      let same = a.length === b.length && a.length > 0;
+      for (let i = 0; same && i < a.length; i++) same = a[i] === b[i];
+      if (same) { out.bytes += body.length; st.remove(); out.removed++; } else { out.kept++; }
+    } catch (e) { out.kept++; }
+  }));
+  return out;
+}
+"""
+
 DEEP_FREEZE_JS = r"""
 () => {
   const result = { lazy: 0, css: 0, crossOriginSheets: 0, canvas: 0, forms: 0, revealed: 0 };
@@ -166,6 +208,18 @@ DEEP_FREEZE_JS = r"""
       let text = '';
       for (let i = 0; i < rules.length; i++) text += rules[i].cssText + '\n';
       if (!text.trim()) return;
+      //    内联 <style> 的表: 若 CSSOM 与元素文本解析结果逐条一致(未被 insertRule 改过),
+      //    DOM 里已有这份样式, 再序列化一份就是纯重复(gitee 首页 14 块 Next.js 内联样式全是) → 跳过
+      const owner = sheet.ownerNode;
+      if (owner && owner.tagName === 'STYLE' && !owner.hasAttribute('data-cssom') && kind === 'true') {
+        try {
+          const tmp = new CSSStyleSheet();
+          tmp.replaceSync(owner.textContent || '');
+          let same = tmp.cssRules.length === rules.length;
+          for (let i = 0; same && i < rules.length; i++) same = tmp.cssRules[i].cssText === rules[i].cssText;
+          if (same) { result.cssSkipped = (result.cssSkipped || 0) + 1; return; }
+        } catch (e) { /* 构造表不可用或解析差异: 照常序列化 */ }
+      }
       const base = sheet.href || document.baseURI;
       //    引号内整体匹配: url("data:image/svg+xml,...fill='url(%23id)'...") 外层含单引号时,
       //    旧正则会钻进 data: 内部把 url(%23id) 改写成远程地址(SVG 渐变失填充 + 无效下载)
@@ -183,6 +237,10 @@ DEEP_FREEZE_JS = r"""
       if (media && media.toLowerCase() !== 'all') text = '@media ' + media + ' {\n' + text + '}\n';
       const style = document.createElement('style');
       style.setAttribute('data-cssom', kind);
+      //    记录来源表地址与规则数: 落盘时若该表已成功本地化且规则集一致, 内联副本即纯重复
+      //    (全语料均值 215KB/页, 占交付 HTML 37%), 由引擎侧去重; 运行时改过的表规则集不一致则保留。
+      if (sheet.href) style.setAttribute('data-cssom-href', sheet.href);
+      style.setAttribute('data-cssom-rules', String(rules.length));
       style.textContent = text;
       // 副本紧跟原节点: 保持与其它样式表的层叠先后。全部追加到 head 末尾时, 某张表的副本缺失
       // (媒体条件不匹配的表最低优先级加载, 冻结时可能还没到)会让其它表的副本反压它的原链接规则

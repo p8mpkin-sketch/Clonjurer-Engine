@@ -2058,6 +2058,225 @@ def beacon_like(url: str) -> bool:
     return ext in ("gif", "jpg", "jpeg", "png", "bin", "") and len(parts.query) >= 120
 
 
+# 交付产物部署性能守卫: 落盘前把"未本地化的阻塞 <script src>"去阻塞化。 -----------
+# 根因(cgnpc 562 复盘): 采集时就 404/被跳过的外链计数脚本(cmsHitsCount.js)与跨域埋点图标
+# (govicon.js)仍留在交付 HTML 里作经典阻塞脚本。本地部署时它们本地无文件 → 走 Flask 反代兜底
+# 回源(timeout 20s)或直连一个远端慢主机, 经典脚本在解析期阻塞, 首屏被拖到 20s+。
+# 评分口径一直量不到: 离线渲染的 route guard 对非本地请求一律瞬时 abort, 而交付产物是等 20s。
+# 通用处置(不认具体站点, 只按形态): 已本地化(/static/、相对影子路径、data:)的保持不动;
+# 其余绝对/根相对未捕获的阻塞脚本 —— 埋点/计数/信标形态整条删除, 其余补 async, 使其永不阻塞首屏。
+_SCRIPT_SRC_TAG_RE = re.compile(
+    r"<script\b(?P<attrs>[^>]*?)\bsrc\s*=\s*(?P<q>[\"'])(?P<src>.*?)(?P=q)(?P<rest>[^>]*)>",
+    re.I | re.S)
+
+# 计数器/统计脚本的通用命名形态(不认具体站点): hitcount / viscount / pvcount / cmsHits 等。
+_HITCOUNT_HINT = re.compile(
+    r"(?:hit|visit|view|page)s?[-_]?count|count[-_]?(?:hit|visit|view|pv|uv)|cmshits", re.I)
+
+
+def _script_src_is_localized(src: str) -> bool:
+    """落盘后由静态服务器直接命中、不触发反代回源的引用形态。"""
+    s = (src or "").strip()
+    if not s:
+        return True   # 空 src 不发请求
+    low = s.lower()
+    if low.startswith(("data:", "blob:", "about:", "javascript:", "#")):
+        return True
+    if low.startswith(("http://", "https://", "//")):
+        return False   # 绝对/协议相对: 未被本地化(本地化会改成 /static 根相对)
+    if s.startswith("/"):
+        # 根相对: 仅 /static/ 是内容寻址的已捕获资源; 其余根相对路径(/cgnhit/... 等)
+        # 落盘无文件, 必走反代兜底
+        return low.startswith("/static/")
+    return True        # 页面目录相对路径: 影子文件随包落盘, 静态直通
+
+
+def neutralize_deploy_hazard_scripts(html: str, page_host: str = "") -> str:
+    """交付 HTML 去阻塞: 未本地化的阻塞 <script src> 不得挡首屏(删埋点 / 其余转 async)。"""
+    if "<script" not in html.lower():
+        return html
+
+    def _repl(m):
+        src = m.group("src")
+        if _script_src_is_localized(src):
+            return m.group(0)
+        attrs = m.group("attrs") or ""
+        rest = m.group("rest") or ""
+        flags = (attrs + " " + rest).lower()
+        if "async" in flags or "defer" in flags:
+            return m.group(0)   # 本就非阻塞
+        abs_url = src if src.lower().startswith(("http://", "https://")) else (
+            "https:" + src if src.startswith("//") else "https://_rel_/" + src.lstrip("/"))
+        # 埋点/计数/信标形态: 部署后只会回源打点, 不改画面 → 整条移除
+        if beacon_like(abs_url) or _HITCOUNT_HINT.search(src):
+            return ""
+        # 其余未捕获阻塞脚本(可能是跨域库/未采到的应用脚本): 转 async, 保留 best-effort
+        # 执行但不再阻塞解析与首屏; 配合反代短超时+多线程, 后台 404 代价可控。
+        return f"<script{attrs} src={m.group('q')}{src}{m.group('q')}{rest} async>"
+
+    return _SCRIPT_SRC_TAG_RE.sub(_repl, html)
+
+
+# 渲染阻塞样式表(举一反三, 全语料 554 页复盘: 未本地化的阻塞 <link rel=stylesheet> 59 处/45 站,
+# 是脚本那一类的 4 倍; 44 处是根相对但原站也 404 的路径, 15 处跨域)。样式表阻塞的是**首次绘制**:
+# 部署后浏览器白屏等它加载/失败, 走反代兜底就是等满超时。未被捕获的样式表, 评分渲染时也没有它,
+# 克隆画面不依赖它 —— 改为异步加载(media=print + onload 还原), 到了就生效, 到不了不挡首屏。
+_LINK_TAG_RE = re.compile(r"<link\b(?P<attrs>[^>]*)>", re.I | re.S)
+_ATTR_RE_CACHE = {}
+
+
+def _attr(attrs: str, name: str):
+    rx = _ATTR_RE_CACHE.get(name)
+    if rx is None:
+        rx = _ATTR_RE_CACHE[name] = re.compile(
+            r"\b" + name + r"\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s>]+))", re.I)
+    m = rx.search(attrs)
+    if not m:
+        return None
+    return next((g for g in m.groups() if g is not None), "")
+
+
+def neutralize_deploy_hazard_styles(html: str) -> str:
+    """交付 HTML: 未本地化的渲染阻塞样式表改为异步加载(不挡首次绘制)。"""
+    if "stylesheet" not in html.lower():
+        return html
+
+    def _repl(m):
+        attrs = m.group("attrs") or ""
+        rel = (_attr(attrs, "rel") or "").lower()
+        if "stylesheet" not in rel.split() and rel != "stylesheet":
+            return m.group(0)
+        href = _attr(attrs, "href")
+        if href is None or _script_src_is_localized(href):
+            return m.group(0)
+        if "data-clone-async-css" in attrs.lower():
+            return m.group(0)
+        media = _attr(attrs, "media")
+        restore = (media or "all").replace("'", "\\'")
+        # 去掉原 media(若有), 换成 print + onload 还原
+        new_attrs = re.sub(r"\s*\bmedia\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s>]+)", "", attrs, flags=re.I)
+        return (f"<link{new_attrs} media=\"print\" "
+                f"onload=\"this.media='{restore}'\" data-clone-async-css>")
+
+    return _LINK_TAG_RE.sub(_repl, html)
+
+
+# 资源提示与外部 iframe(全语料: 未本地化 preload/prefetch 275 处/121 站, preconnect/dns-prefetch
+# 1010 处/239 站, 跨域 iframe 168 处/92 站)。提示类标签只是"预热", 指向未本地化地址时部署后只会
+# 多发一轮回源/外联请求(抢带宽、泄露访问), 删掉不影响任何渲染; 跨域 iframe(视频/地图/广告)无法
+# 本地化, 补 loading=lazy 让它不与首屏资源抢加载(评分渲染本就拦截外联, 画面不变)。
+_IFRAME_TAG_RE = re.compile(r"<iframe\b(?P<attrs>[^>]*)>", re.I | re.S)
+
+
+def neutralize_deploy_hints(html: str) -> str:
+    """删未本地化的 preload/prefetch/modulepreload 与所有 preconnect/dns-prefetch; 外部 iframe 懒加载。"""
+    low = html.lower()
+    if "<link" in low:
+        def _link(m):
+            attrs = m.group("attrs") or ""
+            rel = (_attr(attrs, "rel") or "").lower().split()
+            if not rel:
+                return m.group(0)
+            if "preconnect" in rel or "dns-prefetch" in rel:
+                return ""
+            if any(r in rel for r in ("preload", "prefetch", "modulepreload", "prerender")):
+                href = _attr(attrs, "href")
+                if href is not None and not _script_src_is_localized(href):
+                    return ""
+            return m.group(0)
+        html = _LINK_TAG_RE.sub(_link, html)
+    if "<iframe" in low:
+        def _iframe(m):
+            attrs = m.group("attrs") or ""
+            src = _attr(attrs, "src")
+            if src is None or _script_src_is_localized(src):
+                return m.group(0)
+            if re.search(r"\bloading\s*=", attrs, re.I):
+                return m.group(0)
+            return f"<iframe{attrs} loading=\"lazy\">"
+        html = _IFRAME_TAG_RE.sub(_iframe, html)
+    return html
+
+
+# 远程字体(全语料: 本地化后的 CSS 里仍有 10 万条 url(https://...) 字体切片引用, 99% 集中在采集时
+# ConnectTimeout 的字体 CDN)。浏览器按 unicode-range 懒请求切片, 每片默认 font-display:auto =
+# 文字先隐形(FOIT)最多 3s 等字体 —— 部署在连不上该 CDN 的环境里, 整页文字"闪白"数秒。
+# 通用处置: @font-face 的 src 含未本地化 url() 且未声明 font-display 时补 font-display:swap,
+# 文字立即以回退字体显示, 字体到了再换; 字体到不了画面与评分渲染(拦截外联)一致。
+_FONTFACE_RE = re.compile(r"@font-face\s*\{(?P<body>[^{}]*)\}", re.I | re.S)
+_CSS_REMOTE_URL_RE = re.compile(r"url\(\s*[\"']?(?P<u>[^\"')\s]+)", re.I)
+
+
+def fontface_swap_for_remote(css: str) -> str:
+    """CSS 文本: 含未本地化 src 的 @font-face 补 font-display:swap(已声明的不动)。返回新 CSS。"""
+    if "@font-face" not in css.lower():
+        return css
+
+    def _repl(m):
+        body = m.group("body")
+        if re.search(r"font-display\s*:", body, re.I):
+            return m.group(0)
+        urls = [u.strip() for u in _CSS_REMOTE_URL_RE.findall(body)]
+        if not any(not _script_src_is_localized(u) for u in urls):
+            return m.group(0)
+        sep = "" if body.rstrip().endswith(";") or not body.strip() else ";"
+        return "@font-face{" + body.rstrip() + sep + "font-display:swap;}"
+
+    return _FONTFACE_RE.sub(_repl, css)
+
+
+_STYLE_BLOCK_RE = re.compile(r"(<style\b[^>]*>)(.*?)(</style>)", re.I | re.S)
+
+
+def neutralize_deploy_fonts(html: str) -> str:
+    """交付 HTML 内联 <style> 里的远程 @font-face 补 font-display:swap。"""
+    if "@font-face" not in html.lower():
+        return html
+    return _STYLE_BLOCK_RE.sub(lambda m: m.group(1) + fontface_swap_for_remote(m.group(2)) + m.group(3), html)
+
+
+def neutralize_deploy_hazards(html: str, page_host: str = "") -> str:
+    """交付 HTML 去阻塞总入口: 阻塞脚本 + 渲染阻塞样式表 + 资源提示/外部 iframe + 远程字体 swap。"""
+    return neutralize_deploy_fonts(neutralize_deploy_hints(neutralize_deploy_hazard_styles(
+        neutralize_deploy_hazard_scripts(html, page_host))))
+
+
+def deploy_hazard_audit(html: str, page_host: str = "") -> dict:
+    """部署隐患审计(评分口径之外的交付侧度量): 仍会阻塞首屏的未本地化脚本/样式数、
+    未本地化引用总数、涉及的外部主机。写入任务 stats, 语料跑分汇总, 让交付侧也被量到。"""
+    blocking_scripts, blocking_styles, uncaptured = 0, 0, 0
+    hosts = set()
+    for m in _SCRIPT_SRC_TAG_RE.finditer(html):
+        src = m.group("src")
+        if _script_src_is_localized(src):
+            continue
+        uncaptured += 1
+        flags = ((m.group("attrs") or "") + " " + (m.group("rest") or "")).lower()
+        if "async" not in flags and "defer" not in flags:
+            blocking_scripts += 1
+        h = (urlsplit(src if "://" in src else "https:" + src).hostname or "") if src.lower().startswith(
+            ("http://", "https://", "//")) else ""
+        if h and h != (page_host or "").lower():
+            hosts.add(h)
+    for m in _LINK_TAG_RE.finditer(html):
+        attrs = m.group("attrs") or ""
+        rel = (_attr(attrs, "rel") or "").lower()
+        if "stylesheet" not in rel:
+            continue
+        href = _attr(attrs, "href")
+        if href is None or _script_src_is_localized(href):
+            continue
+        uncaptured += 1
+        if "data-clone-async-css" not in attrs.lower() and (_attr(attrs, "media") or "all") != "print":
+            blocking_styles += 1
+        if href.lower().startswith(("http://", "https://", "//")):
+            h = urlsplit(href if "://" in href else "https:" + href).hostname or ""
+            if h and h != (page_host or "").lower():
+                hosts.add(h)
+    return {"blocking_scripts": blocking_scripts, "blocking_styles": blocking_styles,
+            "uncaptured_refs": uncaptured, "external_hosts": sorted(hosts)}
+
+
 # 重放去重守卫(交互轨通用): 冻结 DOM 已含页面脚本运行后的结果, 交互版再执行一遍同步脚本时,
 # 「插入型」脚本(insertAdjacentHTML / appendChild 追加组件、轮播复制幻灯片等)会把同样的内容再插一次,
 # 页面出现成段重复(example.com 交互轨 70.4 / 保真轨 100 即此类)。守卫在所有页面脚本之前挂钩 DOM
