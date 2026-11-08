@@ -155,7 +155,7 @@ DIAG_JS = r"""() => {
     a: a ? cs(a).textDecorationLine + ' / ' + cs(a).color : '',
     band: getComputedStyle(document.documentElement).getPropertyValue('--cv-band'),
     // 网页字体是否真的到了(fallback 字体行高不同, 整页逐行位移): 各 FontFace 的 family/weight/status
-    fonts: (() => { try { const o = {}; for (const f of document.fonts) { const k = f.family.replace(/["']/g, '') + ' ' + f.weight; o[k] = (o[k] ? o[k] + ',' : '') + f.status[0]; } return Object.entries(o).slice(0, 24).map(([k, v]) => k + ':' + v).join(' | '); } catch (e) { return ''; } })(),
+    fonts: (() => { try { const o = {}; for (const f of document.fonts) { const k = f.family.replace(/["']/g, '') + ' ' + f.weight; o[k] = (o[k] ? o[k] + ',' : '') + ({loaded: 'L', loading: 'g', error: 'E', unloaded: 'u'}[f.status] || f.status[0]); } return Object.entries(o).slice(0, 24).map(([k, v]) => k + ':' + v).join(' | '); } catch (e) { return ''; } })(),
     // 字体是否真的在画: 同一段字用"首选族, monospace"与纯 monospace 量宽, 不同才是网页字体在渲染(status=loaded 但文件不对/
     // unicode-range 不覆盖拉丁时照样回落到后备字体, qwik 克隆两张 Poppins 都 loaded 却按后备字体行高排)
     fontDraws: (() => { try { const fam = cs(document.body).fontFamily.split(',')[0].trim(); const mk = f => { const s = document.createElement('span'); s.textContent = 'mmmmmmmmmmlliiWWW'; s.style.cssText = 'position:absolute;left:-9999px;top:0;font-size:40px;font-family:' + f; document.body.appendChild(s); const w = s.getBoundingClientRect().width; s.remove(); return w; };
@@ -165,6 +165,10 @@ DIAG_JS = r"""() => {
       for (const sh of document.styleSheets) { let rules; try { rules = sh.cssRules; } catch (e) { continue; } if (!rules) continue;
         for (const r of rules) { if (r instanceof CSSFontFaceRule && r.style.fontFamily.replace(/["']/g, '') === fam) out.push(r.style.fontWeight + ' ' + (r.style.src || '').slice(-70) + ' ' + (r.style.unicodeRange || '').slice(0, 40)); if (out.length >= 12) break; } }
       return out.join(' | '); } catch (e) { return ''; } })(),
+    // 字体文件的网络事实(资源计时): 状态码/耗时/字节 —— status=loading 卡 6s 不结束时, 看请求是慢、404 还是根本没发出
+    fontReq: (() => { try { return performance.getEntriesByType('resource').filter(e => /\.(woff2?|ttf|otf|eot)(\?|$)/i.test(e.name) || e.initiatorType === 'font' || e.initiatorType === 'css' && /font/i.test(e.name)).slice(0, 10)
+      .map(e => e.name.split('/').slice(-2).join('/').slice(-48) + ' ' + (e.responseStatus || '?') + ' ' + Math.round(e.duration) + 'ms ' + (e.transferSize || 0) + 'B').join(' | '); } catch (e) { return ''; } })(),
+    referrer: (() => { try { const m = document.querySelector('meta[name=referrer]'); return (m ? m.content : '-') + ' / ' + document.referrer.slice(0, 40); } catch (e) { return ''; } })(),
     vw: innerWidth, dpr: devicePixelRatio,
   };
   // 可见文本行(评分覆盖的前 8 屏): 两侧做差直接看出克隆少了/多了哪些文案(表单/计数/弹层)
