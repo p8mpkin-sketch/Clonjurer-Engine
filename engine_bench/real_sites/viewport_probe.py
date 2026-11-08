@@ -101,12 +101,10 @@ SCROLL_JS = r"""
 async (maxH) => {
   const h = () => Math.min(document.documentElement.scrollHeight, maxH);
   // html{scroll-behavior:smooth} 下 scrollTo 是动画, 400ms 回不到顶(solidjs 克隆截在 -1650px); 滚动期间强制 auto, 回顶后等到 scrollY==0
-  const de = document.documentElement, sb = [de.style.scrollBehavior, document.body ? document.body.style.scrollBehavior : ''];
-  de.style.setProperty('scroll-behavior', 'auto', 'important'); if (document.body) document.body.style.setProperty('scroll-behavior', 'auto', 'important');
-  for (let y = 0; y < h(); y += innerHeight * 0.8) { scrollTo(0, y); await new Promise(r => setTimeout(r, 320)); }
-  scrollTo(0, 0); await new Promise(r => setTimeout(r, 400));
-  for (let i = 0; i < 12 && (scrollY || pageYOffset); i++) { scrollTo(0, 0); await new Promise(r => setTimeout(r, 100)); }
-  de.style.scrollBehavior = sb[0]; if (document.body) document.body.style.scrollBehavior = sb[1];
+  const go = y => scrollTo({top: y, left: 0, behavior: 'instant'});
+  for (let y = 0; y < h(); y += innerHeight * 0.8) { go(y); await new Promise(r => setTimeout(r, 320)); }
+  go(0); await new Promise(r => setTimeout(r, 400));
+  for (let i = 0; i < 12 && scrollY; i++) { go(0); await new Promise(r => setTimeout(r, 100)); }
   return document.documentElement.scrollWidth;
 }
 """
