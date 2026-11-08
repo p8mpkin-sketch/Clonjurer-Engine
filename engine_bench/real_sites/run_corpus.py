@@ -360,6 +360,15 @@ def _probe_viewports(args, results, vps, pre=None):
                 r["vp_dyn_frac"] = {v: (p.get(v) or {}).get("dyn_frac") for v in vps}
             if p.get("probe_lag_s") is not None:
                 r["probe_lag_s"] = p["probe_lag_s"]
+            # 低分视口的克隆侧诊断(失败请求/裂图/样式表/脚本错误)留档, 远程归因只靠日志
+            diag = {}
+            for v in vps:
+                row = p.get(v) or {}
+                sc = row.get("robust") if row.get("robust") is not None else row.get("score")
+                if isinstance(sc, (int, float)) and sc < 85 and row.get("clone_diag"):
+                    diag[v] = {"clone": row["clone_diag"], "orig": row.get("orig_diag")}
+            if diag:
+                r["vp_diag"] = diag
             r["vp_overflow"] = [v for v in vps if (p.get(v) or {}).get("clone_overflow_x")
                                 and not (p.get(v) or {}).get("orig_overflow_x")]
 

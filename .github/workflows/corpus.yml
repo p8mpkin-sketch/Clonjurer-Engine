@@ -110,6 +110,16 @@ jobs:
           vp_dirs = sorted(pathlib.Path("engine_bench/real_sites/runs").glob("viewports_*"))
           for r in run.get("results", []):
               low = _low_vps(r)
+              for v, d in (r.get("vp_diag") or {}).items():
+                  print(f"::group::vp-diag {r.get('task_id')} {v} {r.get('url')}")
+                  for side in ("clone", "orig"):
+                      dd = d.get(side) or {}
+                      print(f"[{side}] 图 {dd.get('nimg')} 张, 裂图 {len(dd.get('broken') or [])}, 失败请求 {len(dd.get('failed') or [])}, 脚本错误 {len(dd.get('errors') or [])}")
+                      for b in (dd.get("broken") or [])[:20]: print("  裂图", b)
+                      for f in (dd.get("failed") or [])[:30]: print("  失败", f)
+                      for e in (dd.get("errors") or [])[:5]: print("  错误", e)
+                      for sh in (dd.get("sheets") or [])[:40]: print("  样式表", sh)
+                  print("::endgroup::")
               # 低分视口的探针截图(原站/克隆/遮罩后)进日志: 产物存储域名在部分环境不可达
               for v in low:
                   for kind in ("orig", "clone", "orig_rb", "clone_rb"):

@@ -123,9 +123,34 @@ async ([maxH, capMs]) => {
 """
 
 
+# 诊断: 该视口下加载失败/4xx+ 的请求、样式表装载情况、脚本错误 —— 远程只能读日志时, 这是
+# 定位"手机宽度下图裂/样式丢"的直接证据(产物存储域名在部分环境不可达)
+DIAG_JS = r"""() => {
+  const sheets = [];
+  for (const sh of document.styleSheets) {
+    let n = -1; try { n = sh.cssRules.length; } catch (e) {}
+    sheets.push([(sh.href || ('inline:' + ((sh.ownerNode && sh.ownerNode.getAttribute('data-clone-freeze')) || (sh.ownerNode && sh.ownerNode.getAttribute('data-cv-band')) || ''))).slice(-90), n, sh.media.mediaText.slice(0, 60), !!sh.disabled]);
+  }
+  const broken = [];
+  for (const im of document.images) {
+    if (im.complete && im.naturalWidth === 0 && im.currentSrc) {
+      const r = im.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) broken.push([im.currentSrc.slice(-120), Math.round(r.width), Math.round(r.height)]);
+    }
+  }
+  return {sheets: sheets.slice(0, 40), broken: broken.slice(0, 30), nimg: document.images.length};
+}"""
+
+
 def _shoot(ctx, url, vp, out: Path, timeout_ms=45000):
     page = ctx.new_page()
     info = {"url": url}
+    failed, errors = [], []
+    page.on("requestfailed", lambda rq: len(failed) < 40 and failed.append(
+        [rq.url[-120:], (rq.failure or "")[:60], rq.resource_type]))
+    page.on("response", lambda rs: rs.status >= 400 and len(failed) < 40 and failed.append(
+        [rs.url[-120:], str(rs.status), rs.request.resource_type]))
+    page.on("pageerror", lambda e: len(errors) < 10 and errors.append(str(e)[:160]))
     try:
         for attempt in range(4):   # 网络层抖动(RESET/CLOSED/断网)退避重试, 不当成克隆缺陷
             try:
@@ -157,6 +182,11 @@ def _shoot(ctx, url, vp, out: Path, timeout_ms=45000):
         page.screenshot(path=str(out), full_page=True, animations="disabled", scale="css",
                         clip={"x": 0, "y": 0, "width": vp["width"], "height": clip_h})
         info["text"] = page.evaluate("document.body ? document.body.innerText.slice(0, 200000) : ''")
+        with suppress(Exception):
+            d = page.evaluate(DIAG_JS) or {}
+            d["failed"] = failed
+            d["errors"] = errors
+            info["diag"] = d
         info["ok"] = True
     except Exception as exc:   # noqa: BLE001 单侧失败记入结果
         info["ok"] = False
@@ -250,7 +280,8 @@ def probe_one(browser, base, task_id, url, viewports, outdir: Path, clone_tpl=No
             ctx.close()
         row = {"orig_overflow_x": ia.get("overflow_x"), "clone_overflow_x": ib.get("overflow_x"),
                "orig_h": ia.get("height"), "clone_h": ib.get("height"),
-               "orig_interstitial": ia.get("interstitial", 0), "clone_interstitial": ib.get("interstitial", 0)}
+               "orig_interstitial": ia.get("interstitial", 0), "clone_interstitial": ib.get("interstitial", 0),
+               "clone_diag": ib.get("diag"), "orig_diag": ia.get("diag")}
         if ia.get("ok") and ib.get("ok"):
             rects = (ia.get("ads") or []) + (ib.get("ads") or [])
             if rects:   # 第三方竞价广告位两侧统一遮灰(与引擎评分同口径)
