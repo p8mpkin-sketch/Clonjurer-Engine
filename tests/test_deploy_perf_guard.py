@@ -31,6 +31,8 @@ import config  # noqa: E402
 from core import flask_generator  # noqa: E402
 from core.clone.support import (  # noqa: E402
     deploy_hazard_audit,
+    fontface_swap_for_remote,
+    neutralize_deploy_hints,
     neutralize_deploy_hazard_scripts,
     neutralize_deploy_hazard_styles,
     neutralize_deploy_hazards,
@@ -146,6 +148,46 @@ class DeployAuditAndInvariant(unittest.TestCase):
                        ("http://a.com/b.js", False), ("//cdn/x.js", False),
                        ("cgn/a/b.js", True), ("data:text/css,", True), ("", True)]:
             self.assertEqual(_script_src_is_localized(s), exp, s)
+
+
+class DeployHintsAndFonts(unittest.TestCase):
+    """资源提示/外部 iframe/远程字体(全语料: preload 275 处、preconnect 1010 处、跨域 iframe 168 处、
+    远程字体切片 10 万条)。"""
+
+    def test_uncaptured_preload_and_all_preconnect_removed(self):
+        html = ('<link rel="preload" as="script" href="https://cdn.x.com/a.js">'
+                '<link rel="modulepreload" href="/_next/chunk.js">'
+                '<link rel="preconnect" href="https://fonts.gstatic.com">'
+                '<link rel="dns-prefetch" href="//x.com">')
+        self.assertEqual(neutralize_deploy_hints(html), "")
+
+    def test_localized_preload_and_stylesheet_kept(self):
+        html = ('<link rel="preload" as="style" href="/static/css/a.css">'
+                '<link rel="stylesheet" href="/static/css/a.css">'
+                '<link rel="icon" href="/static/img/f.ico">')
+        self.assertEqual(neutralize_deploy_hints(html), html)
+
+    def test_external_iframe_lazy_local_iframe_untouched(self):
+        html = '<iframe src="https://www.youtube.com/embed/x" width="1"></iframe><iframe src="/static/misc/l.html"></iframe>'
+        out = neutralize_deploy_hints(html)
+        self.assertIn('<iframe src="https://www.youtube.com/embed/x" width="1" loading="lazy">', out)
+        self.assertIn('<iframe src="/static/misc/l.html">', out)
+        self.assertEqual(neutralize_deploy_hints(out), out)   # 幂等
+
+    def test_fontface_swap_only_for_remote_without_display(self):
+        css = ('@font-face{font-family:A;src:url(https://cdn.x.com/f.woff2) format("woff2")}'
+               '@font-face{font-family:B;src:url(/static/fonts/b.woff2);}'
+               '@font-face{font-family:C;font-display:optional;src:url(https://x/c.woff)}')
+        out = fontface_swap_for_remote(css)
+        self.assertIn('format("woff2");font-display:swap;}', out)       # 远程且未声明 → 补 swap
+        self.assertIn('@font-face{font-family:B;src:url(/static/fonts/b.woff2);}', out)  # 本地不动
+        self.assertEqual(out.count("font-display"), 2)                  # 已声明 optional 的不覆盖
+        self.assertEqual(fontface_swap_for_remote(out), out)            # 幂等
+
+    def test_inline_style_fontface_swapped_via_total_entry(self):
+        html = '<style>@font-face{font-family:A;src:url(https://cdn.x.com/f.woff2)}</style>'
+        out = neutralize_deploy_hazards(html, PAGE_HOST)
+        self.assertIn("font-display:swap", out)
 
 
 class GeneratedFlaskPerf(unittest.TestCase):

@@ -2153,10 +2153,84 @@ def neutralize_deploy_hazard_styles(html: str) -> str:
     return _LINK_TAG_RE.sub(_repl, html)
 
 
+# 资源提示与外部 iframe(全语料: 未本地化 preload/prefetch 275 处/121 站, preconnect/dns-prefetch
+# 1010 处/239 站, 跨域 iframe 168 处/92 站)。提示类标签只是"预热", 指向未本地化地址时部署后只会
+# 多发一轮回源/外联请求(抢带宽、泄露访问), 删掉不影响任何渲染; 跨域 iframe(视频/地图/广告)无法
+# 本地化, 补 loading=lazy 让它不与首屏资源抢加载(评分渲染本就拦截外联, 画面不变)。
+_IFRAME_TAG_RE = re.compile(r"<iframe\b(?P<attrs>[^>]*)>", re.I | re.S)
+
+
+def neutralize_deploy_hints(html: str) -> str:
+    """删未本地化的 preload/prefetch/modulepreload 与所有 preconnect/dns-prefetch; 外部 iframe 懒加载。"""
+    low = html.lower()
+    if "<link" in low:
+        def _link(m):
+            attrs = m.group("attrs") or ""
+            rel = (_attr(attrs, "rel") or "").lower().split()
+            if not rel:
+                return m.group(0)
+            if "preconnect" in rel or "dns-prefetch" in rel:
+                return ""
+            if any(r in rel for r in ("preload", "prefetch", "modulepreload", "prerender")):
+                href = _attr(attrs, "href")
+                if href is not None and not _script_src_is_localized(href):
+                    return ""
+            return m.group(0)
+        html = _LINK_TAG_RE.sub(_link, html)
+    if "<iframe" in low:
+        def _iframe(m):
+            attrs = m.group("attrs") or ""
+            src = _attr(attrs, "src")
+            if src is None or _script_src_is_localized(src):
+                return m.group(0)
+            if re.search(r"\bloading\s*=", attrs, re.I):
+                return m.group(0)
+            return f"<iframe{attrs} loading=\"lazy\">"
+        html = _IFRAME_TAG_RE.sub(_iframe, html)
+    return html
+
+
+# 远程字体(全语料: 本地化后的 CSS 里仍有 10 万条 url(https://...) 字体切片引用, 99% 集中在采集时
+# ConnectTimeout 的字体 CDN)。浏览器按 unicode-range 懒请求切片, 每片默认 font-display:auto =
+# 文字先隐形(FOIT)最多 3s 等字体 —— 部署在连不上该 CDN 的环境里, 整页文字"闪白"数秒。
+# 通用处置: @font-face 的 src 含未本地化 url() 且未声明 font-display 时补 font-display:swap,
+# 文字立即以回退字体显示, 字体到了再换; 字体到不了画面与评分渲染(拦截外联)一致。
+_FONTFACE_RE = re.compile(r"@font-face\s*\{(?P<body>[^{}]*)\}", re.I | re.S)
+_CSS_REMOTE_URL_RE = re.compile(r"url\(\s*[\"']?(?P<u>[^\"')\s]+)", re.I)
+
+
+def fontface_swap_for_remote(css: str) -> str:
+    """CSS 文本: 含未本地化 src 的 @font-face 补 font-display:swap(已声明的不动)。返回新 CSS。"""
+    if "@font-face" not in css.lower():
+        return css
+
+    def _repl(m):
+        body = m.group("body")
+        if re.search(r"font-display\s*:", body, re.I):
+            return m.group(0)
+        urls = [u.strip() for u in _CSS_REMOTE_URL_RE.findall(body)]
+        if not any(not _script_src_is_localized(u) for u in urls):
+            return m.group(0)
+        sep = "" if body.rstrip().endswith(";") or not body.strip() else ";"
+        return "@font-face{" + body.rstrip() + sep + "font-display:swap;}"
+
+    return _FONTFACE_RE.sub(_repl, css)
+
+
+_STYLE_BLOCK_RE = re.compile(r"(<style\b[^>]*>)(.*?)(</style>)", re.I | re.S)
+
+
+def neutralize_deploy_fonts(html: str) -> str:
+    """交付 HTML 内联 <style> 里的远程 @font-face 补 font-display:swap。"""
+    if "@font-face" not in html.lower():
+        return html
+    return _STYLE_BLOCK_RE.sub(lambda m: m.group(1) + fontface_swap_for_remote(m.group(2)) + m.group(3), html)
+
+
 def neutralize_deploy_hazards(html: str, page_host: str = "") -> str:
-    """交付 HTML 去阻塞总入口: 阻塞脚本 + 渲染阻塞样式表。"""
-    return neutralize_deploy_hazard_styles(
-        neutralize_deploy_hazard_scripts(html, page_host))
+    """交付 HTML 去阻塞总入口: 阻塞脚本 + 渲染阻塞样式表 + 资源提示/外部 iframe + 远程字体 swap。"""
+    return neutralize_deploy_fonts(neutralize_deploy_hints(neutralize_deploy_hazard_styles(
+        neutralize_deploy_hazard_scripts(html, page_host))))
 
 
 def deploy_hazard_audit(html: str, page_host: str = "") -> dict:
