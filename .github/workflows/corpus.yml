@@ -220,6 +220,15 @@ jobs:
                       ck = [b for b in ctl if pidx(b) == cidx.get(k, -2)]
                       for b in kids[:8]: print(f"      子 {b[0].split('>')[-1][:60]} 原 y={b[1]} 高{b[2]} / 克隆 {'高' + str(ctm[b[0]][2]) if b[0] in ctm else '无'} [{b[3][:80]}]")
                       for b in [x for x in ck if x[0] not in obm][:4]: print(f"      子(克隆独有) {b[0].split('>')[-1][:60]} 克隆 y={b[1]} 高{b[2]} [{b[3][:80]}]")
+                      # 直接子项都是薄包装时看不出谁变高: 再列该块内所有两侧高度差 ≥20 的后代(沿父链判定)
+                      def _under(b, root):
+                          j = pidx(b)
+                          while 0 <= j < len(otl):
+                              if j == root: return True
+                              j = pidx(otl[j])
+                          return False
+                      desc = [b for b in otl if b[0] in ctm and abs(ctm[b[0]][2] - b[2]) >= 20 and b[0] != k and _under(b, oidx[k])]
+                      for b in desc[:6]: print(f"      后代 Δh {ctm[b[0]][2] - b[2]:+d} {b[0].split('>')[-1][:60]} 原 y={b[1]} 高{b[2]}/克隆{ctm[b[0]][2]} [{b[3][:100]}] | 克隆侧 [{ctm[b[0]][3][:100]}]")
                   print("::endgroup::")
               # 低分视口的探针截图(原站/克隆/遮罩后)进日志: 产物存储域名在部分环境不可达
               for v in low:

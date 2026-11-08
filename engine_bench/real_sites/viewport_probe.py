@@ -282,9 +282,9 @@ DIAG_JS = r"""() => {
     };
     // 第 5 项: 父元素在 tops 里的下标(-1 为 body 直属), 路径只留 12 层, 深处的祖先/子孙关系靠它判断
     const walkT = (el, depth, pidx) => {
-      if (tops.length >= 6000 || depth > 40) return;
+      if (tops.length >= 12000 || depth > 40) return;
       for (const ch of el.children) {
-        if (tops.length >= 6000) break;
+        if (tops.length >= 12000) break;
         if (/^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE|LINK|META)$/.test(ch.tagName)) continue;
         const c = cs(ch); if (c.display === 'none' || c.visibility === 'hidden') continue;
         const r = ch.getBoundingClientRect();
