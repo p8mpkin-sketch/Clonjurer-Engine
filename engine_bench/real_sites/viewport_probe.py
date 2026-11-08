@@ -155,13 +155,13 @@ DIAG_JS = r"""() => {
     band: getComputedStyle(document.documentElement).getPropertyValue('--cv-band'),
     vw: innerWidth, dpr: devicePixelRatio,
   };
-  // 可见文本行(首屏 + 下方 3 屏): 两侧做差直接看出克隆少了/多了哪些文案(表单/计数/弹层)
+  // 可见文本行(评分覆盖的前 8 屏): 两侧做差直接看出克隆少了/多了哪些文案(表单/计数/弹层)
   const lines = [];
   try {
-    const lim = innerHeight * 4;
+    const lim = innerHeight * 8;
     const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     let t;
-    while ((t = w.nextNode()) && lines.length < 400) {
+    while ((t = w.nextNode()) && lines.length < 900) {
       const s = (t.nodeValue || '').replace(/\s+/g, ' ').trim();
       if (s.length < 2) continue;
       const el = t.parentElement; if (!el) continue;
@@ -178,9 +178,9 @@ DIAG_JS = r"""() => {
       const label = (el.placeholder || el.value || el.getAttribute('aria-label') || el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60);
       if (!label) continue;
       const r = el.getBoundingClientRect(); const c = cs(el);
-      const vis = r.width > 0 && r.height > 0 && c.visibility !== 'hidden' && c.display !== 'none' && +c.opacity !== 0 && r.top < innerHeight * 4;
-      if (vis) { if (lines.length < 400) lines.push('[' + el.tagName.toLowerCase() + '] ' + label + ' @' + Math.round(r.top) + ',' + Math.round(r.left) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height)); continue; }
-      if (hiddenInputs.length >= 12 || r.top > innerHeight * 4) continue;
+      const vis = r.width > 0 && r.height > 0 && c.visibility !== 'hidden' && c.display !== 'none' && +c.opacity !== 0 && r.top < innerHeight * 8;
+      if (vis) { if (lines.length < 900) lines.push('[' + el.tagName.toLowerCase() + '] ' + label + ' @' + Math.round(r.top) + ',' + Math.round(r.left) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height)); continue; }
+      if (hiddenInputs.length >= 12 || r.top > innerHeight * 8) continue;
       let why = c.display === 'none' ? 'display:none' : c.visibility === 'hidden' ? 'visibility' : +c.opacity === 0 ? 'opacity0' : (!r.width || !r.height ? 'zero-size' : 'other');
       let anc = el, hop = 0;
       while (anc && anc !== document.body && hop++ < 12) { const a = cs(anc); if (a.display === 'none' || a.visibility === 'hidden') { why += ' <- ' + anc.tagName.toLowerCase() + (anc.id ? '#' + anc.id : '') + (anc.hasAttribute('data-cv-vp') ? '[cv-vp=' + anc.getAttribute('data-cv-vp') + ']' : '') + (anc.hasAttribute('data-cv') ? '[cv]' : '') + ':' + (a.display === 'none' ? 'display:none' : 'visibility'); break; } anc = anc.parentElement; }

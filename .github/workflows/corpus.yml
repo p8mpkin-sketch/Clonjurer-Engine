@@ -141,7 +141,7 @@ jobs:
                       for d in vp_dirs:
                           f = d / f"{r.get('task_id')}_{v}_{kind}.png"
                           if f.is_file():
-                              _shot(f, f"{r.get('task_id')} vp {v} {kind} {r.get('url')}", width=360, max_h=1600)
+                              _shot(f, f"{r.get('task_id')} vp {v} {kind} {r.get('url')}", width=300, max_h=5200)
                               break
               if r.get("status") == "completed" and isinstance(r.get("score"), (int, float)) and r["score"] >= 90 and not low:
                   continue
