@@ -861,6 +861,7 @@ class GlobalResetRule(unittest.TestCase):
         self.assertFalse(f("@media (max-width: 600px) { a { color: red; } }"))
 
 
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
 class FixedIframeInterstitial(unittest.TestCase):
     """第三方营销弹窗 iframe(fixed 铺满视口, z-index auto, 跨域看不到内部)评分时隐藏; 小的嵌入 iframe 不动。"""
     PAGE = ('<html><body style="margin:0"><div style="height:3000px">x</div>'
