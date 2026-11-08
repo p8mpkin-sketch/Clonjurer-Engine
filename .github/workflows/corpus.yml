@@ -23,6 +23,10 @@ on:
         description: "逗号分隔 URL, 覆盖语料(可选)"
         required: false
         default: ""
+      engine_env:
+        description: "实例环境变量(空格分隔 K=V, 同时段 A/B 用, 如 CLONER_FONT_PLAN=0)"
+        required: false
+        default: ""
   schedule:
     - cron: "30 18 * * *"   # 北京时间 02:30
 
@@ -44,7 +48,7 @@ jobs:
       - name: 启动平台实例(开放模式, 无用户)
         run: |
           mkdir -p logs
-          CLONER_PORT=8897 nohup python app.py > logs/app_ci.log 2>&1 &
+          env CLONER_PORT=8897 ${{ github.event.inputs.engine_env }} nohup python app.py > logs/app_ci.log 2>&1 &
           for i in $(seq 1 60); do
             curl -sf http://127.0.0.1:8897/api/auth/state && exit 0
             sleep 1
