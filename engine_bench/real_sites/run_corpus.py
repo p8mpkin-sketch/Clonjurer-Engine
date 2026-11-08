@@ -288,6 +288,9 @@ def _probe_viewports(args, results, vps):
             r["vp"] = {v: (p.get(v) or {}).get("score") for v in vps}
             if args.probe_noise:
                 r["vp_ceiling"] = {v: (p.get(v) or {}).get("ceiling") for v in vps}
+                # 稳健口径: 两次原站加载间变化的区域两侧遮掉, 克隆取较接近的一次原站(见 viewport_probe)
+                r["vp_robust"] = {v: (p.get(v) or {}).get("robust") for v in vps}
+                r["vp_robust_ceiling"] = {v: (p.get(v) or {}).get("robust_ceiling") for v in vps}
             r["vp_overflow"] = [v for v in vps if (p.get(v) or {}).get("clone_overflow_x")
                                 and not (p.get(v) or {}).get("orig_overflow_x")]
 
@@ -340,6 +343,9 @@ def _summary_one(results):
         "p90_elapsed": pct(elapsed, 0.9),
         # 视口分项(探针口径): {desktop/tablet/mobile: 均分}
         "vp_mean": _vp_means(results),
+        "vp_ceiling_mean": _vp_means(results, "vp_ceiling"),
+        "vp_robust_mean": _vp_means(results, "vp_robust"),
+        "vp_robust_ceiling_mean": _vp_means(results, "vp_robust_ceiling"),
     }
 
 
@@ -349,10 +355,10 @@ def _mean_of(results, key):
     return round(statistics.mean(xs), 1) if xs else None
 
 
-def _vp_means(results):
+def _vp_means(results, key="vp"):
     out = {}
     for r in results:
-        for v, sc in (r.get("vp") or {}).items():
+        for v, sc in (r.get(key) or {}).items():
             if isinstance(sc, (int, float)) and not r.get("blocked"):
                 out.setdefault(v, []).append(sc)
     return {v: round(statistics.mean(xs), 1) for v, xs in out.items()}
@@ -364,7 +370,12 @@ _VP_NAMES = {"desktop": "桌面", "tablet": "平板768", "mobile": "手机390",
 
 def _vp_line(g):
     vm = g.get("vp_mean") or {}
-    return "".join(f"  {_VP_NAMES.get(v, v)} {_fmt(x)}" for v, x in vm.items())
+    line = "".join(f"  {_VP_NAMES.get(v, v)} {_fmt(x)}" for v, x in vm.items())
+    rb, rc = g.get("vp_robust_mean") or {}, g.get("vp_robust_ceiling_mean") or {}
+    if rb:
+        line += "  | 稳健口径:" + "".join(
+            f"  {_VP_NAMES.get(v, v)} {_fmt(x)}" + (f"/{_fmt(rc[v])}" if v in rc else "") for v, x in rb.items())
+    return line
 
 
 def _ci_thumbs(results, below=99.0):

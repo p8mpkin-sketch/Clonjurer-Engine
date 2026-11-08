@@ -129,6 +129,73 @@ def _shoot(ctx, url, vp, out: Path, timeout_ms=45000):
     return info
 
 
+# ---- 抗活体随机性的稳健口径(--noise 时一并给出) ----
+# 原站两次加载之间就不同的区域(轮播相位、实时新闻、计数器、A/B 实验位): 克隆不可能也不该
+# 复现某一次的状态。按 24px 网格比两次原站截图, 差异块(膨胀一格)三张图同处涂灰后再比;
+# 克隆分取与两次原站中较接近的一次(活体在两种状态间切换时, 克隆对上其中任一种都算对)。
+# 差异块超过公共区域一半时不遮(整页错位, 遮了就没有可比内容), 只报 dyn_frac 供参考。
+DYN_BLOCK = 24
+DYN_THRESH = 12.0
+DYN_MAX_FRAC = 0.5
+
+
+def dynamic_rects(a_path, a2_path, block=DYN_BLOCK, thresh=DYN_THRESH):
+    """两次原站截图的差异块 -> ([x, y, w, h], 差异块占公共区域比例)。"""
+    import numpy as np
+    from PIL import Image
+    with Image.open(a_path) as ia, Image.open(a2_path) as ib:
+        ga, gb = ia.convert("L"), ib.convert("L")
+    w, h = min(ga.width, gb.width), min(ga.height, gb.height)
+    if w < block or h < block:
+        return [], 0.0
+    A = np.asarray(ga, dtype=np.float32)[:h, :w]
+    B = np.asarray(gb, dtype=np.float32)[:h, :w]
+    nx, ny = w // block, h // block
+    d = np.abs(A[:ny * block, :nx * block] - B[:ny * block, :nx * block])
+    cells = d.reshape(ny, block, nx, block).mean(axis=(1, 3)) > thresh
+    if not cells.any():
+        return [], 0.0
+    grown = cells.copy()
+    grown[1:, :] |= cells[:-1, :]
+    grown[:-1, :] |= cells[1:, :]
+    grown[:, 1:] |= cells[:, :-1]
+    grown[:, :-1] |= cells[:, 1:]
+    frac = float(grown.mean())
+    rects = []
+    for y in range(ny):            # 每行合并连续块, 矩形数可控
+        x = 0
+        while x < nx:
+            if grown[y, x]:
+                x0 = x
+                while x < nx and grown[y, x]:
+                    x += 1
+                rects.append([x0 * block, y * block, (x - x0) * block, block])
+            else:
+                x += 1
+    return rects, frac
+
+
+def robust_scores(a, a2, b, outdir, tag, ia, i2, ib):
+    """返回 {robust, robust_ceiling, dyn_frac}; 原图不动, 遮罩写到 *_rb.png 副本。"""
+    import shutil
+    from core.cloner_engine import _mask_rects, compute_visual_similarity
+    rects, frac = dynamic_rects(a, a2)
+    out = {"dyn_frac": round(frac, 3)}
+    if frac > DYN_MAX_FRAC:
+        rects = []
+    am, a2m, bm = (outdir / f"{tag}_{k}_rb.png" for k in ("orig", "orig2", "clone"))
+    for src, dst in ((a, am), (a2, a2m), (b, bm)):
+        shutil.copyfile(src, dst)
+        if rects:
+            _mask_rects(dst, rects)
+    s1 = compute_visual_similarity(am, bm, None, orig_text=ia.get("text", ""), clone_text=ib.get("text", "")).get("score")
+    s2 = compute_visual_similarity(a2m, bm, None, orig_text=i2.get("text", ""), clone_text=ib.get("text", "")).get("score")
+    out["robust"] = max(x for x in (s1, s2) if x is not None) if (s1 is not None or s2 is not None) else None
+    out["robust_ceiling"] = compute_visual_similarity(
+        am, a2m, None, orig_text=ia.get("text", ""), clone_text=i2.get("text", "")).get("score")
+    return out
+
+
 def probe_one(browser, base, task_id, url, viewports, outdir: Path, clone_tpl=None, noise=False):
     from core.cloner_engine import compute_visual_similarity
     res = {"task_id": task_id, "url": url}
@@ -169,6 +236,8 @@ def probe_one(browser, base, task_id, url, viewports, outdir: Path, clone_tpl=No
                         _mask_rects(a2, rects + (i2.get("ads") or []))
                     row["ceiling"] = compute_visual_similarity(
                         a, a2, None, orig_text=ia.get("text", ""), clone_text=i2.get("text", "")).get("score")
+                    with suppress(Exception):
+                        row.update(robust_scores(a, a2, b, outdir, f"{task_id}_{name}", ia, i2, ib))
         else:
             row["error"] = ia.get("error") or ib.get("error")
         res[name] = row
@@ -212,7 +281,8 @@ def main():
     ap.add_argument("--out", default="")
     ap.add_argument("--workers", type=int, default=3)
     ap.add_argument("--clone-url", default="", help="克隆地址模板, 默认 {base}/preview/{id}/")
-    ap.add_argument("--noise", action="store_true", help="另测原站自比上限(每视口多一次原站加载)")
+    ap.add_argument("--noise", action="store_true",
+                    help="另测原站自比上限(每视口多一次原站加载), 并给出抗活体随机的稳健分 robust")
     args = ap.parse_args()
     pairs = []
     if args.run:
