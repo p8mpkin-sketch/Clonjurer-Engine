@@ -282,7 +282,7 @@ DIAG_JS = r"""() => {
     };
     // 第 5 项: 父元素在 tops 里的下标(-1 为 body 直属), 路径只留 12 层, 深处的祖先/子孙关系靠它判断
     const walkT = (el, depth, pidx) => {
-      if (tops.length >= 6000 || depth > 24) return;
+      if (tops.length >= 6000 || depth > 40) return;
       for (const ch of el.children) {
         if (tops.length >= 6000) break;
         if (/^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE|LINK|META)$/.test(ch.tagName)) continue;
@@ -293,7 +293,9 @@ DIAG_JS = r"""() => {
         if (r.height >= 10 && r.width >= 30 && c.position !== 'fixed') {
           idx = tops.length;
           tops.push([key12(ch), Math.round(r.top + scrollY), Math.round(r.height), (ch.getAttribute('class') || '').slice(0, 50) + ' | ' + (ch.getAttribute('style') || '').slice(0, 100)
-            + (ch.hasAttribute('data-cv-vp') ? ' cv-vp=' + ch.getAttribute('data-cv-vp') : '') + (ch.hasAttribute('data-cv') ? ' cv' : ''), pidx]);
+            + (ch.hasAttribute('data-cv-vp') ? ' cv-vp=' + ch.getAttribute('data-cv-vp') : '') + (ch.hasAttribute('data-cv') ? ' cv' : '')
+            + (c.maxHeight !== 'none' ? ' mh=' + c.maxHeight : '') + (c.overflow !== 'visible' ? ' ov=' + c.overflow : '') + (c.display.indexOf('grid') >= 0 ? ' grid' : '')
+            + (ch.hasAttribute('aria-expanded') ? ' exp=' + ch.getAttribute('aria-expanded') : '') + (ch.hasAttribute('aria-hidden') ? ' ahid=' + ch.getAttribute('aria-hidden') : ''), pidx]);
         }
         walkT(ch, depth + 1, idx);
       }
