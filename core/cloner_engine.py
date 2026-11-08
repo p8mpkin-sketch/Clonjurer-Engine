@@ -1547,10 +1547,17 @@ class ClonerEngine:
             with suppress(Exception):
                 htmls = pages[tag].evaluate(ALT_EXTRACT_JS, top) or {}
                 sizes = page.evaluate(SUBTREE_SIZE_JS, list(htmls))
-                for p, (h, alt_text, alt_n) in htmls.items():
-                    main_text, main_n = sizes.get(p, (0, 0))
+                for p, (h, alt_text, alt_n, *alt_rest) in htmls.items():
+                    main_text, main_n, *main_rest = sizes.get(p, (0, 0, 0))
+                    alt_ctrl = alt_rest[0] if alt_rest else 0
+                    main_ctrl = main_rest[0] if main_rest else 0
                     # 窄屏版明显"更空": 多半是异步内容(赞助位/推荐流)还没到, 不是换了结构
                     if alt_text < 0.5 * main_text or alt_n < 0.3 * main_n:
+                        continue
+                    # 窄屏版表单控件比主页少: 组件晚水合(wix 首屏邮箱表单在窄屏页里时有时无 → 手机端整块表单消失),
+                    # 不是响应式换结构; 退回主页子树 + 分视口样式
+                    if main_ctrl and alt_ctrl < main_ctrl:
+                        self.log("RENDER", f"窄屏 DOM 变体: {p[:60]} 的 {tag} 版表单控件 {alt_ctrl} < 主页 {main_ctrl}, 视为未水合, 不用")
                         continue
                     variants.setdefault(p, {})[tag] = h
         if not variants:

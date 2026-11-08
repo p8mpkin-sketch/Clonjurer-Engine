@@ -719,7 +719,7 @@ ALT_EXTRACT_JS = r"""(paths) => {
         if (v && !/^(data:|blob:|#|javascript:|mailto:|tel:)/i.test(v)) { try { x.setAttribute(a, new URL(v, document.baseURI).href); } catch (e) {} }
       }
     });
-    out[p] = [c.outerHTML, (el.innerText || '').trim().length, el.getElementsByTagName('*').length];
+    out[p] = [c.outerHTML, (el.innerText || '').trim().length, el.getElementsByTagName('*').length, el.querySelectorAll('input:not([type=hidden]),textarea,select').length];
   }
   return out;
 }""".replace("__CANVAS_IMG__", CANVAS_IMG_FN)
@@ -738,7 +738,7 @@ SUBTREE_SIZE_JS = r"""(paths) => {
     return e;
   };
   const out = {};
-  for (const p of paths) { const el = resolve(p); if (el) out[p] = [(el.innerText || '').trim().length, el.getElementsByTagName('*').length]; }
+  for (const p of paths) { const el = resolve(p); if (el) out[p] = [(el.innerText || '').trim().length, el.getElementsByTagName('*').length, el.querySelectorAll('input:not([type=hidden]),textarea,select').length]; }
   return out;
 }"""
 
@@ -783,7 +783,7 @@ STYLE_TEXTS_JS = r"""() => {
 NARROW_STABLE_JS = r"""(ms) => new Promise(res => {
   let last = '', hits = 0;
   const sig = () => { const im = document.images; let s = 0; for (const i of im) if (i.currentSrc) s++;
-    return (document.body ? document.body.innerText.length : 0) + '|' + im.length + '|' + s; };
+    return (document.body ? document.body.innerText.length : 0) + '|' + im.length + '|' + s + '|' + document.querySelectorAll('input,textarea,select,button').length; };
   const t = setInterval(() => { const v = sig(); if (v === last) { if (++hits >= 2) { clearInterval(t); res(1); } } else { hits = 0; last = v; } }, 250);
   setTimeout(() => { clearInterval(t); res(0); }, ms);
 })"""

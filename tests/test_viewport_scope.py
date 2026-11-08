@@ -883,3 +883,19 @@ class FixedIframeInterstitial(unittest.TestCase):
             pg.evaluate(INTERSTITIAL_RESTORE_JS)
             self.assertNotEqual(pg.evaluate("getComputedStyle(document.getElementById('promo')).display"), "none")
             b.close()
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class VariantControlCount(unittest.TestCase):
+    """变体抽取与主页子树尺寸都带表单控件数: 窄屏版控件少于主页 → 视为未水合不采用(wix 手机端邮箱表单整块消失)。"""
+    def test_control_counts_reported(self):
+        from core.clone.js import ALT_EXTRACT_JS, SUBTREE_SIZE_JS
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch(); pg = b.new_page()
+            pg.set_content('<body><section><h1>Hi</h1><form><input placeholder="email"><input type="hidden" name="t"><button>Go</button></form></section></body>')
+            alt = pg.evaluate(ALT_EXTRACT_JS, ["section:1"])["section:1"]
+            size = pg.evaluate(SUBTREE_SIZE_JS, ["section:1"])["section:1"]
+            self.assertEqual(alt[3], 1, "hidden input 不计, button 不计")
+            self.assertEqual(size[2], 1)
+            b.close()
