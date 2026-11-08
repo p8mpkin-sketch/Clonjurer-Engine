@@ -158,8 +158,8 @@ jobs:
                               if shown < 14 and (abs(a[2] - b[2]) >= 3 or abs(a[5] - b[5]) >= 2 or abs(a[4] - b[4]) >= 2 or (a[6], a[7]) != (b[6], b[7])):
                                   print(f"  图盒差异 {a[0]} {a[1]}: 原 {a[4]}x{a[5]}@{a[2]} 原始{a[6]}x{a[7]} {a[8]} | 克隆 {b[4]}x{b[5]}@{b[2]} 原始{b[6]}x{b[7]} {b[8]} (Δy {b[2] - a[2]})"); shown += 1
                       else:
-                          for a in ob[i1:i2][:4]: print(f"  原站侧图盒 {a[0]} {a[1]} {a[4]}x{a[5]}@{a[2]} 原始{a[6]}x{a[7]}")
-                          for b in cb[j1:j2][:4]: print(f"  克隆侧图盒 {b[0]} {b[1]} {b[4]}x{b[5]}@{b[2]} 原始{b[6]}x{b[7]}")
+                          for a in ob[i1:i2][:4]: print(f"  原站侧图盒 {a[0]} {a[1]} {a[4]}x{a[5]}@{a[2]} 原始{a[6]}x{a[7]} [{a[9] if len(a) > 9 else ''}] 父[{a[10] if len(a) > 10 else ''}]")
+                          for b in cb[j1:j2][:4]: print(f"  克隆侧图盒 {b[0]} {b[1]} {b[4]}x{b[5]}@{b[2]} 原始{b[6]}x{b[7]} [{b[9] if len(b) > 9 else ''}] 父[{b[10] if len(b) > 10 else ''}]")
                   # 大块显隐做差: 原站藏起(display:none)而克隆显示的块(多出的桌面横幅/手机版重复块), 及反向;
                   # 原站侧带 inline= 的是脚本首载按宽/UA 写的内联样式(应由窄屏首载对照采到), 不带的是样式表/媒体查询没生效
                   obk = {b[0]: b for b in ((d.get("orig") or {}).get("blocks") or [])}

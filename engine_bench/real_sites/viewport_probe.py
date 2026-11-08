@@ -214,8 +214,12 @@ DIAG_JS = r"""() => {
       let src = el.currentSrc || el.src || el.getAttribute('srcset') || '';
       if (!src && c.backgroundImage && c.backgroundImage !== 'none') src = c.backgroundImage;
       src = (src.match(/[^\/"'()?#]+(?=[?#"')]|$)/) || [src])[0].slice(-60);
+      const par = el.parentElement, pc = par ? cs(par) : null;
       boxes.push([el.tagName.toLowerCase(), src, Math.round(r.top), Math.round(r.left), Math.round(r.width), Math.round(r.height),
-                  el.naturalWidth || el.videoWidth || 0, el.naturalHeight || el.videoHeight || 0, (c.objectFit || '') + '/' + (c.aspectRatio || '')]);
+                  el.naturalWidth || el.videoWidth || 0, el.naturalHeight || el.videoHeight || 0, (c.objectFit || '') + '/' + (c.aspectRatio || ''),
+                  // [9] 自身内联 style [10] 父元素 标签.class + 内联 style + 计算高: 盒高与原站不同时看高度是写死在谁身上
+                  (el.getAttribute('style') || '').slice(0, 80) + (el.hasAttribute('data-cv') ? ' cv=' + el.getAttribute('data-cv') : ''),
+                  par ? par.tagName.toLowerCase() + '.' + String(par.className || '').slice(0, 24) + ' {' + (par.getAttribute('style') || '').slice(0, 60) + '} h=' + Math.round(par.getBoundingClientRect().height) + (par.hasAttribute('data-cv') ? ' cv=' + par.getAttribute('data-cv') : '') : '']);
     }
   } catch (e) {}
   // 大块显隐(前 8 屏): body 下 7 层内 高≥150px 且宽≥半屏的可见块, 以及含图/链接却 display:none/visibility:hidden 的块

@@ -1122,9 +1122,22 @@ CV_EMIT_JS = r"""
         if (same('t', 'm')) { fluid.add('t'); fluid.add('m'); }
         else if (same('d', 't')) { fluid.add('d'); fluid.add('t'); }
       }
+      // 手机段与 0.92 倍宽首载对照页(loads.__pair.m)同比: 平板/手机两段不同比(换了列数)时三点看不出, 但 390 与 359
+      // 两张首载页在同一布局里, 值比≈宽比就是"按宽算的尺寸"(wix 卡片图 height 289px → 420 宽原站 311), 手机段写 vw
+      const pairM = loads.__pair && loads.__pair.m;
+      const pairVal = (k) => {
+        if (k !== 'm' || !pairM || !m.paths || nmap.m === null || nmap.m === undefined || nmap.m === 0) return null;
+        const L2 = pairM.paths && pairM.paths[m.paths[i]];
+        if (!L2 || L2[0] !== el.tagName) return null;
+        const PV = parse(L2[2] + (L2[4] ? ';' + L2[4] : ''));
+        const pv = PV[p] ? px(PV[p][0]) : null;
+        if (pv === null || pv === 0 || pv === nmap.m) return null;
+        return Math.abs(pv / pairM.w - nmap.m / W.m) <= Math.abs(nmap.m / W.m) * 0.015 ? (nmap.m / W.m * 100).toFixed(4) + 'vw' : null;
+      };
       const emit = (k, v) => {
         if (!v) return;
-        const val = fluid.has(k) ? (nmap[k] / W[k] * 100).toFixed(4) + 'vw' : v[0];
+        let val = fluid.has(k) ? (nmap[k] / W[k] * 100).toFixed(4) + 'vw' : v[0];
+        if (!fluid.has(k)) { const pv = pairVal(k); if (pv) { val = pv; out.pairvw = (out.pairvw || 0) + 1; } }
         rule[k].push(p + ':' + val + (v[1] ? '!important' : ''));
       };
       emit('d', dv);

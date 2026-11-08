@@ -1237,3 +1237,59 @@ class FluidPairPage(unittest.TestCase):
                     pg.close()
             finally:
                 b.close()
+
+
+PAIR_EMIT_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<style>body{margin:0}#card{width:100%}</style></head><body>
+<div id="card"><img id="pic" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt=""></div>
+<script>
+// 卡片图高度只在加载时按宽算一次写成内联 px; 窄于 768 时与宽同比, 桌面/平板是另一套列数(不同比), resize 不重写
+var pic = document.getElementById('pic'), w = innerWidth;
+pic.style.width = '100%';
+pic.style.height = (w < 768 ? Math.round(w * 0.741) : (w < 1000 ? 300 : 420)) + 'px';
+</script></body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class PairPageBand(unittest.TestCase):
+    """CV_EMIT 手机段: 平板/手机两段不同比时, 与 0.92 倍宽首载对照页同比(值比≈宽比)的 px 仍写 vw。"""
+
+    def test_phone_band_px_fluid_by_pair(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 1440, "height": 800})
+                page.set_content(PAIR_EMIT_PAGE)
+                page.evaluate(ce.CV_RECORD_JS, "d")
+                for tag, w in (("t", 768), ("m", 390)):
+                    page.set_viewport_size({"width": w, "height": 800})
+                    page.evaluate(ce.CV_QUIET_JS, 100)
+                    page.evaluate(ce.CV_RECORD_JS, tag)
+                page.set_viewport_size({"width": 1440, "height": 800})
+                page.evaluate(ce.CV_QUIET_JS, 100)
+                page.evaluate(ce.CV_RECORD_JS, "b")
+                loads = {}
+                for tag, w in (("t", 768), ("m", 390)):
+                    pg = b.new_page(viewport={"width": w, "height": 800}); pg.set_content(PAIR_EMIT_PAGE)
+                    loads[tag] = pg.evaluate(ce.CV_PATHS_JS); pg.close()
+                pg = b.new_page(viewport={"width": 359, "height": 800}); pg.set_content(PAIR_EMIT_PAGE)
+                loads["__pair"] = {"m": {"w": 359, "paths": pg.evaluate(ce.CV_PATHS_JS)}}; pg.close()
+                out = page.evaluate(ce.CV_EMIT_JS, loads)
+                self.assertEqual(out.get("pairvw"), 1, out)
+                html = page.content()
+            finally:
+                b.close()
+            html = ce.scope_viewport_css(html, 1000, 0).replace("<script>", "<script type='x'>")
+            b = p.chromium.launch()
+            try:
+                for w in (360, 420, 440):
+                    pg = b.new_page(viewport={"width": w, "height": 800})
+                    pg.set_content(html)
+                    h = pg.evaluate("document.getElementById('pic').getBoundingClientRect().height")
+                    self.assertAlmostEqual(h, w * 0.741, delta=1.5, msg=f"{w}: {h}")
+                    pg.close()
+                pg = b.new_page(viewport={"width": 1440, "height": 800}); pg.set_content(html)
+                self.assertAlmostEqual(pg.evaluate("document.getElementById('pic').getBoundingClientRect().height"), 420, delta=1)
+            finally:
+                b.close()

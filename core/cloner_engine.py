@@ -1543,10 +1543,14 @@ class ClonerEngine:
                                  f"该宽度无首载对照/变体")
                 with suppress(Exception):
                     p2.close()
-        for tag, (p3, _w) in list((getattr(self, "_cv_pair", {}) or {}).items()):
+        for tag, (p3, w3) in list((getattr(self, "_cv_pair", {}) or {}).items()):
             try:
                 left = max(0.5, budget_s - (time.monotonic() - t0))
                 p3.wait_for_load_state("load", timeout=int(left * 1000))
+                p3.evaluate(CV_QUIET_JS, 300)
+                # 对照页的内联样式按路径交给 CV_EMIT_JS: 手机段 px 与之同比(值比≈宽比)的写 vw
+                if tag in loads:
+                    loads.setdefault("__pair", {})[tag] = {"w": w3, "paths": p3.evaluate(CV_PATHS_JS) or {}}
             except Exception:   # noqa: BLE001
                 with suppress(Exception):
                     p3.close()
@@ -1701,6 +1705,8 @@ class ClonerEngine:
         pages = dict(getattr(self, "_cv_pages", []) or [])
         variants = {}                      # path -> {tag: html}
         for tag, other in loads.items():
+            if tag.startswith("__"):
+                continue
             diff = sorted(p for p, v in main.items() if p and p in other
                           and other[p][0] == v[0] and other[p][3] != v[3])
             top = []
@@ -2158,7 +2164,8 @@ class ClonerEngine:
                 loads = self._collect_narrow_loads()
                 cv = page.evaluate(CV_EMIT_JS, loads) or {}
                 if cv.get("els") or cv.get("cls") or cv.get("srcFill") or cv.get("textFill"):
-                    self.log("RENDER", f"多视口内联样式: {cv['els']} 个元素, {cv.get('vw', 0)} 个按视口宽比例改写为 vw,"
+                    self.log("RENDER", f"多视口内联样式: {cv['els']} 个元素, {cv.get('vw', 0)} 个按视口宽比例改写为 vw"
+                                       + (f"(另 {cv['pairvw']} 个手机段 px 由 0.92 倍宽首载对照认出同比)" if cv.get("pairvw") else "") + ","
                                        f" {cv.get('banded', 0)} 个移入分视口样式表(其中窄屏首载补采 {cv.get('reload', 0)})"
                                        f"; 分视口 class {cv.get('cls', 0)} 个"
                                        + (f"; 桌面隐藏元素补窄屏 src {cv['srcFill']} 个" if cv.get("srcFill") else "")
