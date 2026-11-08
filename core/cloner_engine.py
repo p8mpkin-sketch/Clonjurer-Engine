@@ -881,6 +881,7 @@ class ClonerEngine:
         if self.cfg.get("bearer"):
             ctx_headers["Authorization"] = f"Bearer {self.cfg['bearer']}"
         ua = self.cfg.get("user_agent") or config.DEFAULT_USER_AGENT
+        self._ctx_headers = dict(ctx_headers)
 
         pages = []          # [(route, html)]
         iframe_pages = []   # [(src, html)] 同源 iframe 固化子页
@@ -1456,10 +1457,22 @@ class ClonerEngine:
         """同上下文另开平板/手机宽的页面重新加载目标页(只等到响应提交, 与主页后续采集并行):
         只在加载时按宽度写一次的内联样式, 缩放采不到, 要靠窄屏首载对照(见 CV_EMIT_JS)。"""
         self._cv_pages = []
+        self._cv_extra_ctx = []
         for tag, w in (("t", 768), ("m", 390)):
             p2 = None
             try:
-                p2 = page.context.new_page()
+                if tag == "m" and getattr(config, "NARROW_PHONE_UA", True):
+                    # 手机宽页按真机口径加载: 手机 UA + 触屏仿真, 单独上下文(UA 是上下文级)。服务端/脚本按 UA
+                    # 或按 A/B 下发的首屏组件(wix 邮箱表单: 桌面 UA 采集 5 轮里 3 轮没有, 手机 UA 评分侧 8/8 有)
+                    # 只在手机 UA 下才稳定出现, 桌面上下文里再开 390 宽页抽不到, 克隆手机端整块缺失
+                    hdrs = dict(getattr(self, "_ctx_headers", {}) or {})
+                    ctx2 = page.context.browser.new_context(
+                        viewport={"width": w, "height": height}, user_agent=config.PHONE_USER_AGENT,
+                        extra_http_headers=hdrs, ignore_https_errors=True, **config.PHONE_DEVICE)
+                    self._cv_extra_ctx.append(ctx2)
+                    p2 = ctx2.new_page()
+                else:
+                    p2 = page.context.new_page()
                 # 窄屏才显示/才加载的图(手机版首屏图、按断点换的 picture 源)桌面活体从没请求过, 不登记就
                 # 进不了活体回补, 克隆在手机宽度下整块裂图(wix 手机首屏 ~40 分)
                 p2.on("response", lambda r: self._on_asset_response(r, bodies=False))
@@ -1493,6 +1506,10 @@ class ClonerEngine:
             with suppress(Exception):
                 p2.close()
         self._cv_pages = []
+        for ctx2 in getattr(self, "_cv_extra_ctx", []) or []:
+            with suppress(Exception):
+                ctx2.close()
+        self._cv_extra_ctx = []
 
     @staticmethod
     def _start_settle_narrow(p2):
@@ -1977,8 +1994,8 @@ class ClonerEngine:
                 self.log("RENDER", f"内联尺寸流式化: 全宽 {fl.get('width', 0)} / 轨道 {fl.get('track', 0)}"
                                    f" / 位移 {fl.get('shift', 0)}(采集视口下不变, 换视口随容器伸缩)")
         with suppress(Exception):
-            loads = self._collect_narrow_loads()
             try:
+                loads = self._collect_narrow_loads()
                 cv = page.evaluate(CV_EMIT_JS, loads) or {}
                 if cv.get("els") or cv.get("cls") or cv.get("srcFill") or cv.get("textFill"):
                     self.log("RENDER", f"多视口内联样式: {cv['els']} 个元素, {cv.get('vw', 0)} 个按视口宽比例改写为 vw,"

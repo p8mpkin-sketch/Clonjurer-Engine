@@ -138,6 +138,7 @@ REPAIR_MIN_GAIN = 0.5          # 修复循环收敛判定: 缺失集合不变且
 FIDELITY_SKIP_ABOVE = 97.0    # 交互轨达到此分时不渲染保真轨(头条取优不受影响)
 VIEWPORT_VARIANT_MAX = 40      # 窄屏 DOM 变体: 结构不同的子树超过此数视为内容随机(推荐流), 不注入
 VIEWPORT_VARIANT_BYTES = 3_000_000   # 窄屏变体 HTML / 附带样式各自上限
+NARROW_PHONE_UA = True         # 窄屏首载对照的手机宽(390)页用手机 UA + 触屏仿真单独上下文加载(与评分真机口径一致)
 MAIN_SETTLE_MS = 4000          # 主页懒加载滚动后等 DOM「到位」(文字量/有源图片数/控件数连续不变)的上限(毫秒):
                                # 晚水合的表单/标签页组件(wix 首屏邮箱表单)抽早了克隆整块缺失
 VIEWPORT_VARIANT_SETTLE = 4.0  # 窄屏首载页抽取变体前平滑滚动的时限(秒): 触发进视口才起播的入场动画
