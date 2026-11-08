@@ -120,3 +120,23 @@ jobs:
             engine_bench/real_sites/runs/
             logs/app_ci.log
           if-no-files-found: ignore
+      - name: 紧凑摘要(日志尾部, 远程归因只拉最后 150 行即可)
+        if: always()
+        run: |
+          j=$(ls -t engine_bench/real_sites/runs/run_*.json 2>/dev/null | head -1)
+          [ -n "$j" ] || exit 0
+          python - "$j" <<'PY'
+          import json, sys
+          run = json.load(open(sys.argv[1], encoding="utf-8"))
+          print("COMPACT env=" + "${{ github.event.inputs.engine_env }}".replace(" ", ","))
+          for r in run.get("results", []):
+              st = r.get("stage_times") or {}
+              ph = r.get("phase_times") or {}
+              print("COMPACT|{}|score={}|int={}|el={}|MB={}|n={}|nav={}|lazy={}|cas={}|bf={}|rw={}|dom={}".format(
+                  (r.get("url") or "")[8:48], r.get("score"), r.get("interactive"), r.get("elapsed_s"),
+                  round((r.get("bytes") or 0) / 1048576, 1), r.get("assets"),
+                  ph.get("采集-导航"), ph.get("采集-懒加载滚动"), st.get("CAS并发下载"),
+                  st.get("活体回补"), st.get("资源重写"), st.get("DOM渲染")))
+          s = run.get("summary") or {}
+          print("COMPACT summary " + json.dumps({k: s.get(k) for k in ("mean", "interactive_mean", "mean_elapsed", "p50_elapsed", "p90_elapsed")}, ensure_ascii=False))
+          PY
