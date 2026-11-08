@@ -172,6 +172,7 @@ DIAG_JS = r"""() => {
     fontReq: (() => { try { return performance.getEntriesByType('resource').filter(e => /\.(woff2?|ttf|otf|eot)(\?|$)/i.test(e.name) || e.initiatorType === 'font' || e.initiatorType === 'css' && /font/i.test(e.name)).slice(0, 10)
       .map(e => e.name.split('/').slice(-2).join('/').slice(-48) + ' ' + (e.responseStatus || '?') + ' ' + Math.round(e.duration) + 'ms ' + (e.transferSize || 0) + 'B').join(' | '); } catch (e) { return ''; } })(),
     referrer: (() => { try { const m = document.querySelector('meta[name=referrer]'); return (m ? m.content : '-') + ' / ' + document.referrer.slice(0, 40); } catch (e) { return ''; } })(),
+    keep: (() => { try { return (window.__cloneKept || 0) + ' ' + (window.__cloneKeepDbg ? JSON.stringify(window.__cloneKeepDbg()).slice(0, 500) : ''); } catch (e) { return ''; } })(),
     vw: innerWidth, dpr: devicePixelRatio,
   };
   // 可见文本行(评分覆盖的前 8 屏): 两侧做差直接看出克隆少了/多了哪些文案(表单/计数/弹层)

@@ -2150,7 +2150,8 @@ wrap(Element.prototype,'replaceWith',function(self){note(self,self.parentNode);}
 wrapSet(Element.prototype,'innerHTML');wrapSet(Node.prototype,'textContent');
 // 放回后的撤销不限时: 父元素里后来又长出新内容(懒挂载/滚到视口才渲染, 可能远在 12s 之后), 旧块必须撤, 否则双份
 var ud=0,bump=function(){clearTimeout(ud);ud=setTimeout(undo,400);},mo=new MutationObserver(bump),ro=window.ResizeObserver?new ResizeObserver(bump):null;
-setTimeout(function(){done=true;},WIN+500);}catch(e){}})();</script>"""
+setTimeout(function(){done=true;},WIN+500);
+window.__cloneKeepDbg=function(){return KEPT.map(function(r){return [r.n.tagName+'.'+String(r.n.className).slice(0,30),r.h,r.ph,hOf(r.p),r.back?1:0,r.n.isConnected?1:0];});};}catch(e){}})();</script>"""
 
 REPLAY_DEDUPE_JS = r"""<script data-clone-preview="replay-dedupe">(function(){try{if(window.__cloneDedupe)return;window.__cloneDedupe=1;var M=[],mark=new WeakSet(),mo=new MutationObserver(function(){});mo.observe(document.documentElement,{childList:true,subtree:true});
 function take(was){var rs=mo.takeRecords();if(document.readyState!=='loading')return;for(var i=0;i<rs.length;i++){var a=rs[i].addedNodes;for(var j=0;j<a.length;j++){var n=a[j];if(n.nodeType===1&&!(was&&was.indexOf(n)>=0)&&!mark.has(n)){mark.add(n);if(M.length<4000)M.push(n);}}}}
