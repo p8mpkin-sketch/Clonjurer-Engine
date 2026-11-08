@@ -122,6 +122,12 @@ jobs:
                       for sh in (dd.get("sheets") or [])[:40]: print("  样式表", sh)
                       for k, v in (dd.get("probe") or {}).items(): print(f"  探 {k}: {v}")
                       for st in (dd.get("styles") or [])[:60]: print("  style块", st)
+                  # 可见文本行做差(忽略坐标): 原站有克隆没有 = 丢的表单/计数/文案; 反向 = 克隆多出的弹层/占位
+                  key = lambda l: l.rsplit(" @", 1)[0]
+                  co = {key(l): l for l in ((d.get("clone") or {}).get("lines") or [])}
+                  oo = {key(l): l for l in ((d.get("orig") or {}).get("lines") or [])}
+                  for l in [oo[k] for k in oo if k not in co][:14]: print("  原站独有文本", l)
+                  for l in [co[k] for k in co if k not in oo][:14]: print("  克隆独有文本", l)
                   print("::endgroup::")
               # 低分视口的探针截图(原站/克隆/遮罩后)进日志: 产物存储域名在部分环境不可达
               for v in low:

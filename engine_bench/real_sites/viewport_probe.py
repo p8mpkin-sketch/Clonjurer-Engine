@@ -152,8 +152,24 @@ DIAG_JS = r"""() => {
     band: getComputedStyle(document.documentElement).getPropertyValue('--cv-band'),
     vw: innerWidth, dpr: devicePixelRatio,
   };
+  // 可见文本行(首屏 + 下方 3 屏): 两侧做差直接看出克隆少了/多了哪些文案(表单/计数/弹层)
+  const lines = [];
+  try {
+    const lim = innerHeight * 4;
+    const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let t;
+    while ((t = w.nextNode()) && lines.length < 400) {
+      const s = (t.nodeValue || '').replace(/\s+/g, ' ').trim();
+      if (s.length < 2) continue;
+      const el = t.parentElement; if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height || r.top > lim) continue;
+      const c = cs(el); if (c.visibility === 'hidden' || c.display === 'none' || +c.opacity === 0) continue;
+      lines.push(s.slice(0, 80) + ' @' + Math.round(r.top) + ',' + Math.round(r.left) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height));
+    }
+  } catch (e) {}
   return {sheets: sheets.slice(0, 40), broken: broken.slice(0, 30), nimg: document.images.length,
-          styles: styles.slice(0, 60), probe: probe};
+          styles: styles.slice(0, 60), probe: probe, lines: lines};
 }"""
 
 
