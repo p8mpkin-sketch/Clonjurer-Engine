@@ -140,6 +140,27 @@ jobs:
                   ypos = lambda l: int(l.rsplit(" @", 1)[1].split(",")[0]) if " @" in l else 0
                   moved = [(ypos(oo[k]), ypos(co[k]), k) for k in oo if k in co and abs(ypos(oo[k]) - ypos(co[k])) > 40]
                   for oy, cy, k in sorted(moved)[:12]: print(f"  位移文本 原 y={oy} 克隆 y={cy}: {k[:70]}")
+                  # 图片盒配对: 同源名(去查询串)按出现序配对, 渲染高度/宽度差 ≥2px 或原始尺寸不同的列出; 再列微位移(3~40px)文本行:
+                  # 克隆用了不同裁切/比例的图源时整页从该图起位移几个像素, 位移文本(阈 40)看不出, 分段 NCC 却从此段起折半
+                  ob = (d.get("orig") or {}).get("boxes") or []; cb = (d.get("clone") or {}).get("boxes") or []
+                  def _pairs(bs):
+                      seen = {}; out = {}
+                      for b in bs:
+                          kk = (b[0], b[1]); seen[kk] = seen.get(kk, 0) + 1; out[(kk, seen[kk])] = b
+                      return out
+                  po, pc = _pairs(ob), _pairs(cb)
+                  shown = 0
+                  for kk in po:
+                      if kk not in pc: continue
+                      a, b = po[kk], pc[kk]
+                      if abs(a[5] - b[5]) >= 2 or abs(a[4] - b[4]) >= 2 or (a[6], a[7]) != (b[6], b[7]):
+                          print(f"  图盒差异 {a[0]} {a[1]}: 原 {a[4]}x{a[5]}@{a[2]} 原始{a[6]}x{a[7]} {a[8]} | 克隆 {b[4]}x{b[5]}@{b[2]} 原始{b[6]}x{b[7]} {b[8]}")
+                          shown += 1
+                          if shown >= 14: break
+                  for b in [po[kk] for kk in po if kk not in pc][:8]: print(f"  原站独有图盒 {b[0]} {b[1]} {b[4]}x{b[5]}@{b[2]}")
+                  for b in [pc[kk] for kk in pc if kk not in po][:8]: print(f"  克隆独有图盒 {b[0]} {b[1]} {b[4]}x{b[5]}@{b[2]}")
+                  drift = [(ypos(oo[k]), ypos(co[k]), k) for k in oo if k in co and 3 <= abs(ypos(oo[k]) - ypos(co[k])) <= 40]
+                  for oy, cy, k in sorted(drift)[:6]: print(f"  微位移文本 原 y={oy} 克隆 y={cy}: {k[:70]}")
                   print("::endgroup::")
               # 低分视口的探针截图(原站/克隆/遮罩后)进日志: 产物存储域名在部分环境不可达
               for v in low:

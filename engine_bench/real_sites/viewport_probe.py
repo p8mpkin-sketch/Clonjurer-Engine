@@ -201,8 +201,25 @@ DIAG_JS = r"""() => {
         + (inp ? ' input' : '') + (btn ? ' btn' : '') + (el.hasAttribute('data-clone-ihide') ? ' ihide' : ''));
     }
   } catch (e) {}
+  // 可见图片/视频盒(前 8 屏): 两侧按源名配对比较渲染高度与原始尺寸 —— 克隆用了不同裁切/比例的图源时
+  // 整页从该图起整体位移几个像素, 文本做差(阈 40px)看不出, 分段 NCC 却从此段起折半
+  const boxes = [];
+  try {
+    const lim = innerHeight * 8;
+    for (const el of document.querySelectorAll('img,video,picture>source,[style*="background-image"]')) {
+      if (boxes.length >= 300) break;
+      const r = (el.tagName === 'SOURCE' ? el.parentElement : el).getBoundingClientRect();
+      if (r.width < 24 || r.height < 24 || r.top > lim || r.bottom < 0) continue;
+      const c = cs(el); if (c.visibility === 'hidden' || c.display === 'none') continue;
+      let src = el.currentSrc || el.src || el.getAttribute('srcset') || '';
+      if (!src && c.backgroundImage && c.backgroundImage !== 'none') src = c.backgroundImage;
+      src = (src.match(/[^\/"'()?#]+(?=[?#"')]|$)/) || [src])[0].slice(-60);
+      boxes.push([el.tagName.toLowerCase(), src, Math.round(r.top), Math.round(r.left), Math.round(r.width), Math.round(r.height),
+                  el.naturalWidth || el.videoWidth || 0, el.naturalHeight || el.videoHeight || 0, (c.objectFit || '') + '/' + (c.aspectRatio || '')]);
+    }
+  } catch (e) {}
   return {sheets: sheets.slice(0, 40), broken: broken.slice(0, 30), nimg: document.images.length,
-          styles: styles.slice(0, 60), probe: probe, lines: lines, overlays: overlays, hiddenInputs: hiddenInputs};
+          styles: styles.slice(0, 60), probe: probe, lines: lines, overlays: overlays, hiddenInputs: hiddenInputs, boxes: boxes};
 }"""
 
 
