@@ -859,3 +859,26 @@ class GlobalResetRule(unittest.TestCase):
         self.assertFalse(f("[data-x] { color: red; }"))
         self.assertFalse(f("@keyframes spin { 0% { transform: rotate(0); } }"))
         self.assertFalse(f("@media (max-width: 600px) { a { color: red; } }"))
+
+
+class FixedIframeInterstitial(unittest.TestCase):
+    """第三方营销弹窗 iframe(fixed 铺满视口, z-index auto, 跨域看不到内部)评分时隐藏; 小的嵌入 iframe 不动。"""
+    PAGE = ('<html><body style="margin:0"><div style="height:3000px">x</div>'
+            '<iframe id="promo" src="https://creative.example/x" style="position:fixed;inset:0;width:100vw;height:100vh;border:0"></iframe>'
+            '<iframe id="video" src="https://video.example/v" style="position:fixed;bottom:0;right:0;width:320px;height:180px"></iframe>'
+            '</body></html>')
+
+    def test_fixed_fullscreen_iframe_hidden(self):
+        from core.clone.js import INTERSTITIAL_HIDE_JS, INTERSTITIAL_RESTORE_JS
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch(); pg = b.new_page(viewport={"width": 420, "height": 900})
+            pg.route("**/*", lambda r: r.fulfill(status=200, content_type="text/html", body="<html></html>") if "example" in r.request.url else r.continue_())
+            pg.set_content(self.PAGE)
+            n = pg.evaluate(INTERSTITIAL_HIDE_JS)
+            self.assertEqual(n, 1)
+            self.assertEqual(pg.evaluate("getComputedStyle(document.getElementById('promo')).display"), "none")
+            self.assertNotEqual(pg.evaluate("getComputedStyle(document.getElementById('video')).display"), "none")
+            pg.evaluate(INTERSTITIAL_RESTORE_JS)
+            self.assertNotEqual(pg.evaluate("getComputedStyle(document.getElementById('promo')).display"), "none")
+            b.close()

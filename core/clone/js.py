@@ -1967,6 +1967,15 @@ INTERSTITIAL_HIDE_JS = r"""() => {
     if (fixeds.some(f => f.contains(e))) continue;   // 外层已记
     fixeds.push(e);
   }
+  // 第三方营销弹窗 iframe(attentive/klaviyo 等): iframe 自身 fixed 铺满视口(z 往往是 auto), 里面是跨域文档看不到
+  // role/输入框; 采集时按埋点沙盒置空或根本没弹, 克隆里没有 → 评分时两侧都藏 iframe 本身
+  for (const f of document.querySelectorAll('iframe')) {
+    if (done.has(f)) continue;
+    const cs = getComputedStyle(f);
+    if (cs.position !== 'fixed' || cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) < 0.05) continue;
+    const r = f.getBoundingClientRect();
+    if (r.width >= vw * 0.85 && r.height >= vh * 0.8) hideEl(f);
+  }
   for (const e of fixeds) {
     if (!modalish(e)) {
       // 纯遮罩: 要有同层级的模态兄弟(对话框与遮罩分开挂)才算营销弹层

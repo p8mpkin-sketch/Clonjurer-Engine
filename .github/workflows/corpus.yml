@@ -122,6 +122,7 @@ jobs:
                       for sh in (dd.get("sheets") or [])[:40]: print("  样式表", sh)
                       for k, v in (dd.get("probe") or {}).items(): print(f"  探 {k}: {v}")
                       for ov in (dd.get("overlays") or [])[:12]: print("  盖屏层", ov)
+                      for hi in (dd.get("hiddenInputs") or [])[:12]: print("  隐藏控件", hi)
                       for st in (dd.get("styles") or [])[:60]: print("  style块", st)
                   # 可见文本行做差(忽略坐标): 原站有克隆没有 = 丢的表单/计数/文案; 反向 = 克隆多出的弹层/占位
                   key = lambda l: l.rsplit(" @", 1)[0]

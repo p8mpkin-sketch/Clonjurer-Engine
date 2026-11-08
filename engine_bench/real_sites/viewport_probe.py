@@ -171,6 +171,22 @@ DIAG_JS = r"""() => {
       lines.push(s.slice(0, 80) + ' @' + Math.round(r.top) + ',' + Math.round(r.left) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height));
     }
   } catch (e) {}
+  // 表单控件也进文本行(占位符/值/aria-label): 表单整块丢失时文本做差才看得见; 另列 DOM 里有但不可见的控件及原因
+  const hiddenInputs = [];
+  try {
+    for (const el of document.querySelectorAll('input:not([type=hidden]),textarea,select,button')) {
+      const label = (el.placeholder || el.value || el.getAttribute('aria-label') || el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+      if (!label) continue;
+      const r = el.getBoundingClientRect(); const c = cs(el);
+      const vis = r.width > 0 && r.height > 0 && c.visibility !== 'hidden' && c.display !== 'none' && +c.opacity !== 0 && r.top < innerHeight * 4;
+      if (vis) { if (lines.length < 400) lines.push('[' + el.tagName.toLowerCase() + '] ' + label + ' @' + Math.round(r.top) + ',' + Math.round(r.left) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height)); continue; }
+      if (hiddenInputs.length >= 12 || r.top > innerHeight * 4) continue;
+      let why = c.display === 'none' ? 'display:none' : c.visibility === 'hidden' ? 'visibility' : +c.opacity === 0 ? 'opacity0' : (!r.width || !r.height ? 'zero-size' : 'other');
+      let anc = el, hop = 0;
+      while (anc && anc !== document.body && hop++ < 12) { const a = cs(anc); if (a.display === 'none' || a.visibility === 'hidden') { why += ' <- ' + anc.tagName.toLowerCase() + (anc.id ? '#' + anc.id : '') + (anc.hasAttribute('data-cv-vp') ? '[cv-vp=' + anc.getAttribute('data-cv-vp') + ']' : '') + (anc.hasAttribute('data-cv') ? '[cv]' : '') + ':' + (a.display === 'none' ? 'display:none' : 'visibility'); break; } anc = anc.parentElement; }
+      hiddenInputs.push('[' + el.tagName.toLowerCase() + '] ' + label + ' ' + why);
+    }
+  } catch (e) {}
   // 盖住视口 ≥50% 的 fixed/sticky 层(弹窗/遮罩/抽屉): 标签#id.class z 尺寸 是否含输入框/关闭钮, 供评分口径的弹层识别对账
   const overlays = [];
   try {
@@ -186,7 +202,7 @@ DIAG_JS = r"""() => {
     }
   } catch (e) {}
   return {sheets: sheets.slice(0, 40), broken: broken.slice(0, 30), nimg: document.images.length,
-          styles: styles.slice(0, 60), probe: probe, lines: lines, overlays: overlays};
+          styles: styles.slice(0, 60), probe: probe, lines: lines, overlays: overlays, hiddenInputs: hiddenInputs};
 }"""
 
 
