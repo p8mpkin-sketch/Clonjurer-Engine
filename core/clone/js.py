@@ -1011,6 +1011,9 @@ CV_EMIT_JS = r"""
     return o;
   };
   const W = m.widths, SPEC = ':not(#\\#):not(#\\#):not(#\\#)';
+  // DEEP_FREEZE 已把 canvas 固化成 <img data-canvas-frozen>: 与窄屏首载页同路径的 canvas 对照时仍按 CANVAS 认
+  // (vite 平板: canvas 只在挂载时按宽定高, 缩放采不到, 首载页能采到, 却因标签名不同被跳过, 克隆 img 留着 height:auto 按位图比例 312 vs 原 347)
+  const tagOf = e => e.getAttribute && e.getAttribute('data-canvas-frozen') ? 'CANVAS' : e.tagName;
   const bands = {d: [], t: [], m: []};
   const px = v => { const r = /^(-?[\d.]+)px$/.exec(v || ''); return r ? parseFloat(r[1]) : null; };
   const tags = ['t', 'm'].filter(t => m.snaps[t]);
@@ -1030,7 +1033,7 @@ CV_EMIT_JS = r"""
       // 只有一方变化的多是时间/交互状态(轮播 active/current、hover、曝光埋点、展开态), 不归视口
       const v = C[t] ? C[t][i] : cd;
       const L = m.paths && loads[t] ? loads[t][m.paths[i]] : null;
-      if (v === cd || !L || L[0] !== el.tagName || L[1] !== v || /[<>"]/.test(v)) return;
+      if (v === cd || !L || L[0] !== tagOf(el) || L[1] !== v || /[<>"]/.test(v)) return;
       const a = new Set(cd.split(/\s+/)), b = new Set(v.split(/\s+/));
       const delta = [...a].filter(x => !b.has(x)).concat([...b].filter(x => !a.has(x)));
       if (delta.some(x => STATE.test(x))) return;
@@ -1067,7 +1070,7 @@ CV_EMIT_JS = r"""
       tags.forEach(t => {
         const v = X[t] ? X[t][i] : xd;
         const L = m.paths && loads[t] ? loads[t][m.paths[i]] : null;
-        if (v === xd || !L || L[0] !== el.tagName || (L[5] || '') !== v) return;
+        if (v === xd || !L || L[0] !== tagOf(el) || (L[5] || '') !== v) return;
         const V = J(v);
         if (!V) return;
         const ch = {};
@@ -1103,7 +1106,7 @@ CV_EMIT_JS = r"""
     tags.forEach(t => { V[t] = parse(S(t, i)); });
     tags.forEach(t => {
       const L = loads[t] && m.paths ? loads[t][m.paths[i]] : null;
-      if (!L || L[0] !== el.tagName) return;
+      if (!L || L[0] !== tagOf(el)) return;
       const cls = String(el.className && el.className.baseVal !== undefined ? el.className.baseVal : el.className || '');
       if (L[1] !== cls || full(L) === sd) return;
       const LV = parse(full(L));
@@ -1156,7 +1159,7 @@ CV_EMIT_JS = r"""
       const pairVal = (k) => {
         if (k !== 'm' || !pairM || !m.paths || nmap.m === null || nmap.m === undefined || nmap.m === 0) return null;
         const L2 = pairM.paths && pairM.paths[m.paths[i]];
-        if (!L2 || L2[0] !== el.tagName) return null;
+        if (!L2 || L2[0] !== tagOf(el)) return null;
         const PV = parse(L2[2] + (L2[4] ? ';' + L2[4] : ''));
         const pv = PV[p] ? px(PV[p][0]) : null;
         if (pv === null || pv === 0 || pv === nmap.m) return null;
@@ -1188,7 +1191,7 @@ CV_EMIT_JS = r"""
     if (!el.isConnected || el.getClientRects().length || el.closest('svg')) return;
     for (const t of ['m', 't']) {
       const L = loads[t] && loads[t][m.paths[i]];
-      if (!L || L[0] !== el.tagName) continue;
+      if (!L || L[0] !== tagOf(el)) continue;
       if (L[6] && !el.getAttribute('src') && !el.getAttribute('srcset')) {
         const [s, ss, po] = L[6].split('\x01');
         if (s && !/^(data:|blob:|javascript:)/i.test(s)) el.setAttribute('src', s);
