@@ -874,6 +874,34 @@ VISIBLE_PATHS_JS = r"""(paths) => {
 # 窄屏首载页抽取变体前: 进行中的 CSS 过渡跳到终点(与主页 TIME_FREEZE_JS 同理)。轮播翻页是两个稳态之间的一段,
 # 抽在半途就是「上一项 active left + 下一项 next left」两项同时有盒(cgnpc 手机横幅下多出一整项, 整页下移 210px);
 # finish() 会派发 transitionend, 轮播脚本据此收尾 class。收尾可能再起一段过渡, 最多三轮
+# 滚动锁剥离(序列化前): html/body 的内联 style 带 overflow:hidden|clip(常伴 position:fixed|absolute; inset:0;
+# top:-Npx; height:100%/unset; padding-right:滚动条宽)是弹层/抽屉菜单打开时脚本写的"锁滚动"状态
+# (body-scroll-lock / Headless UI / Shopify 主题 等)。采集窗口里交互轨开过菜单或自动弹层, 锁就烘进交付 HTML:
+# 整页只剩一屏(allbirds 手机端 原 4628px 克隆 844px, 38 分)。原站源码的 html/body 从不带这些内联声明,
+# 剥掉只影响这类过渡态。只动 html/body, 其余元素不碰。
+SCROLL_LOCK_STRIP_JS = r"""() => {
+  const LOCK = /^(overflow(?:-[xy])?|position|inset|top|right|bottom|left|height|width|padding-right|touch-action|overscroll-behavior(?:-[xy])?|scrollbar-gutter)$/i;
+  let n = 0;
+  for (const el of [document.documentElement, document.body]) {
+    if (!el) continue;
+    const st = el.getAttribute('style') || '';
+    if (!/(?:^|;)\s*overflow(?:-y)?\s*:\s*(?:hidden|clip)\b/i.test(st)) continue;
+    const keep = [];
+    for (const d of st.split(';')) {
+      const m = d.match(/^\s*([a-z-]+)\s*:\s*([^]*)$/i);
+      if (!m) { if (d.trim()) keep.push(d.trim()); continue; }
+      const k = m[1].toLowerCase(), v = m[2].trim();
+      const lock = LOCK.test(k) && !(k === 'position' && !/^(fixed|absolute)/i.test(v))
+        && !(k === 'height' && !/^(100%|100vh|100dvh|unset|auto|initial)$/i.test(v))
+        && !(k === 'width' && !/^(100%|100vw|unset|auto)$/i.test(v));
+      if (lock) n++; else keep.push(k + ': ' + v);
+    }
+    if (keep.length) el.setAttribute('style', keep.join('; ')); else el.removeAttribute('style');
+  }
+  return n;
+}"""
+
+
 TRANSITION_FINISH_JS = r"""async () => {
   let n = 0;
   for (let round = 0; round < 3; round++) {

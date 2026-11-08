@@ -124,6 +124,7 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     DOM_COUNTS_JS,
     HIDDEN_ROOTS_JS,
     TRANSITION_FINISH_JS,
+    SCROLL_LOCK_STRIP_JS,
     VISIBLE_PATHS_JS,
     SUBTREE_SIZE_JS,
     TEXT_EXTRACT_JS,
@@ -150,6 +151,7 @@ from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部
     HTML_INTERCEPT_TYPES,
     INTERACTION_SIM_TEMPLATE,
     REPLAY_DEDUPE_JS,
+    SCROLL_UNLOCK_GUARD_JS,
     JS_NAV_GUARD_SCRIPT,
     JS_NAV_OPEN_RE,
     JS_PARENT_LOC_RE,
@@ -2110,6 +2112,11 @@ class ClonerEngine:
                 self.log("RENDER", f"冻结前等样式表: {ws_.get('ms')}ms, 直取补副本 {ws_.get('fetched', 0)} 张,"
                                    f" 仍未到 {ws_.get('pending', 0)} 张")
         counts = _safe_eval(DEEP_FREEZE_JS)
+        with suppress(Exception):
+            # 定时器已停, 弹层脚本不会再把锁写回
+            n_lock = page.evaluate(SCROLL_LOCK_STRIP_JS) or 0
+            if n_lock:
+                self.log("RENDER", f"滚动锁剥离: html/body 内联 style 上 {n_lock} 条弹层打开时写的锁滚动声明(overflow:hidden/position/inset)不进交付 HTML")
         if getattr(self, "_root_fluid", None):
             # 定时器已停, 页面脚本不会再改回 px
             with suppress(Exception):
@@ -3628,6 +3635,7 @@ class ClonerEngine:
                 localized = self._inject_after_head(localized, bg_css)
             localized = self._inject_after_head(localized, sim_script)
             localized = self._inject_after_head(localized, REPLAY_DEDUPE_JS)
+            localized = self._inject_after_head(localized, SCROLL_UNLOCK_GUARD_JS)
             return _utf8_charset(_inject_responsive(localized, bool(self.cfg.get("responsive_enhance"))))
 
         html_pairs = _html_escaped_pairs(pairs)

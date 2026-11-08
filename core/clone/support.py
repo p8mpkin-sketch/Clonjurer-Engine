@@ -52,6 +52,7 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     CV_PATHS_JS,
     HIDDEN_ROOTS_JS,
     TRANSITION_FINISH_JS,
+    SCROLL_LOCK_STRIP_JS,
     VISIBLE_PATHS_JS,
     CV_PATH_FN,
     CV_QUIET_JS,
@@ -2098,6 +2099,12 @@ def beacon_like(url: str) -> bool:
 # 移除旧节点, 提前去重会两边都丢, 实测 airpods-pro 交互轨 70.5→48); 若被标记元素在同一父节点
 # 下有相同(outerHTML, 忽略引擎自加的 data-cb/data-cv/data-cssom/data-clone-* 属性)且未被标记的兄弟——即冻结 DOM 里已有的同一份——则移除这份重放副本。
 # 框架水合/重渲染会先移除旧节点, 不会留下"旧的仍在"的孪生, 因而不受影响。
+# 克隆页运行时滚动锁守卫: 站点脚本在已序列化(脚本跑过)的 DOM 上重跑, 把弹层/抽屉当作"已打开"去水合,
+# 不等用户任何动作就给 html/body 写 overflow:hidden + position:fixed|absolute 的锁(allbirds 手机端 body 运行后
+# 多出 overflow:hidden;position:absolute;inset:0, 原站运行后 body 无内联样式)。页面加载后 12s 内、用户还没有
+# 任何激活手势(navigator.userActivation.hasBeenActive 为假)时写上的锁, 一律撤掉; 用户点开菜单后的锁不管。
+SCROLL_UNLOCK_GUARD_JS = r"""<script data-clone-preview="scroll-unlock">(function(){try{if(window.__cloneUnlock)return;window.__cloneUnlock=1;var T0=Date.now(),LOCK=/^(overflow(?:-[xy])?|position|inset|top|right|bottom|left|height|width|padding-right|touch-action|overscroll-behavior(?:-[xy])?|scrollbar-gutter)$/i;function active(){try{return !!(navigator.userActivation&&navigator.userActivation.hasBeenActive);}catch(e){return false;}}function strip(el){if(!el)return;var st=el.getAttribute('style')||'';if(!/(?:^|;)\s*overflow(?:-y)?\s*:\s*(?:hidden|clip)\b/i.test(st))return;var keep=[],parts=st.split(';'),n=0;for(var i=0;i<parts.length;i++){var d=parts[i],m=d.match(/^\s*([a-z-]+)\s*:\s*([\s\S]*)$/i);if(!m){if(d.trim())keep.push(d.trim());continue;}var k=m[1].toLowerCase(),v=m[2].trim();var lock=LOCK.test(k)&&!(k==='position'&&!/^(fixed|absolute)/i.test(v))&&!(k==='height'&&!/^(100%|100vh|100dvh|unset|auto|initial)$/i.test(v))&&!(k==='width'&&!/^(100%|100vw|unset|auto)$/i.test(v));if(lock)n++;else keep.push(k+': '+v);}if(!n)return;busy=1;try{if(keep.length)el.setAttribute('style',keep.join('; '));else el.removeAttribute('style');}finally{busy=0;}window.__cloneUnlocked=(window.__cloneUnlocked||0)+n;}var busy=0,mo=new MutationObserver(function(rs){if(busy||active()||Date.now()-T0>12000){try{mo.disconnect();}catch(e){}return;}for(var i=0;i<rs.length;i++){var t=rs[i].target;if(t===document.documentElement||t===document.body)strip(t);}});function arm(){try{mo.observe(document.documentElement,{attributes:true,attributeFilter:['style']});if(document.body)mo.observe(document.body,{attributes:true,attributeFilter:['style']});}catch(e){}strip(document.documentElement);strip(document.body);}if(document.body)arm();else document.addEventListener('DOMContentLoaded',arm);setTimeout(function(){try{mo.disconnect();}catch(e){}},12500);}catch(e){}})();</script>"""
+
 REPLAY_DEDUPE_JS = r"""<script data-clone-preview="replay-dedupe">(function(){try{if(window.__cloneDedupe)return;window.__cloneDedupe=1;var M=[],mark=new WeakSet(),mo=new MutationObserver(function(){});mo.observe(document.documentElement,{childList:true,subtree:true});
 function take(was){var rs=mo.takeRecords();if(document.readyState!=='loading')return;for(var i=0;i<rs.length;i++){var a=rs[i].addedNodes;for(var j=0;j<a.length;j++){var n=a[j];if(n.nodeType===1&&!(was&&was.indexOf(n)>=0)&&!mark.has(n)){mark.add(n);if(M.length<4000)M.push(n);}}}}
 function wrap(P,k){var d=Object.getOwnPropertyDescriptor(P,k);if(!d||typeof d.value!=='function')return;var f=d.value;P[k]=function(){var was=[];for(var i=0;i<arguments.length;i++){var x=arguments[i];if(x&&x.nodeType===1&&x.isConnected)was.push(x);}mo.takeRecords();var r=f.apply(this,arguments);take(was);return r;};}

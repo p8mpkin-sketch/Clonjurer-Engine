@@ -197,8 +197,18 @@ jobs:
                               pk, pb = prev
                               print(f"    其前元素 @原 y={pb[1]}: {pk[-120:]} 高 原{pb[2]}/克隆{ctm[pk][2]} [{pb[3][:150]}] | 克隆侧 [{ctm[pk][3][:150]}]")
                       prev_dy, prev = dy, (k, ob)
-                  hd = sorted(((abs(ctm[k][2] - ob[2]), k, ob) for k, ob in ot if k in ctm and abs(ctm[k][2] - ob[2]) >= 4), reverse=True)
-                  for dh, k, ob in hd[:8]: print(f"  高度不同元素 Δh {ctm[k][2] - ob[2]:+d} @原 y={ob[1]}: {k[-120:]} 原{ob[2]}/克隆{ctm[k][2]} [{ob[3][:120]}] | 克隆侧 [{ctm[k][3][:120]}]")
+                  # 高度不同元素只列"最深"的: 某后代已承担 ≥60% 的高度差就不重复列祖先(祖先只是跟着变高)
+                  dhs = {k: ctm[k][2] - ob[2] for k, ob in ot if k in ctm and abs(ctm[k][2] - ob[2]) >= 4}
+                  leaf = [k for k in dhs if not any(q != k and q.startswith(k + ">") and abs(dhs[q]) >= abs(dhs[k]) * 0.6 for q in dhs)]
+                  obm = dict(ot)
+                  for k in sorted(leaf, key=lambda q: -abs(dhs[q]))[:8]:
+                      ob = obm[k]
+                      print(f"  高度不同元素 Δh {dhs[k]:+d} @原 y={ob[1]}: {k[-120:]} 原{ob[2]}/克隆{ctm[k][2]} [{ob[3][:120]}] | 克隆侧 [{ctm[k][3][:120]}]")
+                      # 该块的直接子元素两侧高度: 看出是子项多了/少了(克隆独有/原站独有)还是某个子项变高
+                      kids = [(q, b) for q, b in ot if q.startswith(k + ">") and q.count(">") == k.count(">") + 1]
+                      ck = [(q, b) for q, b in ctm.items() if q.startswith(k + ">") and q.count(">") == k.count(">") + 1]
+                      for q, b in kids[:8]: print(f"      子 {q.split('>')[-1][:60]} 原 y={b[1]} 高{b[2]} / 克隆 {'高' + str(ctm[q][2]) if q in ctm else '无'} [{b[3][:80]}]")
+                      for q, b in [x for x in ck if x[0] not in obm][:4]: print(f"      子(克隆独有) {q.split('>')[-1][:60]} 克隆 y={b[1]} 高{b[2]} [{b[3][:80]}]")
                   print("::endgroup::")
               # 低分视口的探针截图(原站/克隆/遮罩后)进日志: 产物存储域名在部分环境不可达
               for v in low:
