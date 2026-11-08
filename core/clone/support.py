@@ -2152,16 +2152,22 @@ wrapSet(Element.prototype,'innerHTML');wrapSet(Node.prototype,'textContent');
 // 放回后的撤销不限时: 父元素里后来又长出新内容(懒挂载/滚到视口才渲染, 可能远在 12s 之后), 旧块必须撤, 否则双份
 var ud=0,bump=function(){clearTimeout(ud);ud=setTimeout(undo,400);},mo=new MutationObserver(bump),ro=window.ResizeObserver?new ResizeObserver(bump):null;
 setTimeout(function(){done=true;},WIN+500);
-// 水合"追加而非接管": 框架在克隆里重跑时把组件当作未渲染, 在已有 SSR 块旁边再插一份同签名(同标签、class 几乎相同)、
-// 高度相近(±25%)的大块(allbirds 手机端 Best Sellers 轮播 394px×2)。加载后 12s 内、无手势、父元素下该签名块从 1 个变 2 个,
+// 水合"追加而非接管": 框架在克隆里重跑时把组件当作未渲染, 在已有 SSR 块旁边再插一份同签名(同标签、class 几乎相同且
+// 高度相近 ±25%; 或换了标签/class 但文案基本相同、高度差 ≤60%)的大块(allbirds 手机端 Best Sellers 轮播 394px×2)。加载后 12s 内、无手势、父元素下该签名块从 1 个变 2 个,
 // 1.5s 后两块仍都在且高度仍相近 → 移除序列化的旧块, 留脚本新渲染的那份(苹果类页面"先插新再删旧"会在 1.5s 内自己删旧, 不触发)
 var NEWS=new WeakSet(),PAIRS=[];
 function toks(e){return String(e.className&&e.className.baseVal!==undefined?e.className.baseVal:e.className||'').split(/\s+/).filter(Boolean);}
 function sim(a,b){var A=toks(a),B=toks(b);if(!A.length&&!B.length)return true;var S=new Set(A),n=0;for(var i=0;i<B.length;i++)if(S.has(B[i]))n++;return n/Math.max(A.length,B.length)>=0.6;}
+// 文本签名: 同一页脚/同一组件换了标签和 class 重渲染(allbirds 页脚 footer.bg-black 801px → div.grid 526px, 链接文案相同),
+// 用前 80 个词的 Jaccard 认亲
+function words(e){try{return new Set(String(e.innerText||'').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(function(w){return w.length>1;}).slice(0,80));}catch(e){return new Set();}}
+function tsim(a,b){var A=words(a),B=words(b);if(A.size<6||B.size<6)return false;var n=0;A.forEach(function(w){if(B.has(w))n++;});return n/Math.max(A.size,B.size)>=0.5;}
 function onAdded(n){if(over()||!n||n.nodeType!==1||!n.parentNode||n.parentNode.nodeType!==1)return;if(/^(SCRIPT|STYLE|LINK|TEMPLATE|NOSCRIPT|META|HTML|HEAD|BODY)$/.test(n.tagName))return;NEWS.add(n);
-  var old=null,cnt=0,ch=n.parentNode.children;for(var i=0;i<ch.length;i++){var c=ch[i];if(c===n||c.tagName!==n.tagName||!sim(c,n))continue;cnt++;if(!NEWS.has(c))old=c;}
-  if(cnt!==1||!old)return;PAIRS.push({n:n,o:old,t:Date.now()});setTimeout(dedup,1600);}
-function dedup(){if(over())return;var now=Date.now(),rest=[];for(var i=0;i<PAIRS.length;i++){var q=PAIRS[i];if(now-q.t<1500){rest.push(q);continue;}if(!q.n.isConnected||!q.o.isConnected||q.n.parentNode!==q.o.parentNode)continue;var a=hOf(q.n),b=hOf(q.o);if(a<MIN||b<MIN||Math.abs(a-b)>Math.max(a,b)*0.25)continue;try{selfRm=1;q.o.remove();selfRm=0;window.__cloneHydrDedup=(window.__cloneHydrDedup||0)+1;}catch(e){}}PAIRS=rest;}
+  if(PAIRS.length<200){PAIRS.push({n:n,t:Date.now()});setTimeout(dedup,1600);}}
+function dedup(){if(over())return;var now=Date.now(),rest=[];for(var i=0;i<PAIRS.length;i++){var q=PAIRS[i];if(now-q.t<1500){rest.push(q);continue;}var n=q.n;if(!n.isConnected||!n.parentNode||n.parentNode.nodeType!==1)continue;var a=hOf(n);if(a<MIN)continue;
+  var old=null,cnt=0,ch=n.parentNode.children;for(var j=0;j<ch.length;j++){var c=ch[j];if(c===n||NEWS.has(c))continue;var b=hOf(c);if(b<MIN)continue;if(c.tagName===n.tagName&&sim(c,n)){cnt++;old=c;continue;}if(Math.abs(a-b)<=Math.max(a,b)*0.6&&tsim(c,n)){cnt++;old=c;}}
+  if(cnt!==1||!old)continue;var b2=hOf(old);if(old.tagName===n.tagName&&sim(old,n)&&Math.abs(a-b2)>Math.max(a,b2)*0.25)continue;
+  try{selfRm=1;old.remove();selfRm=0;window.__cloneHydrDedup=(window.__cloneHydrDedup||0)+1;}catch(e){}}PAIRS=rest;}
 var addMo=new MutationObserver(function(rs){if(over()){try{addMo.disconnect();}catch(e){}return;}for(var i=0;i<rs.length;i++){var a=rs[i].addedNodes;for(var j=0;j<a.length;j++)onAdded(a[j]);}});
 function armAdd(){try{addMo.observe(document.documentElement,{childList:true,subtree:true});}catch(e){}}
 if(document.readyState!=='loading')armAdd();else document.addEventListener('DOMContentLoaded',armAdd);

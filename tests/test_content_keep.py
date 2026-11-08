@@ -14,6 +14,7 @@ PAGE = """<!doctype html><html><head>GUARD</head><body style="margin:0">
 <div id="sec3"><div class="mb-6" style="height:22px">t</div><div id="ssr" class="relative z-0 select-none" style="height:394px">ssr</div></div>
 <div id="apple"><div id="old" class="hero" style="height:300px">old</div></div>
 <div id="wrap"><div class="slide" style="height:200px"></div><div class="slide" style="height:200px"></div></div>
+<div id="foot2"><footer id="f2" style="height:800px">Shop Men Women Kids Sale Help Returns Stores About Careers Sustainability Privacy</footer></div>
 <button id="b" onclick="document.getElementById('top').remove()">x</button>
 <script>
   // 水合重建: 轮播整块被拆掉, 没有东西补上
@@ -33,6 +34,8 @@ PAGE = """<!doctype html><html><head>GUARD</head><body style="margin:0">
     setTimeout(function(){ var d=document.createElement('div'); d.id='live'; d.className='relative z-0 select-none swiper-initialized'; d.style.height='394px'; document.getElementById('sec3').appendChild(d); }, 200);
     // 苹果类"先插新再删旧": 站点自己删旧, 守卫既不放回旧块也不动新块
     setTimeout(function(){ var d=document.createElement('div'); d.id='new'; d.className='hero'; d.style.height='300px'; document.getElementById('apple').appendChild(d); setTimeout(function(){ document.getElementById('old').remove(); }, 400); }, 200);
+    // 换了标签/class 的重渲染(页脚 footer → div.grid), 文案相同: 也算孪生, 移除旧块
+    setTimeout(function(){ var d=document.createElement('div'); d.id='grid'; d.className='grid grid-cols-1'; d.style.height='520px'; d.textContent='Shop Men Women Kids Sale Help Returns Stores About Careers Sustainability Privacy Terms'; document.getElementById('foot2').appendChild(d); }, 200);
     // 轮播复制幻灯片: 父下同签名已有多份, 不管
     setTimeout(function(){ var d=document.createElement('div'); d.className='slide'; d.style.height='200px'; document.getElementById('wrap').appendChild(d); }, 200);
   });
@@ -64,7 +67,9 @@ class ContentKeep(unittest.TestCase):
                 self.assertEqual(page.evaluate("!!document.getElementById('old')"), False, "站点自己删的旧块不放回")
                 self.assertEqual(page.evaluate("!!document.getElementById('new')"), True)
                 self.assertEqual(page.evaluate("document.querySelectorAll('#wrap .slide').length"), 3)
-                self.assertEqual(page.evaluate("window.__cloneHydrDedup"), 1)
+                self.assertEqual(page.evaluate("!!document.getElementById('f2')"), False, "换标签重渲染的页脚: 文案相同, 旧块移除")
+                self.assertEqual(page.evaluate("!!document.getElementById('grid')"), True)
+                self.assertEqual(page.evaluate("window.__cloneHydrDedup"), 2)
                 page.click("#b")   # 用户手势之后的移除不管
                 page.wait_for_timeout(900)
                 self.assertEqual(page.evaluate("!!document.getElementById('top')"), False)

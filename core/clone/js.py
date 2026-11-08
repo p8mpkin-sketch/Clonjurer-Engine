@@ -634,6 +634,12 @@ CV_ATTR_FN = r"""(e) => {
     const v = e.getAttribute(a);
     if (v && /^\d+(\.\d+)?$/.test(v.trim())) s += a + ':' + (+v).toFixed(2).replace(/\.?0+$/, '') + 'px;';
   }
+  // 固化 canvas 的 img 只有 width 属性 + 内联 aspect-ratio(见 CANVAS_IMG_FN): 等价高度补出来, 才能与窄屏首载页里
+  // canvas 的 height 属性对照(图表库按宽算高不成比例时, 平板/手机段各自写 px)
+  if (e.tagName === 'IMG' && e.getAttribute('data-canvas-frozen') && !e.getAttribute('height')) {
+    const w = +e.getAttribute('width'), ar = /([\d.]+)\s*\/\s*([\d.]+)/.exec(e.style.aspectRatio || '');
+    if (w && ar && +ar[1]) s += 'height:' + (w * ar[2] / ar[1]).toFixed(2).replace(/\.?0+$/, '') + 'px;';
+  }
   return s;
 }"""
 # 可随视口换的非 class 属性快照: 名=值 JSON(按名排序), 无则空串。引擎自加属性不计; 值过长/含尖括号引号的不计
@@ -1170,6 +1176,8 @@ CV_EMIT_JS = r"""
       };
       const emit = (k, v) => {
         if (!v) return;
+        // 固化 canvas 的桌面段不钉 px: 桌面段靠 aspect-ratio 随宽缩(采集宽之外的桌面宽度也对), 只给平板/手机段写首载页量到的高
+        if (k === 'd' && p === 'height' && el.getAttribute('data-canvas-frozen')) return;
         let val = fluid.has(k) ? (nmap[k] / W[k] * 100).toFixed(4) + 'vw' : v[0];
         if (!fluid.has(k)) { const pv = pairVal(k); if (pv) { val = pv; out.pairvw = (out.pairvw || 0) + 1; } }
         rule[k].push(p + ':' + val + (v[1] ? '!important' : ''));
