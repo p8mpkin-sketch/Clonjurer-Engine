@@ -806,8 +806,22 @@ HIDDEN_ROOTS_JS = r"""() => {
   return out;
 }""".replace("__CV_PATH__", CV_PATH_FN)
 
-# 给定路径里在本页实际渲染(有盒)的那些
+# 给定路径里在本页实际渲染(有盒)、有内容(可见文字 ≥20 字或图/视频/画布)、且不是程序化广告位(GPT 容器/广告 iframe,
+# 与 AD_RECTS_JS 同口径)的那些: 广告位在窄屏首载页里是 250px 占位态, 原站评分时要么空着要么被遮, 换成窄屏版
+# 反把占位高度带进克隆(techcrunch 手机 96→62)
 VISIBLE_PATHS_JS = r"""(paths) => {
+  const AD_SRC = /doubleclick\.net|googlesyndication\.com|adservice\.google|amazon-adsystem\.com|adnxs\.com|taboola\.com|outbrain\.com|criteo\.(?:com|net)|pubmatic\.com|rubiconproject\.com/i;
+  const isAd = el => {
+    if (el.matches('[id^="div-gpt-ad"],[data-google-query-id],iframe[id^="google_ads_iframe"]')) return true;
+    if (el.querySelector('[id^="div-gpt-ad"],[data-google-query-id],iframe[id^="google_ads_iframe"]')) return true;
+    for (const f of el.querySelectorAll('iframe')) if (AD_SRC.test(f.getAttribute('src') || '')) return true;
+    return false;
+  };
+  const hasContent = el => {
+    if ((el.innerText || '').trim().length >= 20) return true;
+    for (const m of el.querySelectorAll('img,video,canvas,svg,picture')) { const r = m.getBoundingClientRect(); if (r.width >= 24 && r.height >= 24) return true; }
+    return false;
+  };
   const resolve = (path) => {
     let e = document.body;
     for (const seg of path ? path.split('>') : []) {
@@ -819,7 +833,7 @@ VISIBLE_PATHS_JS = r"""(paths) => {
     }
     return e;
   };
-  return paths.filter(p => { const el = resolve(p); return !!(el && el.getClientRects().length); });
+  return paths.filter(p => { const el = resolve(p); return !!(el && el.getClientRects().length && hasContent(el) && !isAd(el)); });
 }"""
 
 # 窄屏首载页抽取变体前: 进行中的 CSS 过渡跳到终点(与主页 TIME_FREEZE_JS 同理)。轮播翻页是两个稳态之间的一段,

@@ -994,7 +994,7 @@ HIDDEN_ROOT_PAGE = """<!doctype html><html><head><meta name="viewport" content="
 <style>body{margin:0}.xs{display:none}@media (max-width:767px){.xs{display:block}}
 .item{display:none}.item.active{display:block;height:100px}</style></head><body>
 <header>站头</header>
-<div class="xs"><div class="item active">甲<img alt=""></div><div class="item active">乙<img alt=""></div><div class="item">丙<img alt=""></div></div>
+<div class="xs"><div class="item active">甲<img alt="" width="100" height="50"></div><div class="item active">乙<img alt="" width="100" height="50"></div><div class="item">丙<img alt="" width="100" height="50"></div></div>
 <p>正文</p>
 <script>
 // 桌面上 .xs 不渲染, 后台轮播卡在两项同时 active; 窄屏首载页里脚本正常收尾只留一项
@@ -1050,7 +1050,7 @@ MID_TRANSITION_PAGE = """<!doctype html><html><head><meta name="viewport" conten
 .item.active,.item.next{display:block;height:100px}.item.next{position:absolute;top:0;width:100%;transform:translateX(100%)}
 .item.next.left{transform:translateX(0)}.item.active.left{transform:translateX(-100%)}</style></head><body>
 <header>站头</header>
-<div class="xs"><div class="inner"><div class="item active">甲<img alt=""></div><div class="item">乙<img alt=""></div><div class="item">丙<img alt=""></div></div></div>
+<div class="xs"><div class="inner"><div class="item active">甲<img alt="" width="100" height="50"></div><div class="item">乙<img alt="" width="100" height="50"></div><div class="item">丙<img alt="" width="100" height="50"></div></div></div>
 <p>正文</p>
 <script>
 // 窄屏页: 加载后立刻开始一段 30s 的翻页过渡(Bootstrap 轮播写法), transitionend 时收尾 class
@@ -1095,5 +1095,38 @@ class VariantFinishesTransitions(unittest.TestCase):
                 shown = pg.evaluate("Array.from(document.querySelectorAll('.xs .item')).filter(e => e.checkVisibility()).length")
                 self.assertEqual(shown, 1)
                 self.assertEqual(pg.evaluate("document.querySelector('[data-cv-vp=m] .item.active').textContent.trim()"), "乙")
+            finally:
+                b.close()
+
+
+AD_HIDDEN_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<style>body{margin:0}.m{display:none}@media (max-width:767px){.m{display:block}}</style></head><body>
+<header>站头</header>
+<div class="m ad-unit"><div id="div-gpt-ad-1" style="height:250px"><div class="ph">广告加载中, 请稍候片刻再看</div></div></div>
+<p>正文</p>
+<script>if (innerWidth < 768) document.querySelector('.ad-unit').classList.add('ad-unit--has-placeholder');</script>
+</body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class HiddenRootSkipsAdSlots(unittest.TestCase):
+    """桌面不渲染的子树是程序化广告位(GPT 容器)时不换窄屏版: 窄屏页里的 250px 占位态不是原站评分时的样子。"""
+
+    def test_ad_slot_not_swapped(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 1440, "height": 800})
+                page.set_content(AD_HIDDEN_PAGE)
+                eng = _FakeEngine()
+                eng._cv_pages = []
+                p2 = b.new_page(viewport={"width": 390, "height": 800})
+                p2.set_content(AD_HIDDEN_PAGE)
+                eng._cv_pages.append(("m", p2))
+                loads = {"m": p2.evaluate(ce.CV_PATHS_JS)}
+                n = ce.ClonerEngine._inject_dom_variants(eng, page, loads)
+                self.assertEqual(n, 0)
+                self.assertFalse(page.evaluate("!!document.querySelector('[data-cv-vp]')"))
             finally:
                 b.close()
