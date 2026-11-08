@@ -142,7 +142,7 @@ DIAG_JS = r"""() => {
 }"""
 
 
-def _shoot(ctx, url, vp, out: Path, timeout_ms=45000):
+def _shoot(ctx, url, vp, out: Path, timeout_ms=45000, extra_wait_ms=0):
     page = ctx.new_page()
     info = {"url": url}
     failed, errors = [], []
@@ -170,6 +170,8 @@ def _shoot(ctx, url, vp, out: Path, timeout_ms=45000):
             page.wait_for_load_state("networkidle", timeout=4000)
         with suppress(Exception):
             page.evaluate(SETTLE_MEDIA_JS, [max_h, 6000])
+        if extra_wait_ms:
+            page.wait_for_timeout(extra_wait_ms)
         with suppress(Exception):
             from core.cloner_engine import AD_RECTS_JS, INTERSTITIAL_HIDE_JS
             info["interstitial"] = page.evaluate(INTERSTITIAL_HIDE_JS) or 0
@@ -202,6 +204,7 @@ def _shoot(ctx, url, vp, out: Path, timeout_ms=45000):
 # 复现某一次的状态。按 24px 网格比两次原站截图, 差异块(膨胀一格)三张图同处涂灰后再比;
 # 克隆分取与两次原站中较接近的一次(活体在两种状态间切换时, 克隆对上其中任一种都算对)。
 # 差异块超过公共区域一半时不遮(整页错位, 遮了就没有可比内容), 只报 dyn_frac 供参考。
+NOISE_PHASE_SHIFT_MS = 3500
 DYN_BLOCK = 24
 DYN_THRESH = 12.0
 DYN_MAX_FRAC = 0.5
@@ -296,7 +299,9 @@ def probe_one(browser, base, task_id, url, viewports, outdir: Path, clone_tpl=No
                 ctx2 = browser.new_context(**context_opts(name))
                 try:
                     a2 = outdir / f"{task_id}_{name}_orig2.png"
-                    i2 = _shoot(ctx2, url, vp, a2)
+                    # 第二次原站多等几秒再截: 按定时轮换的区域(标签页/轮播由 setInterval 翻页)两次同相位
+                    # 加载看不出来, 错开相位才会落进动态区被遮
+                    i2 = _shoot(ctx2, url, vp, a2, extra_wait_ms=NOISE_PHASE_SHIFT_MS)
                 finally:
                     ctx2.close()
                 if i2.get("ok"):

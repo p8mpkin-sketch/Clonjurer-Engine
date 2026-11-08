@@ -377,6 +377,34 @@ class InterstitialHide(unittest.TestCase):
             finally:
                 b.close()
 
+    def test_marketing_modal_hidden_drawer_and_cookie_bar_kept(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 420, "height": 912})
+                page.set_content(MODAL_PAGE)
+                self.assertEqual(page.evaluate(ce.INTERSTITIAL_HIDE_JS), 2)
+                disp = "id => getComputedStyle(document.getElementById(id)).display"
+                self.assertEqual(page.evaluate(disp, "bd"), "none")
+                self.assertEqual(page.evaluate(disp, "dlg"), "none")
+                self.assertEqual(page.evaluate(disp, "cookie"), "block")
+                self.assertEqual(page.evaluate(disp, "hero"), "block")
+                page.evaluate(ce.INTERSTITIAL_RESTORE_JS)
+                self.assertEqual(page.evaluate(disp, "bd"), "block")
+                self.assertEqual(page.evaluate(disp, "dlg"), "block")
+            finally:
+                b.close()
+
+
+MODAL_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width"></head><body style="margin:0">
+<div id="hero" style="position:relative;height:900px;z-index:1">首屏大图</div>
+<div id="cookie" style="position:fixed;left:0;right:0;bottom:0;height:120px;z-index:999"><input type="checkbox">Cookie <button aria-label="Close">×</button></div>
+<div id="bd" style="position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.6)"></div>
+<div id="dlg" role="dialog" aria-modal="true" style="position:fixed;top:20%;left:10%;width:80%;height:50%;z-index:1001;background:#fff">
+<input type="email" placeholder="Email"><button aria-label="Close">×</button></div>
+</body></html>"""
+
 
 FLEXIBLE_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width"></head><body style="margin:0">
 <div id="col" style="max-width:10rem">内容</div>

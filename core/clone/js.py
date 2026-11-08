@@ -1845,6 +1845,44 @@ INTERSTITIAL_HIDE_JS = r"""() => {
       break;   // 只看最近的 fixed 祖先
     }
   }
+  // 同源营销弹层(邮件订阅/优惠券/下载 App 的模态框 + 遮罩): 活体按定时/滚动弹出, 采集期多半没弹或已被
+  // 关掉, 克隆里没有; 评分时两侧同隐藏。只认"模态"证据: fixed、z-index ≥ 100、盖住 ≥85% 宽 × ≥80% 高,
+  // 且自身或后代带 role=dialog / aria-modal, 或含输入框 + 关闭钮。Cookie 条(贴底, 不盖高)与导航抽屉(默认关)不中
+  const hideEl = e => {
+    if (done.has(e)) return;
+    e.setAttribute('data-clone-ihide', e.style.getPropertyValue('display') + '|' + e.style.getPropertyPriority('display'));
+    e.style.setProperty('display', 'none', 'important');
+    done.add(e); n++;
+  };
+  const modalish = e => (e.matches('[role=dialog],[role=alertdialog],[aria-modal=true]') ||
+    e.querySelector('[role=dialog],[role=alertdialog],[aria-modal=true]') ||
+    (e.querySelector('input:not([type=hidden]):not([type=checkbox]):not([type=radio]),select,textarea') &&
+     e.querySelector('button[aria-label*=close i],[class*=close i],button[aria-label*=关闭],[aria-label*=dismiss i]')));
+  const fixeds = [];
+  for (const e of document.body ? document.body.querySelectorAll('div,section,aside,dialog,form') : []) {
+    if (done.has(e)) continue;
+    const cs = getComputedStyle(e);
+    if (cs.position !== 'fixed' || cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) < 0.05) continue;
+    const z = parseInt(cs.zIndex, 10);
+    if (!(z >= 100)) continue;
+    const r = e.getBoundingClientRect();
+    if (r.width < vw * 0.85 || r.height < vh * 0.8) continue;
+    if (fixeds.some(f => f.contains(e))) continue;   // 外层已记
+    fixeds.push(e);
+  }
+  for (const e of fixeds) {
+    if (!modalish(e)) {
+      // 纯遮罩: 要有同层级的模态兄弟(对话框与遮罩分开挂)才算营销弹层
+      const sib = Array.from((e.parentElement || document.body).children).find(x => {
+        if (x === e || getComputedStyle(x).position !== 'fixed' || !modalish(x)) return false;
+        const q = x.getBoundingClientRect();
+        return q.width >= vw * 0.6 && q.height >= vh * 0.3;   // 模态框本体尺寸, 贴底的 Cookie 条不算
+      });
+      if (!sib) continue;
+      hideEl(sib);
+    }
+    hideEl(e);
+  }
   return n;
 }"""
 
