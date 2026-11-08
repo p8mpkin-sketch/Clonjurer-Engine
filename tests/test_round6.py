@@ -256,3 +256,60 @@ class MhtmlRetry(unittest.TestCase):
         finally:
             browser.close()
             pw.stop()
+
+
+class SriRelax(unittest.TestCase):
+    """运行时插入的带原站 integrity 哈希的脚本/样式: 本地副本字节已变, 垫片下照常执行。"""
+
+    def test_dynamic_integrity(self):
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("无 playwright")
+        from core.clone.support import SRI_RELAX_SCRIPT
+        bad = "sha384-" + "A" * 64
+        body = ("<script>"
+                f"var s=document.createElement('script');s.integrity='{bad}';s.crossOrigin='anonymous';"
+                "s.src='/static/js/a.js';document.head.appendChild(s);"
+                "var t=document.createElement('script');t.setAttribute('integrity','" + bad + "');"
+                "t.src='/static/js/b.js';document.head.appendChild(t);"
+                "var l=document.createElement('link');l.rel='stylesheet';l.integrity='" + bad + "';"
+                "l.href='/static/css/c.css';document.head.appendChild(l);"
+                "fetch('/static/js/a.js',{integrity:'" + bad + "'}).then(function(){window.F=1},function(){window.F=-1});"
+                "</script><div id=box>x</div>")
+
+        def run(shim):
+            html = "<html><head>" + shim + "</head><body>" + body + "</body></html>"
+            page = browser.new_page()
+
+            def handle(route):
+                url = route.request.url
+                if url == "http://site.test/":
+                    route.fulfill(status=200, content_type="text/html", body=html)
+                elif url.endswith("/a.js"):
+                    route.fulfill(status=200, content_type="text/javascript", body="window.A=1;")
+                elif url.endswith("/b.js"):
+                    route.fulfill(status=200, content_type="text/javascript", body="window.B=1;")
+                elif url.endswith("/c.css"):
+                    route.fulfill(status=200, content_type="text/css", body="#box{width:123px}")
+                else:
+                    route.abort()
+            page.route("**/*", handle)
+            page.goto("http://site.test/", wait_until="load")
+            page.wait_for_timeout(300)
+            got = page.evaluate("[window.A||0, window.B||0, window.F||0, document.getElementById('box').offsetWidth]")
+            page.close()
+            return got
+        try:
+            pw = sync_playwright().start()
+            browser = pw.chromium.launch()
+        except Exception as exc:
+            self.skipTest(f"无 chromium: {exc}")
+        try:
+            off = run("")
+            self.assertEqual(off[:3], [0, 0, -1])        # 无垫片: 哈希不符全被浏览器拒绝
+            self.assertNotEqual(off[3], 123)
+            self.assertEqual(run(SRI_RELAX_SCRIPT), [1, 1, 1, 123])
+        finally:
+            browser.close()
+            pw.stop()

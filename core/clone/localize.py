@@ -235,6 +235,7 @@ from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部
     img_shard_map,
     img_shard_script,
     rewrite_img_shards,
+    sri_relax_script,
     band_wrap,
     capture_band_floor,
     compute_visual_similarity,
@@ -453,6 +454,8 @@ class LocalizeMixin:
                 localized, n_sh = rewrite_img_shards(localized, shard_map)
                 shard_total += n_sh
                 localized = self._inject_after_head(localized, shard_script)
+            # 最后注入 = 落在 <head> 最前, 先于页面任何脚本生效
+            localized = self._inject_after_head(localized, sri_relax_script())
             return _utf8_charset(_inject_responsive(localized, bool(self.cfg.get("responsive_enhance"))))
 
         html_pairs = _html_escaped_pairs(pairs)

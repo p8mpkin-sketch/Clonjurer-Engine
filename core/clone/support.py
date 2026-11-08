@@ -2930,3 +2930,18 @@ def img_shard_script(groups: dict) -> str:
         return ""
     return IMG_SHARD_TEMPLATE.replace(
         "__MAP__", json.dumps(groups, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/"))
+
+
+# ---------------------------------------------------------------------------
+# 子资源完整性(SRI)放行: 采集时已删掉 DOM 里的 integrity 属性, 但运行时动态插入的脚本/样式
+# (webpack sriHashes、广告/同意管理加载器给 <script> 设 integrity)仍带原站哈希; 本地副本经过
+# 地址改写, 字节与哈希不再一致, 浏览器拒绝执行("Failed to find a valid digest in the
+# 'integrity' attribute"), 这段脚本的功能在克隆里整段丢失。克隆里本地文件就是权威副本,
+# 垫片让 <script>/<link> 的 integrity 赋值与 setAttribute 成为空操作, fetch 去掉 integrity 选项。
+# 开关 CLONER_SRI_RELAX=0。
+SRI_RELAX = os.environ.get("CLONER_SRI_RELAX", "1") != "0"
+SRI_RELAX_SCRIPT = r"""<script data-clone-preview="sri-relax">(function(){try{[window.HTMLScriptElement,window.HTMLLinkElement].forEach(function(C){if(!C)return;var p=C.prototype,d=Object.getOwnPropertyDescriptor(p,'integrity');if(d&&d.configurable){Object.defineProperty(p,'integrity',{configurable:true,enumerable:d.enumerable,get:function(){return '';},set:function(){}});}});var sa=Element.prototype.setAttribute;Element.prototype.setAttribute=function(n){if(typeof n==='string'&&n.toLowerCase()==='integrity'&&(this instanceof HTMLScriptElement||this instanceof HTMLLinkElement))return;return sa.apply(this,arguments);};var f=window.fetch;if(f){window.fetch=function(i,o){if(o&&typeof o==='object'&&o.integrity){o=Object.assign({},o);delete o.integrity;}return arguments.length>1?f.call(this,i,o):f.call(this,i);};}}catch(e){}})();</script>"""
+
+
+def sri_relax_script() -> str:
+    return SRI_RELAX_SCRIPT if SRI_RELAX else ""
