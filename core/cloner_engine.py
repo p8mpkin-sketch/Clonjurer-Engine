@@ -729,7 +729,10 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
                 s_local = set(self._structural_missing(failed_local, ()))
                 s_remote = set(self._structural_missing((), remote_missing))
                 new, shadows = self._failed_backfill(ctx, s_local, s_remote, results, origin)
-                if not self._struct_recovered(new, getattr(self, "_bf_shadow_paths", ())):
+                # 这次只回补了结构性缺失: 新增资源或任何落盘(含桶路径修复——池里已有同名字节, 按请求路径
+                # 复制一份, 不记 _bf_shadow_paths)都算补回。CI techcrunch 并发时 2 个字体经桶路径修复补回,
+                # 却被判"一个没补回"直接收敛, 交付带着缺字体的版面(56.9, 单跑重渲染后 90.9)
+                if not (new or shadows or self._struct_recovered(new, getattr(self, "_bf_shadow_paths", ()))):
                     self._phase("修复回补下载", tp)
                     self.log("RENDER", f"结构性缺失 {len(s_local) + len(s_remote)} 个回补一个没补回,"
                                        f" 不再重渲染, 第 {round_i + 1} 轮收敛")
