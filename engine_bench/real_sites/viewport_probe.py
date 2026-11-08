@@ -294,7 +294,9 @@ DIAG_JS = r"""() => {
           idx = tops.length;
           tops.push([key12(ch), Math.round(r.top + scrollY), Math.round(r.height), (ch.getAttribute('class') || '').slice(0, 50) + ' | ' + (ch.getAttribute('style') || '').slice(0, 100)
             + (ch.hasAttribute('data-cv-vp') ? ' cv-vp=' + ch.getAttribute('data-cv-vp') : '') + (ch.hasAttribute('data-cv') ? ' cv' : '')
-            + (c.maxHeight !== 'none' ? ' mh=' + c.maxHeight : '') + (c.overflow !== 'visible' ? ' ov=' + c.overflow : '') + (c.display.indexOf('grid') >= 0 ? ' grid' : '')
+            + (c.maxHeight !== 'none' ? ' mh=' + c.maxHeight : '') + (c.overflow !== 'visible' ? ' ov=' + c.overflow : '')
+            + (c.display.indexOf('grid') >= 0 ? ' grid gtr=' + c.gridTemplateRows.slice(0, 80) : '') + (c.minHeight !== '0px' && c.minHeight !== 'auto' ? ' minh=' + c.minHeight : '')
+            + ((ch.firstChild && ch.firstChild.nodeType === 3 && ch.firstChild.nodeValue.trim().length >= 3) ? ' f=' + c.fontSize + '/' + c.lineHeight + '/' + c.fontFamily.split(',')[0].slice(0, 16) : '')
             + (ch.hasAttribute('aria-expanded') ? ' exp=' + ch.getAttribute('aria-expanded') : '') + (ch.hasAttribute('aria-hidden') ? ' ahid=' + ch.getAttribute('aria-hidden') : ''), pidx]);
         }
         walkT(ch, depth + 1, idx);
