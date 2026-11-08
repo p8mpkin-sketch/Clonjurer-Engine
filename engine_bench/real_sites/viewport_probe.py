@@ -310,6 +310,8 @@ DIAG_JS = r"""() => {
             + (c.maxHeight !== 'none' ? ' mh=' + c.maxHeight : '') + (c.overflow !== 'visible' ? ' ov=' + c.overflow : '')
             + (c.display.indexOf('grid') >= 0 ? ' grid gtr=' + c.gridTemplateRows.slice(0, 80) : '') + (c.minHeight !== '0px' && c.minHeight !== 'auto' ? ' minh=' + c.minHeight : '')
             + ((ch.firstChild && ch.firstChild.nodeType === 3 && ch.firstChild.nodeValue.trim().length >= 3) ? ' f=' + c.fontSize + '/' + c.lineHeight + '/' + c.fontFamily.split(',')[0].slice(0, 16) : '')
+            + (c.position !== 'static' ? ' pos=' + c.position + (c.position === 'absolute' ? '@' + c.top : '') : '') + (c.marginTop !== '0px' ? ' mt=' + c.marginTop : '')
+            + (cs(el).display.indexOf('grid') >= 0 ? ' gr=' + c.gridRowStart + '/' + c.gridRowEnd + (c.alignSelf !== 'auto' && c.alignSelf !== 'normal' ? ' as=' + c.alignSelf : '') : '')
             + (ch.hasAttribute('aria-expanded') ? ' exp=' + ch.getAttribute('aria-expanded') : '') + (ch.hasAttribute('aria-hidden') ? ' ahid=' + ch.getAttribute('aria-hidden') : ''), pidx]);
         }
         walkT(ch, depth + 1, idx);
