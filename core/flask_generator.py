@@ -582,14 +582,21 @@ if __name__ == "__main__":
             port = int(sys.argv[1])
         except ValueError:
             print(f"忽略非法端口参数 {sys.argv[1]!r}, 使用 {port}")
-    # threaded=True: 反代兜底是同步阻塞请求, 单线程下一个慢回源会卡住后面排队的
-    # 所有静态资源(图片/CSS), 把整页首屏一起拖慢 —— 多线程让各请求互不阻塞。
-    app.run(host="0.0.0.0", port=port, threaded=True)
+    # 优先用生产级 WSGI 服务器(waitress: 纯 Python、跨平台、多线程、静态吞吐远高于
+    # Werkzeug 开发服务器); 未安装则回退开发服务器 + threaded=True(反代兜底是同步阻塞
+    # 请求, 单线程下一个慢回源会卡住后面排队的所有图片/CSS)。
+    try:
+        from waitress import serve as _serve
+        print(f" * Serving with waitress on http://0.0.0.0:{port}")
+        _serve(app, host="0.0.0.0", port=port, threads=8)
+    except ImportError:
+        app.run(host="0.0.0.0", port=port, threaded=True)
 '''
 
 GENERATED_REQUIREMENTS = """flask>=3.0.0
 requests>=2.31.0
 gunicorn>=21.2.0
+waitress>=3.0.0
 """
 
 GENERATED_DOCKERFILE = """FROM python:3.12-slim
@@ -681,6 +688,17 @@ Auto-generated standalone Flask project (Task #@@TASK_ID@@, upstream: @@UPSTREAM
                     + audit.log(审计: 验证码/令牌输入事件与登录/提交点击的全字段留痕)
 
 Endpoint `__healthz` returns runtime metadata.
+
+## Serving / performance notes
+- `python app.py` serves with **waitress** (production WSGI, multi-threaded) when it is
+  installed (it is in requirements.txt); otherwise falls back to Flask's dev server in
+  threaded mode. Docker uses gunicorn.
+- Text responses (HTML/CSS/JS/JSON/SVG) are gzip-compressed; hashed static assets get
+  long-lived cache headers.
+- `known_dead.json` lists same-origin paths the origin already returned 4xx/5xx for at
+  capture time; the app answers them with an instant 404 instead of proxying upstream.
+- Uncaptured third-party scripts/stylesheets are made non-blocking in the cloned pages,
+  so a slow or unreachable origin never stalls first paint.
 """
 
 

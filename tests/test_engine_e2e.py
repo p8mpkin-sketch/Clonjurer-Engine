@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 import unittest
+import json
 import zipfile
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -198,7 +199,21 @@ class EngineEndToEnd(unittest.TestCase):
         zips = list(config.EXPORTS_DIR.glob("*.zip"))
         self.assertTrue(zips, "未生成导出 ZIP")
         with zipfile.ZipFile(zips[0]) as z:
-            self.assertTrue(any(n.endswith("app.py") for n in z.namelist()))
+            names = z.namelist()
+            self.assertTrue(any(n.endswith("app.py") for n in names))
+            # 交付侧: 已知死路径清单随包(生成应用对其秒 404 不回源)
+            self.assertTrue(any(n.endswith("known_dead.json") for n in names), "known_dead.json 未随包")
+            gen_app = z.read(next(n for n in names if n.endswith("app.py"))).decode("utf-8")
+            self.assertIn("threaded=True", gen_app)
+            self.assertNotIn("timeout=20", gen_app)
+        # 部署隐患审计进 stats, 且真实克隆产物首页 0 阻塞(评分口径之外的交付侧守卫)
+        from core.clone.support import deploy_hazard_audit
+        stats = json.loads(task.get("stats_json") or "{}")
+        audit = stats.get("deploy_audit") or {}
+        self.assertIn("blocking_scripts", audit, "stats 缺 deploy_audit")
+        self.assertEqual((audit.get("blocking_scripts"), audit.get("blocking_styles")), (0, 0), audit)
+        live = deploy_hazard_audit(html, "localhost")
+        self.assertEqual((live["blocking_scripts"], live["blocking_styles"]), (0, 0), live)
 
 
     def _run_direct(self, url):
