@@ -342,6 +342,26 @@ _HIDE_DECL_RE = re.compile(
     r"\s*(?:!important)?$", re.I)
 
 
+_TYPE_SEL_RE = re.compile(r"^[a-z][a-z0-9-]*(?:::?[a-z-]+(?:\([^)]*\))?)*$", re.I)
+
+
+def _is_global_reset_rule(rule_text: str) -> bool:
+    """窄屏页多出的"全局重置"规则: 选择器全是 * / html / body / :root / 纯标签名(含伪元素), 或 @font-face。
+    媒体查询里的规则在任何视口都在 CSSOM 里, 所以"窄屏页才有"的只能是脚本注入/条件加载的整张表;
+    其中的标签级重置(`*{margin:0}` `a{text-decoration:underline}` `body{font-family}` 同名 @font-face 指向
+    404 字体)注入手机段会改写整页层叠(solidjs 手机端链接全下划线、字体回落), 不属于响应式差异, 跳过。"""
+    m = re.match(r"^\s*([^{}]+)\{", rule_text)
+    if not m:
+        return False
+    sel = m.group(1).strip()
+    if sel.lower().startswith("@font-face"):
+        return True
+    if sel.startswith("@"):
+        return False
+    parts = [p.strip() for p in sel.split(",") if p.strip()]
+    return bool(parts) and all(p in ("*", ":root") or _TYPE_SEL_RE.match(p) for p in parts)
+
+
 def _is_transient_hide_rule(rule_text: str) -> bool:
     """窄屏页采到的"只把元素藏起来"的规则: 声明块全是 visibility:hidden / opacity:0 / display:none /
     transform / animation / transition。这是入场动画的初始态(wix 组件滚入视口前 `#comp-x{visibility:hidden!important}`),
@@ -1549,7 +1569,7 @@ class ClonerEngine:
             items.append({"path": p, "own": own, "alts": alts})
         main_rows = page.evaluate(STYLE_TEXTS_JS) or []
         css_main = {(g, t) for g, t, *_ in main_rows}
-        extra, by_sheet, hidden_skipped = [], {}, 0
+        extra, by_sheet, hidden_skipped, reset_skipped = [], {}, 0, 0
         for tag in {t for v in variants.values() for t in v}:
             with suppress(Exception):
                 for g, t, *rest in (pages[tag].evaluate(STYLE_TEXTS_JS) or []):
@@ -1557,11 +1577,15 @@ class ClonerEngine:
                         if _is_transient_hide_rule(t):
                             hidden_skipped += 1
                             continue
+                        if _is_global_reset_rule(t):
+                            reset_skipped += 1
+                            continue
                         extra.append((g, t))
                         by_sheet[(tag, rest[0] if rest else "")] = by_sheet.get((tag, rest[0] if rest else ""), 0) + 1
         css = _regroup_css_rules(dict.fromkeys(extra))[:config.VIEWPORT_VARIANT_BYTES]
-        if hidden_skipped:
-            self.log("RENDER", f"窄屏运行时样式: 跳过 {hidden_skipped} 条入场动画隐藏态规则(visibility/opacity/display/transform, 不注入手机段)")
+        if hidden_skipped or reset_skipped:
+            self.log("RENDER", f"窄屏运行时样式: 跳过 {hidden_skipped} 条入场动画隐藏态规则(visibility/opacity/display/transform)"
+                               f", {reset_skipped} 条标签级全局重置/@font-face(不注入手机段)")
         if extra:
             # 归因: 多出的规则来自窄屏页哪些样式表, 主页又有哪些表(定位"主页没有"是真窄屏专属还是采集/序列化差异)
             sheets_main = {}

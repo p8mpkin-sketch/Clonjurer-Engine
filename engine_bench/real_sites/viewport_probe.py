@@ -100,8 +100,13 @@ SETTLE_CSS = ("*,*::before,*::after{animation-play-state:paused!important;"
 SCROLL_JS = r"""
 async (maxH) => {
   const h = () => Math.min(document.documentElement.scrollHeight, maxH);
+  // html{scroll-behavior:smooth} 下 scrollTo 是动画, 400ms 回不到顶(solidjs 克隆截在 -1650px); 滚动期间强制 auto, 回顶后等到 scrollY==0
+  const de = document.documentElement, sb = [de.style.scrollBehavior, document.body ? document.body.style.scrollBehavior : ''];
+  de.style.setProperty('scroll-behavior', 'auto', 'important'); if (document.body) document.body.style.setProperty('scroll-behavior', 'auto', 'important');
   for (let y = 0; y < h(); y += innerHeight * 0.8) { scrollTo(0, y); await new Promise(r => setTimeout(r, 320)); }
   scrollTo(0, 0); await new Promise(r => setTimeout(r, 400));
+  for (let i = 0; i < 12 && (scrollY || pageYOffset); i++) { scrollTo(0, 0); await new Promise(r => setTimeout(r, 100)); }
+  de.style.scrollBehavior = sb[0]; if (document.body) document.body.style.scrollBehavior = sb[1];
   return document.documentElement.scrollWidth;
 }
 """
@@ -168,8 +173,22 @@ DIAG_JS = r"""() => {
       lines.push(s.slice(0, 80) + ' @' + Math.round(r.top) + ',' + Math.round(r.left) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height));
     }
   } catch (e) {}
+  // 盖住视口 ≥50% 的 fixed/sticky 层(弹窗/遮罩/抽屉): 标签#id.class z 尺寸 是否含输入框/关闭钮, 供评分口径的弹层识别对账
+  const overlays = [];
+  try {
+    for (const el of document.querySelectorAll('body *')) {
+      if (overlays.length >= 12) break;
+      const c = cs(el); if (c.position !== 'fixed' && c.position !== 'sticky') continue;
+      const r = el.getBoundingClientRect(); if (r.width < innerWidth * 0.5 || r.height < innerHeight * 0.5) continue;
+      if (c.visibility === 'hidden' || c.display === 'none' || +c.opacity === 0) continue;
+      const inp = el.querySelector('input:not([type=hidden]),textarea'), btn = el.querySelector('button,[role=button],[aria-label*="close" i],[class*="close" i]');
+      overlays.push((el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + '.' + String(el.className).slice(0, 40)) + ' z=' + c.zIndex
+        + ' ' + Math.round(r.width) + 'x' + Math.round(r.height) + '@' + Math.round(r.top) + ' bg=' + c.backgroundColor.slice(0, 24) + ' role=' + (el.getAttribute('role') || '') + (el.getAttribute('aria-modal') ? ' aria-modal' : '')
+        + (inp ? ' input' : '') + (btn ? ' btn' : '') + (el.hasAttribute('data-clone-ihide') ? ' ihide' : ''));
+    }
+  } catch (e) {}
   return {sheets: sheets.slice(0, 40), broken: broken.slice(0, 30), nimg: document.images.length,
-          styles: styles.slice(0, 60), probe: probe, lines: lines};
+          styles: styles.slice(0, 60), probe: probe, lines: lines, overlays: overlays};
 }"""
 
 

@@ -837,3 +837,25 @@ class TransientHideRule(unittest.TestCase):
         self.assertFalse(f("@media (max-width: 600px) { .m { display: none; } }"))
         self.assertFalse(f(".k { opacity: 1; }"))
         self.assertFalse(f("* { box-sizing: border-box; margin: 0px; padding: 0px; }"))
+
+
+class GlobalResetRule(unittest.TestCase):
+    """窄屏页多出的标签级全局重置/@font-face 不注入手机段(solidjs: 脚本注入的整张 normalize 让手机端链接全下划线、字体回落)。"""
+    def test_reset_rules_skipped(self):
+        from core.cloner_engine import _is_global_reset_rule as f
+        self.assertTrue(f("* { box-sizing: border-box; margin: 0px; padding: 0px; }"))
+        self.assertTrue(f("html { line-height: 1.15; text-size-adjust: 100%; }"))
+        self.assertTrue(f("body { display: flex; flex-direction: column; height: 100vh; }"))
+        self.assertTrue(f("a { text-decoration: underline; }"))
+        self.assertTrue(f("h1, h2, h3 { margin: 0px; }"))
+        self.assertTrue(f("a:hover, button::before { color: red; }"))
+        self.assertTrue(f('@font-face { font-family: Gordita; src: url("/Gordita-Regular.woff"); }'))
+
+    def test_scoped_rules_kept(self):
+        from core.cloner_engine import _is_global_reset_rule as f
+        self.assertFalse(f(".nav a { text-decoration: none; }"))
+        self.assertFalse(f("#menu { display: block; }"))
+        self.assertFalse(f("body.dark { background: #000; }"))
+        self.assertFalse(f("[data-x] { color: red; }"))
+        self.assertFalse(f("@keyframes spin { 0% { transform: rotate(0); } }"))
+        self.assertFalse(f("@media (max-width: 600px) { a { color: red; } }"))
