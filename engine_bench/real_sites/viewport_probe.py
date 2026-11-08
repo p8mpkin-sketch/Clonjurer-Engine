@@ -280,15 +280,15 @@ DIAG_JS = r"""() => {
     };
     // 第 5 项: 父元素在 tops 里的下标(-1 为 body 直属), 路径只留 12 层, 深处的祖先/子孙关系靠它判断
     const walkT = (el, depth, pidx) => {
-      if (tops.length >= 3000 || depth > 12) return;
+      if (tops.length >= 6000 || depth > 12) return;
       for (const ch of el.children) {
-        if (tops.length >= 3000) break;
+        if (tops.length >= 6000) break;
         if (/^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE|LINK|META)$/.test(ch.tagName)) continue;
         const c = cs(ch); if (c.display === 'none' || c.visibility === 'hidden') continue;
         const r = ch.getBoundingClientRect();
         if (r.top + scrollY > innerHeight * 20) continue;
         let idx = pidx;
-        if (r.height >= 6 && r.width >= 30 && c.position !== 'fixed') {
+        if (r.height >= 10 && r.width >= 30 && c.position !== 'fixed') {
           idx = tops.length;
           tops.push([key12(ch), Math.round(r.top + scrollY), Math.round(r.height), (ch.getAttribute('class') || '').slice(0, 50) + ' | ' + (ch.getAttribute('style') || '').slice(0, 100)
             + (ch.hasAttribute('data-cv-vp') ? ' cv-vp=' + ch.getAttribute('data-cv-vp') : '') + (ch.hasAttribute('data-cv') ? ' cv' : ''), pidx]);

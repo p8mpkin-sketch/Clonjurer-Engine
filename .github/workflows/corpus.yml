@@ -88,7 +88,7 @@ jobs:
           # 未出分/失败/低于 90 分站点的任务日志(engine.log)尾部进日志, 供远程归因
           if [ -n "$j" ]; then
             python - "$j" <<'PY'
-          import json, sys, pathlib
+          import json, sys, pathlib, re
           run = json.load(open(sys.argv[1], encoding="utf-8"))
           def _low_vps(r):
               # 视口探针分(有稳健口径时看稳健分)低于 85 的视口: 这些宽度的原站/克隆截图进日志
@@ -233,9 +233,12 @@ jobs:
                   continue
               log = pathlib.Path("workspaces") / str(r.get("task_id")) / "engine.log"
               print(f"::group::engine.log {r.get('url')} ({r.get('status')})")
+              # 只留引擎决策行(RENDER/WARN/CSSOM/ERROR/SCORE): 下载/资源逐条日志成百上千行, 把 250 行尾部全占掉,
+              # 采集阶段的"解锁滚动/显形/变体"决策一条都看不到(allbirds 排查实证)
               keep = [l for l in (log.read_text(encoding="utf-8").splitlines() if log.is_file() else [])
-                      if not any(k in l for k in ("[CAS-", "跳过 http", "] 录制 "))]
-              print("\n".join(keep[-250:]) if keep else "(无 engine.log)")
+                      if re.search(r"\[(RENDER|WARN|CSSOM|ERROR|SCORE|FAIL)[^\]]*\]", l)
+                      and not any(k in l for k in ("[CAS-", "跳过 http", "] 录制 "))]
+              print("\n".join(keep[-300:]) if keep else "(无 engine.log)")
               print("::endgroup::")
               # 文本差: 原站有而克隆缺的行(文本召回低时定位缺什么)
               ot, ct = log.parent / "original_text.txt", log.parent / "cloned_text.txt"
