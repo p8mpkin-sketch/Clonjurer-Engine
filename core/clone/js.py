@@ -2051,3 +2051,14 @@ FLUID_APPLY_JS = r"""({paths, inline}) => {
   }
   return {marked, vw};
 }"""
+
+
+# 回顶(采集/评分前): html{scroll-behavior:smooth} 下 scrollTo 是动画, 等 400ms 未必到顶, 截图/快照就带着滚动偏移。
+# 临时在 html/body 上强制 auto, 滚完原样恢复(没有 style 属性的不留下空 style="")
+SCROLL_TOP_JS = r"""() => {
+  const els = [document.documentElement, document.body].filter(Boolean);
+  const had = els.map(e => [e.hasAttribute('style'), e.style.cssText]);
+  els.forEach(e => e.style.setProperty('scroll-behavior', 'auto', 'important'));
+  window.scrollTo(0, 0);
+  els.forEach((e, i) => { if (had[i][0]) e.style.cssText = had[i][1]; else e.removeAttribute('style'); });
+}"""

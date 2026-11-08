@@ -119,6 +119,7 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     SHOT_DIAG_JS,
     STORAGE_SNAPSHOT_JS,
     STYLE_TEXTS_JS,
+    SCROLL_TOP_JS,
     NARROW_STABLE_JS,
     SUBTREE_SIZE_JS,
     TEXT_EXTRACT_JS,
@@ -826,7 +827,7 @@ class ClonerEngine:
                 break
             y = top + view_h
         with suppress(Exception):
-            page.evaluate("() => window.scrollTo(0, 0)")
+            page.evaluate(SCROLL_TOP_JS)
         canvas.save(str(path))
 
     def _settle(self, page, cap_ms: int = None, quiet_ms: int = None):
@@ -1393,7 +1394,7 @@ class ClonerEngine:
                 page.evaluate(CV_RECORD_JS, tag)
             page.set_viewport_size({"width": width, "height": height})
             page.evaluate(CV_QUIET_JS, 300)
-            page.evaluate("window.scrollTo(0, 0)")
+            page.evaluate(SCROLL_TOP_JS)
             page.evaluate(CV_RECORD_JS, "b")
             self.log("RENDER", f"多视口内联采集: {n} 个元素 × 平板/手机视口 {time.monotonic() - t0:.1f}s")
             if self.cfg.get("viewport_reload", True):
@@ -1515,7 +1516,7 @@ class ClonerEngine:
             else:
                 p2.evaluate(ClonerEngine.AUTO_SCROLL_JS, [int(budget * 1000), 54000])
             p2.wait_for_timeout(400)
-            p2.evaluate("window.scrollTo(0, 0)")
+            p2.evaluate(SCROLL_TOP_JS)
             p2.evaluate(CV_QUIET_JS, 300)
         # 滚完再等页面"到位": 网络静默 + 文字量/已出 src 的图片数连续两次不变(水合晚到的表单、计数动画、
         # 懒加载图片组件写 src 都在这之后才稳定; 抽早了变体里只剩 alt 文字与空计数, wix 手机首屏 ~40 分)
@@ -2139,7 +2140,7 @@ class ClonerEngine:
                 self.log("RENDER", f"自动滚动达到时限({config.AUTO_SCROLL_BUDGET}s), "
                                    f"停在 {res.get('y')}/{res.get('h')}px")
             page.wait_for_timeout(600)
-            page.evaluate("window.scrollTo(0, 0)")
+            page.evaluate(SCROLL_TOP_JS)
             page.wait_for_timeout(400)
         except Exception as exc:
             self.log("WARN", f"自动滚动中断: {exc}")
@@ -2166,7 +2167,7 @@ class ClonerEngine:
                                        f"停在 {position}/{height}px")
                     break
             page.wait_for_timeout(600)
-            page.evaluate("window.scrollTo(0, 0)")
+            page.evaluate(SCROLL_TOP_JS)
             page.wait_for_timeout(400)
         except Exception as exc:
             self.log("WARN", f"自动滚动中断: {exc}")
