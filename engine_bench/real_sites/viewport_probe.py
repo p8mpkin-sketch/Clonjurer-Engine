@@ -255,8 +255,8 @@ DIAG_JS = r"""() => {
             blocks.push([key(ch), 'hidden:' + (c.display === 'none' ? 'display' : 'visibility'), 0, 0, ch.querySelectorAll('img').length, how]);
           continue;
         }
-        if (r.top > innerHeight * 8) continue;
-        if (r.height >= 150 && r.width >= innerWidth * 0.5) blocks.push([key(ch), 'vis', Math.round(r.top), Math.round(r.height), ch.querySelectorAll('img').length, how]);
+        if (r.top + scrollY > innerHeight * 8) continue;
+        if (r.height >= 150 && r.width >= innerWidth * 0.5) blocks.push([key(ch), 'vis', Math.round(r.top + scrollY), Math.round(r.height), ch.querySelectorAll('img').length, how]);
         walk(ch, depth + 1);
       }
     };
@@ -285,9 +285,9 @@ DIAG_JS = r"""() => {
         if (/^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE|LINK|META)$/.test(ch.tagName)) continue;
         const c = cs(ch); if (c.display === 'none' || c.visibility === 'hidden') continue;
         const r = ch.getBoundingClientRect();
-        if (r.top > innerHeight * 20) continue;
+        if (r.top + scrollY > innerHeight * 20) continue;
         if (r.height >= 6 && r.width >= 30 && c.position !== 'fixed')
-          tops.push([key12(ch), Math.round(r.top), Math.round(r.height), (ch.getAttribute('class') || '').slice(0, 50) + ' | ' + (ch.getAttribute('style') || '').slice(0, 100)
+          tops.push([key12(ch), Math.round(r.top + scrollY), Math.round(r.height), (ch.getAttribute('class') || '').slice(0, 50) + ' | ' + (ch.getAttribute('style') || '').slice(0, 100)
             + (ch.hasAttribute('data-cv-vp') ? ' cv-vp=' + ch.getAttribute('data-cv-vp') : '') + (ch.hasAttribute('data-cv') ? ' cv' : '')]);
         walkT(ch, depth + 1);
       }
