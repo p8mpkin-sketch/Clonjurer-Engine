@@ -1115,15 +1115,18 @@ STATE_PHASE_RESET_JS = r"""(src) => {
     const el = document.getElementById(id);
     if (!el || typeof el.className !== 'string') continue;
     const live = toks(el.className), orig = toks(src[id]);
-    const base = live.filter(t => !ST.test(t)).sort().join(' ');
-    if (!base || base !== orig.filter(t => !ST.test(t)).sort().join(' ')) continue;   // 非状态 class 也变了: 不是同一种相位差
+    // 含自身 id 的 class(组件框架常给每个实例加 comp-<id> 之类)是实例私有的, 不参与"同类"判定
+    const own = t => t.indexOf(id) >= 0;
+    const base = live.filter(t => !ST.test(t) && !own(t)).sort().join(' ');
+    if (!base || base !== orig.filter(t => !ST.test(t) && !own(t)).sort().join(' ')) continue;   // 非状态 class 也变了: 不是同一种相位差
     const k = el.tagName + '|' + base;
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push([el, live.filter(t => ST.test(t)), orig.filter(t => ST.test(t))]);
   }
-  let n = 0, g = 0;
+  let n = 0, g = 0, cand = 0;
   for (const mem of groups.values()) {
     if (mem.length < 2) continue;
+    if (mem.some(([, a, b]) => a.join(' ') !== b.join(' '))) cand++;
     const gained = new Set(), lost = new Set();
     for (const [, a, b] of mem) { a.forEach(t => { if (!b.includes(t)) gained.add(t); }); b.forEach(t => { if (!a.includes(t)) lost.add(t); }); }
     if (![...gained].some(t => lost.has(t))) continue;   // 状态词没在实例间"移动"(只是全体加/去): 不是轮换
@@ -1133,7 +1136,7 @@ STATE_PHASE_RESET_JS = r"""(src) => {
       a.forEach(t => el.classList.remove(t)); b.forEach(t => el.classList.add(t)); n++;
     }
   }
-  return {groups: g, els: n};
+  return {groups: g, els: n, cand};
 }"""
 
 CV_EMIT_JS = r"""

@@ -2164,11 +2164,13 @@ class ClonerEngine:
         counts = _safe_eval(DEEP_FREEZE_JS)
         with suppress(Exception):
             src_cls = _source_id_classes(getattr(self, "_src_html", None))
+            if not src_cls:
+                self.log("RENDER", f"状态类相位复位跳过: 源码 HTML {'未取到' if not getattr(self, '_src_html', None) else '无带 id 的 class'}")
             if src_cls:
                 ph = page.evaluate(STATE_PHASE_RESET_JS, src_cls) or {}
-                if ph.get("els"):
+                if ph.get("els") or ph.get("cand"):
                     self.log("RENDER", f"状态类相位复位: {ph.get('groups', 0)} 组同类组件的 open/active 状态在采集时已轮换, "
-                                       f"{ph['els']} 个实例复位成源码 HTML 的分配(克隆与原站同相位起步)")
+                                       f"{ph.get('els', 0)} 个实例复位成源码 HTML 的分配(克隆与原站同相位起步); 候选组 {ph.get('cand', 0)}")
         with suppress(Exception):
             # 定时器已停, 弹层脚本不会再把锁写回
             n_lock = page.evaluate(SCROLL_LOCK_STRIP_JS) or 0
