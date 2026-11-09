@@ -1104,7 +1104,9 @@ IMG_SRC_PIN_JS = r"""(mode) => {
         return;
       }
       const o = el.__cvSrc;
-      if (!o || !el.isConnected) return;
+      // 原宽下不渲染的(display:none 的手机版实例)不还原: 缩放前记到的多是懒加载占位图(wix blur_2 小图), 还原了反而
+      // 挡住 CV_EMIT 用窄屏首载页真图地址补 src(那一步只补空 src 的)
+      if (!o || !el.isConnected || !(el.tagName === 'SOURCE' ? el.parentElement && el.parentElement.getClientRects().length : el.getClientRects().length)) return;
       let hit = 0;
       keys.forEach(k => {
         const v = el.getAttribute(k);
