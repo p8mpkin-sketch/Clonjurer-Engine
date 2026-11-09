@@ -84,6 +84,7 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     COLLECT_ASSETS_JS,
     COLLECT_LINKS_JS,
     CV_ATTR_FN,
+    CV_CANVAS_DRIFT_JS,
     CV_EMIT_JS,
     CV_PATHS_JS,
     CV_PATH_FN,
@@ -1425,6 +1426,17 @@ class ClonerEngine:
                 page.evaluate(CV_RECORD_JS, tag)
             page.set_viewport_size({"width": width, "height": height})
             page.evaluate(CV_QUIET_JS, 300)
+            # 图表/动画库的 canvas 在来回缩放后可能按还原瞬间(布局未稳)量到的盒子重设位图(vite 首页 638x339 → 548),
+            # 基准截图、布局校准、固化都会接着用这个错态: 尺寸与缩放前不同的 canvas 存在时再派发一次 resize 让库按稳定布局重算
+            with suppress(Exception):
+                for _ in range(2):
+                    if not page.evaluate(CV_CANVAS_DRIFT_JS):
+                        break
+                    page.evaluate("window.dispatchEvent(new Event('resize'))")
+                    page.evaluate(CV_QUIET_JS, 300)
+                drift = page.evaluate(CV_CANVAS_DRIFT_JS)
+                if drift:
+                    self.log("RENDER", f"多视口内联采集: {drift} 个 canvas 缩放来回后尺寸未回到原值(固化时以缩放前尺寸定盒)")
             page.evaluate(SCROLL_TOP_JS)
             page.evaluate(CV_RECORD_JS, "b")
             self.log("RENDER", f"多视口内联采集: {n} 个元素 × 平板/手机视口 {time.monotonic() - t0:.1f}s")

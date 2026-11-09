@@ -79,7 +79,14 @@ CANVAS_IMG_FN = r"""(cv, data) => {
   // 别的视口不随宽缩), 内联 height:auto 又会压过站点 CSS 给这个盒子的高(flex 拉伸/显式高): vite 平板的图表 canvas 盒高 347 由
   // 布局给出、位图按盒子算, 固化后 height:auto 按桌面位图比例只剩 312, 下文整段上移 35px。aspect-ratio 与 canvas 固有比例同义:
   // CSS 没定高时按比例随宽缩, CSS 定了高/拉伸时让位
-  if (cv.width && cv.height) { img.setAttribute('width', String(cv.width)); img.style.aspectRatio = cv.width + ' / ' + cv.height; }
+  // 比例取 canvas 显示盒(位图常按 DPR/内部分辨率另算, 与盒子不成比例: vite 平板位图 751x359、盒 653x347), 没渲染才退回位图比例;
+  // 位图高另存 data-cv-h, 供分视口对照按 canvas 的 height 属性口径比较(CV_ATTR_FN)
+  if (cv.width && cv.height) {
+    img.setAttribute('width', String(cv.width)); img.setAttribute('data-cv-h', String(cv.height));
+    let bw = 0, bh = 0;
+    try { const rb = cv.getBoundingClientRect(); bw = rb.width; bh = rb.height; } catch (e) {}
+    img.style.aspectRatio = (bw > 0 && bh > 0) ? (Math.round(bw * 100) / 100) + ' / ' + (Math.round(bh * 100) / 100) : cv.width + ' / ' + cv.height;
+  }
   // 站点基础样式只对 img 生效的规则(img{max-width:100%} / .img-fluid 等)不该作用在原本是 canvas 的位置:
   // 把 canvas 的计算值 min/max 尺寸内联到 img(vite 比容器宽 2.5rem 的 canvas 被 max-width:100% 截短)
   try {
@@ -641,8 +648,12 @@ CV_ATTR_FN = r"""(e) => {
   // 固化 canvas 的 img 只有 width 属性 + 内联 aspect-ratio(见 CANVAS_IMG_FN): 等价高度补出来, 才能与窄屏首载页里
   // canvas 的 height 属性对照(图表库按宽算高不成比例时, 平板/手机段各自写 px)
   if (e.tagName === 'IMG' && e.getAttribute('data-canvas-frozen') && !e.getAttribute('height')) {
-    const w = +e.getAttribute('width'), ar = /([\d.]+)\s*\/\s*([\d.]+)/.exec(e.style.aspectRatio || '');
-    if (w && ar && +ar[1]) s += 'height:' + (w * ar[2] / ar[1]).toFixed(2).replace(/\.?0+$/, '') + 'px;';
+    const hv = e.getAttribute('data-cv-h');
+    if (hv && /^\d+$/.test(hv)) s += 'height:' + hv + 'px;';
+    else {
+      const w = +e.getAttribute('width'), ar = /([\d.]+)\s*\/\s*([\d.]+)/.exec(e.style.aspectRatio || '');
+      if (w && ar && +ar[1]) s += 'height:' + (w * ar[2] / ar[1]).toFixed(2).replace(/\.?0+$/, '') + 'px;';
+    }
   }
   return s;
 }"""
@@ -1004,6 +1015,20 @@ CV_QUIET_JS = r"""
 })
 """
 
+# 缩放来回之后 width/height 属性与缩放前(CV_RECORD "d" 快照)不同的 canvas 个数
+CV_CANVAS_DRIFT_JS = r"""() => {
+  const m = window.__cvRec;
+  if (!m || !m.attrs || !m.attrs.d) return 0;
+  let n = 0;
+  m.els.forEach((el, i) => {
+    if (el.tagName !== 'CANVAS' || !el.isConnected) return;
+    const w = el.getAttribute('width'), h = el.getAttribute('height');
+    const d = m.attrs.d[i] || '';
+    if (w && h && d && d !== 'width:' + (+w) + 'px;height:' + (+h) + 'px;') n++;
+  });
+  return n;
+}"""
+
 CV_EMIT_JS = r"""
 (loads) => {
   const m = window.__cvRec;
@@ -1041,7 +1066,7 @@ CV_EMIT_JS = r"""
     const dim = s => { const w = /width:([\d.]+)px/.exec(s || ''), h = /height:([\d.]+)px/.exec(s || ''); return w && h ? [+w[1], +h[1]] : null; };
     const dd = dim(m.attrs.d[i]), bb = dim(m.attrs.b[i]);
     if (!dd || !bb || (dd[0] === bb[0] && dd[1] === bb[1]) || m.snaps.d[i] !== m.snaps.b[i] || !dd[0] || !dd[1]) return;
-    el.setAttribute('width', String(dd[0]));
+    el.setAttribute('width', String(dd[0])); el.setAttribute('data-cv-h', String(dd[1]));
     el.style.aspectRatio = dd[0] + ' / ' + dd[1];
     bFix.add(i); out.cvFix = (out.cvFix || 0) + 1;
   });
