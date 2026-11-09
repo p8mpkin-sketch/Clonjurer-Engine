@@ -1089,6 +1089,33 @@ CANVAS_PIN_JS = r"""(mode) => {
   return n;
 }"""
 
+# 图片地址钉住: 缩放来回前 save 记下每张 img/source 的 src/srcset, 回到原宽后 restore 把被站点脚本清空的地址还原。
+# 有的站点脚本在视口切换时把当前视口不显示的图片 src 置空(wix 首屏大图 1920→768→390→1920 走一遍后 src=""),
+# 引擎的多视口采集/窄屏对照都是"来回"操作, 不还原就把空地址烘进交付物。只还原"之前有、现在空"的, 不覆盖脚本换的新地址
+IMG_SRC_PIN_JS = r"""(mode) => {
+  let n = 0;
+  document.querySelectorAll('img, picture source').forEach(el => {
+    try {
+      const keys = el.tagName === 'IMG' ? ['src', 'srcset'] : ['srcset'];
+      if (mode === 'save') {
+        const o = {};
+        keys.forEach(k => { const v = el.getAttribute(k); if (v && v.trim()) o[k] = v; });
+        el.__cvSrc = o;
+        return;
+      }
+      const o = el.__cvSrc;
+      if (!o || !el.isConnected) return;
+      let hit = 0;
+      keys.forEach(k => {
+        const v = el.getAttribute(k);
+        if (o[k] && !(v && v.trim())) { el.setAttribute(k, o[k]); hit = 1; }
+      });
+      n += hit;
+    } catch (e) {}
+  });
+  return n;
+}"""
+
 # 缩放来回之后 width/height 属性与缩放前(CV_RECORD "d" 快照)不同的 canvas 个数
 CV_CANVAS_DRIFT_JS = r"""() => {
   const m = window.__cvRec;

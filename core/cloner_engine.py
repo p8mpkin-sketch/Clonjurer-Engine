@@ -84,6 +84,7 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     COLLECT_ASSETS_JS,
     COLLECT_LINKS_JS,
     CANVAS_PIN_JS,
+    IMG_SRC_PIN_JS,
     CV_ATTR_FN,
     CV_CANVAS_DRIFT_JS,
     CV_EMIT_JS,
@@ -1447,6 +1448,7 @@ class ClonerEngine:
         try:
             with suppress(Exception):
                 page.evaluate(CANVAS_PIN_JS, "save")
+                page.evaluate(IMG_SRC_PIN_JS, "save")
             n = page.evaluate(CV_RECORD_JS, "d")
             for tag, w in (("t", 768), ("m", 390)):
                 page.set_viewport_size({"width": w, "height": height})
@@ -1454,6 +1456,10 @@ class ClonerEngine:
                 page.evaluate(CV_RECORD_JS, tag)
             page.set_viewport_size({"width": width, "height": height})
             page.evaluate(CV_QUIET_JS, 300)
+            with suppress(Exception):
+                k = page.evaluate(IMG_SRC_PIN_JS, "restore")
+                if k:
+                    self.log("RENDER", f"多视口内联采集: {k} 张图片缩放来回后地址被站点脚本清空, 已按缩放前还原")
             # 图表/动画库的 canvas 在来回缩放后可能按还原瞬间(布局未稳)量到的盒子重设位图(vite 首页 638x339 → 548),
             # 基准截图、布局校准、固化都会接着用这个错态: 尺寸与缩放前不同的 canvas 存在时再派发一次 resize 让库按稳定布局重算
             with suppress(Exception):
@@ -1670,6 +1676,7 @@ class ClonerEngine:
             fa = p2.evaluate(FLUID_READ_JS) or {}
             with suppress(Exception):
                 p2.evaluate(CANVAS_PIN_JS, "save")
+                p2.evaluate(IMG_SRC_PIN_JS, "save")
             samples = {}
             # 窄一档(0.92×)与宽一档(1.128×: 390→440 正好是最宽的主流手机)各读一次, 三点判直线/封顶/垫底
             for w in (int(round(w1 * 0.92)), int(round(w1 * 1.128)), w1):
@@ -1683,6 +1690,7 @@ class ClonerEngine:
                     samples[w] = p2.evaluate(FLUID_READ_JS) or {}
             with suppress(Exception):
                 p2.evaluate(CANVAS_PIN_JS, "restore")
+                p2.evaluate(IMG_SRC_PIN_JS, "restore")
             w2, w3 = int(round(w1 * 0.92)), int(round(w1 * 1.128))
             fb = samples.get(w2) or {}
             fl = _fluid_elements(fa, fb, w1, w2, fc=samples.get(w3) or None, w3=w3)
