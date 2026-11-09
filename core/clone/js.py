@@ -1031,7 +1031,21 @@ CV_EMIT_JS = r"""
   const px = v => { const r = /^(-?[\d.]+)px$/.exec(v || ''); return r ? parseFloat(r[1]) : null; };
   const tags = ['t', 'm'].filter(t => m.snaps[t]);
   const attrOf = __CV_ATTR__;
-  const S = (t, i) => m.snaps[t][i] + ((m.attrs && m.attrs[t] && m.attrs[t][i]) ? ';' + m.attrs[t][i] : '');
+  const S0 = (t, i) => m.snaps[t][i] + ((m.attrs && m.attrs[t] && m.attrs[t][i]) ? ';' + m.attrs[t][i] : '');
+  // 固化 canvas: 图表/动画库在缩放来回后按当时(布局未稳)量到的盒子重设了位图尺寸(vite 首页 638x339 → 638x548),
+  // 固化时拿到的是来回之后的位图, img 按它的比例占 548 高, 桌面就比原站高 209px、其下整页错位; 且"还原后没回到原值"
+  // 让这个 canvas 的平板/手机段也一条写不出。以来回之前(d)的尺寸为准: img 盒按 d 的比例, 还原快照视同 d
+  const bFix = new Set();
+  m.els.forEach((el, i) => {
+    if (!el.isConnected || !(el.getAttribute && el.getAttribute('data-canvas-frozen')) || !m.attrs || !m.attrs.d || !m.attrs.b) return;
+    const dim = s => { const w = /width:([\d.]+)px/.exec(s || ''), h = /height:([\d.]+)px/.exec(s || ''); return w && h ? [+w[1], +h[1]] : null; };
+    const dd = dim(m.attrs.d[i]), bb = dim(m.attrs.b[i]);
+    if (!dd || !bb || (dd[0] === bb[0] && dd[1] === bb[1]) || m.snaps.d[i] !== m.snaps.b[i] || !dd[0] || !dd[1]) return;
+    el.setAttribute('width', String(dd[0]));
+    el.style.aspectRatio = dd[0] + ' / ' + dd[1];
+    bFix.add(i); out.cvFix = (out.cvFix || 0) + 1;
+  });
+  const S = (t, i) => S0(t === 'b' && bFix.has(i) ? 'd' : t, i);
   // 分视口 class: 缩放快照里该视口 class 与桌面不同且还原后回到桌面值 → 该视口用缩放快照的 class;
   // 缩放没变而窄屏首载页同路径同标签元素 class 不同 → 只在加载时按宽度决定 class, 用首载值
   const C = m.cls || {}, swaps = [];

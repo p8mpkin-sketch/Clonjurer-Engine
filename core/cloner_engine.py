@@ -2178,7 +2178,8 @@ class ClonerEngine:
                                        f" {cv.get('banded', 0)} 个移入分视口样式表(其中窄屏首载补采 {cv.get('reload', 0)})"
                                        f"; 分视口 class {cv.get('cls', 0)} 个"
                                        + (f"; 桌面隐藏元素补窄屏 src {cv['srcFill']} 个" if cv.get("srcFill") else "")
-                                       + (f", 补文本 {cv['textFill']} 个" if cv.get("textFill") else ""))
+                                       + (f", 补文本 {cv['textFill']} 个" if cv.get("textFill") else "")
+                                       + (f"; 固化 canvas 按缩放前尺寸定盒 {cv['cvFix']} 个" if cv.get("cvFix") else ""))
                 if cv.get("cvdbg"):
                     self.log("RENDER", f"固化 canvas 分视口对照: {json.dumps(cv['cvdbg'], ensure_ascii=False)[:1500]}")
                 try:

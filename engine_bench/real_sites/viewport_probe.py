@@ -325,9 +325,15 @@ DIAG_JS = r"""() => {
       for (const ch of el.children) {
         if (tops.length >= 12000) break;
         if (/^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE|LINK|META)$/.test(ch.tagName)) continue;
-        const c = cs(ch); if (c.display === 'none' || c.visibility === 'hidden') continue;
+        const c = cs(ch); if (c.display === 'none') continue;
         const r = ch.getBoundingClientRect();
         if (r.top + scrollY > innerHeight * 20) continue;
+        // visibility:hidden 的块看不见却占位(水合过渡中/入场前的整段): 记一行带 VH 标记、不再下钻, 否则位移源头处找不到占位者
+        if (c.visibility === 'hidden') {
+          if (r.height >= 50 && r.width >= 30 && c.position !== 'fixed' && c.position !== 'absolute')
+            tops.push([key12(ch), Math.round(r.top + scrollY), Math.round(r.height), (ch.getAttribute('class') || '').slice(0, 50) + ' | ' + (ch.getAttribute('style') || '').slice(0, 100) + ' VH', pidx]);
+          continue;
+        }
         let idx = pidx;
         if (r.height >= 10 && r.width >= 30 && c.position !== 'fixed') {
           idx = tops.length;
