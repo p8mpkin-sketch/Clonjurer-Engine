@@ -23,7 +23,7 @@ class StatePhase(unittest.TestCase):
                 page = b.new_page()
                 page.set_content("<body>" + LIVE + "</body>")
                 r = page.evaluate(STATE_PHASE_RESET_JS, _source_id_classes(SRC))
-                self.assertEqual(r, {"groups": 1, "els": 2, "cand": 2})
+                self.assertEqual({k: r[k] for k in ("groups", "els", "cand")}, {"groups": 1, "els": 2, "cand": 2})
                 cls = page.evaluate("Object.fromEntries([...document.querySelectorAll('[id]')].map(e => [e.id, e.className]))")
                 self.assertEqual(cls["a1"], "card a1-box wixui-card is-open")   # 实例私有 class(含自身 id)不妨碍认同类
                 self.assertEqual(cls["a3"], "card a3-box wixui-card")

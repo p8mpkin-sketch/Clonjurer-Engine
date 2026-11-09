@@ -1123,10 +1123,10 @@ STATE_PHASE_RESET_JS = r"""(src) => {
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push([el, live.filter(t => ST.test(t)), orig.filter(t => ST.test(t))]);
   }
-  let n = 0, g = 0, cand = 0;
+  let n = 0, g = 0, cand = 0; const dbg = [];
   for (const mem of groups.values()) {
     if (mem.length < 2) continue;
-    if (mem.some(([, a, b]) => a.join(' ') !== b.join(' '))) cand++;
+    if (mem.some(([, a, b]) => a.join(' ') !== b.join(' '))) { cand++; if (dbg.length < 4) dbg.push(mem.slice(0, 8).map(([el, a, b]) => el.id.slice(-24) + ':' + a.join('+') + '/' + b.join('+')).join(' ')); }
     const gained = new Set(), lost = new Set();
     for (const [, a, b] of mem) { a.forEach(t => { if (!b.includes(t)) gained.add(t); }); b.forEach(t => { if (!a.includes(t)) lost.add(t); }); }
     if (![...gained].some(t => lost.has(t))) continue;   // 状态词没在实例间"移动"(只是全体加/去): 不是轮换
@@ -1136,7 +1136,7 @@ STATE_PHASE_RESET_JS = r"""(src) => {
       a.forEach(t => el.classList.remove(t)); b.forEach(t => el.classList.add(t)); n++;
     }
   }
-  return {groups: g, els: n, cand};
+  return {groups: g, els: n, cand, dbg};
 }"""
 
 CV_EMIT_JS = r"""
