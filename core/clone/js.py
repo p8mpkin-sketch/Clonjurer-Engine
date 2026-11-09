@@ -1127,13 +1127,21 @@ STATE_PHASE_RESET_JS = r"""(src) => {
   for (const mem of groups.values()) {
     if (mem.length < 2) continue;
     if (mem.some(([, a, b]) => a.join(' ') !== b.join(' '))) { cand++; if (dbg.length < 4) dbg.push(mem.slice(0, 8).map(([el, a, b]) => el.id.slice(-24) + ':' + a.join('+') + '/' + b.join('+')).join(' ')); }
-    const gained = new Set(), lost = new Set();
-    for (const [, a, b] of mem) { a.forEach(t => { if (!b.includes(t)) gained.add(t); }); b.forEach(t => { if (!a.includes(t)) lost.add(t); }); }
-    if (![...gained].some(t => lost.has(t))) continue;   // 状态词没在实例间"移动"(只是全体加/去): 不是轮换
+    // 某状态词只在组内部分实例上加/去(轮换到第 k 项, 或源码全收起而采集时展开了其中一个)才复位;
+    // 全体实例一起加/去的(整组菜单打开、主题切换)不是相位差, 不动
+    const cnt = new Map();
+    for (const [, a, b] of mem) {
+      a.forEach(t => { if (!b.includes(t)) cnt.set('+' + t, (cnt.get('+' + t) || 0) + 1); });
+      b.forEach(t => { if (!a.includes(t)) cnt.set('-' + t, (cnt.get('-' + t) || 0) + 1); });
+    }
+    const partial = new Set([...cnt].filter(([, c]) => c < mem.length).map(([k]) => k));
+    if (!partial.size) continue;
     g++;
     for (const [el, a, b] of mem) {
-      if (a.join(' ') === b.join(' ')) continue;
-      a.forEach(t => el.classList.remove(t)); b.forEach(t => el.classList.add(t)); n++;
+      let hit = false;
+      a.forEach(t => { if (!b.includes(t) && partial.has('+' + t)) { el.classList.remove(t); hit = true; } });
+      b.forEach(t => { if (!a.includes(t) && partial.has('-' + t)) { el.classList.add(t); hit = true; } });
+      if (hit) n++;
     }
   }
   return {groups: g, els: n, cand, dbg};
