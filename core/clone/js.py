@@ -628,12 +628,23 @@ CV_RECORD_JS = r"""
 """
 
 # 结构路径(tag:同类序号 链): 主页与窄屏重载页按它对齐元素
+# body 直接子元素有稳定 id 的按 id 认, 其余按"同标签且无 id 的前兄弟"计序: 第三方脚本(Shopify 应用/像素沙箱/埋点)往 body
+# 插的容器在主页与窄屏首载页里数量、位置不一样, 纯序号路径整体错位, 分视口样式/变体会对到别的区块上(allbirds 手机
+# 底部 526px 区块的窄屏版被并列插到 main 之前, 93→43 双峰)。只在 body 这一层这样做: 深层 id 多是按渲染计数生成的
 CV_PATH_FN = r"""(e) => {
   const p = [];
+  const M = window.__cvSid || (window.__cvSid = new WeakMap());
+  const sid = x => { if (M.has(x)) return M.get(x); const v = x.id;
+    const r = v && /^[A-Za-z][\w-]{1,100}$/.test(v) && document.querySelectorAll('[id="' + v + '"]').length === 1 ? v : ''; M.set(x, r); return r; };
   while (e && e.parentElement && e !== document.body) {
-    let i = 1, s = e;
-    while ((s = s.previousElementSibling)) if (s.tagName === e.tagName) i++;
-    p.unshift(e.tagName.toLowerCase() + ':' + i);
+    const top = e.parentElement === document.body;
+    const id = top ? sid(e) : '';
+    if (id) p.unshift(e.tagName.toLowerCase() + '#' + id);
+    else {
+      let i = 1, s = e;
+      while ((s = s.previousElementSibling)) if (s.tagName === e.tagName && !(top && sid(s))) i++;
+      p.unshift(e.tagName.toLowerCase() + ':' + i);
+    }
     e = e.parentElement;
   }
   return p.join('>');
