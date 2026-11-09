@@ -1015,6 +1015,25 @@ CV_QUIET_JS = r"""
 })
 """
 
+# canvas 显示盒钉住: 缩放来回前 save 记下每个 canvas 的显示盒, 回到原宽后 restore 把高度变了(宽不变)的 canvas 按原盒比例钉住。
+# 有的图表/动画库只在变宽时重设位图、变窄回来不收(vite 首页 638x339 → 548; 窄屏页 1.128 倍宽对照后 653x347 → 751x359),
+# 回到原宽的页面就停在错态: 基准截图、布局校准(按错态补 min-height)、固化比例全跟着错。位图按原盒拉伸显示, 版面回到首载态
+CANVAS_PIN_JS = r"""(mode) => {
+  let n = 0;
+  document.querySelectorAll('canvas').forEach(cv => {
+    try {
+      const r = cv.getBoundingClientRect();
+      if (mode === 'save') { cv.__cvBox = r.width > 0 && r.height > 0 ? [r.width, r.height] : null; return; }
+      const b = cv.__cvBox;
+      if (!b || !(r.width > 0) || Math.abs(r.width - b[0]) > 1 || Math.abs(r.height - b[1]) <= 1) return;
+      cv.style.setProperty('aspect-ratio', (Math.round(b[0] * 100) / 100) + ' / ' + (Math.round(b[1] * 100) / 100), 'important');
+      cv.style.setProperty('height', 'auto', 'important');
+      n++;
+    } catch (e) {}
+  });
+  return n;
+}"""
+
 # 缩放来回之后 width/height 属性与缩放前(CV_RECORD "d" 快照)不同的 canvas 个数
 CV_CANVAS_DRIFT_JS = r"""() => {
   const m = window.__cvRec;

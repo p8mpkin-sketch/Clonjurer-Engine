@@ -83,6 +83,7 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     COLLAPSE_REVERT_JS,
     COLLECT_ASSETS_JS,
     COLLECT_LINKS_JS,
+    CANVAS_PIN_JS,
     CV_ATTR_FN,
     CV_CANVAS_DRIFT_JS,
     CV_EMIT_JS,
@@ -1419,6 +1420,8 @@ class ClonerEngine:
             return
         t0 = time.monotonic()
         try:
+            with suppress(Exception):
+                page.evaluate(CANVAS_PIN_JS, "save")
             n = page.evaluate(CV_RECORD_JS, "d")
             for tag, w in (("t", 768), ("m", 390)):
                 page.set_viewport_size({"width": w, "height": height})
@@ -1435,8 +1438,9 @@ class ClonerEngine:
                     page.evaluate("window.dispatchEvent(new Event('resize'))")
                     page.evaluate(CV_QUIET_JS, 300)
                 drift = page.evaluate(CV_CANVAS_DRIFT_JS)
-                if drift:
-                    self.log("RENDER", f"多视口内联采集: {drift} 个 canvas 缩放来回后尺寸未回到原值(固化时以缩放前尺寸定盒)")
+                pinned = page.evaluate(CANVAS_PIN_JS, "restore")
+                if drift or pinned:
+                    self.log("RENDER", f"多视口内联采集: {drift} 个 canvas 缩放来回后尺寸未回到原值, {pinned} 个按缩放前显示盒钉住")
             page.evaluate(SCROLL_TOP_JS)
             page.evaluate(CV_RECORD_JS, "b")
             self.log("RENDER", f"多视口内联采集: {n} 个元素 × 平板/手机视口 {time.monotonic() - t0:.1f}s")
@@ -1639,6 +1643,8 @@ class ClonerEngine:
             if not w1:
                 return
             fa = p2.evaluate(FLUID_READ_JS) or {}
+            with suppress(Exception):
+                p2.evaluate(CANVAS_PIN_JS, "save")
             samples = {}
             # 窄一档(0.92×)与宽一档(1.128×: 390→440 正好是最宽的主流手机)各读一次, 三点判直线/封顶/垫底
             for w in (int(round(w1 * 0.92)), int(round(w1 * 1.128)), w1):
@@ -1650,6 +1656,8 @@ class ClonerEngine:
                     p2.evaluate(NARROW_STABLE_JS, 1500)
                 if w != w1:
                     samples[w] = p2.evaluate(FLUID_READ_JS) or {}
+            with suppress(Exception):
+                p2.evaluate(CANVAS_PIN_JS, "restore")
             w2, w3 = int(round(w1 * 0.92)), int(round(w1 * 1.128))
             fb = samples.get(w2) or {}
             fl = _fluid_elements(fa, fb, w1, w2, fc=samples.get(w3) or None, w3=w3)
