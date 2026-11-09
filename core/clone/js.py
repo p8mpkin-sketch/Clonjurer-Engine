@@ -709,12 +709,23 @@ CV_PATHS_JS = r"""() => {
 # 改都救不回结构。窄屏首载页与主页按结构路径对齐, 子元素结构不同的最上层子树把窄屏版
 # 也序列化进克隆, 两版各打 data-cv-vp 视口令牌, 由分视口样式表只显示当前视口那一版。
 ALT_EXTRACT_JS = r"""(paths) => {
+  // 与 CV_PATH_FN 同口径: body 这一层有唯一 id 的段写成 tag#id, 序号段只数同标签且无唯一 id 的兄弟
   const resolve = (path) => {
     let e = document.body;
+    const sid = x => { const v = x.id; return v && /^[A-Za-z][\w-]{1,100}$/.test(v) && document.querySelectorAll('[id="' + v + '"]').length === 1 ? v : ''; };
     for (const seg of path ? path.split('>') : []) {
-      const [tag, n] = seg.split(':');
-      let k = 0, hit = null;
-      for (const c of e.children) if (c.tagName.toLowerCase() === tag && ++k === +n) { hit = c; break; }
+      const top = e === document.body;
+      let hit = null;
+      const h = seg.indexOf('#');
+      if (h > 0) {
+        const tag = seg.slice(0, h), id = seg.slice(h + 1);
+        const c = document.getElementById(id);
+        if (c && c.parentElement === e && c.tagName.toLowerCase() === tag) hit = c;
+      } else {
+        const [tag, n] = seg.split(':');
+        let k = 0;
+        for (const c of e.children) if (c.tagName.toLowerCase() === tag && !(top && sid(c)) && ++k === +n) { hit = c; break; }
+      }
       if (!hit) return null;
       e = hit;
     }
@@ -796,12 +807,23 @@ ALT_EXTRACT_JS = r"""(paths) => {
 
 # 主页同路径子树的体量(文本长度/元素数), 判断窄屏版是"换了结构"还是"还没加载完"
 SUBTREE_SIZE_JS = r"""(paths) => {
+  // 与 CV_PATH_FN 同口径: body 这一层有唯一 id 的段写成 tag#id, 序号段只数同标签且无唯一 id 的兄弟
   const resolve = (path) => {
     let e = document.body;
+    const sid = x => { const v = x.id; return v && /^[A-Za-z][\w-]{1,100}$/.test(v) && document.querySelectorAll('[id="' + v + '"]').length === 1 ? v : ''; };
     for (const seg of path ? path.split('>') : []) {
-      const [tag, n] = seg.split(':');
-      let k = 0, hit = null;
-      for (const c of e.children) if (c.tagName.toLowerCase() === tag && ++k === +n) { hit = c; break; }
+      const top = e === document.body;
+      let hit = null;
+      const h = seg.indexOf('#');
+      if (h > 0) {
+        const tag = seg.slice(0, h), id = seg.slice(h + 1);
+        const c = document.getElementById(id);
+        if (c && c.parentElement === e && c.tagName.toLowerCase() === tag) hit = c;
+      } else {
+        const [tag, n] = seg.split(':');
+        let k = 0;
+        for (const c of e.children) if (c.tagName.toLowerCase() === tag && !(top && sid(c)) && ++k === +n) { hit = c; break; }
+      }
       if (!hit) return null;
       e = hit;
     }
@@ -892,12 +914,23 @@ VISIBLE_PATHS_JS = r"""(paths) => {
     for (const m of el.querySelectorAll('img,video,canvas,svg,picture')) { const r = m.getBoundingClientRect(); if (r.width >= 24 && r.height >= 24) return true; }
     return false;
   };
+  // 与 CV_PATH_FN 同口径: body 这一层有唯一 id 的段写成 tag#id, 序号段只数同标签且无唯一 id 的兄弟
   const resolve = (path) => {
     let e = document.body;
+    const sid = x => { const v = x.id; return v && /^[A-Za-z][\w-]{1,100}$/.test(v) && document.querySelectorAll('[id="' + v + '"]').length === 1 ? v : ''; };
     for (const seg of path ? path.split('>') : []) {
-      const [tag, n] = seg.split(':');
-      let k = 0, hit = null;
-      for (const c of e.children) if (c.tagName.toLowerCase() === tag && ++k === +n) { hit = c; break; }
+      const top = e === document.body;
+      let hit = null;
+      const h = seg.indexOf('#');
+      if (h > 0) {
+        const tag = seg.slice(0, h), id = seg.slice(h + 1);
+        const c = document.getElementById(id);
+        if (c && c.parentElement === e && c.tagName.toLowerCase() === tag) hit = c;
+      } else {
+        const [tag, n] = seg.split(':');
+        let k = 0;
+        for (const c of e.children) if (c.tagName.toLowerCase() === tag && !(top && sid(c)) && ++k === +n) { hit = c; break; }
+      }
       if (!hit) return null;
       e = hit;
     }
@@ -957,12 +990,23 @@ DOM_COUNTS_JS = r"""() => { const im = document.images; let s = 0; for (const i 
     btn: document.querySelectorAll('button,[role=button]').length, els: document.getElementsByTagName('*').length }; }"""
 
 ALT_INJECT_JS = r"""({items, css}) => {
+  // 与 CV_PATH_FN 同口径: body 这一层有唯一 id 的段写成 tag#id, 序号段只数同标签且无唯一 id 的兄弟
   const resolve = (path) => {
     let e = document.body;
+    const sid = x => { const v = x.id; return v && /^[A-Za-z][\w-]{1,100}$/.test(v) && document.querySelectorAll('[id="' + v + '"]').length === 1 ? v : ''; };
     for (const seg of path ? path.split('>') : []) {
-      const [tag, n] = seg.split(':');
-      let k = 0, hit = null;
-      for (const c of e.children) if (c.tagName.toLowerCase() === tag && ++k === +n) { hit = c; break; }
+      const top = e === document.body;
+      let hit = null;
+      const h = seg.indexOf('#');
+      if (h > 0) {
+        const tag = seg.slice(0, h), id = seg.slice(h + 1);
+        const c = document.getElementById(id);
+        if (c && c.parentElement === e && c.tagName.toLowerCase() === tag) hit = c;
+      } else {
+        const [tag, n] = seg.split(':');
+        let k = 0;
+        for (const c of e.children) if (c.tagName.toLowerCase() === tag && !(top && sid(c)) && ++k === +n) { hit = c; break; }
+      }
       if (!hit) return null;
       e = hit;
     }
@@ -2304,12 +2348,23 @@ FLUID_READ_JS = r"""() => {
 }"""
 # 写: {paths: [字号随宽的路径], inline: {路径: {属性: 'Xvw'}}} → 标 data-cv-fluidsz(烘焙跳过字号类), 内联改 vw
 FLUID_APPLY_JS = r"""({paths, inline}) => {
+  // 与 CV_PATH_FN 同口径: body 这一层有唯一 id 的段写成 tag#id, 序号段只数同标签且无唯一 id 的兄弟
   const resolve = (path) => {
     let e = document.body;
+    const sid = x => { const v = x.id; return v && /^[A-Za-z][\w-]{1,100}$/.test(v) && document.querySelectorAll('[id="' + v + '"]').length === 1 ? v : ''; };
     for (const seg of path ? path.split('>') : []) {
-      const [tag, n] = seg.split(':');
-      let k = 0, hit = null;
-      for (const c of e.children) if (c.tagName.toLowerCase() === tag && ++k === +n) { hit = c; break; }
+      const top = e === document.body;
+      let hit = null;
+      const h = seg.indexOf('#');
+      if (h > 0) {
+        const tag = seg.slice(0, h), id = seg.slice(h + 1);
+        const c = document.getElementById(id);
+        if (c && c.parentElement === e && c.tagName.toLowerCase() === tag) hit = c;
+      } else {
+        const [tag, n] = seg.split(':');
+        let k = 0;
+        for (const c of e.children) if (c.tagName.toLowerCase() === tag && !(top && sid(c)) && ++k === +n) { hit = c; break; }
+      }
       if (!hit) return null;
       e = hit;
     }

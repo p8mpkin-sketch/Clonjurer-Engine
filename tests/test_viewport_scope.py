@@ -522,7 +522,7 @@ class FluidSizeProbe(unittest.TestCase):
                 self.assertEqual(eng._root_fluid, {})
                 fl = eng._fluid
                 self.assertEqual(sorted(fl["paths"]), ["h1#css", "h2#js"])   # body 直接子元素有唯一 id 时路径按 id 认
-                self.assertEqual(fl["inline"], {"h2:1": {"font-size": "10.0000vw"}, "div:1": {"width": "80.0000vw"}})
+                self.assertEqual(fl["inline"], {"h2#js": {"font-size": "10.0000vw"}, "div#box": {"width": "80.0000vw"}})
                 self.assertEqual(len(ctx.pages), 1)
                 page.evaluate(ce.FLUID_APPLY_JS, fl)
                 self.assertEqual(page.evaluate("document.getElementById('js').style.fontSize"), "10vw")
