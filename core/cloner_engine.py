@@ -87,6 +87,7 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     CV_ATTR_FN,
     CV_CANVAS_DRIFT_JS,
     CV_EMIT_JS,
+    STATE_PHASE_RESET_JS,
     CV_PATHS_JS,
     CV_PATH_FN,
     CV_QUIET_JS,
@@ -320,6 +321,30 @@ class _EditionDB:
 _FLUID_GEOM_RE = re.compile(r"(?:^|;)\s*(attr-width|attr-height|width|height|min-width|max-width|min-height|max-height|font-size|line-height|"
                             r"letter-spacing|top|left|right|bottom|margin-[a-z]+|padding-[a-z]+|gap|column-gap|row-gap)\s*:\s*"
                             r"(-?\d+(?:\.\d+)?)px\s*(!important)?(?=;|$)", re.I)
+
+
+def _source_id_classes(html, limit=6000):
+    """源码 HTML 里带 id 的开标签的 class: {id: class}。只做状态类相位复位的对照, 解析失败返回空。"""
+    if not html or len(html) > 8_000_000:
+        return {}
+    from html.parser import HTMLParser
+
+    out = {}
+
+    class _P(HTMLParser):
+        def handle_starttag(self, tag, attrs):
+            if len(out) >= limit:
+                return
+            d = dict(attrs)
+            i, c = d.get("id"), d.get("class")
+            if i and c is not None and i not in out:
+                out[i] = c
+
+    try:
+        _P(convert_charrefs=True).feed(html)
+    except Exception:  # noqa: BLE001
+        return out
+    return out
 
 
 def _fluid_elements(fa: dict, fb: dict, w1: float, w2: float, tol: float = 0.015, fc: dict = None, w3: float = None):
@@ -1962,8 +1987,11 @@ class ClonerEngine:
         page.on("requestfailed", self._on_nav_request_failed)
         self.log("RENDER", f"导航 {url}")
         t_nav, t_nav_m = time.time(), time.monotonic()
+        self._src_html = None
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=config.PAGELOAD_TIMEOUT)
+            _resp = page.goto(url, wait_until="domcontentloaded", timeout=config.PAGELOAD_TIMEOUT)
+            with suppress(Exception):
+                self._src_html = _resp.text() if _resp is not None else None
         except Exception as exc:
             # 首导航瞬时失败(超时/连接抖动): 先用轻量请求探测网络层可达性 ——
             # 不可达(DNS/连接/超时)直接判失败, 不再白等第二个 45s 导航;
@@ -2134,6 +2162,13 @@ class ClonerEngine:
                 self.log("RENDER", f"冻结前等样式表: {ws_.get('ms')}ms, 直取补副本 {ws_.get('fetched', 0)} 张,"
                                    f" 仍未到 {ws_.get('pending', 0)} 张")
         counts = _safe_eval(DEEP_FREEZE_JS)
+        with suppress(Exception):
+            src_cls = _source_id_classes(getattr(self, "_src_html", None))
+            if src_cls:
+                ph = page.evaluate(STATE_PHASE_RESET_JS, src_cls) or {}
+                if ph.get("els"):
+                    self.log("RENDER", f"状态类相位复位: {ph.get('groups', 0)} 组同类组件的 open/active 状态在采集时已轮换, "
+                                       f"{ph['els']} 个实例复位成源码 HTML 的分配(克隆与原站同相位起步)")
         with suppress(Exception):
             # 定时器已停, 弹层脚本不会再把锁写回
             n_lock = page.evaluate(SCROLL_LOCK_STRIP_JS) or 0

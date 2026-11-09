@@ -1103,6 +1103,39 @@ CV_CANVAS_DRIFT_JS = r"""() => {
   return n;
 }"""
 
+# 状态类相位复位: 同一组件的多个实例(同标签、去掉状态词后 class 相同)里, 状态词(open/active/expanded/current…)在采集时
+# 从源码 HTML 里的那个实例"移"到了别的实例上 = 自动轮换(手风琴/卡片轮播)转到了第 k 项。克隆里站点脚本从烘进 HTML 的
+# 第 k 项接着转, 原站从首载项起转, 两边永远差一个相位(wix 手机展开卡差 350px, iPhone Air 49↔70)。把这组实例的状态词
+# 复位成源码里的分配, 克隆与原站从同一相位起步。只动组内状态词; 参数 src: {id: 源码 class}
+STATE_PHASE_RESET_JS = r"""(src) => {
+  const ST = /(^|[-_])(is-)?(open|opened|expanded|active|show|shown|current|selected|collapsed)$/i;
+  const toks = c => (c || '').split(/\s+/).filter(Boolean);
+  const groups = new Map();
+  for (const id of Object.keys(src || {})) {
+    const el = document.getElementById(id);
+    if (!el || typeof el.className !== 'string') continue;
+    const live = toks(el.className), orig = toks(src[id]);
+    const base = live.filter(t => !ST.test(t)).sort().join(' ');
+    if (!base || base !== orig.filter(t => !ST.test(t)).sort().join(' ')) continue;   // 非状态 class 也变了: 不是同一种相位差
+    const k = el.tagName + '|' + base;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push([el, live.filter(t => ST.test(t)), orig.filter(t => ST.test(t))]);
+  }
+  let n = 0, g = 0;
+  for (const mem of groups.values()) {
+    if (mem.length < 2) continue;
+    const gained = new Set(), lost = new Set();
+    for (const [, a, b] of mem) { a.forEach(t => { if (!b.includes(t)) gained.add(t); }); b.forEach(t => { if (!a.includes(t)) lost.add(t); }); }
+    if (![...gained].some(t => lost.has(t))) continue;   // 状态词没在实例间"移动"(只是全体加/去): 不是轮换
+    g++;
+    for (const [el, a, b] of mem) {
+      if (a.join(' ') === b.join(' ')) continue;
+      a.forEach(t => el.classList.remove(t)); b.forEach(t => el.classList.add(t)); n++;
+    }
+  }
+  return {groups: g, els: n};
+}"""
+
 CV_EMIT_JS = r"""
 (loads) => {
   const m = window.__cvRec;
