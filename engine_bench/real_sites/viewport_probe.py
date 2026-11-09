@@ -153,6 +153,13 @@ DIAG_JS = r"""() => {
   const cs = e => e ? getComputedStyle(e) : null;
   const probe = {
     html: attrs(document.documentElement), body: attrs(document.body),
+    // body 直接子元素(到 main 之后 3 个为止): 顶边/高/display/position/外边距, 再加 body 内边距 —— 位移源头在 main 本身、
+    // 前面又对不上路径时, 占位者可能是零宽/极窄块、body 内边距或外边距, tops 行收不到
+    kids: (() => { try { const b = document.body, bc = cs(b); const out = ['body pt=' + bc.paddingTop + ' mt=' + bc.marginTop]; let after = -1;
+      for (const k of b.children) { if (/^(SCRIPT|STYLE|LINK|META|NOSCRIPT|TEMPLATE)$/.test(k.tagName)) continue; const c = cs(k), r = k.getBoundingClientRect();
+        out.push(k.tagName.toLowerCase() + (k.id ? '#' + k.id.slice(-30) : '') + '@' + Math.round(r.top + scrollY) + ' h' + Math.round(r.height) + ' w' + Math.round(r.width) + ' ' + c.display + '/' + c.position + (c.marginTop !== '0px' ? ' mt=' + c.marginTop : '') + (c.paddingTop !== '0px' ? ' pt=' + c.paddingTop : '') + (c.visibility !== 'visible' ? ' ' + c.visibility : ''));
+        if (k.tagName === 'MAIN' || k.querySelector('main')) after = 0; else if (after >= 0 && ++after >= 3) break; if (out.length > 40) break; }
+      return out.join(' | ').slice(0, 1500); } catch (e) { return 'ERR ' + e; } })(),
     bodyFont: cs(document.body) ? cs(document.body).fontFamily.slice(0, 80) + ' / ' + cs(document.body).fontSize + ' / ' + cs(document.body).color : '',
     h1: h1 ? cs(h1).fontSize + ' / ' + cs(h1).lineHeight + ' / ' + cs(h1).fontWeight + ' / ' + cs(h1).fontFamily.slice(0, 60) : '',
     a: a ? cs(a).textDecorationLine + ' / ' + cs(a).color : '',
