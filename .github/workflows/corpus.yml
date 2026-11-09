@@ -186,6 +186,7 @@ jobs:
                   for oy, cy, k in sorted(drift)[:10]: print(f"  微位移文本 原 y={oy} 克隆 y={cy}: {k[:70]}")
                   for side, dd in (("原站", d.get("orig") or {}), ("克隆", d.get("clone") or {})):
                       for tg in (dd.get("src_tags") or []): print(f"  源码开标签[{side}] {tg[:260]}")
+                      for sc in (dd.get("state_cls") or []): print(f"  状态类与源码不同[{side}] #{sc[0]} 运行时多 {sc[1]} 源码多 {sc[2]}")
                   # 位移源头: 两侧逐元素顶边按路径对齐, 相邻元素间 Δy 跳变 ≥4px 处 = 其前一个元素(或祖先)两侧高度不同
                   ot = [(b[0], b) for b in ((d.get("orig") or {}).get("tops") or [])]
                   ctm = {b[0]: b for b in ((d.get("clone") or {}).get("tops") or [])}

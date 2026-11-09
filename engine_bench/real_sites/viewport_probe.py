@@ -130,6 +130,8 @@ async ([maxH, capMs]) => {
 # 诊断: 该视口下加载失败/4xx+ 的请求、样式表装载情况、脚本错误 —— 远程只能读日志时, 这是
 # 定位"手机宽度下图裂/样式丢"的直接证据(产物存储域名在部分环境不可达)
 # 对侧点名: 原站里带 0px 行的 grid 容器, 在克隆里同路径元素(按 data-pi 下标)也转储命中规则, 两侧对照看少了/多了哪条
+# 带 id 的元素里 class 含状态词的(及源码里可能有而运行时已去掉的: 全部带 id 且 class 非空的前 3000 个都给, Python 侧比源码)
+STATE_CLS_JS = r"""() => { const o = []; for (const e of document.querySelectorAll('[id][class]')) { if (o.length >= 3000) break; const c = typeof e.className === 'string' ? e.className : (e.getAttribute('class') || ''); if (e.id && c) o.push([e.id, c]); } return o; }"""
 FOCUS_RULES_JS = r"""(idxs) => { const o = {}; for (const i of idxs) { try { const el = document.querySelector('[data-pi="' + i + '"]'); o[i] = el && window.__probeDump ? window.__probeDump(el) : '(无)'; } catch (e) { o[i] = 'ERR ' + e; } } return o; }"""
 
 DIAG_JS = r"""() => {
@@ -435,6 +437,22 @@ def _shoot(ctx, url, vp, out: Path, timeout_ms=45000, extra_wait_ms=0, focus_key
             with suppress(Exception):
                 raw = page.request.get(url, timeout=15000).text()
                 d["src_tags"] = [m.group(0)[:300] for m in re.finditer(r"<(?:html|body)\b[^>]*>", raw[:400000], re.I)][:2]
+                # 状态类(open/expanded/active/show)运行时与源码不一致的元素: 区分"状态烘进 HTML"与"脚本在本页重跑时加/去"
+                with suppress(Exception):
+                    st_re = re.compile(r"(^|[\s_-])(is-)?(open|opened|expanded|active|show|shown|collapsed)($|[\s_-])", re.I)
+                    live = page.evaluate(STATE_CLS_JS) or []
+                    diff = []
+                    for el_id, cls in live:
+                        m = re.search(r"<[a-zA-Z][^>]*\bid=[\"']" + re.escape(el_id) + r"[\"'][^>]*>", raw)
+                        if not m:
+                            continue
+                        cm = re.search(r"\bclass=[\"']([^\"']*)", m.group(0))
+                        scls = cm.group(1) if cm else ""
+                        a = {t for t in cls.split() if st_re.search(t)}
+                        b = {t for t in scls.split() if st_re.search(t)}
+                        if a != b:
+                            diff.append([el_id[:60], sorted(a - b)[:4], sorted(b - a)[:4]])
+                    d["state_cls"] = diff[:20]
             if focus_keys and d.get("tops"):
                 with suppress(Exception):
                     idx = {t[0]: i for i, t in enumerate(d["tops"])}
