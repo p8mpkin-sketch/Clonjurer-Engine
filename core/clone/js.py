@@ -1118,25 +1118,24 @@ IMG_SRC_PIN_JS = r"""(mode) => {
   return n;
 }"""
 
-# 内联态钉住(窄屏首载页 0.92/1.128 倍宽对照来回用): save 记下每个元素的 style/class, restore 把来回后变了的复原。
+# 内联态钉住(窄屏首载页 0.92/1.128 倍宽对照来回用): save 记下每个元素的全部属性, restore 把来回后变了的复原。
 # 轮播/虚拟列表在改宽时按新宽重排(react-slick 换 track 宽与当前项、translate), 回到原宽不一定回到首载态, 随后抽取的
 # 窄屏变体就带着来回后的错态(ant.design 手机 91→54)。只复原 save 时就在的元素; 返回复原个数
 ROUNDTRIP_PIN_JS = r"""(mode) => {
+  // 全部属性(不只 style/class): 轮播改宽后还会改 aria-hidden/tabindex/data-index 等, 只复原样式时当前项标记仍错位
   let n = 0;
   const els = document.body ? document.body.getElementsByTagName('*') : [];
   for (let i = 0; i < els.length && i < 30000; i++) {
     const el = els[i];
     try {
-      if (mode === 'save') { el.__cvRt = [el.getAttribute('style'), el.getAttribute('class')]; continue; }
+      if (mode === 'save') { const o = {}; for (const a of el.attributes) o[a.name] = a.value; el.__cvRt = o; continue; }
       const o = el.__cvRt;
       if (!o) continue;
       let hit = 0;
-      ['style', 'class'].forEach((a, k) => {
-        const v = el.getAttribute(a);
-        if (v === o[k]) return;
-        if (o[k] === null) el.removeAttribute(a); else el.setAttribute(a, o[k]);
-        hit = 1;
-      });
+      // canvas 的 width/height 属性一写就清空位图(图表变白), 交给 CANVAS_PIN_JS 按显示盒钉
+      const keep = el.tagName === 'CANVAS' ? /^(width|height)$/ : null;
+      for (const a of Array.from(el.attributes)) if (!(a.name in o) && !(keep && keep.test(a.name))) { el.removeAttribute(a.name); hit = 1; }
+      for (const k in o) if (!(keep && keep.test(k)) && el.getAttribute(k) !== o[k]) { el.setAttribute(k, o[k]); hit = 1; }
       n += hit;
     } catch (e) {}
   }
