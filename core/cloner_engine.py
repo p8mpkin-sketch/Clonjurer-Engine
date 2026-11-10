@@ -2376,6 +2376,15 @@ class ClonerEngine:
                 self._close_narrow_loads()
         except Exception as exc:   # noqa: BLE001 以前静默吞掉: 该站手机端没有分视口样式/变体却看不出原因(qwik 手机 41/100 双峰)
             self.log("WARN", f"多视口内联样式/窄屏变体整步失败: {type(exc).__name__}: {str(exc)[:200]}")
+        # 序列化前再做一次状态类相位复位: 第一次复位之后页面仍活着(多视口样式/变体注入期间组件框架重渲染会按自己的
+        # 状态把 class 写回去, 或进视口观察器又展开一张), 复位过的展开态回到交付 HTML 里(wix 手机多展开一张卡, 整页错位)
+        if getattr(config, "LATE_PHASE_RESET", True):
+            with suppress(Exception):
+                src_cls = _source_id_classes(getattr(self, "_src_html", None))
+                if src_cls:
+                    ph = page.evaluate(STATE_PHASE_RESET_JS, src_cls) or {}
+                    if ph.get("els"):
+                        self.log("RENDER", f"状态类相位复位(序列化前复查): 又有 {ph.get('els', 0)} 个实例偏离源码分配, 已再次复位 {ph.get('dbg') or ''}"[:600])
         # N1 保真轨: MHTML 快照(采集期活体渲染的权威固化)。
         # Chromium 对 MHTML 的回放默认禁脚本 —— 确定性由构造保证。
         if screenshot:

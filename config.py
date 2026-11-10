@@ -141,6 +141,7 @@ VIEWPORT_VARIANT_BYTES = 3_000_000   # 窄屏变体 HTML / 附带样式各自上
 VARIANT_FLUID = True           # 窄屏首载页抽取变体前: 0.92 倍宽对照, 随宽同比的内联 px/img 尺寸属性改写为 vw
 VARIANT_FLUID_RESTORE = True   # 随宽对照(0.92/1.128 倍宽来回)后把内联 style/class 复原成首载态再抽变体
 NARROW_PHASE_RESET = True        # 窄屏首载页抽变体前也做状态类相位复位(滚动后才展开/轮换的同类组件回到源码 HTML 的首载分配)
+LATE_PHASE_RESET = True          # 序列化前复查一次状态类相位复位(首次复位后被页面脚本/重渲染写回的)
 NARROW_UA_SPLIT = True           # 手机 UA 首载页之外再开一张桌面 UA 390 页: 只在手机 UA 下才换结构的变体只给触屏显示
 NARROW_UA_CLS = True             # 手机 UA 首载页与桌面 UA 同宽页同路径 class 不同(桌面 UA 同宽与主页相同)→ 只给触屏手机段换 class(wix 手机卡片默认收起)
 NARROW_PHONE_UA = True           # 窄屏首载对照的手机宽(390)页用手机 UA + 触屏仿真单独上下文加载(与评分真机口径一致)
