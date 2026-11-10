@@ -1402,7 +1402,7 @@ CV_EMIT_JS = r"""
       const pairVal = (k) => {
         if (k !== 'm' || !pairM || !m.paths || nmap.m === null || nmap.m === undefined || nmap.m === 0) return null;
         const L2 = pairM.paths && pairM.paths[m.paths[i]];
-        if (!L2 || L2[0] !== tagOf(el)) return null;
+        if (!L2 || L2[0] !== tagOf(el) || L2[0] === 'CANVAS') return null;   // canvas 位图尺寸改宽即重设, 不是首载写一次
         const PV = parse(L2[2] + (L2[4] ? ';' + L2[4] : ''));
         const pv = PV[p] ? px(PV[p][0]) : null;
         if (pv === null || pv === 0 || pv === nmap.m) return null;

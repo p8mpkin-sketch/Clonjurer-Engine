@@ -1717,6 +1717,10 @@ class ClonerEngine:
                     fp = p3.evaluate(FLUID_READ_JS) or {}
                     fl2 = _fluid_elements(fa, fp, w1, wp)
                     for path, props in fl2["inline"].items():
+                        # canvas 位图尺寸由图表库在改宽时重设(不是"只在首载写一次"), 同页三点采样已覆盖; 两张首载页对照
+                        # 只有窄侧两点, 往 420/440 外推会把位图/固化图拉大(vite iPhone Air 90→76)
+                        if (fa.get(path) or [""])[0] == "CANVAS":
+                            continue
                         cur = fl["inline"].setdefault(path, {})
                         for k, v in props.items():
                             if k not in cur:
@@ -1731,6 +1735,9 @@ class ClonerEngine:
                 except Exception as exc:   # noqa: BLE001
                     self.log("WARN", f"窄屏首载对照页({tag})读取失败: {str(exc)[:120]}")
             if fl["paths"] or fl["inline"]:
+                dbg = [f"{pth[-70:]} {k}={v}" for pth, props in list(fl["inline"].items())[:40] for k, v in props.items()][:14]
+                if dbg:
+                    self.log("RENDER", f"窄屏首载页 {tag} 随宽同比明细: " + " | ".join(dbg)[:1800])
                 res = p2.evaluate(FLUID_APPLY_JS, fl) or {}
                 piece = sum(1 for v in fl["inline"].values() for x in v.values() if x.startswith(("min(", "max(")))
                 self.log("RENDER", f"窄屏首载页 {tag} 随宽同比: {res.get('vw', 0)} 个内联 px/尺寸属性改写为 vw(其中 {piece} 个封顶/垫底),"
