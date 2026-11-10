@@ -1163,7 +1163,16 @@ STATE_PHASE_RESET_JS = r"""(src) => {
       a.forEach(t => { if (!b.includes(t)) cnt.set('+' + t, (cnt.get('+' + t) || 0) + 1); });
       b.forEach(t => { if (!a.includes(t)) cnt.set('-' + t, (cnt.get('-' + t) || 0) + 1); });
     }
-    const partial = new Set([...cnt].filter(([, c]) => c < mem.length).map(([k]) => k));
+    // 只认两种确定的相位差: 状态词从一个实例移到另一个实例(轮换, +1/-1), 或源码里全组都没有、采集时恰有一个实例加上
+    // (≥3 个实例的折叠卡展开了一张)。多个实例同时变化的是水合/脚本初始化给出的真实首屏态(aliyun 手机复位后 97→29), 不动
+    const partial = new Set();
+    const has0 = t => mem.some(([, , b]) => b.includes(t));
+    for (const [k, c] of cnt) {
+      const t = k.slice(1);
+      const p = cnt.get('+' + t) || 0, q = cnt.get('-' + t) || 0;
+      if (c >= mem.length) continue;
+      if ((p === 1 && q === 1) || (k[0] === '+' && p === 1 && q === 0 && !has0(t) && mem.length >= 3)) partial.add(k);
+    }
     if (!partial.size) continue;
     g++;
     for (const [el, a, b] of mem) {
