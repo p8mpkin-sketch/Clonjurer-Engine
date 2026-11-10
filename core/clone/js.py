@@ -1172,7 +1172,6 @@ CV_CANVAS_DRIFT_JS = r"""() => {
 # 复位成源码里的分配, 克隆与原站从同一相位起步。只动组内状态词; 参数 src: {id: 源码 class}
 STATE_PHASE_RESET_JS = r"""(src) => {
   const ST = /(^|[-_])(is-)?(open|opened|expanded|active|show|shown|current|selected|collapsed)$/i;
-  const OPENISH = /(^|[-_])(is-)?(open|opened|expanded|show|shown)$/i;
   const toks = c => (c || '').split(/\s+/).filter(Boolean);
   const groups = new Map();
   for (const id of Object.keys(src || {})) {
@@ -1210,40 +1209,14 @@ STATE_PHASE_RESET_JS = r"""(src) => {
     }
     if (!partial.size) continue;
     g++;
-    const offs = [...partial].filter(k => k[0] === '+' && !cnt.get('-' + k.slice(1)) && OPENISH.test(k.slice(1))).map(k => k.slice(1));
     for (const [el, a, b] of mem) {
       let hit = false;
-      // 单张展开类(源码全组收起、采集时恰一个实例展开)复位后记下: 站点脚本在克隆里多半还会照桌面逻辑再展开,
-      // 窄屏手机首载页滚完仍收起的, 触屏上守住收起态(见 RESET_TOUCH_JS)
-      // 记在全组每个实例上: 自动轮流展开的卡片组, 克隆里脚本下一次会展开另一张
-      if (offs.length) for (const [e2] of mem) e2.setAttribute('data-cv-reset-off', offs.join(' '));
       a.forEach(t => { if (!b.includes(t) && partial.has('+' + t)) { el.classList.remove(t); hit = true; } });
       b.forEach(t => { if (!a.includes(t) && partial.has('-' + t)) { el.classList.add(t); hit = true; } });
       if (hit) n++;
     }
   }
   return {groups: g, els: n, cand, dbg};
-}"""
-
-# 复位过的单张展开(data-cv-reset-off): 窄屏手机首载页滚完后同路径元素仍没有这些词 → 触屏上守住收起态(data-cv-touch-off);
-# 有的(手机上也会展开)不守。标记用完即去
-RESET_TOUCH_LIST_JS = r"""() => Array.from(document.querySelectorAll('[data-cv-reset-off]')).map(e => [(""" + CV_PATH_FN + r""")(e), e.getAttribute('data-cv-reset-off'), e.id || ''])"""
-# 窄屏页上按 id(唯一时)或路径取这些元素当前 class: 换了结构的区域(重复器项)路径对不上, id 稳定
-RESET_TOUCH_PROBE_JS = r"""(marks) => {
-  const paths = (""" + CV_PATHS_JS + r""")();
-  return marks.map(([p, t, id]) => {
-    const byId = id && document.querySelectorAll('[id="' + CSS.escape(id) + '"]').length === 1 ? document.getElementById(id) : null;
-    if (byId) return typeof byId.className === 'string' ? byId.className : '';
-    return paths[p] ? paths[p][1] : null;
-  });
-}"""
-RESET_TOUCH_APPLY_JS = r"""(keep) => {
-  let n = 0;
-  Array.from(document.querySelectorAll('[data-cv-reset-off]')).forEach((e, i) => {
-    if (keep[i]) { e.setAttribute('data-cv-touch-off', e.getAttribute('data-cv-reset-off')); n++; }
-    e.removeAttribute('data-cv-reset-off');
-  });
-  return n;
 }"""
 
 CV_EMIT_JS = r"""
@@ -1532,7 +1505,7 @@ CV_EMIT_JS = r"""
   });
   if (srcFill) out.srcFill = srcFill;
   if (textFill) out.textFill = textFill;
-  if (out.cls || out.xattr || out.touchOff || document.querySelector('[data-cv-reset-off]')) {
+  if (out.cls || out.xattr || out.touchOff) {
     // 当前视口段由分视口样式表里的 --cv-band 告诉运行时(段边界落盘时才确定, 脚本不重复计算断点)
     bands.d.push(':root{--cv-band:d}'); bands.t.push(':root{--cv-band:t}'); bands.m.push(':root{--cv-band:m}');
     const sc = document.createElement('script');
