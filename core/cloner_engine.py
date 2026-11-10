@@ -393,7 +393,36 @@ def _fluid_elements(fa: dict, fb: dict, w1: float, w2: float, tol: float = 0.015
                     inline.setdefault(path, {})[k] = f"min({vw}, {v3:g}px)"       # 宽侧封顶
                 elif v1 > 0 and lin13 and v1 * ratio * (1 + tol) < v2 <= v1:
                     inline.setdefault(path, {})[k] = f"max({vw}, {v2:g}px)"       # 窄侧垫底
+    _drop_slider_tracks(inline)
     return {"paths": paths, "inline": inline}
+
+
+def _vw_num(v):
+    m = re.match(r"^([\d.]+)vw$", v or "")
+    return float(m.group(1)) if m else None
+
+
+def _drop_slider_tracks(inline: dict) -> int:
+    """轮播轨道(父元素内联宽 = 各子项内联宽之和, 子项 ≥2 且等宽)不改 vw: 轨道/子项宽由轮播脚本按容器宽维护,
+    克隆里脚本照样会重算, 写死成 vw 反而和脚本的当前项/位移对不上(ant.design 手机 91→61, 两项叠成两倍高)。"""
+    kids = {}
+    for path, props in inline.items():
+        if ">" in path and _vw_num(props.get("width")) is not None:
+            kids.setdefault(path.rsplit(">", 1)[0], []).append(path)
+    n = 0
+    for parent, ch in kids.items():
+        pw = _vw_num((inline.get(parent) or {}).get("width"))
+        if pw is None or len(ch) < 2:
+            continue
+        ws = [_vw_num(inline[c]["width"]) for c in ch]
+        if max(ws) - min(ws) > max(ws) * 0.02 or abs(sum(ws) - pw) > pw * 0.02:
+            continue
+        for c in ch + [parent]:
+            inline[c].pop("width", None)
+            if not inline[c]:
+                inline.pop(c)
+            n += 1
+    return n
 
 
 _HIDE_DECL_RE = re.compile(
