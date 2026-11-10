@@ -35,6 +35,10 @@ on:
         description: "每站克隆一完成立即探针(true/false)"
         required: false
         default: "false"
+      diag_keys:
+        description: "探针诊断: 逗号分隔的元素路径片段(如 #comp-abc), 两侧同路径元素的顶边/高/样式并排打印"
+        required: false
+        default: ""
       engine_env:
         description: "引擎常量 A/B: 空格分隔的 CLONER_CFG_<常量>=值(如 CLONER_CFG_NARROW_PHONE_UA=0)"
         required: false
@@ -87,6 +91,7 @@ jobs:
           if [ -n "$j" ]; then echo "::group::run json"; cat "$j"; echo "::endgroup::"; fi
           # 未出分/失败/低于 90 分站点的任务日志(engine.log)尾部进日志, 供远程归因
           if [ -n "$j" ]; then
+            export DIAG_KEYS="${{ github.event.inputs.diag_keys }}"
             python - "$j" <<'PY' | tee logs/diag_ci.txt
           import json, sys, pathlib, re
           run = json.load(open(sys.argv[1], encoding="utf-8"))
@@ -190,6 +195,19 @@ jobs:
                   # 位移源头: 两侧逐元素顶边按路径对齐, 相邻元素间 Δy 跳变 ≥4px 处 = 其前一个元素(或祖先)两侧高度不同
                   ot = [(b[0], b) for b in ((d.get("orig") or {}).get("tops") or [])]
                   ctm = {b[0]: b for b in ((d.get("clone") or {}).get("tops") or [])}
+                  # 指定路径片段的元素两侧并排(归因时逐层看是哪个后代的顶边/高/边距不同)
+                  import os
+                  for frag in [x.strip() for x in os.environ.get("DIAG_KEYS", "").split(",") if x.strip()]:
+                      seen = 0
+                      for k, ob in ot:
+                          if frag in k and seen < 40:
+                              seen += 1
+                              cb = ctm.get(k)
+                              print(f"  并排 {k[-90:]} 原 y={ob[1]} h={ob[2]} [{ob[3][:330]}] | 克隆 " + (f"y={cb[1]} h={cb[2]} [{cb[3][:330]}]" if cb else "无"))
+                      for k, cb in ctm.items():
+                          if frag in k and k not in dict(ot) and seen < 50:
+                              seen += 1
+                              print(f"  并排(克隆独有) {k[-90:]} y={cb[1]} h={cb[2]} [{cb[3][:330]}]")
                   prev_dy, prev, n = 0, None, 0
                   for k, ob in ot:
                       cb = ctm.get(k)
