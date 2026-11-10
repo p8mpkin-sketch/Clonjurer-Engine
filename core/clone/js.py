@@ -1227,7 +1227,16 @@ STATE_PHASE_RESET_JS = r"""(src) => {
 
 # 复位过的单张展开(data-cv-reset-off): 窄屏手机首载页滚完后同路径元素仍没有这些词 → 触屏上守住收起态(data-cv-touch-off);
 # 有的(手机上也会展开)不守。标记用完即去
-RESET_TOUCH_LIST_JS = r"""() => Array.from(document.querySelectorAll('[data-cv-reset-off]')).map(e => [(""" + CV_PATH_FN + r""")(e), e.getAttribute('data-cv-reset-off')])"""
+RESET_TOUCH_LIST_JS = r"""() => Array.from(document.querySelectorAll('[data-cv-reset-off]')).map(e => [(""" + CV_PATH_FN + r""")(e), e.getAttribute('data-cv-reset-off'), e.id || ''])"""
+# 窄屏页上按 id(唯一时)或路径取这些元素当前 class: 换了结构的区域(重复器项)路径对不上, id 稳定
+RESET_TOUCH_PROBE_JS = r"""(marks) => {
+  const paths = (""" + CV_PATHS_JS + r""")();
+  return marks.map(([p, t, id]) => {
+    const byId = id && document.querySelectorAll('[id="' + CSS.escape(id) + '"]').length === 1 ? document.getElementById(id) : null;
+    if (byId) return typeof byId.className === 'string' ? byId.className : '';
+    return paths[p] ? paths[p][1] : null;
+  });
+}"""
 RESET_TOUCH_APPLY_JS = r"""(keep) => {
   let n = 0;
   Array.from(document.querySelectorAll('[data-cv-reset-off]')).forEach((e, i) => {

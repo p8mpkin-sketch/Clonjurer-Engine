@@ -93,6 +93,7 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     CV_PATHS_JS,
     RESET_TOUCH_APPLY_JS,
     RESET_TOUCH_LIST_JS,
+    RESET_TOUCH_PROBE_JS,
     CV_PATH_FN,
     CV_QUIET_JS,
     CV_RECORD_JS,
@@ -1852,13 +1853,17 @@ class ClonerEngine:
             marks = page.evaluate(RESET_TOUCH_LIST_JS) or []
             if not marks:
                 return
-            got = narrow.evaluate(CV_PATHS_JS) or {}
-            keep = []
-            for path, toks in marks:
-                row = got.get(path)
-                keep.append(bool(row) and not (set(toks.split()) & set(str(row[1]).split())))
+            got = narrow.evaluate(RESET_TOUCH_PROBE_JS, marks) or []
+            keep, miss, opened = [], 0, []
+            for (path, toks, eid), cls in zip(marks, got):
+                if cls is None:
+                    miss += 1
+                elif set(toks.split()) & set(cls.split()):
+                    opened.append(eid or path[-40:])
+                keep.append(cls is not None and not (set(toks.split()) & set(cls.split())))
             n = page.evaluate(RESET_TOUCH_APPLY_JS, keep) or 0
-            self.log("RENDER", f"相位复位的单张展开: {len(marks)} 处, 手机 UA 首载页滚完仍收起 {n} 处, 触屏上守住收起态")
+            self.log("RENDER", f"相位复位的单张展开: {len(marks)} 处, 手机 UA 首载页滚完仍收起 {n} 处, 触屏上守住收起态"
+                               + (f"; 窄屏页找不到 {miss} 处" if miss else "") + (f"; 窄屏页也展开 {opened[:6]}" if opened else ""))
 
     def _inject_dom_variants(self, page, loads):
         """窄屏 DOM 变体(见 ALT_EXTRACT_JS): 结构不同的最上层子树把窄屏版并列插入主页。"""
