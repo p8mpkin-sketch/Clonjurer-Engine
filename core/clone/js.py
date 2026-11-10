@@ -1283,6 +1283,36 @@ CV_EMIT_JS = r"""
     });
     if (Object.keys(alt).length) swaps.push([el, alt]);
   });
+  // 只随 UA 变的 class(触屏): 手机 UA 首载页与桌面 UA 同宽首载页(loads.__mdesk)同路径元素 class 不同、桌面 UA 同宽页
+  // 与主页相同 → 宽度没改它, 是站点按设备类型(触屏/手机 UA)写的(wix 手机上卡片默认收起, 桌面展开第一张)。
+  // 只给触屏手机段(mt)。含状态词的变化要排除轮换: 同一组件(同标签、去状态词后同 class)里有别的实例反向变了同一个词 → 是时间相位不是 UA
+  const LM = loads.m, MD = loads.__mdesk;
+  if (C.d && LM && MD && m.paths) {
+    const has = new Set(swaps.map(([e]) => e));
+    const keyOf = (tg, c) => tg + '|' + c.split(/\s+/).filter(x => x && !STATE.test(x)).sort().join(' ');
+    const flips = {};
+    for (const p in LM) {
+      const a = LM[p], b = MD[p];
+      if (!a || !b || a[0] !== b[0] || a[1] === b[1]) continue;
+      const A = new Set(a[1].split(/\s+/)), B = new Set(b[1].split(/\s+/));
+      const k = keyOf(a[0], b[1]);
+      for (const x of A) if (x && !B.has(x) && STATE.test(x)) (flips[k + '+' + x] = (flips[k + '+' + x] || 0) + 1);
+      for (const x of B) if (x && !A.has(x) && STATE.test(x)) (flips[k + '-' + x] = (flips[k + '-' + x] || 0) + 1);
+    }
+    let nt = 0;
+    m.els.forEach((el, i) => {
+      if (nt >= 2000 || has.has(el) || !el.isConnected || el.closest('svg')) return;
+      const cd = C.d[i], p = m.paths[i], L = LM[p], D = MD[p];
+      if (!L || !D || C.b[i] !== cd || (el.getAttribute('class') || '') !== cd) return;
+      if (L[0] !== tagOf(el) || D[0] !== L[0] || D[1] !== cd || L[1] === cd || /[<>"]/.test(L[1])) return;
+      const a = new Set(cd.split(/\s+/)), b = new Set(L[1].split(/\s+/));
+      const k = keyOf(L[0], cd);
+      const lost = [...a].filter(x => x && !b.has(x)), got = [...b].filter(x => x && !a.has(x));
+      if (lost.some(x => STATE.test(x) && flips[k + '+' + x]) || got.some(x => STATE.test(x) && flips[k + '-' + x])) return;
+      swaps.push([el, {mt: L[1]}]); nt++;
+    });
+    if (nt) out.clsTouch = nt;
+  }
   swaps.slice(0, 4000).forEach(([el, alt]) => {
     for (const t of Object.keys(alt)) el.setAttribute('data-cv-cls-' + t, alt[t]);
     el.setAttribute('data-cv-cls-d', el.getAttribute('class') || '');
@@ -1490,12 +1520,14 @@ CV_EMIT_JS = r"""
 CV_CLS_RUNTIME = r"""(function(){var cur=null;
 function band(){try{return (getComputedStyle(document.documentElement).getPropertyValue('--cv-band')||'').trim();}catch(x){return '';}}
 function one(e,b){try{
-if(e.hasAttribute('data-cv-cls-d')){var v=e.getAttribute('data-cv-cls-'+b);if(v===null)v=e.getAttribute('data-cv-cls-d');if(e.getAttribute('class')!==v)e.setAttribute('class',v);}
-if(e.hasAttribute('data-cv-xa-d')){var o=JSON.parse(e.getAttribute('data-cv-xa-d')),bv=e.getAttribute('data-cv-xa-'+b);if(bv!==null){var q=JSON.parse(bv);for(var k in q)o[k]=q[k];}for(k in o){if(o[k]===null)e.removeAttribute(k);else if(e.getAttribute(k)!==o[k])e.setAttribute(k,o[k]);}}
+if(e.hasAttribute('data-cv-cls-d')){var v=e.getAttribute('data-cv-cls-'+b);if(v===null&&b==='mt')v=e.getAttribute('data-cv-cls-m');if(v===null)v=e.getAttribute('data-cv-cls-d');if(e.getAttribute('class')!==v)e.setAttribute('class',v);}
+if(e.hasAttribute('data-cv-xa-d')){var o=JSON.parse(e.getAttribute('data-cv-xa-d')),bv=e.getAttribute('data-cv-xa-'+(b==='mt'?'m':b));if(bv!==null){var q=JSON.parse(bv);for(var k in q)o[k]=q[k];}for(k in o){if(o[k]===null)e.removeAttribute(k);else if(e.getAttribute(k)!==o[k])e.setAttribute(k,o[k]);}}
 }catch(x){}}
 function all(b){var es=document.querySelectorAll('[data-cv-cls-d],[data-cv-xa-d]');for(var i=0;i<es.length;i++)one(es[i],b);}
-function apply(){var b=band()||'d';if(b===cur)return;cur=b;all(b);}
-try{new MutationObserver(function(ms){var b=cur||band();if(!b)return;for(var i=0;i<ms.length;i++){var ad=ms[i].addedNodes;for(var j=0;j<ad.length;j++){var n=ad[j];if(n.nodeType!==1)continue;one(n,b);if(n.children&&n.children.length){var es=n.querySelectorAll('[data-cv-cls-d],[data-cv-xa-d]');for(var k=0;k<es.length;k++)one(es[k],b);}}}}).observe(document.documentElement,{childList:true,subtree:true});}catch(x){}
+function touch(){try{return matchMedia('(pointer: coarse)').matches;}catch(x){return false;}}
+function bt(){var b=band();if(b==='m'&&touch())b='mt';return b;}
+function apply(){var b=bt()||'d';if(b===cur)return;cur=b;all(b);}
+try{new MutationObserver(function(ms){var b=cur||bt();if(!b)return;for(var i=0;i<ms.length;i++){var ad=ms[i].addedNodes;for(var j=0;j<ad.length;j++){var n=ad[j];if(n.nodeType!==1)continue;one(n,b);if(n.children&&n.children.length){var es=n.querySelectorAll('[data-cv-cls-d],[data-cv-xa-d]');for(var k=0;k<es.length;k++)one(es[k],b);}}}}).observe(document.documentElement,{childList:true,subtree:true});}catch(x){}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',apply);else apply();window.addEventListener('resize',apply);window.addEventListener('load',apply);})();"""
 CV_EMIT_JS = CV_EMIT_JS.replace("CV_CLS_RUNTIME", json.dumps(CV_CLS_RUNTIME))
 

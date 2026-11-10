@@ -2337,12 +2337,14 @@ class ClonerEngine:
         try:
             try:
                 loads = self._collect_narrow_loads()
-                cv = page.evaluate(CV_EMIT_JS, loads) or {}
+                emit_loads = loads if config.NARROW_UA_CLS else {k: v for k, v in loads.items() if k != "__mdesk"}
+                cv = page.evaluate(CV_EMIT_JS, emit_loads) or {}
                 if cv.get("els") or cv.get("cls") or cv.get("srcFill") or cv.get("textFill"):
                     self.log("RENDER", f"多视口内联样式: {cv['els']} 个元素, {cv.get('vw', 0)} 个按视口宽比例改写为 vw"
                                        + (f"(另 {cv['pairvw']} 个手机段 px 由 0.92 倍宽首载对照认出同比)" if cv.get("pairvw") else "") + ","
                                        f" {cv.get('banded', 0)} 个移入分视口样式表(其中窄屏首载补采 {cv.get('reload', 0)})"
                                        f"; 分视口 class {cv.get('cls', 0)} 个"
+                                       + (f"(其中只随手机 UA 变、只给触屏 {cv['clsTouch']} 个)" if cv.get("clsTouch") else "")
                                        + (f"; 桌面隐藏元素补窄屏 src {cv['srcFill']} 个" if cv.get("srcFill") else "")
                                        + (f", 补文本 {cv['textFill']} 个" if cv.get("textFill") else "")
                                        + (f"; 固化 canvas 按缩放前尺寸定盒 {cv['cvFix']} 个" if cv.get("cvFix") else ""))
