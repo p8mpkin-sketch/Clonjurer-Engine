@@ -1413,7 +1413,7 @@ CV_EMIT_JS = r"""
         // 固化 canvas 的桌面段不钉 px: 桌面段靠 aspect-ratio 随宽缩(采集宽之外的桌面宽度也对), 只给平板/手机段写首载页量到的高
         if (k === 'd' && p === 'height' && el.getAttribute('data-canvas-frozen')) return;
         let val = fluid.has(k) ? (nmap[k] / W[k] * 100).toFixed(4) + 'vw' : v[0];
-        if (!fluid.has(k)) { const pv = pairVal(k); if (pv) { val = pv; out.pairvw = (out.pairvw || 0) + 1; } }
+        if (!fluid.has(k)) { const pv = pairVal(k); if (pv) { val = pv; out.pairvw = (out.pairvw || 0) + 1; if ((out.pairdbg = out.pairdbg || []).length < 12) out.pairdbg.push([(m.paths && m.paths[i] || '').slice(-80), el.tagName, p, v[0], pv]); } }
         rule[k].push(p + ':' + val + (v[1] ? '!important' : ''));
       };
       emit('d', dv);

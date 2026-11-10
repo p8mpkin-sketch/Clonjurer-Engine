@@ -1722,6 +1722,8 @@ class ClonerEngine:
                             if k not in cur:
                                 cur[k] = v
                                 pair_n += 1
+                                if pair_n <= 12:
+                                    self.log("RENDER", f"窄屏首载对照页同比 {tag}: {path[-90:]} {k} {(fa.get(path) or [0, 0, ''])[2][:80]!r} → {v}")
                     for path in fl2["paths"]:
                         if path not in fl["paths"]:
                             fl["paths"].append(path)
@@ -2255,6 +2257,8 @@ class ClonerEngine:
                                        + (f"; 桌面隐藏元素补窄屏 src {cv['srcFill']} 个" if cv.get("srcFill") else "")
                                        + (f", 补文本 {cv['textFill']} 个" if cv.get("textFill") else "")
                                        + (f"; 固化 canvas 按缩放前尺寸定盒 {cv['cvFix']} 个" if cv.get("cvFix") else ""))
+                if cv.get("pairdbg"):
+                    self.log("RENDER", f"手机段首载对照同比明细: {json.dumps(cv['pairdbg'], ensure_ascii=False)[:1500]}")
                 if cv.get("cvdbg"):
                     self.log("RENDER", f"固化 canvas 分视口对照: {json.dumps(cv['cvdbg'], ensure_ascii=False)[:1500]}")
                 try:
