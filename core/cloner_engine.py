@@ -91,6 +91,8 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     CV_EMIT_JS,
     STATE_PHASE_RESET_JS,
     CV_PATHS_JS,
+    RESET_TOUCH_APPLY_JS,
+    RESET_TOUCH_LIST_JS,
     CV_PATH_FN,
     CV_QUIET_JS,
     CV_RECORD_JS,
@@ -1842,6 +1844,22 @@ class ClonerEngine:
                 out.append(p)
         return out
 
+    def _reset_touch_hold(self, page, narrow):
+        """相位复位过的单张展开: 手机 UA 首载页滚完仍收起的, 触屏手机段守住收起态(克隆跑桌面版脚本会再展开)。"""
+        if not getattr(config, "NARROW_UA_CLS", True):
+            return
+        with suppress(Exception):
+            marks = page.evaluate(RESET_TOUCH_LIST_JS) or []
+            if not marks:
+                return
+            got = narrow.evaluate(CV_PATHS_JS) or {}
+            keep = []
+            for path, toks in marks:
+                row = got.get(path)
+                keep.append(bool(row) and not (set(toks.split()) & set(str(row[1]).split())))
+            n = page.evaluate(RESET_TOUCH_APPLY_JS, keep) or 0
+            self.log("RENDER", f"相位复位的单张展开: {len(marks)} 处, 手机 UA 首载页滚完仍收起 {n} 处, 触屏上守住收起态")
+
     def _inject_dom_variants(self, page, loads):
         """窄屏 DOM 变体(见 ALT_EXTRACT_JS): 结构不同的最上层子树把窄屏版并列插入主页。"""
         if not loads or not self.cfg.get("viewport_variants", True):
@@ -1872,6 +1890,7 @@ class ClonerEngine:
             # 反而让图表/轮播停在错态(vite 平板 98→64、iPad Air 87→77)
             if tag == "m":
                 ClonerEngine._fluidize_narrow_page(self, pages[tag], tag)
+                ClonerEngine._reset_touch_hold(self, page, pages[tag])
             mc = getattr(self, "_main_counts", {}) or {}
             self.log("RENDER", f"窄屏首载页 {tag}: {'到位' if stable else '到时限仍在变化'}, 控件 {counts.get('ctrl', '?')}"
                                f"(主页 {mc.get('ctrl', '?')}) / 按钮 {counts.get('btn', '?')}(主页 {mc.get('btn', '?')})"
@@ -2358,6 +2377,8 @@ class ClonerEngine:
                 except Exception as exc:
                     self.log("WARN", f"窄屏 DOM 变体注入失败: {str(exc)[:160]}")
             finally:
+                with suppress(Exception):
+                    page.evaluate(RESET_TOUCH_APPLY_JS, [])
                 self._close_narrow_loads()
         except Exception as exc:   # noqa: BLE001 以前静默吞掉: 该站手机端没有分视口样式/变体却看不出原因(qwik 手机 41/100 双峰)
             self.log("WARN", f"多视口内联样式/窄屏变体整步失败: {type(exc).__name__}: {str(exc)[:200]}")

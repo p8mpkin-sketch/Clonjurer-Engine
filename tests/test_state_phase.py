@@ -28,6 +28,8 @@ class StatePhase(unittest.TestCase):
                 self.assertEqual(cls["a1"], "card a1-box wixui-card is-open")   # 实例私有 class(含自身 id)不妨碍认同类
                 self.assertEqual(cls["a3"], "card a3-box wixui-card")
                 self.assertEqual(cls["c2"], "acc")                # 源码全收起、采集时展开了其中一个: 复位
+                marks = page.evaluate("[...document.querySelectorAll('[data-cv-reset-off]')].map(e => e.id + ':' + e.getAttribute('data-cv-reset-off'))")
+                self.assertEqual(marks, ["c2:is-open"])           # 单张展开记下(轮换 a1/a3 不记)
                 self.assertEqual(cls["m1"], "menu active")        # 全体都加了: 不是轮换
                 self.assertEqual(cls["solo"], "panel open")       # 单实例
                 self.assertEqual(cls["t2"], "tab open")
