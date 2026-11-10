@@ -715,6 +715,7 @@ CV_PATHS_JS = r"""() => {
 # 改都救不回结构。窄屏首载页与主页按结构路径对齐, 子元素结构不同的最上层子树把窄屏版
 # 也序列化进克隆, 两版各打 data-cv-vp 视口令牌, 由分视口样式表只显示当前视口那一版。
 ALT_EXTRACT_JS = r"""(paths) => {
+  const VFILL = 1;
   // 与 CV_PATH_FN 同口径: body 这一层有唯一 id 的段写成 tag#id, 序号段只数同标签且无唯一 id 的兄弟
   const resolve = (path) => {
     let e = document.body;
@@ -784,7 +785,20 @@ ALT_EXTRACT_JS = r"""(paths) => {
       try {
         const data = cv.toDataURL('image/png'), dst = cvc[k];
         if (!dst || !data || data.length <= 128) return;
-        dst.replaceWith((__CANVAS_IMG__)(cv, data));
+        const im = (__CANVAS_IMG__)(cv, data);
+        // 脚本按容器宽写了内联 px 宽高、且显示盒正好撑满父元素内容宽的 canvas: 窄屏版只在首载那一个宽度(768/390)采到,
+        // 钉着 px 到同段别的机型(820/360/420)就窄一截或溢出 → 写 width:100% + height:auto, 由内联 aspect-ratio 定高
+        if (VFILL) try {
+          const pw = /^([\d.]+)px$/.exec(cv.style.width || ''), ph = /^([\d.]+)px$/.exec(cv.style.height || ''), pe = cv.parentElement;
+          if (pw && ph && pe) {
+            const pc = getComputedStyle(pe), rb = cv.getBoundingClientRect();
+            const inner = pe.clientWidth - (parseFloat(pc.paddingLeft) || 0) - (parseFloat(pc.paddingRight) || 0);
+            if (rb.width > 0 && Math.abs(inner - rb.width) <= 1.5 && Math.abs(rb.width - +pw[1]) <= 1.5 && Math.abs(rb.height - +ph[1]) <= 1.5) {
+              im.style.setProperty('width', '100%'); im.style.setProperty('height', 'auto');
+            }
+          }
+        } catch (e) {}
+        dst.replaceWith(im);
       } catch (e) {}
     });
     c.querySelectorAll('script,noscript').forEach(x => x.remove());

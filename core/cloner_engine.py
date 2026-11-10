@@ -325,8 +325,10 @@ _FLUID_GEOM_RE = re.compile(r"(?:^|;)\s*(attr-width|attr-height|width|height|min
                             r"(-?\d+(?:\.\d+)?)px\s*(!important)?(?=;|$)", re.I)
 
 
-if not getattr(config, "VARIANT_CANVAS_CANON", True):
+if not getattr(config, "VARIANT_CANVAS_CANON", False):
     CV_PATHS_JS = CV_PATHS_JS.replace("const CANON = 1;", "const CANON = 0;")
+if not getattr(config, "VARIANT_CANVAS_FILL", True):
+    ALT_EXTRACT_JS = ALT_EXTRACT_JS.replace("const VFILL = 1;", "const VFILL = 0;")
 
 
 def _root_inline_varies(reads) -> bool:
