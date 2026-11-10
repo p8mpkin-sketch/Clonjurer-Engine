@@ -9,6 +9,7 @@ PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device
 <div id="c1" class="card is-open">a</div><div id="c2" class="card">b</div><div id="c3" class="card">c</div>
 <div id="x" class="nav">n</div>
 <div id="s1" class="slide active">1</div><div id="s2" class="slide">2</div>
+<div id="k1" class="acc">k</div>
 </body></html>"""
 
 
@@ -33,7 +34,7 @@ class UaClass(unittest.TestCase):
                 loads = {}
                 for key, h in (("m", variant({"c1": ("card is-open", "card"), "x": ("nav", "nav nav-touch"),
                                               "s1": ("slide active", "slide"), "s2": ("slide", "slide active")})),
-                               ("__mdesk", PAGE)):
+                               ("__mdesk", variant({"k1": ("acc", "acc is-open")}))):
                     p2 = b.new_page(viewport={"width": 390, "height": 800})
                     p2.set_content(h)
                     loads[key] = p2.evaluate(ce.CV_PATHS_JS)
@@ -41,6 +42,7 @@ class UaClass(unittest.TestCase):
                 out = page.evaluate(ce.CV_EMIT_JS, loads)
                 self.assertEqual(out.get("clsTouch"), 2)
                 self.assertIsNone(page.evaluate("document.getElementById('s1').getAttribute('data-cv-cls-mt')"))
+                self.assertEqual(out.get("touchOff"), 2)   # c1(桌面 UA 同宽也展开) 与 k1
                 html = page.content()
             finally:
                 b.close()
@@ -55,6 +57,17 @@ class UaClass(unittest.TestCase):
                 pt = ctx.new_page()
                 pt.set_content(html)
                 self.assertEqual(pt.evaluate(cls), ["card", "nav nav-touch", "slide active", "slide"])
+                # 桌面版脚本加载后把 k1 展开: 触屏手机段上点按前拿掉; 点按后放行
+                pt.evaluate("document.getElementById('k1').classList.add('is-open')")
+                pt.wait_for_timeout(50)
+                self.assertEqual(pt.evaluate("document.getElementById('k1').className"), "acc")
+                pt.tap("#k1")
+                pt.evaluate("document.getElementById('k1').classList.add('is-open')")
+                pt.wait_for_timeout(50)
+                self.assertEqual(pt.evaluate("document.getElementById('k1').className"), "acc is-open")
+                pg.evaluate("document.getElementById('k1').classList.add('is-open')")
+                pg.wait_for_timeout(50)
+                self.assertEqual(pg.evaluate("document.getElementById('k1').className"), "acc is-open")
                 pt.set_viewport_size({"width": 1440, "height": 800})
                 pt.wait_for_timeout(100)
                 self.assertEqual(pt.evaluate(cls)[:2], ["card is-open", "nav"])

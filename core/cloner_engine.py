@@ -2345,6 +2345,7 @@ class ClonerEngine:
                                        f" {cv.get('banded', 0)} 个移入分视口样式表(其中窄屏首载补采 {cv.get('reload', 0)})"
                                        f"; 分视口 class {cv.get('cls', 0)} 个"
                                        + (f"(其中只随手机 UA 变、只给触屏 {cv['clsTouch']} 个)" if cv.get("clsTouch") else "")
+                                       + (f"; 只随 UA 的状态词触屏上先拿掉 {cv['touchOff']} 个元素" if cv.get("touchOff") else "")
                                        + (f"; 桌面隐藏元素补窄屏 src {cv['srcFill']} 个" if cv.get("srcFill") else "")
                                        + (f", 补文本 {cv['textFill']} 个" if cv.get("textFill") else "")
                                        + (f"; 固化 canvas 按缩放前尺寸定盒 {cv['cvFix']} 个" if cv.get("cvFix") else ""))

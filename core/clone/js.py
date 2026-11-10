@@ -1312,6 +1312,20 @@ CV_EMIT_JS = r"""
       swaps.push([el, {mt: L[1]}]); nt++;
     });
     if (nt) out.clsTouch = nt;
+    // 只随 UA 的状态词: 桌面 UA 同宽首载页有、手机 UA 首载页没有(wix 卡片桌面加载后自动展开第一张, 手机不展开)。
+    // 克隆跑的是桌面版脚本, 加载后(或滚到时)会照桌面逻辑再加上 → 触屏手机段上用户点按/按键前把这些词拿掉
+    // (data-cv-touch-off, 运行时守住; 滑动滚动不算操作: 手机上滚动不会展开, 只有点按会)
+    let no = 0;
+    m.els.forEach((el, i) => {
+      if (no >= 200 || !el.isConnected || el.closest('svg')) return;
+      const p = m.paths[i], L = LM[p], D = MD[p];
+      if (!L || !D || L[0] !== D[0] || L[0] !== tagOf(el) || L[1] === D[1]) return;
+      const a = new Set(L[1].split(/\s+/)), k = keyOf(D[0], D[1]);
+      const off = D[1].split(/\s+/).filter(x => x && !a.has(x) && STATE.test(x) && !flips[k + '+' + x]);
+      if (!off.length || /[<>"]/.test(off.join(' '))) return;
+      el.setAttribute('data-cv-touch-off', off.join(' ')); no++;
+    });
+    if (no) out.touchOff = no;
   }
   swaps.slice(0, 4000).forEach(([el, alt]) => {
     for (const t of Object.keys(alt)) el.setAttribute('data-cv-cls-' + t, alt[t]);
@@ -1491,7 +1505,7 @@ CV_EMIT_JS = r"""
   });
   if (srcFill) out.srcFill = srcFill;
   if (textFill) out.textFill = textFill;
-  if (out.cls || out.xattr) {
+  if (out.cls || out.xattr || out.touchOff) {
     // 当前视口段由分视口样式表里的 --cv-band 告诉运行时(段边界落盘时才确定, 脚本不重复计算断点)
     bands.d.push(':root{--cv-band:d}'); bands.t.push(':root{--cv-band:t}'); bands.m.push(':root{--cv-band:m}');
     const sc = document.createElement('script');
@@ -1526,8 +1540,12 @@ if(e.hasAttribute('data-cv-xa-d')){var o=JSON.parse(e.getAttribute('data-cv-xa-d
 function all(b){var es=document.querySelectorAll('[data-cv-cls-d],[data-cv-xa-d]');for(var i=0;i<es.length;i++)one(es[i],b);}
 function touch(){try{return matchMedia('(pointer: coarse)').matches;}catch(x){return false;}}
 function bt(){var b=band();if(b==='m'&&touch())b='mt';return b;}
-function apply(){var b=bt()||'d';if(b===cur)return;cur=b;all(b);}
-try{new MutationObserver(function(ms){var b=cur||bt();if(!b)return;for(var i=0;i<ms.length;i++){var ad=ms[i].addedNodes;for(var j=0;j<ad.length;j++){var n=ad[j];if(n.nodeType!==1)continue;one(n,b);if(n.children&&n.children.length){var es=n.querySelectorAll('[data-cv-cls-d],[data-cv-xa-d]');for(var k=0;k<es.length;k++)one(es[k],b);}}}}).observe(document.documentElement,{childList:true,subtree:true});}catch(x){}
+var gest=false;try{['click','keydown'].forEach(function(n){addEventListener(n,function(ev){if(ev.isTrusted)gest=true;},true);});}catch(x){}
+function off(e){if(gest||(cur||bt())!=='mt')return;var w=(e.getAttribute('data-cv-touch-off')||'').split(' ');for(var i=0;i<w.length;i++)if(w[i]&&e.classList.contains(w[i]))e.classList.remove(w[i]);}
+function offAll(){var es=document.querySelectorAll('[data-cv-touch-off]');for(var i=0;i<es.length;i++)off(es[i]);}
+try{new MutationObserver(function(ms){if(gest||(cur||bt())!=='mt')return;for(var i=0;i<ms.length;i++){var t=ms[i].target;if(t.nodeType===1&&t.hasAttribute('data-cv-touch-off'))off(t);}}).observe(document.documentElement,{attributes:true,attributeFilter:['class'],subtree:true});}catch(x){}
+function apply(){var b=bt()||'d';if(b!==cur){cur=b;all(b);}offAll();}
+try{new MutationObserver(function(ms){var b=cur||bt();if(!b)return;for(var i=0;i<ms.length;i++){var ad=ms[i].addedNodes;for(var j=0;j<ad.length;j++){var n=ad[j];if(n.nodeType!==1)continue;one(n,b);if(n.hasAttribute('data-cv-touch-off'))off(n);if(n.children&&n.children.length){var es=n.querySelectorAll('[data-cv-cls-d],[data-cv-xa-d],[data-cv-touch-off]');for(var k=0;k<es.length;k++){one(es[k],b);if(es[k].hasAttribute('data-cv-touch-off'))off(es[k]);}}}}}).observe(document.documentElement,{childList:true,subtree:true});}catch(x){}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',apply);else apply();window.addEventListener('resize',apply);window.addEventListener('load',apply);})();"""
 CV_EMIT_JS = CV_EMIT_JS.replace("CV_CLS_RUNTIME", json.dumps(CV_CLS_RUNTIME))
 
