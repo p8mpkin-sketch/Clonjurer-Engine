@@ -700,7 +700,10 @@ CV_PATHS_JS = r"""() => {
     Array.from(e.children, c => c.tagName).filter(t => !NONVIS.has(t)).join(',').slice(0, 400), (""" + CV_ATTR_FN + r""")(e),
     (""" + CV_XATTR_FN + r""")(e),
     MEDIA.test(e.tagName) ? [e.getAttribute('src') || '', e.getAttribute('srcset') || '', e.getAttribute('poster') || ''].join('\x01').replace(/\x01+$/, '') : '',
-    (!e.children.length && !NONVIS.has(e.tagName) && e.tagName !== 'TEXTAREA') ? (e.textContent || '').trim().slice(0, 300) : ''];
+    (!e.children.length && !NONVIS.has(e.tagName) && e.tagName !== 'TEXTAREA') ? (e.textContent || '').trim().slice(0, 300) : '',
+    // [8] 子元素 id 序列(与 [3] 同序; 非稳定形态的 id 记空): 标签序列相同而某个带 id 的子项只在一侧存在时,
+    // 按序号对齐会把不同组件配成一对(见 _inject_dom_variants 的 id 错位判定)
+    Array.from(e.children).filter(c => !NONVIS.has(c.tagName)).map(c => /^[A-Za-z][\w-]{1,100}$/.test(c.id || '') ? c.id : '').join(',').slice(0, 2400)];
   return out;
 }"""
 

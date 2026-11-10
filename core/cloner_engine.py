@@ -325,6 +325,31 @@ _FLUID_GEOM_RE = re.compile(r"(?:^|;)\s*(attr-width|attr-height|width|height|min
                             r"(-?\d+(?:\.\d+)?)px\s*(!important)?(?=;|$)", re.I)
 
 
+def _id_misaligned_parents(main, other):
+    """CV_PATHS_JS 两页结果里, 子元素标签序列相同而 id 序列错位的容器路径。
+    错位: 同一序号两侧 id 不同, 且其中带 id 的那个在另一页整页都不存在(不是换了位置, 是另一页没有这个组件)。"""
+    def _all_ids(tbl):
+        out = set()
+        for v in tbl.values():
+            if len(v) > 8 and v[8]:
+                out.update(x for x in v[8].split(",") if x)
+        return out
+    ids_m, ids_o = _all_ids(main), _all_ids(other)
+    if not ids_m or not ids_o:
+        return []
+    out = []
+    for p, v in main.items():
+        o = other.get(p)
+        if not p or not o or len(v) <= 8 or len(o) <= 8 or o[0] != v[0] or o[3] != v[3] or v[8] == o[8]:
+            continue
+        a, b = v[8].split(","), o[8].split(",")
+        if len(a) != len(b):
+            continue
+        if any(x != y and ((x and x not in ids_o) or (y and y not in ids_m)) for x, y in zip(a, b)):
+            out.append(p)
+    return out
+
+
 def _source_id_classes(html, limit=6000):
     """源码 HTML 里带 id 的开标签的 class: {id: class}。只做状态类相位复位的对照, 解析失败返回空。"""
     if not html or len(html) > 8_000_000:
@@ -1855,6 +1880,19 @@ class ClonerEngine:
                 continue
             diff = sorted(p for p, v in main.items() if p and p in other
                           and other[p][0] == v[0] and other[p][3] != v[3])
+            # 子元素标签序列相同、但某个带 id 的子项只在一侧存在(另一侧整页都没有这个 id): 两页在这个容器里各有对方
+            # 没有的组件, 按序号对齐会把不同组件配成一对, 变体只换其中一个、另一侧独有的兄弟丢掉(wix 手机首屏表单:
+            # 原站多一个占第三行的 0 高兄弟, 克隆少一道行距, 其下整页上移 16px)。把变体根提到这个容器, 整个换成窄屏版。
+            # id 每次加载都变的站(随机 id)会大面积命中, 超过上限就整体不用这条判据
+            if getattr(config, "VARIANT_ID_ALIGN", True):
+                lifted = _id_misaligned_parents(main, other)
+                if lifted:
+                    if len(lifted) > int(getattr(config, "VARIANT_ID_ALIGN_MAX", 12)):
+                        self.log("RENDER", f"窄屏首载页 {tag}: 子项 id 错位的容器 {len(lifted)} 个超上限, 视为 id 不稳定, 不按 id 提升变体根")
+                    else:
+                        self.log("RENDER", f"窄屏首载页 {tag}: {len(lifted)} 个容器的子项 id 与主页错位(各有对方没有的组件), 变体根提到容器: "
+                                           + "; ".join(q[-60:] for q in lifted[:4]))
+                        diff = sorted(set(diff) | set(lifted))
             top = []
             for p in diff:
                 if not any(p.startswith(q + ">") for q in top):
@@ -1927,7 +1965,8 @@ class ClonerEngine:
         # 只在手机 UA 下换结构的子树: 桌面 UA 同宽页该处子元素结构与主页相同(状态类隐藏子树除外)
         md = loads.get("__mdesk") or {}
         ua_only = {p for p, v in variants.items() if "m" in v and md and p not in hidden_all and p in md and p in main
-                   and md[p][0] == main[p][0] and md[p][3] == main[p][3]}
+                   and md[p][0] == main[p][0] and md[p][3] == main[p][3]
+                   and (len(md[p]) <= 8 or len(main[p]) <= 8 or md[p][8] == main[p][8])}
         if ua_only:
             self.log("RENDER", f"窄屏 DOM 变体: {len(ua_only)} 处只在手机 UA 下换结构, 只给触屏显示(桌面浏览器窄窗口仍用主页版): "
                                + "; ".join(p[-60:] for p in list(ua_only)[:4]))
