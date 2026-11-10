@@ -291,8 +291,10 @@ class EngineEndToEnd(unittest.TestCase):
         return db, db.get_task(task["id"])
 
     def _log_of(self, task):
+        """本次任务的日志: _run_direct 每次新建库, 任务号都从 1 起, 同一工作区的 engine.log 是追加的。"""
         ws = Path(task["workspace_path"]) if task.get("workspace_path") else config.WORKSPACE_ROOT / str(task["id"])
-        return (ws / "engine.log").read_text(encoding="utf-8")
+        text = (ws / "engine.log").read_text(encoding="utf-8")
+        return text[text.rfind("启动: "):]
 
     def test_thin_static_page_not_renavigated(self):
         """没有脚本/子框架的纯静态小页: 小体量即原貌, 不做「序列化过薄」重导航; 有脚本的薄壳照旧重试。"""
