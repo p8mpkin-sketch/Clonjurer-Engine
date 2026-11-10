@@ -85,6 +85,7 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     COLLECT_LINKS_JS,
     CANVAS_PIN_JS,
     IMG_SRC_PIN_JS,
+    ROUNDTRIP_PIN_JS,
     CV_ATTR_FN,
     CV_CANVAS_DRIFT_JS,
     CV_EMIT_JS,
@@ -1677,6 +1678,10 @@ class ClonerEngine:
             with suppress(Exception):
                 p2.evaluate(CANVAS_PIN_JS, "save")
                 p2.evaluate(IMG_SRC_PIN_JS, "save")
+            rt_on = bool(getattr(config, "VARIANT_FLUID_RESTORE", True))
+            if rt_on:
+                with suppress(Exception):
+                    p2.evaluate(ROUNDTRIP_PIN_JS, "save")
             samples = {}
             # 窄一档(0.92×)与宽一档(1.128×: 390→440 正好是最宽的主流手机)各读一次, 三点判直线/封顶/垫底
             for w in (int(round(w1 * 0.92)), int(round(w1 * 1.128)), w1):
@@ -1691,6 +1696,11 @@ class ClonerEngine:
             with suppress(Exception):
                 p2.evaluate(CANVAS_PIN_JS, "restore")
                 p2.evaluate(IMG_SRC_PIN_JS, "restore")
+            if rt_on:
+                with suppress(Exception):
+                    k = p2.evaluate(ROUNDTRIP_PIN_JS, "restore")
+                    if k:
+                        self.log("RENDER", f"窄屏首载页 {tag} 随宽对照来回后 {k} 个元素的内联样式/class 没回到首载态, 已复原")
             w2, w3 = int(round(w1 * 0.92)), int(round(w1 * 1.128))
             fb = samples.get(w2) or {}
             fl = _fluid_elements(fa, fb, w1, w2, fc=samples.get(w3) or None, w3=w3)

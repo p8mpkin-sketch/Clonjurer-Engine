@@ -139,6 +139,7 @@ FIDELITY_SKIP_ABOVE = 97.0    # 交互轨达到此分时不渲染保真轨(头�
 VIEWPORT_VARIANT_MAX = 40      # 窄屏 DOM 变体: 结构不同的子树超过此数视为内容随机(推荐流), 不注入
 VIEWPORT_VARIANT_BYTES = 3_000_000   # 窄屏变体 HTML / 附带样式各自上限
 VARIANT_FLUID = True           # 窄屏首载页抽取变体前: 0.92 倍宽对照, 随宽同比的内联 px/img 尺寸属性改写为 vw
+VARIANT_FLUID_RESTORE = True   # 随宽对照(0.92/1.128 倍宽来回)后把内联 style/class 复原成首载态再抽变体
 NARROW_PHONE_UA = True           # 窄屏首载对照的手机宽(390)页用手机 UA + 触屏仿真单独上下文加载(与评分真机口径一致)
 NARROW_FLUID_PAIR = True         # 手机首载页旁再开一张 0.92 倍宽首载页, 认出只在加载时按宽度写一次的内联尺寸
 MAIN_SETTLE_MS = 4000          # 主页懒加载滚动后等 DOM「到位」(文字量/有源图片数/控件数连续不变)的上限(毫秒):

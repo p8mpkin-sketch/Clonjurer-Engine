@@ -1118,6 +1118,31 @@ IMG_SRC_PIN_JS = r"""(mode) => {
   return n;
 }"""
 
+# 内联态钉住(窄屏首载页 0.92/1.128 倍宽对照来回用): save 记下每个元素的 style/class, restore 把来回后变了的复原。
+# 轮播/虚拟列表在改宽时按新宽重排(react-slick 换 track 宽与当前项、translate), 回到原宽不一定回到首载态, 随后抽取的
+# 窄屏变体就带着来回后的错态(ant.design 手机 91→54)。只复原 save 时就在的元素; 返回复原个数
+ROUNDTRIP_PIN_JS = r"""(mode) => {
+  let n = 0;
+  const els = document.body ? document.body.getElementsByTagName('*') : [];
+  for (let i = 0; i < els.length && i < 30000; i++) {
+    const el = els[i];
+    try {
+      if (mode === 'save') { el.__cvRt = [el.getAttribute('style'), el.getAttribute('class')]; continue; }
+      const o = el.__cvRt;
+      if (!o) continue;
+      let hit = 0;
+      ['style', 'class'].forEach((a, k) => {
+        const v = el.getAttribute(a);
+        if (v === o[k]) return;
+        if (o[k] === null) el.removeAttribute(a); else el.setAttribute(a, o[k]);
+        hit = 1;
+      });
+      n += hit;
+    } catch (e) {}
+  }
+  return n;
+}"""
+
 # 缩放来回之后 width/height 属性与缩放前(CV_RECORD "d" 快照)不同的 canvas 个数
 CV_CANVAS_DRIFT_JS = r"""() => {
   const m = window.__cvRec;
