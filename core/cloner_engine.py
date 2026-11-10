@@ -1792,8 +1792,15 @@ class ClonerEngine:
             self.log("WARN", f"桌面隐藏子树窄屏对照失败: {str(exc)[:120]}")
             return []
         out = []
+        _dv = lambda st: sorted(m.group(1).lower() + ":" + m.group(2).strip().lower()
+                                for m in re.finditer(r"(?:^|;)\s*(display|visibility)\s*:\s*([^;!]+)", st or ""))
         for p in roots:
             if p not in vis:
+                continue
+            # 窄屏页里靠根自身内联 display/visibility 才显示的(脚本轮换消息条/标签页当前项写的), 是时间状态不是视口
+            # 差异: 换成窄屏版就和主页正显示的那一项同时可见(apple iphone 页平板横幅多出一行, 81→43)
+            if _dv(other[p][2]) and _dv(other[p][2]) != _dv(main[p][2]):
+                self.log("RENDER", f"桌面不渲染子树 {p[-80:]} 在窄屏页靠内联 {_dv(other[p][2])} 显示(脚本轮换态), 不换窄屏版")
                 continue
             pre = p + ">"
             diff = (other[p][1] != main[p][1] or other[p][2] != main[p][2]) or any(
