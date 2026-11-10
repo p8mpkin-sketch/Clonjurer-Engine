@@ -517,6 +517,13 @@ class ScoringMixin:
                     self.log("RENDER", f"布局校准: {len(shown)} 个基准可见块在克隆里被脚本收起, 压回显示")
         if not css:
             return detail, clone_text
+        if getattr(config, "LAYOUT_CALIB_INPLACE_GATE", True):
+            # 就地预评(与像素校准同一闸门): 尺寸覆盖先注入当前活页重截图评分, 不升就不付整页
+            # 重渲染(加载 + 滚动 + 静置 + 截图 + 评分)再回滚
+            pre = self._calib_inplace_score(page, css, original, orig_text)
+            if pre is not None and pre <= (detail.get("score") or 0):
+                self.log("RENDER", f"布局校准就地预评未提升({detail.get('score')}→{pre}, {n_bad} 块失配), 跳过重渲染")
+                return detail, clone_text
         prev_css, prev_detail, prev_text = self._calib_css, detail, clone_text
         prev_doc = idx_html.read_text(encoding="utf-8", errors="replace")
         prev_shot = cloned.read_bytes()

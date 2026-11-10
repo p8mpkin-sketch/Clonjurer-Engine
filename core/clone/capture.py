@@ -255,7 +255,7 @@ from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部
     text_overlap_score,
     write_diff_preview,
 )
-from core.clone.support import bounded_call, _fluid_elements, _is_global_reset_rule, _is_transient_hide_rule, _regroup_css_rules  # noqa: F401
+from core.clone.support import bounded_call, bounded_api_call, _fluid_elements, _is_global_reset_rule, _is_transient_hide_rule, _regroup_css_rules  # noqa: F401
 
 
 
@@ -565,7 +565,7 @@ class CaptureMixin:
         return loads
 
 
-    def _mhtml_retry(self, page, cdp, impl):
+    def _mhtml_retry(self, page, cdp):
         """MHTML 快照首次超时: 探测卡住的 frame(document.readyState 1s 内不返回)写进日志,
         Page.stopLoading 取消挂起的导航/请求后重试一次; 仍超时则抛出, 走既有"快照失败"分支。"""
         t0 = time.monotonic()
@@ -574,7 +574,7 @@ class CaptureMixin:
             if time.monotonic() - t0 > 8:
                 break
             try:
-                st = bounded_call(fr, fr._impl_obj.evaluate("document.readyState"), 1.0)
+                st = bounded_api_call(fr, "evaluate", ("document.readyState",), 1.0)
                 states[st] = states.get(st, 0) + 1
             except TimeoutError:
                 stuck.append(fr.url[:120])
@@ -584,9 +584,9 @@ class CaptureMixin:
                          f"状态 {states}, 无响应 {len(stuck)} 个 {stuck[:5]}; 停止加载后重试")
         self._diag_mark("保真轨 MHTML 快照重试")
         with suppress(Exception):
-            bounded_call(cdp, impl.send('Page.stopLoading'), 5.0)
-        return bounded_call(cdp, impl.send('Page.captureSnapshot', {'format': 'mhtml'}),
-                            config.MHTML_RETRY_TIMEOUT_S)
+            bounded_api_call(cdp, "send", ('Page.stopLoading',), 5.0)
+        return bounded_api_call(cdp, "send", ('Page.captureSnapshot', {'format': 'mhtml'}),
+                                config.MHTML_RETRY_TIMEOUT_S)
 
     def _diag_mark(self, what: str):
         """只写文件不进日志总线的进度标记(engine.diag): 任务挂死时据最后一行定位卡点, 正常日志不变。"""
@@ -598,15 +598,12 @@ class CaptureMixin:
         for _tag, p2 in getattr(self, "_cv_pages", []) or []:
             self._diag_mark(f"关窄屏首载页 {_tag}")
             try:
-                impl = getattr(p2, "_impl_obj", None)
-                if impl is None:
-                    p2.close()
-                else:
-                    bounded_call(p2, impl.close(), config.NARROW_CLOSE_TIMEOUT_S)
+                bounded_api_call(p2, "close", (), config.NARROW_CLOSE_TIMEOUT_S)
             except TimeoutError as exc:
                 self.log("WARN", f"窄屏首载页 {_tag} 关闭{exc}, 放弃等待(页面留给上下文关闭时回收)")
-            except Exception:
-                pass
+            except Exception as exc:   # noqa: BLE001 关不掉要留痕: 活页空转到任务结束会拖慢后续全部阶段
+                if "closed" not in str(exc).lower():
+                    self.log("WARN", f"窄屏首载页 {_tag} 关闭失败: {type(exc).__name__}: {str(exc)[:120]}")
         self._cv_pages = []
 
 
@@ -1014,7 +1011,7 @@ class CaptureMixin:
                     json.dumps(stable, ensure_ascii=False), encoding="utf-8")
         return baseline_text, layout_stable
 
-    def _render_page(self, ctx, url: str, screenshot: bool, collect_links: bool):
+    def _render_page(self, ctx, url: str, screenshot: bool, collect_links: bool, is_frame: bool = False):
         page = ctx.new_page()
         rt = self.cfg.get("render_timeout")  # 批次级页面加载超时(秒), 0/缺省 = 平台默认
         try:
@@ -1076,6 +1073,12 @@ class CaptureMixin:
                 if rt:
                     self.log("PATTERN", f"活体运行时证据: {', '.join(rt)}")
         tp = self._phase("采集-导航", t_nav_m)
+        # 就绪时页面里的脚本数与同源以外的子资源: 序列化过薄时据此区分"本来就小的纯静态页"与"脚本壳被清空"
+        n_scripts = n_els_ready = None
+        with suppress(Exception):
+            n_scripts, n_els_ready = page.evaluate(
+                "() => [document.scripts.length + document.querySelectorAll('iframe,frame,meta[http-equiv=refresh i]').length,"
+                " document.body ? document.body.getElementsByTagName('*').length : 0]")
         self._auto_settle_update_prompt(page)
         # 采集期主框架导航冻结: wikipedia 等站在固化序列中途自导航
         # (重定向/落地切换)会撕裂 evaluate 会话("Execution context
@@ -1228,15 +1231,11 @@ class CaptureMixin:
                 cdp = ctx.new_cdp_session(page)
                 # 卡死归因: CDP 调用没有超时, 163/wix 偶发在窄屏变体之后整任务无日志挂死(疑在此处或关窄屏页)
                 self._diag_mark("保真轨 MHTML 快照开始")
-                impl = getattr(cdp, "_impl_obj", None)
-                if impl is None:
-                    snap = cdp.send('Page.captureSnapshot', {'format': 'mhtml'})
-                else:
-                    try:
-                        snap = bounded_call(cdp, impl.send('Page.captureSnapshot', {'format': 'mhtml'}),
+                try:
+                    snap = bounded_api_call(cdp, "send", ('Page.captureSnapshot', {'format': 'mhtml'}),
                                             config.MHTML_SNAPSHOT_TIMEOUT_S)
-                    except TimeoutError:
-                        snap = self._mhtml_retry(page, cdp, impl)
+                except TimeoutError:
+                    snap = self._mhtml_retry(page, cdp)
                 (self.ws / 'capture.mhtml').write_text(snap['data'], encoding='utf-8')
                 self.log("RENDER", f"保真轨 MHTML 快照: {len(snap['data']) // 1024} KB")
             except Exception as exc:
@@ -1267,7 +1266,21 @@ class CaptureMixin:
         html = self._inline_blob_urls(page, html)
         # N1.1 采集退化守卫: 序列化过薄(<5KB)说明页面在采集窗口内被
         # 重定向/挂载失败清空(ibm 类 React 壳) —— 重新导航再序列化一次
-        if len(html) < 5000:
+        if len(html) < 5000 and n_scripts == 0 and getattr(config, "THIN_STATIC_NO_RETRY", True):
+            # 就绪时页面没有任何脚本/子框架/meta 刷新: 没有东西能在采集窗口里清空或重定向它, 小就是它本来的
+            # 大小(example.com 类文档页、无脚本的广告素材 iframe)。重导航只会拿到同一份 HTML, 白等 3~5s
+            self.log("RENDER", f"序列化 {len(html)}B: 页面无脚本/子框架, 小体量即原貌, 不重导航")
+        elif len(html) < 5000 and is_frame and getattr(config, "THIN_STATIC_NO_RETRY", True) \
+                and self._not_degraded(page, n_els_ready):
+            # 跨域 iframe 子页(登录框/订阅条/广告素材)本来就是小部件: 就绪以来元素没有减少即不是"被清空",
+            # 不为它再整页导航一次(每个 3~5s, 单任务最多 6 个)
+            self.log("RENDER", f"序列化 {len(html)}B: iframe 小部件自就绪以来未被清空, 不重导航")
+        elif len(html) < 5000 and getattr(config, "THIN_STATIC_NO_RETRY", True) \
+                and self._not_degraded(page, n_els_ready, min_text=200):
+            # 带脚本的小页: 画面上有成段可见文字且元素自就绪以来没有减少 —— 不是挂载失败的空壳, 也没被清空;
+            # 标记字节少只是页面本身小(example.com 现版 2.5KB / 917 字), 重导航拿不到更完整的结果
+            self.log("RENDER", f"序列化 {len(html)}B: 页面有成段可见文字且自就绪以来未被清空, 不重导航")
+        elif len(html) < 5000:
             self.log("RENDER", f"序列化过薄({len(html)}B), 判定采集退化, 重导航重试")
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=config.PAGELOAD_TIMEOUT)
@@ -1407,6 +1420,19 @@ class CaptureMixin:
         except Exception:
             pass
 
+    @staticmethod
+    def _not_degraded(page, n_els_ready, min_text: int = 0) -> bool:
+        """序列化时元素数不少于就绪时的 60%(且就绪时非空): 采集窗口内没有被清空/跳走;
+        min_text > 0 时还要求当前可见文字不少于这么多字符(排除从一开始就没挂载上的空壳)。"""
+        if not n_els_ready:
+            return False
+        try:
+            now, text = page.evaluate("() => [document.body ? document.body.getElementsByTagName('*').length : 0,"
+                                      " document.body ? (document.body.innerText || '').trim().length : 0]")
+        except Exception:
+            return False
+        return now >= 0.6 * n_els_ready and text >= min_text
+
     def _settle_main_page(self, page):
         """懒加载滚动后等主页 DOM「到位」: 文字量/有源图片数/控件数连续不变(与窄屏首载页同口径,
         NARROW_STABLE_JS)。晚水合的表单/标签页组件(wix 首屏邮箱表单、模板标签行)在 load 与滚动之后才出现,
@@ -1501,7 +1527,7 @@ class CaptureMixin:
                 continue  # 同源已 DOM 提取 / 自引用 / 已固化
             try:
                 sub = self._render_page(ctx, src, screenshot=False,
-                                        collect_links=False)
+                                        collect_links=False, is_frame=True)
             except Exception as exc:
                 self.log("WARN", f"iframe 固化失败 {src[:100]}: {exc}")
                 continue

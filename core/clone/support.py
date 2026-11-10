@@ -2117,8 +2117,10 @@ _HITCOUNT_HINT = re.compile(
     r"(?:hit|visit|view|page)s?[-_]?count|count[-_]?(?:hit|visit|view|pv|uv)|cmshits", re.I)
 
 
-def _script_src_is_localized(src: str) -> bool:
-    """落盘后由静态服务器直接命中、不触发反代回源的引用形态。"""
+def _script_src_is_localized(src: str, local_root=None) -> bool:
+    """落盘后由静态服务器直接命中、不触发反代回源的引用形态。
+    local_root: 克隆工作区根目录; 给出时, 根相对路径在工作区里确有同路径文件(运行时原路径镜像 /
+    影子落盘)也算已本地化 —— 它由静态服务器直接命中, 不是部署隐患。"""
     s = (src or "").strip()
     if not s:
         return True   # 空 src 不发请求
@@ -2128,20 +2130,38 @@ def _script_src_is_localized(src: str) -> bool:
     if low.startswith(("http://", "https://", "//")):
         return False   # 绝对/协议相对: 未被本地化(本地化会改成 /static 根相对)
     if s.startswith("/"):
-        # 根相对: 仅 /static/ 是内容寻址的已捕获资源; 其余根相对路径(/cgnhit/... 等)
-        # 落盘无文件, 必走反代兜底
-        return low.startswith("/static/")
+        # 根相对: /static/ 是内容寻址的已捕获资源; 其余根相对路径(/cgnhit/... 等)只有工作区里
+        # 确有同路径文件才是本地的, 否则落盘无文件, 必走反代兜底
+        if low.startswith("/static/"):
+            return True
+        return _local_file_exists(local_root, s)
     return True        # 页面目录相对路径: 影子文件随包落盘, 静态直通
 
 
-def neutralize_deploy_hazard_scripts(html: str, page_host: str = "") -> str:
-    """交付 HTML 去阻塞: 未本地化的阻塞 <script src> 不得挡首屏(删埋点 / 其余转 async)。"""
+def _local_file_exists(local_root, root_rel: str) -> bool:
+    """根相对引用(去掉查询串/片段)在工作区里是否有同路径文件。"""
+    if local_root is None or root_rel.startswith("//"):
+        return False
+    rel = re.split(r"[?#]", root_rel, maxsplit=1)[0].lstrip("/")
+    if not rel or rel.endswith("/") or ".." in rel.split("/"):
+        return False
+    try:
+        return (Path(local_root) / rel).is_file()
+    except (OSError, ValueError):
+        return False
+
+
+def neutralize_deploy_hazard_scripts(html: str, page_host: str = "", local_root=None) -> str:
+    """交付 HTML 去阻塞: 未本地化的阻塞 <script src> 不得挡首屏(删埋点 / 其余转 async)。
+    按原路径镜像落盘的同源脚本(工作区里有同路径文件)是本地的, 保持同步执行: 给它补 async 会改变
+    执行时机/次序 —— 解析期「插入型」脚本变成解析后才跑, 重放去重守卫(只管解析期)挡不住,
+    内容整段重复(example.com: /s.js 被补 async, 交互版正文出现两遍, 交互轨 70.8)。"""
     if "<script" not in html.lower():
         return html
 
     def _repl(m):
         src = m.group("src")
-        if _script_src_is_localized(src):
+        if _script_src_is_localized(src, local_root):
             return m.group(0)
         attrs = m.group("attrs") or ""
         rest = m.group("rest") or ""
@@ -2179,7 +2199,7 @@ def _attr(attrs: str, name: str):
     return next((g for g in m.groups() if g is not None), "")
 
 
-def neutralize_deploy_hazard_styles(html: str) -> str:
+def neutralize_deploy_hazard_styles(html: str, local_root=None) -> str:
     """交付 HTML: 未本地化的渲染阻塞样式表改为异步加载(不挡首次绘制)。"""
     if "stylesheet" not in html.lower():
         return html
@@ -2190,7 +2210,7 @@ def neutralize_deploy_hazard_styles(html: str) -> str:
         if "stylesheet" not in rel.split() and rel != "stylesheet":
             return m.group(0)
         href = _attr(attrs, "href")
-        if href is None or _script_src_is_localized(href):
+        if href is None or _script_src_is_localized(href, local_root):
             return m.group(0)
         if "data-clone-async-css" in attrs.lower():
             return m.group(0)
@@ -2291,20 +2311,28 @@ def neutralize_deploy_fonts(html: str) -> str:
     return _STYLE_BLOCK_RE.sub(lambda m: m.group(1) + fontface_swap_for_remote(m.group(2)) + m.group(3), html)
 
 
-def neutralize_deploy_hazards(html: str, page_host: str = "") -> str:
+def neutralize_deploy_hazards(html: str, page_host: str = "", local_root=None) -> str:
     """交付 HTML 去阻塞总入口: 阻塞脚本 + 渲染阻塞样式表 + 资源提示/外部 iframe + 远程字体 swap。"""
+    if not DEPLOY_LOCAL_PATH_AWARE:
+        local_root = None
     return neutralize_deploy_fonts(neutralize_deploy_hints(neutralize_deploy_hazard_styles(
-        neutralize_deploy_hazard_scripts(html, page_host))))
+        neutralize_deploy_hazard_scripts(html, page_host, local_root), local_root)))
 
 
-def deploy_hazard_audit(html: str, page_host: str = "") -> dict:
+# 交付去阻塞认工作区里按原路径落盘的文件(开关 CLONER_DEPLOY_LOCAL_PATH_AWARE=0 回到只认 /static/)
+DEPLOY_LOCAL_PATH_AWARE = os.environ.get("CLONER_DEPLOY_LOCAL_PATH_AWARE", "1") != "0"
+
+
+def deploy_hazard_audit(html: str, page_host: str = "", local_root=None) -> dict:
     """部署隐患审计(评分口径之外的交付侧度量): 仍会阻塞首屏的未本地化脚本/样式数、
     未本地化引用总数、涉及的外部主机。写入任务 stats, 语料跑分汇总, 让交付侧也被量到。"""
     blocking_scripts, blocking_styles, uncaptured = 0, 0, 0
     hosts = set()
+    if not DEPLOY_LOCAL_PATH_AWARE:
+        local_root = None
     for m in _SCRIPT_SRC_TAG_RE.finditer(html):
         src = m.group("src")
-        if _script_src_is_localized(src):
+        if _script_src_is_localized(src, local_root):
             continue
         uncaptured += 1
         flags = ((m.group("attrs") or "") + " " + (m.group("rest") or "")).lower()
@@ -2320,7 +2348,7 @@ def deploy_hazard_audit(html: str, page_host: str = "") -> dict:
         if "stylesheet" not in rel:
             continue
         href = _attr(attrs, "href")
-        if href is None or _script_src_is_localized(href):
+        if href is None or _script_src_is_localized(href, local_root):
             continue
         uncaptured += 1
         if "data-clone-async-css" not in attrs.lower() and (_attr(attrs, "media") or "all") != "print":
@@ -2712,6 +2740,29 @@ def bounded_call(sync_obj, coro, timeout_s: float):
         return runner(asyncio.wait_for(coro, timeout_s))
     except asyncio.TimeoutError as exc:
         raise TimeoutError(f"超过 {timeout_s:.0f}s 未返回") from exc
+
+
+def bounded_api_call(sync_obj, method: str, args: tuple = (), timeout_s: float = 30.0):
+    """带时限调用 Playwright 同步对象的一个方法(cdp.send / page.close / frame.evaluate)。
+
+    时限靠内部协程 + wait_for 实现, 而内部接口的签名随 Playwright 版本变(1.65 起
+    CDPSession.send(method, params, timeout) / Page.close(run_before_unload, reason) /
+    Frame.evaluate(expression, arg) 的参数全部必填): 按实际签名把缺的必填位置参数补 None。
+    内部接口取不到或签名对不上时退回公开同步 API(无时限, 功能照常) —— 此前直接按旧签名调用,
+    新版本下 TypeError 被外层吞掉: MHTML 快照恒失败(保真轨整条消失)、窄屏首载页永不关闭
+    (两张活页一路空转到任务结束)。超时抛 TimeoutError。"""
+    import inspect
+    impl = getattr(sync_obj, "_impl_obj", None)
+    fn = getattr(impl, method, None) if impl is not None else None
+    if fn is None or getattr(sync_obj, "_sync", None) is None:
+        return getattr(sync_obj, method)(*args)
+    try:
+        need = [p for p in inspect.signature(fn).parameters.values()
+                if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD) and p.default is p.empty]
+        coro = fn(*(list(args) + [None] * max(0, len(need) - len(args))))
+    except (TypeError, ValueError):
+        return getattr(sync_obj, method)(*args)
+    return bounded_call(sync_obj, coro, timeout_s)
 
 
 # ---- 带边界的 URL 替换(本地化落盘用) ----

@@ -134,6 +134,31 @@ const d = await r.json(); const ul = document.getElementById('feed'); ul.innerHT
 for (const t of d.items) { const li = document.createElement('li'); li.textContent = t; ul.appendChild(li); }
 document.body.setAttribute('data-feed', String(d.items.length)); })();</script></body></html>"""
 SITE["xapi/feed.json"] = '{"items": ["Remote one", "Remote two"]}'
+SITE["thin.html"] = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Thin</title>
+<style>body{background:#eee;width:60vw;margin:15vh auto;font-family:sans-serif}</style></head>
+<body><div><h1>Thin static document</h1><p>A tiny page without any script.</p></div></body></html>"""
+SITE["thin_js.html"] = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>ThinJS</title></head>
+<body><div id="app"><h1>Thin scripted shell</h1></div><script>window.__shell = 1;</script></body></html>"""
+SITE["thin_text_js.html"] = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>ThinText</title></head>
+<body><main><h1>Small scripted document</h1><p>""" + ("A paragraph of visible copy for a small page. " * 8) + """</p></main>
+<script>document.documentElement.setAttribute('data-ready', '1');</script></body></html>"""
+SITE["ins.html"] = """<!doctype html><html lang=en><head><meta charset=utf-8><title>Insert</title>
+<style>body{font:16px/1.6 sans-serif;max-width:26em;margin:auto;padding:25vh 2em 2em;text-align:center}</style></head>
+<body><p>This page keeps one paragraph in its markup and builds the rest with a tiny script.</p><script src=/s.js></script></body></html>"""
+SITE["s.js"] = """(function(){var b=document.body,p=b.querySelector('p');p.lang='en';
+var st=document.createElement('style');st.textContent='svg{display:block;margin:-2.75em auto 0;opacity:.55}p+p{font-size:.875em;opacity:.6}';
+b.insertBefore(st,p);
+p.insertAdjacentHTML('beforebegin','<svg viewBox="0,0,20,20" width="44" height="44"><rect width="20" height="20" fill="#888"/></svg>');
+['Second paragraph inserted by the script, in another language.','Third paragraph inserted by the script as well.',
+ 'Fourth paragraph, also built at parse time by the same script.'].forEach(function(t,i){
+  var q=document.createElement('p');q.lang='x'+i;q.textContent=t;b.insertBefore(q,document.currentScript);});
+var a=document.createElement('a');a.href='https://iana.org/help/example-domains';a.textContent='Learn more';
+b.insertBefore(a,document.currentScript);})();"""
+SITE["host.html"] = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Host</title></head>
+<body><h1>Host page with a cross origin widget</h1><p>""" + ("Body copy that makes the host page thick enough. " * 120) + """</p>
+<iframe src="CROSS/widget.html" width="320" height="90" title="w"></iframe></body></html>"""
+SITE["widget.html"] = """<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">
+<p id="w">Subscribe widget</p><script>document.getElementById('w').className = 'ready';</script></body></html>"""
 REQUESTED = []
 
 
@@ -279,6 +304,73 @@ class EngineEndToEnd(unittest.TestCase):
         except Exception:
             pass
         return db, db.get_task(task["id"])
+
+    def _log_of(self, task):
+        """本次任务的日志: _run_direct 每次新建库, 任务号都从 1 起, 同一工作区的 engine.log 是追加的。"""
+        ws = Path(task["workspace_path"]) if task.get("workspace_path") else config.WORKSPACE_ROOT / str(task["id"])
+        text = (ws / "engine.log").read_text(encoding="utf-8")
+        return text[text.rfind("启动: "):]
+
+    def test_thin_static_page_not_renavigated(self):
+        """没有脚本/子框架的纯静态小页: 小体量即原貌, 不做「序列化过薄」重导航; 有脚本的薄壳照旧重试。"""
+        port = self.httpd.server_address[1]
+        REQUESTED.clear()
+        _db, task = self._run_direct(f"http://localhost:{port}/thin.html")
+        self.assertEqual(task["status"], "completed", task.get("error_msg"))
+        log = self._log_of(task)
+        self.assertIn("小体量即原貌, 不重导航", log)
+        self.assertNotIn("判定采集退化", log)
+        self.assertGreaterEqual(float(task.get("similarity_score") or 0), 95.0)
+        _db, task = self._run_direct(f"http://localhost:{port}/thin_js.html")
+        self.assertEqual(task["status"], "completed", task.get("error_msg"))
+        self.assertIn("判定采集退化, 重导航重试", self._log_of(task))
+        # 带脚本但画面上有成段文字、元素没减少的小页: 同样不重导航
+        _db, task = self._run_direct(f"http://localhost:{port}/thin_text_js.html")
+        self.assertEqual(task["status"], "completed", task.get("error_msg"))
+        log = self._log_of(task)
+        self.assertIn("有成段可见文字且自就绪以来未被清空, 不重导航", log)
+        self.assertNotIn("判定采集退化", log)
+
+    def test_thin_static_retry_switch_off(self):
+        port = self.httpd.server_address[1]
+        saved = config.THIN_STATIC_NO_RETRY
+        config.THIN_STATIC_NO_RETRY = False
+        try:
+            _db, task = self._run_direct(f"http://localhost:{port}/thin.html?off=1")
+        finally:
+            config.THIN_STATIC_NO_RETRY = saved
+        self.assertIn("判定采集退化, 重导航重试", self._log_of(task))
+
+    def test_parse_time_insert_script_not_duplicated(self):
+        """页尾同源短路径脚本(/s.js, 不进字面替换, 按原路径镜像落盘)在解析期插入内容: 克隆里它仍同步执行,
+        重放去重守卫去掉重复副本, 交互版正文不出现两遍。此前交付去阻塞把它当「未本地化」补了 async。"""
+        port = self.httpd.server_address[1]
+        _db, task = self._run_direct(f"http://localhost:{port}/ins.html")
+        self.assertEqual(task["status"], "completed", task.get("error_msg"))
+        ws = Path(task["workspace_path"]) if task.get("workspace_path") else config.WORKSPACE_ROOT / str(task["id"])
+        self.assertTrue((ws / "s.js").is_file(), "脚本未按原路径镜像落盘")
+        stats = json.loads(task.get("stats_json") or "{}")
+        html = (ws / "index.html").read_text(encoding="utf-8")
+        inter = ws / "index.interactive.html"
+        if inter.is_file():
+            html = inter.read_text(encoding="utf-8")
+        self.assertRegex(html, r'<script[^>]*src="?/s\.js"?[^>]*>')
+        self.assertNotRegex(html, r'<script[^>]*src="?/s\.js"?[^>]*\basync\b')
+        self.assertGreaterEqual(float(stats.get("interactive_score") or 0), 95.0, self._log_of(task)[-1500:])
+        self.assertEqual((stats.get("deploy_audit") or {}).get("blocking_scripts"), 0)
+
+    def test_small_frame_widget_not_renavigated(self):
+        """跨域 iframe 小部件(有脚本、序列化 <5KB)自就绪以来没被清空: 固化为本地子页但不为它重导航。"""
+        port = self.httpd.server_address[1]
+        site = self.tmp / "site"
+        (site / "host_x.html").write_text(
+            SITE["host.html"].replace("CROSS", f"http://127.0.0.1:{port}"), encoding="utf-8")
+        _db, task = self._run_direct(f"http://localhost:{port}/host_x.html")
+        self.assertEqual(task["status"], "completed", task.get("error_msg"))
+        log = self._log_of(task)
+        self.assertIn("跨域 iframe 已固化为本地子页", log)
+        self.assertIn("iframe 小部件自就绪以来未被清空, 不重导航", log)
+        self.assertNotIn("判定采集退化", log)
 
     def test_spa_fetch_rendered_and_mocked(self):
         port = self.httpd.server_address[1]

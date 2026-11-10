@@ -43,6 +43,10 @@ on:
         description: "低分站截图(base64)进日志(true/false; 远程只读日志尾部归因时填 false)"
         required: false
         default: "true"
+      dump_src:
+        description: "原站源码与克隆首页(各前 40KB)进日志(true/false; 配合 sites 做单站归因)"
+        required: false
+        default: "false"
   schedule:
     - cron: "30 18 * * *"   # 北京时间 02:30
 
@@ -155,8 +159,10 @@ jobs:
                               _shot(f, f"{r.get('task_id')} vp {v} {kind} {r.get('url')}", width=300, max_h=5200)
                               break
               # 慢站(>120s)也打日志: 远程做耗时归因
+              # 交互轨(可交互交付物)低于 90 的站同样打日志: 头条分被保真轨托住时交互轨塌陷也要能远程归因
+              inter = r.get("interactive")
               if r.get("status") == "completed" and isinstance(r.get("score"), (int, float)) and r["score"] >= 90 and not low \
-                      and (r.get("elapsed_s") or 0) <= 120:
+                      and (r.get("elapsed_s") or 0) <= 120 and not (isinstance(inter, (int, float)) and inter < 90):
                   continue
               log = pathlib.Path("workspaces") / str(r.get("task_id")) / "engine.log"
               print(f"::group::engine.log {r.get('url')} ({r.get('status')})")
@@ -194,6 +200,23 @@ jobs:
                   print(f"(缩略图失败: {exc})")
           PY
           fi
+      - name: 原站源码与克隆首页进日志(单站归因)
+        if: always() && github.event.inputs.dump_src == 'true' && github.event.inputs.sites != ''
+        run: |
+          IFS=',' read -ra urls <<< "${{ github.event.inputs.sites }}"
+          for u in "${urls[@]}"; do
+            echo "::group::SRC $u"
+            curl -sL -m 20 -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36" "$u" | head -c 40000 || true
+            echo; echo "::endgroup::"
+          done
+          for d in workspaces/*/; do
+            for f in index.html index.interactive.html; do
+              [ -f "$d/$f" ] || continue
+              echo "::group::CLONE $d$f"
+              head -c 40000 "$d/$f"
+              echo; echo "::endgroup::"
+            done
+          done
       - name: 上传报告与实例日志
         if: always()
         uses: actions/upload-artifact@v4

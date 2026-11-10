@@ -447,7 +447,7 @@ class LocalizeMixin:
             # 部署性能守卫: 未本地化的阻塞外链脚本(采集期已 404/跳过的计数/埋点、跨域图标)
             # 不得在本地部署时走反代兜底阻塞首屏 —— 删信标 / 其余转 async。
             localized = neutralize_deploy_hazards(
-                localized, urlsplit(self._target).netloc)
+                localized, urlsplit(self._target).netloc, self.ws)
             if xhost_script:
                 localized = self._inject_after_head(localized, xhost_script)
             if shard_script:
