@@ -325,6 +325,28 @@ _FLUID_GEOM_RE = re.compile(r"(?:^|;)\s*(attr-width|attr-height|width|height|min
                             r"(-?\d+(?:\.\d+)?)px\s*(!important)?(?=;|$)", re.I)
 
 
+if not getattr(config, "VARIANT_CANVAS_CANON", True):
+    CV_PATHS_JS = CV_PATHS_JS.replace("const CANON = 1;", "const CANON = 0;")
+
+
+def _root_inline_varies(reads) -> bool:
+    """reads: 各视口宽下 ROOT_FONT_READ_JS 的读数 [宽, html 内联px, html 计算px, body 内联px, body 计算px]。
+    <html> 或 <body> 的内联 px 字号在不同宽度下相差 >1.5% 即认定由脚本按屏宽改写。"""
+    for i in (1, 3):
+        vals = [r[i] for r in reads if r and len(r) > i and r[i] > 0]
+        if len(vals) >= 2 and max(vals) / min(vals) > 1.015:
+            return True
+    return False
+
+
+def _subtree_sig(paths, root):
+    """CV_PATHS_JS 结果里 root 及其后代的结构签名(路径 → 标签 + 子元素标签序列); root 不在则为 None。"""
+    if root not in paths:
+        return None
+    pre = root + ">"
+    return {k: (v[0], v[3]) for k, v in paths.items() if k == root or k.startswith(pre)}
+
+
 def _id_misaligned_parents(main, other):
     """CV_PATHS_JS 两页结果里, 子元素标签序列相同而 id 序列错位的容器路径。
     错位: 同一序号两侧 id 不同, 且其中带 id 的那个在另一页整页都不存在(不是换了位置, 是另一页没有这个组件)。"""
@@ -371,6 +393,65 @@ def _source_id_classes(html, limit=6000):
         _P(convert_charrefs=True).feed(html)
     except Exception:  # noqa: BLE001
         return out
+    return out
+
+
+_VOID_TAGS = frozenset("area base br col embed hr img input link meta param source track wbr".split())
+
+
+def _source_sibling_groups(html, limit=4000, kid_limit=24000):
+    """源码 HTML 里 <body> 下「≥2 个子元素且有子元素带 class」的父元素: [{a: 最近的带 id 祖先(或 ""=body), i: 从它往下的子元素序号链,
+    k: [[子标签, class 或 None, id 或 ""], ...]}]。给状态类相位复位认没有 id 的同类兄弟组(轮播项/指示点/折叠卡)。
+    html.parser 不做隐式闭合, 路径可能与活体 DOM 对不上: 使用方必须再核对子元素个数与标签序列, 对不上就不用。"""
+    if not html or len(html) > 8_000_000:
+        return []
+    from html.parser import HTMLParser
+
+    root = {"tag": "body", "id": "", "cls": None, "kids": [], "up": None}
+    stack = []
+
+    class _P(HTMLParser):
+        def handle_starttag(self, tag, attrs):
+            if not stack:
+                if tag == "body":
+                    stack.append(root)
+                return
+            d = dict(attrs)
+            node = {"tag": tag, "id": d.get("id") or "", "cls": d.get("class"), "kids": [], "up": stack[-1]}
+            stack[-1]["kids"].append(node)
+            if tag not in _VOID_TAGS:
+                stack.append(node)
+
+        def handle_startendtag(self, tag, attrs):
+            if stack:
+                d = dict(attrs)
+                stack[-1]["kids"].append({"tag": tag, "id": d.get("id") or "", "cls": d.get("class"), "kids": [], "up": stack[-1]})
+
+        def handle_endtag(self, tag):
+            for j in range(len(stack) - 1, 0, -1):
+                if stack[j]["tag"] == tag:
+                    del stack[j:]
+                    return
+
+    try:
+        _P(convert_charrefs=True).feed(html)
+    except Exception:  # noqa: BLE001
+        return []
+    out, total = [], 0
+    todo = [root]
+    while todo and len(out) < limit and total < kid_limit:
+        node = todo.pop()
+        kids = node["kids"]
+        todo.extend(reversed(kids))
+        if len(kids) < 2 or not any(k["cls"] for k in kids) or len(kids) > 200:
+            continue
+        idx, cur = [], node
+        while cur is not root and not cur["id"]:
+            idx.append(cur["up"]["kids"].index(cur))
+            cur = cur["up"]
+        out.append({"a": cur["id"] if cur is not root else "", "i": idx[::-1],
+                    "k": [[k["tag"], k["cls"], k["id"]] for k in kids]})
+        total += len(kids)
     return out
 
 
@@ -1509,10 +1590,17 @@ class ClonerEngine:
                 page.evaluate(CANVAS_PIN_JS, "save")
                 page.evaluate(IMG_SRC_PIN_JS, "save")
             n = page.evaluate(CV_RECORD_JS, "d")
+            roots = [page.evaluate(ROOT_FONT_READ_JS)]
             for tag, w in (("t", 768), ("m", 390)):
                 page.set_viewport_size({"width": w, "height": height})
                 page.evaluate(CV_QUIET_JS, 250)
                 page.evaluate(CV_RECORD_JS, tag)
+                roots.append(page.evaluate(ROOT_FONT_READ_JS))
+            # 脚本按屏宽改写 <html>/<body> 内联字号(rem 基准; 桌面宽下常已封顶, 与宽不成正比): 桌面宽烘焙的 px 字号/行高
+            # 没有断点可限定区间时会在所有宽度压过 rem 规则 —— 窄屏下盒子按新基准缩了、字仍是桌面 px。认定后不烘字号度量
+            self._root_inline_varies = bool(config.ROOT_INLINE_VARIES_NOSIZE and _root_inline_varies(roots))
+            if self._root_inline_varies:
+                self.log("RENDER", "多视口内联采集: 根字号由脚本按屏宽改写, 字体烘焙不烘字号/行高/字距")
             page.set_viewport_size({"width": width, "height": height})
             page.evaluate(CV_QUIET_JS, 300)
             with suppress(Exception):
@@ -1542,6 +1630,16 @@ class ClonerEngine:
             with suppress(Exception):
                 page.evaluate("window.__cvRec = null")
             self.log("WARN", f"多视口内联采集失败: {exc}")
+
+    def _phase_src(self, html):
+        """状态类相位复位的源码对照: ({id: class}, 同类兄弟组)。同一份源码只解析一次。"""
+        if not html:
+            return {}, []
+        memo = getattr(self, "_phase_src_memo", None)
+        if memo is None or memo[0] is not html:
+            grp = _source_sibling_groups(html) if getattr(config, "PHASE_RESET_SIBLINGS", True) else []
+            memo = self._phase_src_memo = (html, _source_id_classes(html), grp)
+        return memo[1], memo[2]
 
     def _probe_root_font(self, page):
         """rem 基准随视口宽成正比(<html>/<body> 内联 font-size = 宽/N)时, 冻结后改写成 vw(见
@@ -1924,9 +2022,11 @@ class ClonerEngine:
                     with suppress(Exception):
                         r2 = pages[tag].request.get(pages[tag].url, timeout=6000)
                         src2 = r2.text() if r2 is not None and r2.ok else None
-                    cls2 = _source_id_classes(src2) or _source_id_classes(getattr(self, "_src_html", None))
-                    if cls2:
-                        ph = pages[tag].evaluate(STATE_PHASE_RESET_JS, cls2) or {}
+                    cls2, grp2 = ClonerEngine._phase_src(self, src2)
+                    if not cls2 and not grp2:
+                        cls2, grp2 = ClonerEngine._phase_src(self, getattr(self, "_src_html", None))
+                    if cls2 or grp2:
+                        ph = pages[tag].evaluate(STATE_PHASE_RESET_JS, [cls2, grp2]) or {}
                         if ph.get("els") or ph.get("cand"):
                             self.log("RENDER", f"窄屏首载页 {tag} 状态类相位复位: {ph.get('groups', 0)} 组 / {ph.get('els', 0)} 个实例复位成源码分配"
                                                f"({'本页源码' if src2 else '主页源码'}); 候选组 {ph.get('cand', 0)} {ph.get('dbg') or ''}"[:700])
@@ -1946,13 +2046,23 @@ class ClonerEngine:
                     main_ctrl = main_rest[0] if main_rest else 0
                     # 窄屏版明显"更空": 多半是异步内容(赞助位/推荐流)还没到, 不是换了结构
                     # (桌面不渲染的子树 innerText 退化为 textContent, 含未激活项的文字, 不比文字量)
-                    if (alt_text < 0.5 * main_text and p not in hidden_tops) or alt_n < 0.3 * main_n:
+                    # 例外(两处判据共用): 同 UA 的 0.92 倍宽对照页是另一次独立加载, 它在该子树下的结构与本页逐节点相同
+                    # → 两次加载一致, 是这个宽度本来就这样(手机版换成紧凑列表/表单只留邮箱), 不是内容没到或水合时序
+                    pair = ((loads.get("__pair") or {}).get(tag) or {}).get("paths") or {}
+                    confirmed = bool(config.VARIANT_PAIR_CONFIRM and pair
+                                     and _subtree_sig(loads.get(tag) or {}, p) == _subtree_sig(pair, p))
+                    if ((alt_text < 0.5 * main_text and p not in hidden_tops) or alt_n < 0.3 * main_n) and not confirmed:
+                        self.log("RENDER", f"窄屏 DOM 变体: {p[:60]} 的 {tag} 版内容明显更少(文字 {alt_text}/{main_text}, 节点 {alt_n}/{main_n}), 视为未到位, 不用")
                         continue
                     # 窄屏版表单控件比主页少: 组件晚水合(wix 首屏邮箱表单在窄屏页里时有时无 → 手机端整块表单消失),
                     # 不是响应式换结构; 退回主页子树 + 分视口样式
                     if main_ctrl and alt_ctrl < main_ctrl:
-                        self.log("RENDER", f"窄屏 DOM 变体: {p[:60]} 的 {tag} 版表单控件 {alt_ctrl} < 主页 {main_ctrl}, 视为未水合, 不用")
-                        continue
+                        if confirmed:
+                            self.log("RENDER", f"窄屏 DOM 变体: {p[:60]} 的 {tag} 版表单控件 {alt_ctrl} < 主页 {main_ctrl}, "
+                                               f"但对照页(另一次加载)结构相同, 采用窄屏版")
+                        else:
+                            self.log("RENDER", f"窄屏 DOM 变体: {p[:60]} 的 {tag} 版表单控件 {alt_ctrl} < 主页 {main_ctrl}, 视为未水合, 不用")
+                            continue
                     if alt_ctrl > main_ctrl:
                         self.log("RENDER", f"窄屏 DOM 变体: {p[:60]} 的 {tag} 版表单控件 {alt_ctrl} > 主页 {main_ctrl}(主页该组件可能未水合), 采用窄屏版")
                     variants.setdefault(p, {})[tag] = h
@@ -2269,6 +2379,15 @@ class ClonerEngine:
                 if frz.get("anims"):
                     self.log("RENDER", f"时间冻结: 暂停 {frz['anims']} 个动画, "
                                        f"清空定时器 {frz.get('timers', 0)} 个")
+            # 基准也按源码相位: 定时器已清, 把轮换过的同类组件(轮播/折叠卡)先复位成源码 HTML 的分配再截。否则基准是
+            # 「采集那一刻转到的第 k 项」、克隆是复位后的第一项, 布局校准会按基准把收起的那项撑回展开时的高度(一块空白)
+            if getattr(config, "BASELINE_PHASE_RESET", True):
+                with suppress(Exception):
+                    src_cls, src_grp = self._phase_src(getattr(self, "_src_html", None))
+                    if src_cls or src_grp:
+                        ph = page.evaluate(STATE_PHASE_RESET_JS, [src_cls, src_grp]) or {}
+                        if ph.get("els"):
+                            self.log("RENDER", f"基准截图前状态类相位复位: {ph.get('groups', 0)} 组 / {ph.get('els', 0)} 个实例 {ph.get('dbg') or ''}"[:500])
             t_frz = time.monotonic()
             # 冻结后再等一轮可见图: 上面等图期间轮播定时器还在翻页, 冻结那一刻露出的往往
             # 是刚翻到、图还没到的一页(mi.com 基准整屏空白)。冻结后版面不再动, 等的就是截图里那几张
@@ -2326,11 +2445,11 @@ class ClonerEngine:
                                    f" 仍未到 {ws_.get('pending', 0)} 张")
         counts = _safe_eval(DEEP_FREEZE_JS)
         with suppress(Exception):
-            src_cls = _source_id_classes(getattr(self, "_src_html", None))
-            if not src_cls:
-                self.log("RENDER", f"状态类相位复位跳过: 源码 HTML {'未取到' if not getattr(self, '_src_html', None) else '无带 id 的 class'}")
-            if src_cls:
-                ph = page.evaluate(STATE_PHASE_RESET_JS, src_cls) or {}
+            src_cls, src_grp = self._phase_src(getattr(self, "_src_html", None))
+            if not src_cls and not src_grp:
+                self.log("RENDER", f"状态类相位复位跳过: 源码 HTML {'未取到' if not getattr(self, '_src_html', None) else '无带 id 的 class、无同类兄弟组'}")
+            else:
+                ph = page.evaluate(STATE_PHASE_RESET_JS, [src_cls, src_grp]) or {}
                 if ph.get("els") or ph.get("cand"):
                     self.log("RENDER", f"状态类相位复位: {ph.get('groups', 0)} 组同类组件的 open/active 状态在采集时已轮换, "
                                        f"{ph.get('els', 0)} 个实例复位成源码 HTML 的分配(克隆与原站同相位起步); 候选组 {ph.get('cand', 0)} {ph.get('dbg') or ''}"[:900])
@@ -2378,7 +2497,7 @@ class ClonerEngine:
         # A2 字体度量固化(W7): 活体 computed font 采样为 !important 覆盖,
         # 序列化进 HTML/MHTML —— 回放文本度量与采集态一致。
         try:
-            baked = _safe_eval(FONT_BAKE_NOSIZE_JS if getattr(self, "_root_fluid", None) else FONT_BAKE_JS)
+            baked = _safe_eval(FONT_BAKE_NOSIZE_JS if (getattr(self, "_root_fluid", None) or getattr(self, "_root_inline_varies", False)) else FONT_BAKE_JS)
             if baked:
                 self.log("RENDER", f"字体度量固化: {baked} 个元素逐元素烘焙(差分继承)")
         except Exception:
@@ -2392,7 +2511,8 @@ class ClonerEngine:
             try:
                 loads = self._collect_narrow_loads()
                 emit_loads = loads if config.NARROW_UA_CLS else {k: v for k, v in loads.items() if k != "__mdesk"}
-                cv = page.evaluate(CV_EMIT_JS, emit_loads) or {}
+                cv = page.evaluate(CV_EMIT_JS if getattr(config, "CANVAS_FILL_BANDS", True)
+                                   else CV_EMIT_JS.replace("const CVFILL = 1;", "const CVFILL = 0;"), emit_loads) or {}
                 if cv.get("els") or cv.get("cls") or cv.get("srcFill") or cv.get("textFill"):
                     self.log("RENDER", f"多视口内联样式: {cv['els']} 个元素, {cv.get('vw', 0)} 个按视口宽比例改写为 vw"
                                        + (f"(另 {cv['pairvw']} 个手机段 px 由 0.92 倍宽首载对照认出同比)" if cv.get("pairvw") else "") + ","
@@ -2419,9 +2539,9 @@ class ClonerEngine:
         # 状态把 class 写回去, 或进视口观察器又展开一张), 复位过的展开态回到交付 HTML 里(wix 手机多展开一张卡, 整页错位)
         if getattr(config, "LATE_PHASE_RESET", True):
             with suppress(Exception):
-                src_cls = _source_id_classes(getattr(self, "_src_html", None))
-                if src_cls:
-                    ph = page.evaluate(STATE_PHASE_RESET_JS, src_cls) or {}
+                src_cls, src_grp = self._phase_src(getattr(self, "_src_html", None))
+                if src_cls or src_grp:
+                    ph = page.evaluate(STATE_PHASE_RESET_JS, [src_cls, src_grp]) or {}
                     if ph.get("els"):
                         self.log("RENDER", f"状态类相位复位(序列化前复查): 又有 {ph.get('els', 0)} 个实例偏离源码分配, 已再次复位 {ph.get('dbg') or ''}"[:600])
         # N1 保真轨: MHTML 快照(采集期活体渲染的权威固化)。

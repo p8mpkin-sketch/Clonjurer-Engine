@@ -696,8 +696,11 @@ CV_PATHS_JS = r"""() => {
   // [6] 媒体源(src/srcset/poster, \x01 连接) [7] 叶子文本: 桌面上隐藏的手机版元素, 脚本只在可见时才写 src /
   // 才跑计数动画, 桌面采集永远拿不到 → 用窄屏首载页同路径元素的值补(见 CV_EMIT_JS 末尾)
   const MEDIA = /^(IMG|SOURCE|VIDEO|AUDIO)$/;
+  // 主页的 canvas 在 DEEP_FREEZE 后已固化成 <img data-canvas-frozen>, 窄屏首载页里还是 <canvas>: 子元素签名里按 CANVAS 记,
+  // 否则每个 canvas 的父元素都被判成「随视口换结构」, 并列插入的窄屏版带着首载那一个宽度的 px 盒(768 采的到 820 宽窄一截)
+  const CANON = 1;
   for (const e of els) out[pathOf(e)] = [e.tagName, String(e.className && e.className.baseVal !== undefined ? e.className.baseVal : e.className || ''), e.getAttribute('style') || '',
-    Array.from(e.children, c => c.tagName).filter(t => !NONVIS.has(t)).join(',').slice(0, 400), (""" + CV_ATTR_FN + r""")(e),
+    Array.from(e.children, c => (CANON && c.tagName === 'IMG' && c.getAttribute('data-canvas-frozen')) ? 'CANVAS' : c.tagName).filter(t => !NONVIS.has(t)).join(',').slice(0, 400), (""" + CV_ATTR_FN + r""")(e),
     (""" + CV_XATTR_FN + r""")(e),
     MEDIA.test(e.tagName) ? [e.getAttribute('src') || '', e.getAttribute('srcset') || '', e.getAttribute('poster') || ''].join('\x01').replace(/\x01+$/, '') : '',
     (!e.children.length && !NONVIS.has(e.tagName) && e.tagName !== 'TEXTAREA') ? (e.textContent || '').trim().slice(0, 300) : '',
@@ -1173,7 +1176,9 @@ CV_CANVAS_DRIFT_JS = r"""() => {
 # 从源码 HTML 里的那个实例"移"到了别的实例上 = 自动轮换(手风琴/卡片轮播)转到了第 k 项。克隆里站点脚本从烘进 HTML 的
 # 第 k 项接着转, 原站从首载项起转, 两边永远差一个相位(wix 手机展开卡差 350px, iPhone Air 49↔70)。把这组实例的状态词
 # 复位成源码里的分配, 克隆与原站从同一相位起步。只动组内状态词; 参数 src: {id: 源码 class}
-STATE_PHASE_RESET_JS = r"""(src) => {
+STATE_PHASE_RESET_JS = r"""(arg) => {
+  const src = Array.isArray(arg) ? (arg[0] || {}) : (arg || {});
+  const sib = Array.isArray(arg) ? (arg[1] || []) : [];
   const ST = /(^|[-_])(is-)?(open|opened|expanded|active|show|shown|current|selected|collapsed)$/i;
   const toks = c => (c || '').split(/\s+/).filter(Boolean);
   const groups = new Map();
@@ -1189,10 +1194,46 @@ STATE_PHASE_RESET_JS = r"""(src) => {
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push([el, live.filter(t => ST.test(t)), orig.filter(t => ST.test(t))]);
   }
+  // 没有 id 的同类兄弟组: 源码里父元素(最近带 id 的祖先 + 子元素序号链)在活体里找到、子元素个数与标签序列都对上才用;
+  // 有 id 且源码登记过的子项上面已处理
+  let moved = 0, movedG = 0; const mvDbg = [];
+  sib.forEach((gp, gi) => {
+    let par = gp.a ? document.getElementById(gp.a) : document.body;
+    for (const i of gp.i) { par = par && par.children[i]; }
+    if (!par || par.children.length !== gp.k.length) return;
+    for (let i = 0; i < gp.k.length; i++) if (par.children[i].tagName.toLowerCase() !== gp.k[i][0]) return;
+    const usable = i => { const el = par.children[i]; return typeof el.className === 'string' && !(el.id && src[el.id] != null) && (gp.k[i][2] || '') === (el.id || ''); };
+    // 不靠状态词表: 同一个 class 词从一个兄弟身上去掉、加到另一个除此之外 class 完全相同的同标签兄弟身上(组内仅此一去一加)
+    // = 当前项轮换(.on/.cur/.z-crt 等各家自造的状态名), 移回源码所在的那个
+    const mv = new Map();
+    for (let i = 0; i < gp.k.length; i++) {
+      if (!usable(i)) continue;
+      const el = par.children[i], live = toks(el.className), orig = toks(gp.k[i][1]);
+      const note = (t, rest, sign) => { const k = t + '|' + el.tagName + '|' + rest.filter(x => x !== t).sort().join(' '); if (!mv.has(k)) mv.set(k, {t, add: [], del: []}); mv.get(k)[sign].push(el); };
+      live.forEach(t => { if (!orig.includes(t)) note(t, live, 'add'); });
+      orig.forEach(t => { if (!live.includes(t)) note(t, orig, 'del'); });
+    }
+    for (const r of mv.values()) {
+      if (r.add.length !== 1 || r.del.length !== 1 || r.add[0] === r.del[0]) continue;
+      r.add[0].classList.remove(r.t); r.del[0].classList.add(r.t);
+      moved += 2; movedG++;
+      if (mvDbg.length < 4) mvDbg.push((gp.a ? '#' + gp.a.slice(-20) : 'body') + '>' + gp.i.join('>') + ' ' + r.add[0].tagName.toLowerCase() + '.' + r.t);
+    }
+    for (let i = 0; i < gp.k.length; i++) {
+      const el = par.children[i], oc = gp.k[i][1];
+      if (oc == null || !usable(i)) continue;
+      const live = toks(el.className), orig = toks(oc);
+      const base = live.filter(t => !ST.test(t)).sort().join(' ');
+      if (!base || base !== orig.filter(t => !ST.test(t)).sort().join(' ')) continue;
+      const k = 'P' + gi + '|' + el.tagName + '|' + base;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push([el, live.filter(t => ST.test(t)), orig.filter(t => ST.test(t))]);
+    }
+  });
   let n = 0, g = 0, cand = 0; const dbg = [];
   for (const mem of groups.values()) {
     if (mem.length < 2) continue;
-    if (mem.some(([, a, b]) => a.join(' ') !== b.join(' '))) { cand++; if (dbg.length < 4) dbg.push(mem.slice(0, 8).map(([el, a, b]) => el.id.slice(-24) + ':' + a.join('+') + '/' + b.join('+')).join(' ')); }
+    if (mem.some(([, a, b]) => a.join(' ') !== b.join(' '))) { cand++; if (dbg.length < 4) dbg.push(mem.slice(0, 8).map(([el, a, b], i) => (el.id ? el.id.slice(-24) : el.tagName.toLowerCase() + '[' + i + ']') + ':' + a.join('+') + '/' + b.join('+')).join(' ')); }
     // 某状态词只在组内部分实例上加/去(轮换到第 k 项, 或源码全收起而采集时展开了其中一个)才复位;
     // 全体实例一起加/去的(整组菜单打开、主题切换)不是相位差, 不动
     const cnt = new Map();
@@ -1219,7 +1260,7 @@ STATE_PHASE_RESET_JS = r"""(src) => {
       if (hit) n++;
     }
   }
-  return {groups: g, els: n, cand, dbg};
+  return {groups: g + movedG, els: n + moved, cand: cand + movedG, dbg: dbg.concat(mvDbg)};
 }"""
 
 CV_EMIT_JS = r"""
@@ -1464,8 +1505,22 @@ CV_EMIT_JS = r"""
         if (pv === null || pv === 0 || pv === nmap.m) return null;
         return Math.abs(pv / pairM.w - nmap.m / W.m) <= Math.abs(nmap.m / W.m) * 0.015 ? (nmap.m / W.m * 100).toFixed(4) + 'vw' : null;
       };
+      // 固化 canvas「撑满容器、宽高比恒定」: 桌面采集时显示宽 = 父元素内容宽, 且该段首载页量到的宽高比与桌面相同(±1.5%)
+      // → 平板/手机段不钉首载那一个宽度的 px(768 采的 672px 到 820 宽的 iPad 上窄一截、390 采的到 360 宽溢出),
+      // 写 width:100% + height:auto, 由内联 aspect-ratio 定高。宽高比随段变化的(图表库按宽另算高)照旧钉 px
+      const CVFILL = 1;
+      const cvFill = (k) => {
+        if (!CVFILL || k === 'd' || (p !== 'width' && p !== 'height') || !el.getAttribute('data-canvas-frozen')) return false;
+        const g = (o, q) => (o && o[q]) ? px(o[q][0]) : null;
+        const dw = g(D, 'width'), dh = g(D, 'height'), w = g(V[k], 'width'), h = g(V[k], 'height');
+        if (!dw || !dh || !w || !h || w === dw || Math.abs((h / w) / (dh / dw) - 1) > 0.015) return false;
+        const pe = el.parentElement; if (!pe) return false;
+        const pc = getComputedStyle(pe);
+        return Math.abs(pe.clientWidth - (parseFloat(pc.paddingLeft) || 0) - (parseFloat(pc.paddingRight) || 0) - dw) <= 1.5;
+      };
       const emit = (k, v) => {
         if (!v) return;
+        if (cvFill(k)) { rule[k].push(p === 'width' ? 'width:100%' : 'height:auto'); out.cvFill = (out.cvFill || 0) + 1; return; }
         // 固化 canvas 的桌面段不钉 px: 桌面段靠 aspect-ratio 随宽缩(采集宽之外的桌面宽度也对), 只给平板/手机段写首载页量到的高
         if (k === 'd' && p === 'height' && el.getAttribute('data-canvas-frozen')) return;
         let val = fluid.has(k) ? (nmap[k] / W[k] * 100).toFixed(4) + 'vw' : v[0];

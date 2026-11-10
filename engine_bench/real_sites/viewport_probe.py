@@ -14,6 +14,7 @@ desktop 探针分是本方法的噪声基线, tablet/mobile 与它的差才是�
 """
 import argparse
 import json
+import os
 import re
 import sys
 import tempfile
@@ -125,6 +126,82 @@ async ([maxH, capMs]) => {
   return Math.round(performance.now() - t0);
 }
 """
+
+
+# ---- 截图方式 ----
+# full(旧): 回顶后一次整页截图。滚动进场/离场的内容(滚到才显示、滚走又收回, 或只渲染视口附近的懒渲染)在回顶状态下
+#   是空白: 用户往下滑明明看得到, 截图里却没有。原站这样空着时, 克隆把内容显示出来反而被判错(allbirds 手机端 65,
+#   原站下半页空白; 原站自比上限也是空白对空白, 看不出来)。
+# scroll(默认): 一屏一屏滚到位再截视口、按实际滚动位置拼成长图 = 用户滑动时逐屏看到的样子。第二屏起把
+#   fixed/sticky 元素隐藏(否则顶栏在每一屏重复出现); 两侧同口径。PROBE_CAPTURE=full 可切回旧口径做对照。
+CAPTURE_MODE = (os.environ.get("PROBE_CAPTURE") or "scroll").strip().lower()
+SEG_SCROLL_JS = r"""
+async (y) => {
+  scrollTo({top: y, left: 0, behavior: 'instant'});
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  await new Promise(r => setTimeout(r, 220));
+  return Math.round(scrollY);
+}
+"""
+PINNED_HIDE_JS = r"""
+(hide) => {
+  if (!hide) {
+    document.querySelectorAll('[data-probe-pinned]').forEach(e => {
+      e.style.setProperty('visibility', e.getAttribute('data-probe-pinned') || '');
+      if (!e.getAttribute('data-probe-pinned')) e.style.removeProperty('visibility');
+      e.removeAttribute('data-probe-pinned');
+    });
+    return 0;
+  }
+  let n = 0;
+  for (const e of document.body ? document.body.querySelectorAll('*') : []) {
+    if (n >= 400) break;
+    const p = getComputedStyle(e).position;
+    if (p !== 'fixed' && p !== 'sticky') continue;
+    if (e.hasAttribute('data-probe-pinned')) continue;
+    e.setAttribute('data-probe-pinned', e.style.getPropertyValue('visibility') || '');
+    e.style.setProperty('visibility', 'hidden', 'important');
+    n++;
+  }
+  return n;
+}
+"""
+
+
+def _capture_scroll(page, out, vp, clip_h):
+    """逐屏滚动截视口并按实际 scrollY 拼接; 返回拼了几屏。末屏滚不满一屏时按实际位置覆盖(与上一屏重叠部分以末屏为准)。"""
+    import io
+    from PIL import Image
+    w, h = vp["width"], vp["height"]
+    canvas = Image.new("RGB", (w, max(1, clip_h)), "white")
+    y, k, last = 0, 0, -1
+    try:
+        while y < clip_h and k < MAX_SCREENS + 2:
+            at = page.evaluate(SEG_SCROLL_JS, y)
+            if at == last:      # 滚不动了(页面比预期短)
+                break
+            last = at
+            if k == 1:
+                with suppress(Exception):
+                    page.evaluate(PINNED_HIDE_JS, True)
+            elif k > 1:
+                with suppress(Exception):   # 滚到才变 fixed/sticky 的(吸顶)也藏
+                    page.evaluate(PINNED_HIDE_JS, True)
+            png = page.screenshot(animations="disabled", scale="css")
+            with Image.open(io.BytesIO(png)) as seg:
+                seg = seg.convert("RGB")
+                if seg.width != w:      # 移动端模拟下视口截图宽度以布局视口为准, 个别页会带出横向溢出
+                    seg = seg.crop((0, 0, min(seg.width, w), seg.height))
+                canvas.paste(seg.crop((0, 0, seg.width, min(seg.height, clip_h - at))), (0, at))
+            k += 1
+            y = at + h
+    finally:
+        with suppress(Exception):
+            page.evaluate(PINNED_HIDE_JS, False)
+        with suppress(Exception):
+            page.evaluate(SEG_SCROLL_JS, 0)
+    canvas.save(str(out))
+    return k
 
 
 # 诊断: 该视口下加载失败/4xx+ 的请求、样式表装载情况、脚本错误 —— 远程只能读日志时, 这是
@@ -368,8 +445,20 @@ DIAG_JS = r"""() => {
 }"""
 
 
+# 周期 ≥1s 的 setInterval(轮播翻页/折叠卡轮换/倒计时)两侧都不触发: 比的是首载状态。否则截图那一刻各自转到第几项
+# 取决于加载耗时, 分屏滚动截图期间翻页还会在拼接处留错位。与引擎自评同口径; PROBE_TIMERS=live 恢复放行
+HOLD_INTERVALS = (os.environ.get("PROBE_TIMERS") or "hold") != "live"
+HOLD_INTERVALS_JS = r"""(() => {
+  const real = window.setInterval; let fake = 1 << 30;
+  window.setInterval = function (fn, ms) { if (+ms >= 1000) return fake++; return real.apply(this, arguments); };
+})();"""
+
+
 def _shoot(ctx, url, vp, out: Path, timeout_ms=45000, extra_wait_ms=0, focus_keys=None):
     page = ctx.new_page()
+    if HOLD_INTERVALS:
+        with suppress(Exception):
+            page.add_init_script(HOLD_INTERVALS_JS)
     info = {"url": url}
     failed, errors = [], []
     page.on("requestfailed", lambda rq: len(failed) < 40 and failed.append(
@@ -426,8 +515,14 @@ def _shoot(ctx, url, vp, out: Path, timeout_ms=45000, extra_wait_ms=0, focus_key
         full_h = page.evaluate("document.documentElement.scrollHeight")
         info["height"] = full_h
         clip_h = min(full_h, max_h)
-        page.screenshot(path=str(out), full_page=True, animations="disabled", scale="css",
-                        clip={"x": 0, "y": 0, "width": vp["width"], "height": clip_h})
+        done = 0
+        if CAPTURE_MODE == "scroll" and full_h > vp["height"] + 4:
+            with suppress(Exception):
+                done = _capture_scroll(page, out, vp, clip_h)
+                info["segs"] = done
+        if not done:
+            page.screenshot(path=str(out), full_page=True, animations="disabled", scale="css",
+                            clip={"x": 0, "y": 0, "width": vp["width"], "height": clip_h})
         info["text"] = page.evaluate("document.body ? document.body.innerText.slice(0, 200000) : ''")
         with suppress(Exception):
             d = page.evaluate(DIAG_JS) or {}
@@ -561,15 +656,44 @@ def robust_scores(a, a2, b, outdir, tag, ia, i2, ib):
     return out
 
 
-def probe_one(browser, base, task_id, url, viewports, outdir: Path, clone_tpl=None, noise=False):
-    from core.cloner_engine import compute_visual_similarity
+# 双峰站(同一份克隆两次探针差几十分: 轮播/手风琴相位、A/B 实验位、广告位)单次读数不可信。PROBE_REPEAT=N(奇数)时每个视口
+# 整对(原站+克隆)重测 N 次, 取分数居中的那一次整行(截图/诊断都是那一次的), 各次分数留在 scores 里。
+PROBE_REPEAT = max(1, int(os.environ.get("PROBE_REPEAT") or 1))
+
+
+def probe_one(browser, base, task_id, url, viewports, outdir: Path, clone_tpl=None, noise=False, repeat=None):
     res = {"task_id": task_id, "url": url}
+    n = max(1, int(repeat or PROBE_REPEAT))
     for name in viewports:
+        rows = []
+        for k in range(n):
+            rows.append(_probe_vp(browser, base, task_id, url, name, outdir, clone_tpl, noise,
+                                  suffix="" if k == 0 else f"_r{k + 1}"))
+        if n > 1:
+            scored = sorted((r for r in rows if r.get("score") is not None), key=lambda r: r["score"])
+            row = scored[len(scored) // 2] if scored else rows[0]
+            row["scores"] = [r.get("score") for r in rows]
+            k = next((i for i, r in enumerate(rows) if r is row), 0)
+            if k:   # 居中那次的截图盖到无后缀文件名上(CI 日志里的缩略图/热力图按这个名字取)
+                import shutil
+                for f in outdir.glob(f"{task_id}_{name}_r{k + 1}_*.png"):
+                    with suppress(Exception):
+                        shutil.copyfile(f, outdir / f.name.replace(f"_r{k + 1}_", "_", 1))
+        else:
+            row = rows[0]
+        res[name] = row
+    return res
+
+
+def _probe_vp(browser, base, task_id, url, name, outdir: Path, clone_tpl=None, noise=False, suffix=""):
+    from core.cloner_engine import compute_visual_similarity
+    if True:
         vp = PROBE_VIEWPORTS[name]
+        tag = f"{task_id}_{name}{suffix}"
         ctx = browser.new_context(**context_opts(name))
         try:
-            a = outdir / f"{task_id}_{name}_orig.png"
-            b = outdir / f"{task_id}_{name}_clone.png"
+            a = outdir / f"{tag}_orig.png"
+            b = outdir / f"{tag}_clone.png"
             ia = _shoot(ctx, url, vp, a, focus_keys="self")
             clone_url = (clone_tpl or "{base}/preview/{id}/").format(base=base.rstrip("/"), id=task_id)
             focus = {}
@@ -591,7 +715,7 @@ def probe_one(browser, base, task_id, url, viewports, outdir: Path, clone_tpl=No
                 from core.cloner_engine import _mask_rects
                 _mask_rects(a, rects)
                 _mask_rects(b, rects)
-            sim = compute_visual_similarity(a, b, outdir / f"{task_id}_{name}_diff.png",
+            sim = compute_visual_similarity(a, b, outdir / f"{tag}_diff.png",
                                             orig_text=ia.get("text", ""), clone_text=ib.get("text", ""),
                                             seg_detail=True)
             row.update({k: sim.get(k) for k in ("score", "structure", "edge", "text", "height_ratio", "seg_detail")})
@@ -599,7 +723,7 @@ def probe_one(browser, base, task_id, url, viewports, outdir: Path, clone_tpl=No
                 # 原站自比: 隔一次重新加载原站再比, 得到本口径下的可达上限(活体随机性)
                 ctx2 = browser.new_context(**context_opts(name))
                 try:
-                    a2 = outdir / f"{task_id}_{name}_orig2.png"
+                    a2 = outdir / f"{tag}_orig2.png"
                     # 第二次原站多等几秒再截: 按定时轮换的区域(标签页/轮播由 setInterval 翻页)两次同相位
                     # 加载看不出来, 错开相位才会落进动态区被遮
                     i2 = _shoot(ctx2, url, vp, a2, extra_wait_ms=NOISE_PHASE_SHIFT_MS)
@@ -612,11 +736,10 @@ def probe_one(browser, base, task_id, url, viewports, outdir: Path, clone_tpl=No
                     row["ceiling"] = compute_visual_similarity(
                         a, a2, None, orig_text=ia.get("text", ""), clone_text=i2.get("text", "")).get("score")
                     with suppress(Exception):
-                        row.update(robust_scores(a, a2, b, outdir, f"{task_id}_{name}", ia, i2, ib))
+                        row.update(robust_scores(a, a2, b, outdir, tag, ia, i2, ib))
         else:
             row["error"] = ia.get("error") or ib.get("error")
-        res[name] = row
-    return res
+        return row
 
 
 def probe_tasks(base, tasks, viewports=("desktop", "tablet", "mobile"), outdir=None, workers=3,

@@ -35,6 +35,10 @@ on:
         description: "每站克隆一完成立即探针(true/false)"
         required: false
         default: "false"
+      probe_env:
+        description: "探针口径 A/B: 空格分隔(PROBE_CAPTURE=full 整页一次截图 / PROBE_TIMERS=live 不拦周期定时器 / PROBE_REPEAT=3 每格测 3 次取中位)"
+        required: false
+        default: ""
       diag_keys:
         description: "探针诊断: 逗号分隔的元素路径片段(如 #comp-abc), 两侧同路径元素的顶边/高/样式并排打印"
         required: false
@@ -78,6 +82,7 @@ jobs:
       - name: 跑语料
         run: |
           extra=""
+          for kv in ${{ github.event.inputs.probe_env }}; do export "$kv"; echo "探针口径覆盖: $kv"; done
           [ "${{ github.event.inputs.probe_noise }}" = "true" ] && extra="$extra --probe-noise"
           [ "${{ github.event.inputs.probe_each }}" = "true" ] && extra="$extra --probe-each"
           python engine_bench/real_sites/run_corpus.py --base http://127.0.0.1:8897 \
