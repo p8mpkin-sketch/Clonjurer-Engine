@@ -87,7 +87,7 @@ jobs:
           if [ -n "$j" ]; then echo "::group::run json"; cat "$j"; echo "::endgroup::"; fi
           # 未出分/失败/低于 90 分站点的任务日志(engine.log)尾部进日志, 供远程归因
           if [ -n "$j" ]; then
-            python - "$j" <<'PY'
+            python - "$j" <<'PY' | tee logs/diag_ci.txt
           import json, sys, pathlib, re
           run = json.load(open(sys.argv[1], encoding="utf-8"))
           def _low_vps(r):
@@ -309,6 +309,28 @@ jobs:
                   print(f"(缩略图失败: {exc})")
           PY
           fi
+      - name: 日志尾部摘要(远程读日志只拿得到最后几千行)
+        if: always()
+        run: |
+          # 小规模归因运行(≤3 站): 诊断正文去掉截图/样式表清单后重放在尾部; 之后是逐站逐视口分数表与报告
+          j=$(ls -t engine_bench/real_sites/runs/run_*.json 2>/dev/null | head -1)
+          [ -n "$j" ] || exit 0
+          n=$(python -c "import json,sys; print(len(json.load(open(sys.argv[1], encoding='utf-8')).get('results', [])))" "$j")
+          if [ "$n" -le 3 ] && [ -f logs/diag_ci.txt ]; then
+            grep -v -e 'SHOT64:' -e '^  style块 ' -e '^  样式表 ' logs/diag_ci.txt | cut -c1-1800 | tail -n 3600 || true
+          fi
+          python - "$j" <<'PY'
+          import json, sys
+          run = json.load(open(sys.argv[1], encoding="utf-8"))
+          f = lambda v: "-" if v is None else f"{v:.1f}"
+          print("VPTABLE url | 引擎分 | 耗时 | 视口: 分/稳健/上限")
+          for r in run.get("results", []):
+              vp, rb, ce = r.get("vp") or {}, r.get("vp_robust") or {}, r.get("vp_ceiling") or {}
+              cells = "  ".join(f"{k} {f(vp.get(k))}/{f(rb.get(k))}/{f(ce.get(k))}" for k in vp)
+              print(f"VPROW {r.get('url')} | {r.get('score')} | {r.get('elapsed_s', r.get('elapsed'))} | {cells}")
+          PY
+          f=$(ls -t engine_bench/real_sites/runs/REPORT_*.md 2>/dev/null | head -1)
+          [ -n "$f" ] && cut -c1-600 "$f" | tail -n 120
       - name: 上传报告与实例日志
         if: always()
         uses: actions/upload-artifact@v4
