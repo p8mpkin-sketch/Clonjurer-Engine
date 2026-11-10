@@ -1838,7 +1838,10 @@ class ClonerEngine:
             if not top or len(top) > config.VIEWPORT_VARIANT_MAX:
                 continue
             stable, counts = ClonerEngine._settle_narrow_page(pages[tag])
-            ClonerEngine._fluidize_narrow_page(self, pages[tag], tag)
+            # 随宽对照只做手机段: 手机机型宽度 360~440 一档内连续变化, 平板段(768/820)两档之间断点换布局, 来回改宽
+            # 反而让图表/轮播停在错态(vite 平板 98→64、iPad Air 87→77)
+            if tag == "m":
+                ClonerEngine._fluidize_narrow_page(self, pages[tag], tag)
             mc = getattr(self, "_main_counts", {}) or {}
             self.log("RENDER", f"窄屏首载页 {tag}: {'到位' if stable else '到时限仍在变化'}, 控件 {counts.get('ctrl', '?')}"
                                f"(主页 {mc.get('ctrl', '?')}) / 按钮 {counts.get('btn', '?')}(主页 {mc.get('btn', '?')})"
