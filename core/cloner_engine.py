@@ -1131,7 +1131,7 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
         try:
             main_html = (self.ws / pages_map.get("/", "index.html")).read_text(
                 encoding="utf-8", errors="replace")
-            audit = deploy_hazard_audit(main_html, urlsplit(origin).netloc)
+            audit = deploy_hazard_audit(main_html, urlsplit(origin).netloc, self.ws)
             audit["dead_paths"] = len(dead_paths)
             stats["deploy_audit"] = audit
             if audit["blocking_scripts"] or audit["blocking_styles"]:

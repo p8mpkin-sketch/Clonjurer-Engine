@@ -142,6 +142,18 @@ SITE["thin_js.html"] = """<!doctype html><html lang="en"><head><meta charset="ut
 SITE["thin_text_js.html"] = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>ThinText</title></head>
 <body><main><h1>Small scripted document</h1><p>""" + ("A paragraph of visible copy for a small page. " * 8) + """</p></main>
 <script>document.documentElement.setAttribute('data-ready', '1');</script></body></html>"""
+SITE["ins.html"] = """<!doctype html><html lang=en><head><meta charset=utf-8><title>Insert</title>
+<style>body{font:16px/1.6 sans-serif;max-width:26em;margin:auto;padding:25vh 2em 2em;text-align:center}</style></head>
+<body><p>This page keeps one paragraph in its markup and builds the rest with a tiny script.</p><script src=/s.js></script></body></html>"""
+SITE["s.js"] = """(function(){var b=document.body,p=b.querySelector('p');p.lang='en';
+var st=document.createElement('style');st.textContent='svg{display:block;margin:-2.75em auto 0;opacity:.55}p+p{font-size:.875em;opacity:.6}';
+b.insertBefore(st,p);
+p.insertAdjacentHTML('beforebegin','<svg viewBox="0,0,20,20" width="44" height="44"><rect width="20" height="20" fill="#888"/></svg>');
+['Second paragraph inserted by the script, in another language.','Third paragraph inserted by the script as well.',
+ 'Fourth paragraph, also built at parse time by the same script.'].forEach(function(t,i){
+  var q=document.createElement('p');q.lang='x'+i;q.textContent=t;b.insertBefore(q,document.currentScript);});
+var a=document.createElement('a');a.href='https://iana.org/help/example-domains';a.textContent='Learn more';
+b.insertBefore(a,document.currentScript);})();"""
 SITE["host.html"] = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Host</title></head>
 <body><h1>Host page with a cross origin widget</h1><p>""" + ("Body copy that makes the host page thick enough. " * 120) + """</p>
 <iframe src="CROSS/widget.html" width="320" height="90" title="w"></iframe></body></html>"""
@@ -328,6 +340,24 @@ class EngineEndToEnd(unittest.TestCase):
         finally:
             config.THIN_STATIC_NO_RETRY = saved
         self.assertIn("判定采集退化, 重导航重试", self._log_of(task))
+
+    def test_parse_time_insert_script_not_duplicated(self):
+        """页尾同源短路径脚本(/s.js, 不进字面替换, 按原路径镜像落盘)在解析期插入内容: 克隆里它仍同步执行,
+        重放去重守卫去掉重复副本, 交互版正文不出现两遍。此前交付去阻塞把它当「未本地化」补了 async。"""
+        port = self.httpd.server_address[1]
+        _db, task = self._run_direct(f"http://localhost:{port}/ins.html")
+        self.assertEqual(task["status"], "completed", task.get("error_msg"))
+        ws = Path(task["workspace_path"]) if task.get("workspace_path") else config.WORKSPACE_ROOT / str(task["id"])
+        self.assertTrue((ws / "s.js").is_file(), "脚本未按原路径镜像落盘")
+        stats = json.loads(task.get("stats_json") or "{}")
+        html = (ws / "index.html").read_text(encoding="utf-8")
+        inter = ws / "index.interactive.html"
+        if inter.is_file():
+            html = inter.read_text(encoding="utf-8")
+        self.assertRegex(html, r'<script[^>]*src="?/s\.js"?[^>]*>')
+        self.assertNotRegex(html, r'<script[^>]*src="?/s\.js"?[^>]*\basync\b')
+        self.assertGreaterEqual(float(stats.get("interactive_score") or 0), 95.0, self._log_of(task)[-1500:])
+        self.assertEqual((stats.get("deploy_audit") or {}).get("blocking_scripts"), 0)
 
     def test_small_frame_widget_not_renavigated(self):
         """跨域 iframe 小部件(有脚本、序列化 <5KB)自就绪以来没被清空: 固化为本地子页但不为它重导航。"""
