@@ -1048,9 +1048,19 @@ ALT_INJECT_JS = r"""({items, css}) => {
     const hide = (b) => '[data-cv-vp]:not([data-cv-vp~="' + b + '"]){display:none!important}';
     st.textContent = '@media all/*cv-d*/{' + hide('d') + '}\n'
       + '@media (min-width: 99999px)/*cv-t*/{' + hide('t') + '}\n'
-      + '@media (min-width: 99999px)/*cv-m*/{' + hide('m') + '}\n'
+      // 手机段: 非触屏只显示带 m 的; 触屏另显示 mt(只在手机 UA 下换结构的变体)并藏起 mx(其主页版)
+      + '@media (min-width: 99999px)/*cv-m*/{html:not([data-cv-touch]) [data-cv-vp]:not([data-cv-vp~="m"]),'
+      + 'html[data-cv-touch] [data-cv-vp]:not([data-cv-vp~="m"]):not([data-cv-vp~="mt"]),html[data-cv-touch] [data-cv-vp~="mx"]{display:none!important}}\n'
       + (css ? '@media (min-width: 99999px)/*cv-x*/{\n' + css + '\n}' : '');
     (document.head || document.documentElement).appendChild(st);
+    if (items.some(it => / mx$/.test(it.own))) {
+      // 触屏标记在解析期最早设上(先于分视口样式生效): 粗指针 = 手机/平板真机
+      const sc = document.createElement('script');
+      sc.setAttribute('data-clone-preview', 'cv-touch');
+      sc.textContent = "try{if(matchMedia('(pointer: coarse)').matches)document.documentElement.setAttribute('data-cv-touch','')}catch(e){}";
+      const h = document.head || document.documentElement;
+      h.insertBefore(sc, h.firstChild);
+    }
   }
   return n;
 }"""

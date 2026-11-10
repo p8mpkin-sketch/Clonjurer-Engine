@@ -1567,6 +1567,7 @@ class ClonerEngine:
         """同上下文另开平板/手机宽的页面重新加载目标页(只等到响应提交, 与主页后续采集并行):
         只在加载时按宽度写一次的内联样式, 缩放采不到, 要靠窄屏首载对照(见 CV_EMIT_JS)。"""
         self._cv_pages = []
+        self._cv_mdesk = None
         self._cv_extra_ctx = []
         self._cv_pair = {}
         for tag, w in (("t", 768), ("m", 390)):
@@ -1582,6 +1583,16 @@ class ClonerEngine:
                         extra_http_headers=hdrs, ignore_https_errors=True, **config.PHONE_DEVICE)
                     self._cv_extra_ctx.append(ctx2)
                     p2 = ctx2.new_page()
+                    # 同宽再开一张桌面 UA 页(只读结构): 手机 UA 页换了结构而桌面 UA 同宽页没换的子树是按 UA 下发的,
+                    # 不是按宽度; 这类变体只给触屏设备显示, 桌面浏览器窄窗口仍显示主页版(wix 手机 390 89→43)
+                    if getattr(config, "NARROW_UA_SPLIT", True):
+                        try:
+                            p4 = page.context.new_page()
+                            p4.set_viewport_size({"width": w, "height": height})
+                            p4.goto(page.url, wait_until="commit", timeout=10000)
+                            self._cv_mdesk = p4
+                        except Exception as exc:   # noqa: BLE001 可有可无
+                            self.log("WARN", f"桌面 UA 窄屏对照页启动失败: {str(exc)[:120]}")
                 else:
                     p2 = page.context.new_page()
                 # 窄屏才显示/才加载的图(手机版首屏图、按断点换的 picture 源)桌面活体从没请求过, 不登记就
@@ -1628,6 +1639,19 @@ class ClonerEngine:
                                  f"该宽度无首载对照/变体")
                 with suppress(Exception):
                     p2.close()
+        p4 = getattr(self, "_cv_mdesk", None)
+        if p4 is not None and "m" in loads:
+            try:
+                left = max(0.5, budget_s - (time.monotonic() - t0))
+                p4.wait_for_load_state("load", timeout=int(left * 1000))
+                p4.evaluate(CV_QUIET_JS, 300)
+                loads["__mdesk"] = p4.evaluate(CV_PATHS_JS) or {}
+            except Exception as exc:   # noqa: BLE001
+                self.log("WARN", f"桌面 UA 窄屏对照页未加载完, 不分 UA({type(exc).__name__})")
+        if p4 is not None:
+            with suppress(Exception):
+                p4.close()
+            self._cv_mdesk = None
         for tag, (p3, w3) in list((getattr(self, "_cv_pair", {}) or {}).items()):
             try:
                 left = max(0.5, budget_s - (time.monotonic() - t0))
@@ -1651,6 +1675,10 @@ class ClonerEngine:
             with suppress(Exception):
                 p3.close()
         self._cv_pair = {}
+        if getattr(self, "_cv_mdesk", None) is not None:
+            with suppress(Exception):
+                self._cv_mdesk.close()
+            self._cv_mdesk = None
         for ctx2 in getattr(self, "_cv_extra_ctx", []) or []:
             with suppress(Exception):
                 ctx2.close()
@@ -1821,6 +1849,7 @@ class ClonerEngine:
         main = page.evaluate(CV_PATHS_JS) or {}
         pages = dict(getattr(self, "_cv_pages", []) or [])
         variants = {}                      # path -> {tag: html}
+        hidden_all = set()
         for tag, other in loads.items():
             if tag.startswith("__"):
                 continue
@@ -1834,6 +1863,7 @@ class ClonerEngine:
                 continue
             # 桌面不渲染、窄屏可见的子树: 类或内联样式与窄屏首载页不同就整棵换成窄屏版(状态只在窄屏页里可信)
             hidden_tops = ClonerEngine._hidden_root_variants(self, page, pages[tag], main, other, top)
+            hidden_all.update(hidden_tops)
             top += hidden_tops
             if not top or len(top) > config.VIEWPORT_VARIANT_MAX:
                 continue
@@ -1879,14 +1909,22 @@ class ClonerEngine:
         if total > config.VIEWPORT_VARIANT_BYTES:
             self.log("RENDER", f"窄屏 DOM 变体 {len(variants)} 处共 {total // 1024}KB 超上限, 不注入")
             return 0
+        # 只在手机 UA 下换结构的子树: 桌面 UA 同宽页该处子元素结构与主页相同(状态类隐藏子树除外)
+        md = loads.get("__mdesk") or {}
+        ua_only = {p for p, v in variants.items() if "m" in v and md and p not in hidden_all and p in md and p in main
+                   and md[p][0] == main[p][0] and md[p][3] == main[p][3]}
+        if ua_only:
+            self.log("RENDER", f"窄屏 DOM 变体: {len(ua_only)} 处只在手机 UA 下换结构, 只给触屏显示(桌面浏览器窄窗口仍用主页版): "
+                               + "; ".join(p[-60:] for p in list(ua_only)[:4]))
         items = []
         for p, v in variants.items():
             alts = []
+            mt = "mt" if p in ua_only else "m"
             if len(v) == 2 and v.get("t") == v.get("m"):
-                alts.append({"bands": "t m", "html": v["t"]})
+                alts.append({"bands": "t " + mt, "html": v["t"]})
             else:
-                alts += [{"bands": t, "html": h} for t, h in v.items()]
-            own = " ".join(["d"] + [t for t in ("t", "m") if t not in v])
+                alts += [{"bands": (mt if t == "m" else t), "html": h} for t, h in v.items()]
+            own = " ".join(["d"] + [t for t in ("t", "m") if t not in v] + (["m", "mx"] if p in ua_only else []))
             items.append({"path": p, "own": own, "alts": alts})
         main_rows = page.evaluate(STYLE_TEXTS_JS) or []
         css_main = {(g, t) for g, t, *_ in main_rows}
