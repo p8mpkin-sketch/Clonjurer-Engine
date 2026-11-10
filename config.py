@@ -144,6 +144,7 @@ NARROW_PHASE_RESET = True        # 窄屏首载页抽变体前也做状态类相
 LATE_PHASE_RESET = True          # 序列化前复查一次状态类相位复位(首次复位后被页面脚本/重渲染写回的)
 VARIANT_ID_ALIGN = True          # 窄屏变体: 容器子项标签序列相同但带 id 的子项只在一侧存在 → 变体根提到容器
 VARIANT_ID_ALIGN_MAX = 12        # 上述容器数超过此值视为 id 不稳定(随机 id), 整体不用
+CONTENT_KEEP_GROUP = True        # 内容守卫: 同一父元素下成批同类兄弟(横向列表/轮播条目)被脚本重跑删掉、幸存不到 1/3 → 按原顺序放回
 NARROW_UA_SPLIT = True           # 手机 UA 首载页之外再开一张桌面 UA 390 页: 只在手机 UA 下才换结构的变体只给触屏显示
 NARROW_UA_CLS = True             # 手机 UA 首载页与桌面 UA 同宽页同路径 class 不同(桌面 UA 同宽与主页相同)→ 只给触屏手机段换 class(wix 手机卡片默认收起)
 NARROW_PHONE_UA = True           # 窄屏首载对照的手机宽(390)页用手机 UA + 触屏仿真单独上下文加载(与评分真机口径一致)

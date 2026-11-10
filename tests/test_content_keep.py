@@ -77,5 +77,56 @@ class ContentKeep(unittest.TestCase):
                 b.close()
 
 
+LIST_PAGE = """<!doctype html><html><head>GUARD</head><body style="margin:0">
+<div id="w" style="display:flex;overflow:hidden">CARDS</div>
+<div id="w2" style="display:flex;overflow:hidden">CARDS</div>
+<div id="w3" style="display:flex;overflow:hidden">CARDS</div>
+<div id="w4" style="display:flex;overflow:hidden">CARDS</div>
+<script>
+  function mk(t, i) { var d = document.createElement('div'); d.className = 'slide card'; d.style.cssText = 'width:300px;height:400px;flex:none'; d.textContent = t + ' ' + i; return d; }
+  function kids(id) { return [].slice.call(document.getElementById(id).children); }
+  // 按 1 条数据水合: 其余 11 张被当多余节点删掉(横向列表, 父元素不变矮)
+  kids('w').slice(1).forEach(function (c) { c.parentNode.removeChild(c); });
+  // 整批换成新的一批: 不是丢失
+  kids('w2').forEach(function (c) { c.remove(); }); for (var i = 0; i < 12; i++) document.getElementById('w2').appendChild(mk('New', i));
+  // 删到只剩 1 张, 1.5s 后数据到了自己渲染出 8 张: 放回的要撤
+  kids('w3').slice(1).forEach(function (c) { c.remove(); });
+  setTimeout(function () { for (var i = 0; i < 8; i++) document.getElementById('w3').appendChild(mk('Fresh', i)); }, 1500);
+  // 只删两张: 不算成批丢失
+  kids('w4')[3].remove(); kids('w4')[5].remove();
+</script></body></html>"""
+
+
+@unittest.skipUnless(chromium_available(), "需要 Playwright Chromium")
+class ContentKeepGroup(unittest.TestCase):
+    def test_sibling_group(self):
+        from playwright.sync_api import sync_playwright
+        cards = "".join(f'<div class="slide card" style="width:300px;height:400px;flex:none">Product {i}</div>' for i in range(12))
+        texts = "[].map.call(document.getElementById('%s').children, function (c) { return c.textContent; }).join('|')"
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 390, "height": 844})
+                page.set_content(LIST_PAGE.replace("GUARD", CONTENT_KEEP_GUARD_JS).replace("CARDS", cards))
+                page.wait_for_timeout(1000)
+                want = "|".join(f"Product {i}" for i in range(12))
+                self.assertEqual(page.evaluate(texts % "w"), want, "成批被删的同类兄弟按原顺序放回")
+                self.assertEqual(page.evaluate(texts % "w2"), "|".join(f"New {i}" for i in range(12)), "整批替换不放回")
+                self.assertEqual(page.evaluate(texts % "w3"), want, "数据未到前先放回")
+                self.assertEqual(page.evaluate("document.getElementById('w4').children.length"), 10, "零星删除不管")
+                page.wait_for_timeout(2600)
+                self.assertNotIn("Product 5", page.evaluate(texts % "w3"), "脚本自己渲染出列表后撤掉放回的")
+                self.assertIn("Fresh 7", page.evaluate(texts % "w3"))
+                self.assertEqual(page.evaluate(texts % "w"), want)
+                off = CONTENT_KEEP_GUARD_JS.replace(",GRP=1;", ",GRP=0;")
+                self.assertNotEqual(off, CONTENT_KEEP_GUARD_JS)
+                page = b.new_page(viewport={"width": 390, "height": 844})
+                page.set_content(LIST_PAGE.replace("GUARD", off).replace("CARDS", cards))
+                page.wait_for_timeout(1000)
+                self.assertEqual(page.evaluate(texts % "w"), "Product 0", "开关关闭时不放回")
+            finally:
+                b.close()
+
+
 if __name__ == "__main__":
     unittest.main()

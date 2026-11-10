@@ -2130,7 +2130,11 @@ def relax_font_display(text):
 # 就把原块放回原位(先按原前一个兄弟定位, 它不在了才按原后一个: 站点脚本会把埋点/沙箱容器挪到 body 开头, 单按后兄弟定位曾把 739px 页脚放到 main 之前)(父元素下已有同签名、高度相近的孪生块 = 先插新再删旧的替换, 不放回)。放回后一直看着(不限时): 父元素后来又长回来(异步数据到了 / 滚到视口才挂载, 新内容补上), 再把放回的
 # 旧块撤掉, 避免双份(allbirds 轮播: Vue 先插入空壳、图片到了/swiper 初始化后才长高, 父元素 childList 不再变 —— 用
 # ResizeObserver 盯父元素尺寸 + 子树变动兜底; 曾与放回块并存 394px×2)。
-CONTENT_KEEP_GUARD_JS = r"""<script data-clone-preview="content-keep">(function(){try{if(window.__cloneKeep)return;window.__cloneKeep=1;var T0=Date.now(),WIN=12000,MIN=100,REC=[],KEPT=[],measured=0,done=false;
+# 同类兄弟成批丢失(CONTENT_KEEP_GROUP): 横向列表/轮播的条目被拆时父元素不变矮, 上面的"塌高"判据看不见(allbirds
+# Best Sellers: 序列化 12 张卡, Vue 在克隆里按 1 条数据水合, 把其余 11 张当多余节点删掉)。同一父元素下 ≥3 个同签名
+# 兄弟在窗口内被删、幸存的同签名兄弟不到被删数的 1/3 → 按原顺序放回(与幸存者文案逐字相同的不放, 免重复);
+# 之后父元素里脚本自己又渲染出一半以上数量的同类条目(数据到了) → 撤掉放回的。
+CONTENT_KEEP_GUARD_JS = r"""<script data-clone-preview="content-keep">(function(){try{if(window.__cloneKeep)return;window.__cloneKeep=1;var T0=Date.now(),WIN=12000,MIN=100,REC=[],KEPT=[],measured=0,done=false,RST=new WeakSet(),GRP=1;
 function active(){return !!window.__cloneUserAct;}if(!window.__cloneActHook){window.__cloneActHook=1;['pointerdown','keydown','touchstart','wheel'].forEach(function(t){try{addEventListener(t,function(e){if(e.isTrusted)window.__cloneUserAct=1;},{capture:true,passive:true});}catch(e){}});}
 function over(){return done||active()||Date.now()-T0>WIN;}
 function hOf(el){try{var r=el.getBoundingClientRect();return r.width>=60?r.height:0;}catch(e){return 0;}}
@@ -2138,9 +2142,14 @@ var selfRm=0;function twin(r){try{var ch=r.p.children;for(var i=0;i<ch.length;i+
 function note(n,parent){if(selfRm||over()||measured>300||!n||n.nodeType!==1||!n.isConnected||!parent||parent.nodeType!==1)return;var t=n.tagName;if(/^(SCRIPT|STYLE|LINK|TEMPLATE|NOSCRIPT|META|HTML|HEAD|BODY)$/.test(t)||n.closest('svg'))return;measured++;var h=hOf(n);if(h<MIN)return;REC.push({n:n,p:parent,next:n.nextElementSibling,prev:n.previousElementSibling,h:h,ph:hOf(parent),t:Date.now()});sched();}
 function noteAll(parent){if(over()||!parent||parent.nodeType!==1||!parent.isConnected||!parent.children)return;var ch=parent.children;for(var i=0;i<ch.length;i++)note(ch[i],parent);}
 var tm=0;function sched(){if(tm)return;tm=setTimeout(check,600);}
-function check(){tm=0;if(over()){return;}var now=Date.now(),rest=[];for(var i=0;i<REC.length;i++){var r=REC[i];if(r.back){rest.push(r);continue;}if(now-r.t<550){rest.push(r);continue;}if(r.n.isConnected||!r.p.isConnected)continue;var ph=hOf(r.p);if(ph>r.ph-r.h*0.6)continue;if(twin(r))continue;try{var nx=r.prev&&r.prev.parentNode===r.p?r.prev.nextSibling:(r.next&&r.next.parentNode===r.p?r.next:null);r.p.insertBefore(r.n,nx);r.back=1;KEPT.push(r);r.phBack=hOf(r.p);window.__cloneKept=(window.__cloneKept||0)+1;rest.push(r);try{mo.observe(r.p,{childList:true,subtree:true});if(ro)ro.observe(r.p);}catch(e){}}catch(e){}}
-REC=rest;if(REC.length)sched();}
-function undo(){for(var i=0;i<KEPT.length;i++){var r=KEPT[i];if(!r.back||!r.n.isConnected)continue;var ph=hOf(r.p);if(ph-r.h>=r.ph*0.7){try{r.n.remove();r.back=0;window.__cloneKept=(window.__cloneKept||0)-1;}catch(e){}}}}
+function grpMark(now){var by=new Map();for(var i=0;i<REC.length;i++){var r=REC[i];if(r.back||r.grp||now-r.t<550||r.n.isConnected||!r.p.isConnected)continue;var a=by.get(r.p);if(!a){a=[];by.set(r.p,a);}a.push(r);}
+by.forEach(function(a,p){if(a.length<3)return;var f=a[0].n,k=0;for(var i=0;i<a.length;i++)if(a[i].n.tagName===f.tagName&&sim(a[i].n,f))k++;if(k<3)return;var s=0,ch=p.children;for(var j=0;j<ch.length;j++){var c=ch[j];if(c.tagName===f.tagName&&sim(c,f)&&hOf(c)>=MIN)s++;}if(s*3>k)return;for(var i2=0;i2<a.length;i2++)if(a[i2].n.tagName===f.tagName&&sim(a[i2].n,f)){a[i2].grp=1;a[i2].gk=k;}});}
+function nt(e){return String(e.textContent||'').replace(/\s+/g,' ').trim();}
+function dupText(r){try{var ch=r.p.children;for(var i=0;i<ch.length;i++){var c=ch[i];if(c!==r.n&&c.tagName===r.n.tagName&&nt(c)===nt(r.n)&&nt(c).length>0)return true;}}catch(e){}return false;}
+function check(){tm=0;if(over()){return;}var now=Date.now(),rest=[];if(GRP)try{grpMark(now);}catch(e){}
+for(var i=REC.length-1;i>=0;i--){var r=REC[i];if(r.dead)continue;if(r.back){rest.push(r);continue;}if(now-r.t<550){rest.push(r);continue;}if(r.n.isConnected||!r.p.isConnected)continue;if(r.grp){if(dupText(r))continue;}else{var ph=hOf(r.p);if(ph>r.ph-r.h*0.6)continue;if(twin(r))continue;}try{var nx=r.prev&&r.prev.parentNode===r.p?r.prev.nextSibling:(r.next&&r.next.parentNode===r.p?r.next:null);r.p.insertBefore(r.n,nx);r.back=1;KEPT.push(r);RST.add(r.n);r.phBack=hOf(r.p);window.__cloneKept=(window.__cloneKept||0)+1;rest.push(r);try{mo.observe(r.p,{childList:true,subtree:true});if(ro)ro.observe(r.p);}catch(e){}}catch(e){}}
+rest.reverse();REC=rest;if(REC.length)sched();}
+function undo(){for(var i=0;i<KEPT.length;i++){var r=KEPT[i];if(!r.back||!r.n.isConnected)continue;if(r.grp){var c2=0,ch=r.p.children;for(var j=0;j<ch.length;j++){var c=ch[j];if(!RST.has(c)&&c.tagName===r.n.tagName&&hOf(c)>=MIN)c2++;}if(c2*2>=r.gk){try{selfRm=1;r.n.remove();selfRm=0;r.back=0;r.dead=1;window.__cloneKept=(window.__cloneKept||0)-1;}catch(e){selfRm=0;}}continue;}var ph=hOf(r.p);if(ph-r.h>=r.ph*0.7){try{r.n.remove();r.back=0;window.__cloneKept=(window.__cloneKept||0)-1;}catch(e){}}}}
 function wrap(P,k,pick){var d=Object.getOwnPropertyDescriptor(P,k);if(!d||typeof d.value!=='function')return;var f=d.value;P[k]=function(){try{pick(this,arguments);}catch(e){}return f.apply(this,arguments);};}
 function wrapSet(P,k){var d=Object.getOwnPropertyDescriptor(P,k);if(!d||!d.set)return;Object.defineProperty(P,k,{configurable:true,enumerable:d.enumerable,get:d.get,set:function(v){try{noteAll(this);}catch(e){}d.set.call(this,v);}});}
 wrap(Node.prototype,'removeChild',function(self,a){note(a[0],self);});
@@ -2162,7 +2171,7 @@ function sim(a,b){var A=toks(a),B=toks(b);if(!A.length&&!B.length)return true;va
 // 用前 80 个词的 Jaccard 认亲
 function words(e){try{return new Set(String(e.innerText||'').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(function(w){return w.length>1;}).slice(0,80));}catch(e){return new Set();}}
 function tsim(a,b){var A=words(a),B=words(b);if(A.size<6||B.size<6)return false;var n=0;A.forEach(function(w){if(B.has(w))n++;});return n/Math.max(A.size,B.size)>=0.5;}
-function onAdded(n){if(over()||!n||n.nodeType!==1||!n.parentNode||n.parentNode.nodeType!==1)return;if(/^(SCRIPT|STYLE|LINK|TEMPLATE|NOSCRIPT|META|HTML|HEAD|BODY)$/.test(n.tagName))return;NEWS.add(n);
+function onAdded(n){if(over()||!n||n.nodeType!==1||RST.has(n)||!n.parentNode||n.parentNode.nodeType!==1)return;if(/^(SCRIPT|STYLE|LINK|TEMPLATE|NOSCRIPT|META|HTML|HEAD|BODY)$/.test(n.tagName))return;NEWS.add(n);
   if(PAIRS.length<200){PAIRS.push({n:n,t:Date.now()});setTimeout(dedup,1600);}}
 function dedup(){if(over())return;var now=Date.now(),rest=[];for(var i=0;i<PAIRS.length;i++){var q=PAIRS[i];if(now-q.t<1500){rest.push(q);continue;}var n=q.n;if(!n.isConnected||!n.parentNode||n.parentNode.nodeType!==1)continue;var a=hOf(n);if(a<MIN)continue;
   var old=null,cnt=0,ch=n.parentNode.children;for(var j=0;j<ch.length;j++){var c=ch[j];if(c===n||NEWS.has(c))continue;var b=hOf(c);if(b<MIN)continue;if(c.tagName===n.tagName&&sim(c,n)){cnt++;old=c;continue;}if(Math.abs(a-b)<=Math.max(a,b)*0.6&&tsim(c,n)){cnt++;old=c;}}

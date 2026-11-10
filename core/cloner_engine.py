@@ -3899,7 +3899,8 @@ class ClonerEngine:
             localized = self._inject_after_head(localized, sim_script)
             localized = self._inject_after_head(localized, REPLAY_DEDUPE_JS)
             localized = self._inject_after_head(localized, SCROLL_UNLOCK_GUARD_JS)
-            localized = self._inject_after_head(localized, CONTENT_KEEP_GUARD_JS)
+            localized = self._inject_after_head(localized, CONTENT_KEEP_GUARD_JS if getattr(config, "CONTENT_KEEP_GROUP", True)
+                                                else CONTENT_KEEP_GUARD_JS.replace(",GRP=1;", ",GRP=0;"))
             localized = relax_font_display(localized)
             return _utf8_charset(_inject_responsive(localized, bool(self.cfg.get("responsive_enhance"))))
 
