@@ -1271,10 +1271,15 @@ class CaptureMixin:
             # 大小(example.com 类文档页、无脚本的广告素材 iframe)。重导航只会拿到同一份 HTML, 白等 3~5s
             self.log("RENDER", f"序列化 {len(html)}B: 页面无脚本/子框架, 小体量即原貌, 不重导航")
         elif len(html) < 5000 and is_frame and getattr(config, "THIN_STATIC_NO_RETRY", True) \
-                and self._frame_not_degraded(page, n_els_ready):
+                and self._not_degraded(page, n_els_ready):
             # 跨域 iframe 子页(登录框/订阅条/广告素材)本来就是小部件: 就绪以来元素没有减少即不是"被清空",
             # 不为它再整页导航一次(每个 3~5s, 单任务最多 6 个)
             self.log("RENDER", f"序列化 {len(html)}B: iframe 小部件自就绪以来未被清空, 不重导航")
+        elif len(html) < 5000 and getattr(config, "THIN_STATIC_NO_RETRY", True) \
+                and self._not_degraded(page, n_els_ready, min_text=200):
+            # 带脚本的小页: 画面上有成段可见文字且元素自就绪以来没有减少 —— 不是挂载失败的空壳, 也没被清空;
+            # 标记字节少只是页面本身小(example.com 现版 2.5KB / 917 字), 重导航拿不到更完整的结果
+            self.log("RENDER", f"序列化 {len(html)}B: 页面有成段可见文字且自就绪以来未被清空, 不重导航")
         elif len(html) < 5000:
             self.log("RENDER", f"序列化过薄({len(html)}B), 判定采集退化, 重导航重试")
             try:
@@ -1416,15 +1421,17 @@ class CaptureMixin:
             pass
 
     @staticmethod
-    def _frame_not_degraded(page, n_els_ready) -> bool:
-        """iframe 子页序列化时的元素数不少于就绪时的 60%(且就绪时非空): 采集窗口内没有被清空/跳走。"""
+    def _not_degraded(page, n_els_ready, min_text: int = 0) -> bool:
+        """序列化时元素数不少于就绪时的 60%(且就绪时非空): 采集窗口内没有被清空/跳走;
+        min_text > 0 时还要求当前可见文字不少于这么多字符(排除从一开始就没挂载上的空壳)。"""
         if not n_els_ready:
             return False
         try:
-            now = int(page.evaluate("() => document.body ? document.body.getElementsByTagName('*').length : 0"))
+            now, text = page.evaluate("() => [document.body ? document.body.getElementsByTagName('*').length : 0,"
+                                      " document.body ? (document.body.innerText || '').trim().length : 0]")
         except Exception:
             return False
-        return now >= 0.6 * n_els_ready
+        return now >= 0.6 * n_els_ready and text >= min_text
 
     def _settle_main_page(self, page):
         """懒加载滚动后等主页 DOM「到位」: 文字量/有源图片数/控件数连续不变(与窄屏首载页同口径,

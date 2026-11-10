@@ -139,6 +139,9 @@ SITE["thin.html"] = """<!doctype html><html lang="en"><head><meta charset="utf-8
 <body><div><h1>Thin static document</h1><p>A tiny page without any script.</p></div></body></html>"""
 SITE["thin_js.html"] = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>ThinJS</title></head>
 <body><div id="app"><h1>Thin scripted shell</h1></div><script>window.__shell = 1;</script></body></html>"""
+SITE["thin_text_js.html"] = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>ThinText</title></head>
+<body><main><h1>Small scripted document</h1><p>""" + ("A paragraph of visible copy for a small page. " * 8) + """</p></main>
+<script>document.documentElement.setAttribute('data-ready', '1');</script></body></html>"""
 SITE["host.html"] = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Host</title></head>
 <body><h1>Host page with a cross origin widget</h1><p>""" + ("Body copy that makes the host page thick enough. " * 120) + """</p>
 <iframe src="CROSS/widget.html" width="320" height="90" title="w"></iframe></body></html>"""
@@ -309,6 +312,12 @@ class EngineEndToEnd(unittest.TestCase):
         _db, task = self._run_direct(f"http://localhost:{port}/thin_js.html")
         self.assertEqual(task["status"], "completed", task.get("error_msg"))
         self.assertIn("判定采集退化, 重导航重试", self._log_of(task))
+        # 带脚本但画面上有成段文字、元素没减少的小页: 同样不重导航
+        _db, task = self._run_direct(f"http://localhost:{port}/thin_text_js.html")
+        self.assertEqual(task["status"], "completed", task.get("error_msg"))
+        log = self._log_of(task)
+        self.assertIn("有成段可见文字且自就绪以来未被清空, 不重导航", log)
+        self.assertNotIn("判定采集退化", log)
 
     def test_thin_static_retry_switch_off(self):
         port = self.httpd.server_address[1]
