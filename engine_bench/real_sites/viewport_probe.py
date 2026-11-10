@@ -454,6 +454,13 @@ def _shoot(ctx, url, vp, out: Path, timeout_ms=45000, extra_wait_ms=0, focus_key
                         if a != b:
                             diff.append([el_id[:60], sorted(a - b)[:4], sorted(b - a)[:4]])
                     d["state_cls"] = diff[:20]
+            if focus_keys == "self" and d.get("tops"):
+                # 原站侧自己转储带 0px 行的 grid 容器(与克隆侧同一批容器并排看子项规则: 多出的行由哪个子项占着)
+                focus_keys = {}
+                for t in d["tops"]:
+                    g = re.search(r"grid gtr=([^ ]+(?: [0-9.]+(?:px|fr))*)", t[3])
+                    if g and re.search(r"(^| )0px( |$)", g.group(1)) and len(focus_keys) < 12:
+                        focus_keys[t[0]] = None
             if focus_keys and d.get("tops"):
                 with suppress(Exception):
                     idx = {t[0]: i for i, t in enumerate(d["tops"])}
@@ -563,7 +570,7 @@ def probe_one(browser, base, task_id, url, viewports, outdir: Path, clone_tpl=No
         try:
             a = outdir / f"{task_id}_{name}_orig.png"
             b = outdir / f"{task_id}_{name}_clone.png"
-            ia = _shoot(ctx, url, vp, a)
+            ia = _shoot(ctx, url, vp, a, focus_keys="self")
             clone_url = (clone_tpl or "{base}/preview/{id}/").format(base=base.rstrip("/"), id=task_id)
             focus = {}
             with suppress(Exception):
