@@ -1693,14 +1693,15 @@ class ClonerEngine:
                     p2.evaluate(NARROW_STABLE_JS, 1500)
                 if w != w1:
                     samples[w] = p2.evaluate(FLUID_READ_JS) or {}
-            with suppress(Exception):
-                p2.evaluate(CANVAS_PIN_JS, "restore")
-                p2.evaluate(IMG_SRC_PIN_JS, "restore")
+            # 先复原内联态, 再钉 canvas 显示盒(反过来会把刚钉上的 aspect-ratio 一并抹掉, vite 平板 98→64)
             if rt_on:
                 with suppress(Exception):
                     k = p2.evaluate(ROUNDTRIP_PIN_JS, "restore")
                     if k:
                         self.log("RENDER", f"窄屏首载页 {tag} 随宽对照来回后 {k} 个元素的内联样式/class 没回到首载态, 已复原")
+            with suppress(Exception):
+                p2.evaluate(CANVAS_PIN_JS, "restore")
+                p2.evaluate(IMG_SRC_PIN_JS, "restore")
             w2, w3 = int(round(w1 * 0.92)), int(round(w1 * 1.128))
             fb = samples.get(w2) or {}
             fl = _fluid_elements(fa, fb, w1, w2, fc=samples.get(w3) or None, w3=w3)
