@@ -2714,6 +2714,29 @@ def bounded_call(sync_obj, coro, timeout_s: float):
         raise TimeoutError(f"超过 {timeout_s:.0f}s 未返回") from exc
 
 
+def bounded_api_call(sync_obj, method: str, args: tuple = (), timeout_s: float = 30.0):
+    """带时限调用 Playwright 同步对象的一个方法(cdp.send / page.close / frame.evaluate)。
+
+    时限靠内部协程 + wait_for 实现, 而内部接口的签名随 Playwright 版本变(1.65 起
+    CDPSession.send(method, params, timeout) / Page.close(run_before_unload, reason) /
+    Frame.evaluate(expression, arg) 的参数全部必填): 按实际签名把缺的必填位置参数补 None。
+    内部接口取不到或签名对不上时退回公开同步 API(无时限, 功能照常) —— 此前直接按旧签名调用,
+    新版本下 TypeError 被外层吞掉: MHTML 快照恒失败(保真轨整条消失)、窄屏首载页永不关闭
+    (两张活页一路空转到任务结束)。超时抛 TimeoutError。"""
+    import inspect
+    impl = getattr(sync_obj, "_impl_obj", None)
+    fn = getattr(impl, method, None) if impl is not None else None
+    if fn is None or getattr(sync_obj, "_sync", None) is None:
+        return getattr(sync_obj, method)(*args)
+    try:
+        need = [p for p in inspect.signature(fn).parameters.values()
+                if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD) and p.default is p.empty]
+        coro = fn(*(list(args) + [None] * max(0, len(need) - len(args))))
+    except (TypeError, ValueError):
+        return getattr(sync_obj, method)(*args)
+    return bounded_call(sync_obj, coro, timeout_s)
+
+
 # ---- 带边界的 URL 替换(本地化落盘用) ----
 # apply_replacements 是纯子串替换(与冻结基线逐值等价, 不改); 本地化时无协议键(根相对 /x/、原始相对写法)
 # 也会命中更长路径的中段: 页面自身路径 "/airpods-pro/" 被当资产落地后, 视频

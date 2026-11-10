@@ -255,7 +255,7 @@ from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部
     text_overlap_score,
     write_diff_preview,
 )
-from core.clone.support import bounded_call, _fluid_elements, _is_global_reset_rule, _is_transient_hide_rule, _regroup_css_rules  # noqa: F401
+from core.clone.support import bounded_call, bounded_api_call, _fluid_elements, _is_global_reset_rule, _is_transient_hide_rule, _regroup_css_rules  # noqa: F401
 
 
 
@@ -565,7 +565,7 @@ class CaptureMixin:
         return loads
 
 
-    def _mhtml_retry(self, page, cdp, impl):
+    def _mhtml_retry(self, page, cdp):
         """MHTML 快照首次超时: 探测卡住的 frame(document.readyState 1s 内不返回)写进日志,
         Page.stopLoading 取消挂起的导航/请求后重试一次; 仍超时则抛出, 走既有"快照失败"分支。"""
         t0 = time.monotonic()
@@ -574,7 +574,7 @@ class CaptureMixin:
             if time.monotonic() - t0 > 8:
                 break
             try:
-                st = bounded_call(fr, fr._impl_obj.evaluate("document.readyState"), 1.0)
+                st = bounded_api_call(fr, "evaluate", ("document.readyState",), 1.0)
                 states[st] = states.get(st, 0) + 1
             except TimeoutError:
                 stuck.append(fr.url[:120])
@@ -584,9 +584,9 @@ class CaptureMixin:
                          f"状态 {states}, 无响应 {len(stuck)} 个 {stuck[:5]}; 停止加载后重试")
         self._diag_mark("保真轨 MHTML 快照重试")
         with suppress(Exception):
-            bounded_call(cdp, impl.send('Page.stopLoading'), 5.0)
-        return bounded_call(cdp, impl.send('Page.captureSnapshot', {'format': 'mhtml'}),
-                            config.MHTML_RETRY_TIMEOUT_S)
+            bounded_api_call(cdp, "send", ('Page.stopLoading',), 5.0)
+        return bounded_api_call(cdp, "send", ('Page.captureSnapshot', {'format': 'mhtml'}),
+                                config.MHTML_RETRY_TIMEOUT_S)
 
     def _diag_mark(self, what: str):
         """只写文件不进日志总线的进度标记(engine.diag): 任务挂死时据最后一行定位卡点, 正常日志不变。"""
@@ -598,15 +598,12 @@ class CaptureMixin:
         for _tag, p2 in getattr(self, "_cv_pages", []) or []:
             self._diag_mark(f"关窄屏首载页 {_tag}")
             try:
-                impl = getattr(p2, "_impl_obj", None)
-                if impl is None:
-                    p2.close()
-                else:
-                    bounded_call(p2, impl.close(), config.NARROW_CLOSE_TIMEOUT_S)
+                bounded_api_call(p2, "close", (), config.NARROW_CLOSE_TIMEOUT_S)
             except TimeoutError as exc:
                 self.log("WARN", f"窄屏首载页 {_tag} 关闭{exc}, 放弃等待(页面留给上下文关闭时回收)")
-            except Exception:
-                pass
+            except Exception as exc:   # noqa: BLE001 关不掉要留痕: 活页空转到任务结束会拖慢后续全部阶段
+                if "closed" not in str(exc).lower():
+                    self.log("WARN", f"窄屏首载页 {_tag} 关闭失败: {type(exc).__name__}: {str(exc)[:120]}")
         self._cv_pages = []
 
 
@@ -1234,15 +1231,11 @@ class CaptureMixin:
                 cdp = ctx.new_cdp_session(page)
                 # 卡死归因: CDP 调用没有超时, 163/wix 偶发在窄屏变体之后整任务无日志挂死(疑在此处或关窄屏页)
                 self._diag_mark("保真轨 MHTML 快照开始")
-                impl = getattr(cdp, "_impl_obj", None)
-                if impl is None:
-                    snap = cdp.send('Page.captureSnapshot', {'format': 'mhtml'})
-                else:
-                    try:
-                        snap = bounded_call(cdp, impl.send('Page.captureSnapshot', {'format': 'mhtml'}),
+                try:
+                    snap = bounded_api_call(cdp, "send", ('Page.captureSnapshot', {'format': 'mhtml'}),
                                             config.MHTML_SNAPSHOT_TIMEOUT_S)
-                    except TimeoutError:
-                        snap = self._mhtml_retry(page, cdp, impl)
+                except TimeoutError:
+                    snap = self._mhtml_retry(page, cdp)
                 (self.ws / 'capture.mhtml').write_text(snap['data'], encoding='utf-8')
                 self.log("RENDER", f"保真轨 MHTML 快照: {len(snap['data']) // 1024} KB")
             except Exception as exc:

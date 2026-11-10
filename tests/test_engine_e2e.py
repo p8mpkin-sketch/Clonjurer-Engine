@@ -134,6 +134,16 @@ const d = await r.json(); const ul = document.getElementById('feed'); ul.innerHT
 for (const t of d.items) { const li = document.createElement('li'); li.textContent = t; ul.appendChild(li); }
 document.body.setAttribute('data-feed', String(d.items.length)); })();</script></body></html>"""
 SITE["xapi/feed.json"] = '{"items": ["Remote one", "Remote two"]}'
+SITE["thin.html"] = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Thin</title>
+<style>body{background:#eee;width:60vw;margin:15vh auto;font-family:sans-serif}</style></head>
+<body><div><h1>Thin static document</h1><p>A tiny page without any script.</p></div></body></html>"""
+SITE["thin_js.html"] = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>ThinJS</title></head>
+<body><div id="app"><h1>Thin scripted shell</h1></div><script>window.__shell = 1;</script></body></html>"""
+SITE["host.html"] = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Host</title></head>
+<body><h1>Host page with a cross origin widget</h1><p>""" + ("Body copy that makes the host page thick enough. " * 120) + """</p>
+<iframe src="CROSS/widget.html" width="320" height="90" title="w"></iframe></body></html>"""
+SITE["widget.html"] = """<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">
+<p id="w">Subscribe widget</p><script>document.getElementById('w').className = 'ready';</script></body></html>"""
 REQUESTED = []
 
 
@@ -279,6 +289,47 @@ class EngineEndToEnd(unittest.TestCase):
         except Exception:
             pass
         return db, db.get_task(task["id"])
+
+    def _log_of(self, task):
+        ws = Path(task["workspace_path"]) if task.get("workspace_path") else config.WORKSPACE_ROOT / str(task["id"])
+        return (ws / "engine.log").read_text(encoding="utf-8")
+
+    def test_thin_static_page_not_renavigated(self):
+        """没有脚本/子框架的纯静态小页: 小体量即原貌, 不做「序列化过薄」重导航; 有脚本的薄壳照旧重试。"""
+        port = self.httpd.server_address[1]
+        REQUESTED.clear()
+        _db, task = self._run_direct(f"http://localhost:{port}/thin.html")
+        self.assertEqual(task["status"], "completed", task.get("error_msg"))
+        log = self._log_of(task)
+        self.assertIn("小体量即原貌, 不重导航", log)
+        self.assertNotIn("判定采集退化", log)
+        self.assertGreaterEqual(float(task.get("similarity_score") or 0), 95.0)
+        _db, task = self._run_direct(f"http://localhost:{port}/thin_js.html")
+        self.assertEqual(task["status"], "completed", task.get("error_msg"))
+        self.assertIn("判定采集退化, 重导航重试", self._log_of(task))
+
+    def test_thin_static_retry_switch_off(self):
+        port = self.httpd.server_address[1]
+        saved = config.THIN_STATIC_NO_RETRY
+        config.THIN_STATIC_NO_RETRY = False
+        try:
+            _db, task = self._run_direct(f"http://localhost:{port}/thin.html?off=1")
+        finally:
+            config.THIN_STATIC_NO_RETRY = saved
+        self.assertIn("判定采集退化, 重导航重试", self._log_of(task))
+
+    def test_small_frame_widget_not_renavigated(self):
+        """跨域 iframe 小部件(有脚本、序列化 <5KB)自就绪以来没被清空: 固化为本地子页但不为它重导航。"""
+        port = self.httpd.server_address[1]
+        site = self.tmp / "site"
+        (site / "host_x.html").write_text(
+            SITE["host.html"].replace("CROSS", f"http://127.0.0.1:{port}"), encoding="utf-8")
+        _db, task = self._run_direct(f"http://localhost:{port}/host_x.html")
+        self.assertEqual(task["status"], "completed", task.get("error_msg"))
+        log = self._log_of(task)
+        self.assertIn("跨域 iframe 已固化为本地子页", log)
+        self.assertIn("iframe 小部件自就绪以来未被清空, 不重导航", log)
+        self.assertNotIn("判定采集退化", log)
 
     def test_spa_fetch_rendered_and_mocked(self):
         port = self.httpd.server_address[1]

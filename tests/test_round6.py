@@ -68,7 +68,7 @@ class BoundedCall(unittest.TestCase):
             from playwright.sync_api import sync_playwright
         except ImportError:
             self.skipTest("无 playwright")
-        from core.clone.support import bounded_call
+        from core.clone.support import bounded_api_call
         try:
             pw = sync_playwright().start()
             browser = pw.chromium.launch()
@@ -79,17 +79,104 @@ class BoundedCall(unittest.TestCase):
             page.set_content("<p>x</p>")
             t0 = time.monotonic()
             with self.assertRaises(TimeoutError):
-                bounded_call(page, page._impl_obj.evaluate("() => new Promise(() => {})"), 1.0)
+                bounded_api_call(page, "evaluate", ("() => new Promise(() => {})",), 1.0)
             self.assertLess(time.monotonic() - t0, 5)
             self.assertEqual(page.evaluate("1 + 1"), 2)
             cdp = page.context.new_cdp_session(page)
-            snap = bounded_call(cdp, cdp._impl_obj.send("Page.captureSnapshot", {"format": "mhtml"}), 30)
+            snap = bounded_api_call(cdp, "send", ("Page.captureSnapshot", {"format": "mhtml"}), 30)
             self.assertIn("MIME", snap["data"][:400])
-            bounded_call(page, page._impl_obj.close(), 10)
+            bounded_api_call(page, "close", (), 10)
             self.assertTrue(page.is_closed())
         finally:
             browser.close()
             pw.stop()
+
+
+class BoundedApiCallSignatures(unittest.TestCase):
+    """内部接口签名随 Playwright 版本变(1.65 起参数全部必填): 缺的必填位置参数补 None;
+    取不到内部接口或签名对不上时退回公开同步 API。不需要浏览器 —— CI 精简环境也能挡住依赖漂移。"""
+
+    @staticmethod
+    def _sync_obj(impl, public=None):
+        import asyncio
+
+        class Obj:
+            _impl_obj = impl
+
+            def _sync(self, aw):
+                loop = asyncio.new_event_loop()
+                try:
+                    return loop.run_until_complete(aw)
+                finally:
+                    loop.close()
+        obj = Obj()
+        for name, fn in (public or {}).items():
+            setattr(obj, name, fn)
+        return obj
+
+    def test_old_and_new_impl_signatures(self):
+        from core.clone.support import bounded_api_call
+
+        class Old:
+            async def send(self, method, params=None):
+                return {"m": method, "p": params}
+
+            async def close(self, runBeforeUnload=None, reason=None):
+                return "closed-old"
+
+        class New:
+            async def send(self, method, params, timeout):
+                return {"m": method, "p": params, "t": timeout}
+
+            async def close(self, run_before_unload, reason):
+                return "closed-new"
+
+            async def evaluate(self, expression, arg):
+                return (expression, arg)
+        self.assertEqual(bounded_api_call(self._sync_obj(Old()), "send", ("A.b", {"x": 1}), 5), {"m": "A.b", "p": {"x": 1}})
+        self.assertEqual(bounded_api_call(self._sync_obj(Old()), "close", (), 5), "closed-old")
+        self.assertEqual(bounded_api_call(self._sync_obj(New()), "send", ("A.b", {"x": 1}), 5),
+                         {"m": "A.b", "p": {"x": 1}, "t": None})
+        self.assertEqual(bounded_api_call(self._sync_obj(New()), "send", ("A.c",), 5), {"m": "A.c", "p": None, "t": None})
+        self.assertEqual(bounded_api_call(self._sync_obj(New()), "close", (), 5), "closed-new")
+        self.assertEqual(bounded_api_call(self._sync_obj(New()), "evaluate", ("1",), 5), ("1", None))
+
+    def test_falls_back_to_public_api(self):
+        from core.clone.support import bounded_api_call
+        calls = []
+        # 没有内部接口: 直接走公开 API
+        obj = self._sync_obj(None, {"close": lambda: calls.append("pub") or "ok"})
+        self.assertEqual(bounded_api_call(obj, "close", (), 5), "ok")
+
+        class Odd:   # 签名对不上(只收关键字参数): 不能让 TypeError 被吞成"什么都没做"
+            def close(self, *, reason):
+                raise AssertionError("不该被调用")
+        obj = self._sync_obj(Odd(), {"close": lambda: calls.append("pub2") or "ok2"})
+        self.assertEqual(bounded_api_call(obj, "close", (), 5), "ok2")
+        self.assertEqual(calls, ["pub", "pub2"])
+
+    def test_timeout_raises(self):
+        import asyncio
+        from core.clone.support import bounded_api_call
+
+        class Slow:
+            async def send(self, method, params, timeout):
+                await asyncio.sleep(5)
+        with self.assertRaises(TimeoutError):
+            bounded_api_call(self._sync_obj(Slow()), "send", ("A.b",), 0.2)
+
+    def test_engine_has_no_direct_impl_calls(self):
+        """引擎里不再直接按某个版本的签名调内部接口(_impl_obj.xxx(...)), 一律经 bounded_api_call。"""
+        import re
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent / "core"
+        bad = []
+        for f in root.rglob("*.py"):
+            for i, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+                if re.search(r"_impl_obj\.\w+\(|\bimpl\.(send|close|evaluate)\(", line) and "def bounded" not in line \
+                        and not line.lstrip().startswith(("#", '"', "'")) and "如 cdp._impl_obj" not in line:
+                    bad.append(f"{f.name}:{i}: {line.strip()[:90]}")
+        self.assertEqual(bad, [])
 
 
 PNG_1x1 = bytes.fromhex(
@@ -225,7 +312,7 @@ class MhtmlRetry(unittest.TestCase):
             self.skipTest("无 playwright")
         import config
         from core.clone.capture import CaptureMixin
-        from core.clone.support import bounded_call
+        from core.clone.support import bounded_api_call
 
         class Stub:
             logs: list = []
@@ -245,10 +332,9 @@ class MhtmlRetry(unittest.TestCase):
             page = browser.new_page()
             page.set_content("<p>x</p><iframe srcdoc='<b>y</b>'></iframe>")
             cdp = page.context.new_cdp_session(page)
-            impl = cdp._impl_obj
             with self.assertRaises(TimeoutError):
-                bounded_call(cdp, impl.send('Page.captureSnapshot', {'format': 'mhtml'}), 0.0)
-            snap = CaptureMixin._mhtml_retry(stub, page, cdp, impl)
+                bounded_api_call(cdp, "send", ('Page.captureSnapshot', {'format': 'mhtml'}), 0.0)
+            snap = CaptureMixin._mhtml_retry(stub, page, cdp)
             self.assertIn("MIME", snap["data"][:400])
             self.assertTrue(any("未返回" in m and "complete" in m for _k, m in stub.logs), stub.logs)
             self.assertEqual(page.evaluate("1 + 1"), 2)
