@@ -1210,12 +1210,13 @@ STATE_PHASE_RESET_JS = r"""(src) => {
     }
     if (!partial.size) continue;
     g++;
+    const offs = [...partial].filter(k => k[0] === '+' && !cnt.get('-' + k.slice(1)) && OPENISH.test(k.slice(1))).map(k => k.slice(1));
     for (const [el, a, b] of mem) {
       let hit = false;
       // 单张展开类(源码全组收起、采集时恰一个实例展开)复位后记下: 站点脚本在克隆里多半还会照桌面逻辑再展开,
       // 窄屏手机首载页滚完仍收起的, 触屏上守住收起态(见 RESET_TOUCH_JS)
-      const offs = a.filter(t => !b.includes(t) && partial.has('+' + t) && !(cnt.get('-' + t)) && OPENISH.test(t));
-      if (offs.length) el.setAttribute('data-cv-reset-off', offs.join(' '));
+      // 记在全组每个实例上: 自动轮流展开的卡片组, 克隆里脚本下一次会展开另一张
+      if (offs.length) for (const [e2] of mem) e2.setAttribute('data-cv-reset-off', offs.join(' '));
       a.forEach(t => { if (!b.includes(t) && partial.has('+' + t)) { el.classList.remove(t); hit = true; } });
       b.forEach(t => { if (!a.includes(t) && partial.has('-' + t)) { el.classList.add(t); hit = true; } });
       if (hit) n++;
