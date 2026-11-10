@@ -364,6 +364,10 @@ def _fluid_elements(fa: dict, fb: dict, w1: float, w2: float, tol: float = 0.015
         vb = fb.get(path)
         if not vb or vb[0] != va[0]:
             continue
+        # canvas 的位图/显示尺寸归 canvas 固化(aspect-ratio + 分视口盒高)管: 位图宽高属性写成 vw 后在 820 宽
+        # 把固化图撑大(vite iPad Air 87→77)
+        if va[0] == "CANVAS":
+            continue
         f1, f2 = va[1] or 0, vb[1] or 0
         if f1 >= 6 and f2 > 0 and f1 != f2 and abs((f2 / f1) / ratio - 1) <= tol:
             paths.append(path)
