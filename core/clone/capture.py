@@ -1014,7 +1014,7 @@ class CaptureMixin:
                     json.dumps(stable, ensure_ascii=False), encoding="utf-8")
         return baseline_text, layout_stable
 
-    def _render_page(self, ctx, url: str, screenshot: bool, collect_links: bool):
+    def _render_page(self, ctx, url: str, screenshot: bool, collect_links: bool, is_frame: bool = False):
         page = ctx.new_page()
         rt = self.cfg.get("render_timeout")  # 批次级页面加载超时(秒), 0/缺省 = 平台默认
         try:
@@ -1076,6 +1076,12 @@ class CaptureMixin:
                 if rt:
                     self.log("PATTERN", f"活体运行时证据: {', '.join(rt)}")
         tp = self._phase("采集-导航", t_nav_m)
+        # 就绪时页面里的脚本数与同源以外的子资源: 序列化过薄时据此区分"本来就小的纯静态页"与"脚本壳被清空"
+        n_scripts = n_els_ready = None
+        with suppress(Exception):
+            n_scripts, n_els_ready = page.evaluate(
+                "() => [document.scripts.length + document.querySelectorAll('iframe,frame,meta[http-equiv=refresh i]').length,"
+                " document.body ? document.body.getElementsByTagName('*').length : 0]")
         self._auto_settle_update_prompt(page)
         # 采集期主框架导航冻结: wikipedia 等站在固化序列中途自导航
         # (重定向/落地切换)会撕裂 evaluate 会话("Execution context
@@ -1267,7 +1273,16 @@ class CaptureMixin:
         html = self._inline_blob_urls(page, html)
         # N1.1 采集退化守卫: 序列化过薄(<5KB)说明页面在采集窗口内被
         # 重定向/挂载失败清空(ibm 类 React 壳) —— 重新导航再序列化一次
-        if len(html) < 5000:
+        if len(html) < 5000 and n_scripts == 0 and getattr(config, "THIN_STATIC_NO_RETRY", True):
+            # 就绪时页面没有任何脚本/子框架/meta 刷新: 没有东西能在采集窗口里清空或重定向它, 小就是它本来的
+            # 大小(example.com 类文档页、无脚本的广告素材 iframe)。重导航只会拿到同一份 HTML, 白等 3~5s
+            self.log("RENDER", f"序列化 {len(html)}B: 页面无脚本/子框架, 小体量即原貌, 不重导航")
+        elif len(html) < 5000 and is_frame and getattr(config, "THIN_STATIC_NO_RETRY", True) \
+                and self._frame_not_degraded(page, n_els_ready):
+            # 跨域 iframe 子页(登录框/订阅条/广告素材)本来就是小部件: 就绪以来元素没有减少即不是"被清空",
+            # 不为它再整页导航一次(每个 3~5s, 单任务最多 6 个)
+            self.log("RENDER", f"序列化 {len(html)}B: iframe 小部件自就绪以来未被清空, 不重导航")
+        elif len(html) < 5000:
             self.log("RENDER", f"序列化过薄({len(html)}B), 判定采集退化, 重导航重试")
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=config.PAGELOAD_TIMEOUT)
@@ -1407,6 +1422,17 @@ class CaptureMixin:
         except Exception:
             pass
 
+    @staticmethod
+    def _frame_not_degraded(page, n_els_ready) -> bool:
+        """iframe 子页序列化时的元素数不少于就绪时的 60%(且就绪时非空): 采集窗口内没有被清空/跳走。"""
+        if not n_els_ready:
+            return False
+        try:
+            now = int(page.evaluate("() => document.body ? document.body.getElementsByTagName('*').length : 0"))
+        except Exception:
+            return False
+        return now >= 0.6 * n_els_ready
+
     def _settle_main_page(self, page):
         """懒加载滚动后等主页 DOM「到位」: 文字量/有源图片数/控件数连续不变(与窄屏首载页同口径,
         NARROW_STABLE_JS)。晚水合的表单/标签页组件(wix 首屏邮箱表单、模板标签行)在 load 与滚动之后才出现,
@@ -1501,7 +1527,7 @@ class CaptureMixin:
                 continue  # 同源已 DOM 提取 / 自引用 / 已固化
             try:
                 sub = self._render_page(ctx, src, screenshot=False,
-                                        collect_links=False)
+                                        collect_links=False, is_frame=True)
             except Exception as exc:
                 self.log("WARN", f"iframe 固化失败 {src[:100]}: {exc}")
                 continue

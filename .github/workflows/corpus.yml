@@ -155,8 +155,10 @@ jobs:
                               _shot(f, f"{r.get('task_id')} vp {v} {kind} {r.get('url')}", width=300, max_h=5200)
                               break
               # 慢站(>120s)也打日志: 远程做耗时归因
+              # 交互轨(可交互交付物)低于 90 的站同样打日志: 头条分被保真轨托住时交互轨塌陷也要能远程归因
+              inter = r.get("interactive")
               if r.get("status") == "completed" and isinstance(r.get("score"), (int, float)) and r["score"] >= 90 and not low \
-                      and (r.get("elapsed_s") or 0) <= 120:
+                      and (r.get("elapsed_s") or 0) <= 120 and not (isinstance(inter, (int, float)) and inter < 90):
                   continue
               log = pathlib.Path("workspaces") / str(r.get("task_id")) / "engine.log"
               print(f"::group::engine.log {r.get('url')} ({r.get('status')})")

@@ -228,3 +228,7 @@ NARROW_CLOSE_TIMEOUT_S = float(os.environ.get("CLONER_NARROW_CLOSE_TIMEOUT_S", "
 # 先探测哪些 frame 卡住(进日志), 再 Page.stopLoading 取消挂起的导航/请求重试一次(MHTML_RETRY_TIMEOUT_S)
 MHTML_SNAPSHOT_TIMEOUT_S = float(os.environ.get("CLONER_MHTML_SNAPSHOT_TIMEOUT_S", "45"))
 MHTML_RETRY_TIMEOUT_S = float(os.environ.get("CLONER_MHTML_RETRY_TIMEOUT_S", "30"))
+# 序列化过薄的重导航重试: 就绪时无脚本/子框架/meta 刷新的纯静态小页不重试(没有东西能清空它)
+THIN_STATIC_NO_RETRY = os.environ.get("CLONER_THIN_STATIC_NO_RETRY", "1") != "0"
+# 布局校准就地预评: 尺寸覆盖先注入活页重截图评分, 不升即不做整页重渲染(与 CALIB_INPLACE_GATE 同口径)
+LAYOUT_CALIB_INPLACE_GATE = os.environ.get("CLONER_LAYOUT_CALIB_INPLACE_GATE", "1") != "0"
