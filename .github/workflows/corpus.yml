@@ -39,6 +39,10 @@ on:
         description: "探针诊断: 逗号分隔的元素路径片段(如 #comp-abc), 两侧同路径元素的顶边/高/样式并排打印"
         required: false
         default: ""
+      html_grep:
+        description: "克隆 HTML 取证: 正则, 打印 index.html 里每处命中起 500 字符(最多 12 处), 另列出留在克隆里的脚本"
+        required: false
+        default: ""
       engine_env:
         description: "引擎常量 A/B: 空格分隔的 CLONER_CFG_<常量>=值(如 CLONER_CFG_NARROW_PHONE_UA=0)"
         required: false
@@ -92,6 +96,7 @@ jobs:
           # 未出分/失败/低于 90 分站点的任务日志(engine.log)尾部进日志, 供远程归因
           if [ -n "$j" ]; then
             export DIAG_KEYS="${{ github.event.inputs.diag_keys }}"
+            export HTML_GREP='${{ github.event.inputs.html_grep }}'
             python - "$j" <<'PY' | tee logs/diag_ci.txt
           import json, sys, pathlib, re
           run = json.load(open(sys.argv[1], encoding="utf-8"))
@@ -288,6 +293,23 @@ jobs:
               # 手动派发的小规模运行(≤3 站)是在做归因, 高分站的日志也要(双峰站高分那次长什么样)
               if len(run["results"]) > 3 and r.get("status") == "completed" and isinstance(r.get("score"), (int, float)) and r["score"] >= 90 and not low:
                   continue
+              import os
+              if os.environ.get("HTML_GREP"):
+                  hp = pathlib.Path("workspaces") / str(r.get("task_id")) / "index.html"
+                  print(f"::group::html-grep {r.get('url')}")
+                  try:
+                      doc = hp.read_text(encoding="utf-8", errors="replace")
+                      for i, m in enumerate(re.finditer(os.environ["HTML_GREP"], doc)):
+                          if i >= 12: break
+                          print(f"  HTML@{m.start()}: " + doc[m.start():m.start() + 500].replace("\n", " "))
+                      for i, m in enumerate(re.finditer(r"<script\b([^>]*)>", doc, re.I)):
+                          if i >= 80: break
+                          body = doc[m.end():m.end() + 140].replace("\n", " ")
+                          end = doc.find("</script", m.end())
+                          print(f"  SCRIPT[{i}] {m.group(1)[:200]} len={end - m.end()} :: {'' if 'src=' in m.group(1) else body}")
+                  except Exception as exc:
+                      print(f"(html-grep 失败: {exc})")
+                  print("::endgroup::")
               log = pathlib.Path("workspaces") / str(r.get("task_id")) / "engine.log"
               print(f"::group::engine.log {r.get('url')} ({r.get('status')})")
               # 只留引擎决策行(RENDER/WARN/CSSOM/ERROR/SCORE): 下载/资源逐条日志成百上千行, 把 250 行尾部全占掉,
