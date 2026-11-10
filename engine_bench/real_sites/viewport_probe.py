@@ -354,6 +354,7 @@ DIAG_JS = r"""() => {
             + (c.display.indexOf('grid') >= 0 ? ' grid gtr=' + c.gridTemplateRows.slice(0, 80) + ' gtrSrc=' + gtrSrc(ch) + zeroRowDump(ch, c) : '') + (c.minHeight !== '0px' && c.minHeight !== 'auto' ? ' minh=' + c.minHeight : '')
             + ((ch.firstChild && ch.firstChild.nodeType === 3 && ch.firstChild.nodeValue.trim().length >= 3) ? ' f=' + c.fontSize + '/' + c.lineHeight + '/' + c.fontFamily.split(',')[0].slice(0, 16) : '')
             + (c.position !== 'static' ? ' pos=' + c.position + (c.position === 'absolute' ? '@' + c.top : '') : '') + (c.marginTop !== '0px' ? ' mt=' + c.marginTop : '')
+            + (() => { const st = (ch.getAttribute('class') || '').split(/\s+/).filter(t => /(^|[-_])(is-)?(open|opened|expanded|active|show|shown|current|selected|collapsed)$/i.test(t)); return st.length ? ' st=' + st.join('+') : ''; })()
             + (cs(el).display.indexOf('grid') >= 0 ? ' gr=' + c.gridRowStart + '/' + c.gridRowEnd + (c.alignSelf !== 'auto' && c.alignSelf !== 'normal' ? ' as=' + c.alignSelf : '') : '')
             + (ch.hasAttribute('aria-expanded') ? ' exp=' + ch.getAttribute('aria-expanded') : '') + (ch.hasAttribute('aria-hidden') ? ' ahid=' + ch.getAttribute('aria-hidden') : ''), pidx]);
         }

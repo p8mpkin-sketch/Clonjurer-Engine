@@ -1877,6 +1877,21 @@ class ClonerEngine:
                                f"(主页 {mc.get('ctrl', '?')}) / 按钮 {counts.get('btn', '?')}(主页 {mc.get('btn', '?')})"
                                f" / 文字 {counts.get('text', '?')}(主页 {mc.get('text', '?')}); 结构不同子树 {len(top) - len(hidden_tops)}"
                                + (f", 桌面不渲染而窄屏状态不同的子树 {len(hidden_tops)}" if hidden_tops else ""))
+            # 窄屏首载页同样做状态类相位复位: 它滚到底再回顶后, 进视口才展开/自动轮换的同类组件(折叠卡、高亮卡)已不在
+            # 源码 HTML 的首载分配上, 变体把那一刻的状态烘进交付页(主页做过复位, 变体没做: 手机端多展开一张卡, 其下整页错位)。
+            # 源码用该页自己上下文再取一次(手机 UA 下发的 HTML 可能不同), 取不到退回主页源码
+            if getattr(config, "NARROW_PHASE_RESET", True):
+                with suppress(Exception):
+                    src2 = None
+                    with suppress(Exception):
+                        r2 = pages[tag].request.get(pages[tag].url, timeout=6000)
+                        src2 = r2.text() if r2 is not None and r2.ok else None
+                    cls2 = _source_id_classes(src2) or _source_id_classes(getattr(self, "_src_html", None))
+                    if cls2:
+                        ph = pages[tag].evaluate(STATE_PHASE_RESET_JS, cls2) or {}
+                        if ph.get("els") or ph.get("cand"):
+                            self.log("RENDER", f"窄屏首载页 {tag} 状态类相位复位: {ph.get('groups', 0)} 组 / {ph.get('els', 0)} 个实例复位成源码分配"
+                                               f"({'本页源码' if src2 else '主页源码'}); 候选组 {ph.get('cand', 0)} {ph.get('dbg') or ''}"[:700])
             with suppress(Exception):
                 fin = pages[tag].evaluate(TRANSITION_FINISH_JS) or 0
                 if fin:
