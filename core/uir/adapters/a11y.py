@@ -538,6 +538,16 @@ class _Sampler:
         far = px[dist >= max(60, int(dist.max() * (0.88 if self.core_stroke and self.s <= 1.25 else 0.7)))]
         return self._hex(far.mean(axis=0).round())
 
+    def square_corners(self, x, y, w, h, border_hex) -> bool:
+        """边框的四个角是不是直角: 角上那个像素就是边线色(圆角控件的角上是外面的底色)。"""
+        a = self._crop(x, y, w, h)
+        if a is None or min(a.shape[:2]) < 8 or not border_hex:
+            return False
+        bc = self.np.array([int(border_hex[i:i + 2], 16) for i in (1, 3, 5)])
+        hit = sum(1 for cy, cx in ((0, 0), (0, -1), (-1, 0), (-1, -1))
+                  if int(self.np.abs(a[cy, cx].astype(self.np.int32) - bc).sum()) <= 36)
+        return hit >= 3
+
     def _bg_vec(self, bg_hex, px):
         np = self.np
         if isinstance(bg_hex, str) and re.match(r"^#[0-9a-fA-F]{6}$", bg_hex):
@@ -904,7 +914,7 @@ _TEXTY_ROLES = ("text", "button", "link", "list_item", "box")
 
 
 def _refine_leaves(root: dict, sampler: "_Sampler") -> None:
-    """建树前的两步叶子修整(纯几何 + 截图证据, 不看应用):
+    """建树前的叶子修整(纯几何 + 截图证据, 不看应用):
     1. 同级里框住了后面兄弟的文字叶子(表格行的首列文本框常报整行宽), 宽度收到最近的那个兄弟左缘 ——
        否则量墨迹时把别的列的字也算进来, 版式也被判成叠放;
     2. 文字控件框里另画着图标的(见 _Sampler.icon_split), 拆成 图标 + 文字 两个子节点。"""
@@ -940,6 +950,19 @@ def _refine_leaves(root: dict, sampler: "_Sampler") -> None:
             if wrap.get("uir_role") == "text":
                 wrap["uir_role"] = "box"
             kids[i] = wrap
+        for a in kids:
+            # 3. 可访问框比画出来的控件框大一圈(系统给焦点环/阴影留的边距): 整框一圈找不到边线、往里缩 1~3 个单位
+            #    那一圈正好是一条边线 → 控件几何取缩进后的框, 边线与底色才能照实重建
+            if (sampler is None or a.get("children") or a.get("uir_role") not in ("input", "button")
+                    or a.get("checked") is not None):
+                continue
+            x, y, w, h = a["bounds"]
+            if h < 16 or w < 24 or sampler.bg_border(x, y, w, h)[1]:
+                continue
+            for k in (1, 2, 3):
+                if sampler.bg_border(x + k, y + k, w - 2 * k, h - 2 * k)[1]:
+                    a["bounds"] = [x + k, y + k, w - 2 * k, h - 2 * k]
+                    break
         for c in n.get("children") or []:
             if c.get("children") and not c.get("_split"):
                 walk(c)
@@ -1254,6 +1277,8 @@ class _Builder:
             if multi:
                 content["multiline"] = True  # type: ignore[assignment]
             text_ref = self.text_style(isize, fg or "c1", 0, line=iline or None)
+            if box.get("border") and self.sampler.square_corners(x, y, w, h, box["border"]["color"]):
+                box["radius"] = 0
             intents = [{"on": "input", "do": "input"}]
         elif role == "image":
             content = {"alt": label or "图片"}
