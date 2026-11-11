@@ -119,6 +119,15 @@ class BlockedPageDetect(unittest.TestCase):
               "against malicious bots.\nRay ID: a562\nPerformance and Security by Cloudflare\nPrivacy")
         self.assertIn("基准页即拦截页", ce.detect_blocked_page(cf, cf))
 
+    def test_title_captcha_page(self):
+        # 风控验证码页: 正文是扫码/密码登录框, 只有标题直说是验证码页
+        risk = ("扫描二维码登录\n请使用 哔哩哔哩客户端\n扫码登录或扫码下载APP\n密码登录\n短信登录\n账号\n密码\n忘记密码？\n注册\n登录"
+                "\n其他方式登录\n微信登录\n微博登录\nQQ登录")
+        self.assertIn("基准页即拦截页", ce.detect_blocked_page(risk, risk, "验证码_哔哩哔哩"))
+        # 普通登录页标题不算; 正文很长的站标题里带「验证码」也不算
+        self.assertEqual(ce.detect_blocked_page(risk, risk, "登录 - 哔哩哔哩"), "")
+        self.assertEqual(ce.detect_blocked_page(self.REAL, self.REAL, "短信验证码平台"), "")
+
     def test_capture_replaced_midway(self):
         # 原站局部模块也带同样话术(基准里有), 但采集文本骤缩成拦截页: 仍判受阻
         orig = self.REAL + "\n内容太火爆了，请稍后再试"

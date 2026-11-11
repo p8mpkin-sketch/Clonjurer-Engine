@@ -1219,7 +1219,11 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
         # 只有交互轨回放变成拦截页(回放时活体请求被风控)是交付物缺陷, 不在此豁免;
         # 没有保真轨时退回交互轨文本
         captured = _read("fidelity_text.txt") or _read("cloned_text.txt")
-        return detect_blocked_page(orig, captured)
+        title = ""
+        m = re.search(r"<title[^>]*>([^<]{1,200})</title>", getattr(self, "_main_dom_html", "") or "", re.I)
+        if m:
+            title = _html.unescape(m.group(1))
+        return detect_blocked_page(orig, captured, title)
 
     # ------------------------------------------------------------------
     @staticmethod

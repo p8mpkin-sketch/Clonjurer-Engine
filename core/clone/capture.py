@@ -762,6 +762,7 @@ class CaptureMixin:
                     fp = p3.evaluate(FLUID_READ_JS) or {}
                     self._cv_pair_read = dict(getattr(self, "_cv_pair_read", {}) or {})
                     self._cv_pair_read[tag] = (fp, w3)
+                    self._grab_fresh_storage(p3)
                     with suppress(Exception):
                         p3.close()
                     self._cv_pair.pop(tag, None)
@@ -801,8 +802,21 @@ class CaptureMixin:
             with open(self.ws / "engine.diag", "a", encoding="utf-8") as fh:
                 fh.write(f"{time.strftime('%H:%M:%S')} {what}\n")
 
+    def _grab_fresh_storage(self, p):
+        """全新上下文(不与主页共用存储)的同文档窄屏首载页的存储, 关页前取: 用来认「站点每次首访都自己写」的键。"""
+        if not getattr(config, "STATE_SKIP_SELF_WRITTEN", True) or p is None:
+            return
+        with suppress(Exception):
+            mp = getattr(self, "_cv_main_page", None)
+            if mp is None or p.context is mp.context or not self._narrow_same_doc(p):
+                return
+            st = p.evaluate(STORAGE_SNAPSHOT_JS)
+            if st:
+                self._fresh_storage = list(getattr(self, "_fresh_storage", None) or []) + [st]
+
     def _close_narrow_loads(self):
         for _tag, p2 in getattr(self, "_cv_pages", []) or []:
+            self._grab_fresh_storage(p2)
             self._diag_mark(f"关窄屏首载页 {_tag}")
             try:
                 bounded_api_call(p2, "close", (), config.NARROW_CLOSE_TIMEOUT_S)
@@ -817,6 +831,7 @@ class CaptureMixin:
                 p3.close()
         self._cv_pair = {}
         if getattr(self, "_cv_mdesk", None) is not None:
+            self._grab_fresh_storage(self._cv_mdesk)
             with suppress(Exception):
                 self._cv_mdesk.close()
             self._cv_mdesk = None
@@ -1114,6 +1129,7 @@ class CaptureMixin:
                 if any(tag in v for v in variants.values()):
                     with suppress(Exception):
                         style_pre[tag] = pages[tag].evaluate(STYLE_TEXTS_JS) or []
+                CaptureMixin._grab_fresh_storage(self, pages[tag])
                 with suppress(Exception):
                     pages[tag].close()
         if not variants:
@@ -1511,10 +1527,9 @@ class CaptureMixin:
             self.log("RENDER", "网络静置等待超时, 继续后续固化流程")
         self._nav_ready_s = time.time() - t_nav
         self._storage_first = None
-        if screenshot and getattr(config, "STATE_SNAPSHOT_FIRST_VALUE", True):
-            # 主页首载静置后的存储值: 采集后续还会在同源页面里多次加载目标页(窄屏首载页/对照页/重试), 站点按
-            # localStorage 计数的「第 N 次访问」状态(苹果顶栏消息条按访问计数轮换文案)会被引擎自己加上去, 终态快照
-            # 写回克隆就成了回访态, 而原站对新访客显示首访态(iphone 平板 81→43)
+        self._fresh_storage = []
+        if screenshot and getattr(config, "STATE_SKIP_SELF_WRITTEN", True):
+            # 主页自然首载静置后(引擎点弹层/滚动之前)就有的存储键, 终态快照时与全新上下文窄屏首载页对比(见下)
             with suppress(Exception):
                 self._storage_first = page.evaluate(STORAGE_SNAPSHOT_JS)
         if nav_tr:
@@ -1826,15 +1841,19 @@ class CaptureMixin:
             try:
                 storage = page.evaluate(STORAGE_SNAPSHOT_JS)
                 first = getattr(self, "_storage_first", None) or {}
-                n_rev = 0
+                fresh = getattr(self, "_fresh_storage", None) or []
+                n_drop = 0
                 for kind in ("local", "session"):
                     cur, f0 = storage.get(kind) or {}, first.get(kind) or {}
-                    for k, v in f0.items():
-                        if k in cur and cur[k] != v:
-                            cur[k] = v
-                            n_rev += 1
-                if n_rev:
-                    self.log("RENDER", f"状态快照: {n_rev} 个存储键在首载后被改写(引擎多次加载同源页), 写回首载值")
+                    for k in list(cur):
+                        # 主页自然首载时就写下、且另一个全新上下文的首访页写出同一个值: 站点每次首访都会自己写,
+                        # 克隆的脚本也会再写一遍; 预先写回反而让脚本按回访者渲染(苹果顶栏 ribbon="下次显示第几条",
+                        # 首访即写 2, 写回后克隆显示第 2 条长文案, 768 宽折两行整页下移)。随机分桶类键各上下文不同, 照旧写回
+                        if k in f0 and any((fs.get(kind) or {}).get(k) == cur[k] for fs in fresh):
+                            del cur[k]
+                            n_drop += 1
+                if n_drop:
+                    self.log("RENDER", f"状态快照: {n_drop} 个存储键是站点每次首访自己写的(另一全新上下文首访同值), 不写回")
                 state = {"cookies": ctx.cookies(), "local": storage.get("local", {}),
                          "session": storage.get("session", {})}
             except Exception as exc:

@@ -274,11 +274,13 @@ FLUID_SKIP_UNSTABLE_WAIT = True
 CONTENT_KEEP_NEW_TWIN = True
 # 手机 UA 窄屏首载页启动失败时, 同宽桌面 UA 页接管手机段
 NARROW_MDESK_FALLBACK = True
-# 克隆写回的 localStorage/sessionStorage 取主页首载静置后的值: 之后被引擎自己多次加载同源页改写的键(访问计数)
-# 回到首载值, 否则克隆显示回访态文案(apple iphone 顶栏)
-STATE_SNAPSHOT_FIRST_VALUE = True
+# 克隆不写回「站点每次首访自己写」的存储键(主页自然首载就有, 另一全新上下文首访同值): 写回会让克隆脚本按回访者
+# 渲染(apple iphone 顶栏 ribbon=下次显示第几条, 平板/手机 81/99.8→42.7/49.8)
+STATE_SKIP_SELF_WRITTEN = True
 # 内容守卫的新插入观察器在守卫脚本执行时就挂上(只计解析完之后的插入): defer/module 脚本阶段的先插后删也认得出
 CONTENT_KEEP_EARLY_ADD = True
+# 拦截页识别看主页面标题(「验证码_xx」「安全验证」+ 正文很短): 风控页正文是登录框, 正文话术认不出
+BLOCK_TITLE_CHECK = True
 
 # ---------------------------------------------------------------------------
 # 常量环境覆盖(A/B 用): CLONER_CFG_<常量名>=值 覆盖本模块同名的 bool/int/float/str 常量。

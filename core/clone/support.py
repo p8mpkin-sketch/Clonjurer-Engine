@@ -760,6 +760,8 @@ _BLOCK_STRONG = re.compile(
 # 弱话术: 正常页面也常见(登录页本身就有"验证码"), 只在采集侧新出现、且整页文字很少时才算
 _BLOCK_WEAK = re.compile(r"请稍后(?:再试|重试)|系统繁忙|请(?:先)?登录后|登录后(?:查看|访问)|验证码|切换账号|captcha", re.I)
 _BLOCK_MAX_CHARS = 600
+# 标题级话术: 风控/验证码页正文常是登录框(扫码/密码登录, 不含拦截话术), 但标题直说「验证码_xx」「安全验证」
+_BLOCK_TITLE = re.compile(r"验证码|安全(?:验证|检查)|人机验证|风险验证|captcha|security check|just a moment|attention required|access denied", re.I)
 
 
 def _short_text(text: str) -> str:
@@ -771,13 +773,19 @@ def _text_len(text: str) -> int:
     return len(text.replace(" ", ""))
 
 
-def detect_blocked_page(original_text: str, captured_text: str = "") -> str:
+def detect_blocked_page(original_text: str, captured_text: str = "", title: str = "") -> str:
     """返回环境受阻原因(空串 = 未受阻)。
 
-    original_text: 基准截图时刻的可见文本; captured_text: 采集/回放出来的页面可见文本。
+    original_text: 基准截图时刻的可见文本; captured_text: 采集/回放出来的页面可见文本;
+    title: 采集时主页面的 <title>。
     """
     orig = _short_text(original_text)
     cap = _short_text(captured_text)
+    t = _short_text(title)
+    if t and orig and _text_len(orig) <= _BLOCK_MAX_CHARS and getattr(config, "BLOCK_TITLE_CHECK", True):
+        m = _BLOCK_TITLE.search(t)
+        if m:
+            return f"基准页即拦截页(标题「{t[:40]}」)"
     if orig and _text_len(orig) <= _BLOCK_MAX_CHARS:
         m = _BLOCK_STRONG.search(orig)
         if m:
