@@ -39,11 +39,39 @@ def _num(x):
     return isinstance(x, (int, float)) and not isinstance(x, bool)
 
 
+ROW_KEYS = ("url", "holdout", "status", "score", "interactive", "fidelity", "blocked", "vp", "elapsed_s")
+
+
+def emit_rows(path):
+    """把 run json 压成每站一行 GENROW|{...}(CI 日志尾部; 远程只读得到日志尾)。合成集 cases json 出 GENCASE 行。"""
+    doc = json.loads(Path(path).read_text(encoding="utf-8"))
+    for r in doc.get("results", []):
+        print("GENROW|" + json.dumps({k: r.get(k) for k in ROW_KEYS if r.get(k) is not None},
+                                     ensure_ascii=False, separators=(",", ":")))
+    for r in doc.get("rows", []):
+        print("GENCASE|" + json.dumps({"case": r.get("case"), "vp": r.get("vp")}, ensure_ascii=False, separators=(",", ":")))
+
+
+def parse_log(text):
+    """日志文本(可带时间戳前缀) → {"results": [...], "rows": [...]}。"""
+    out = {"results": [], "rows": []}
+    for line in text.splitlines():
+        for tag, key in (("GENROW|", "results"), ("GENCASE|", "rows")):
+            i = line.find(tag)
+            if i >= 0:
+                try:
+                    out[key].append(json.loads(line[i + len(tag):]))
+                except ValueError:
+                    pass
+    return out
+
+
 def _load(paths):
     docs = []
     for p in paths or []:
         try:
-            docs.append(json.loads(Path(p).read_text(encoding="utf-8")))
+            text = Path(p).read_text(encoding="utf-8")
+            docs.append(parse_log(text) if "GENROW|" in text or "GENCASE|" in text else json.loads(text))
         except (OSError, ValueError) as exc:
             print(f"(跳过 {p}: {exc})", file=sys.stderr)
     return docs
@@ -199,7 +227,10 @@ def main(argv=None):
     ap.add_argument("--gate", type=float, default=95.0)
     ap.add_argument("--out", default="")
     ap.add_argument("--json", default="")
+    ap.add_argument("--emit-rows", default="", help="把一份 run/cases json 压成 GENROW/GENCASE 行后退出(CI 用)")
     args = ap.parse_args(argv)
+    if args.emit_rows:
+        return emit_rows(args.emit_rows)
     res = score(args)
     md = render(res)
     print(md)

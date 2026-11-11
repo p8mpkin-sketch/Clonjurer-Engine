@@ -46,3 +46,9 @@ jobs:
           f=$(ls -t engine_bench/mobile_cases/runs/CASES_*.md 2>/dev/null | head -1)
           if [ -n "$f" ]; then cat "$f" >> "$GITHUB_STEP_SUMMARY"; fi
           tail -40 engine_bench/mobile_cases/runs/instance.log 2>/dev/null || true
+      - name: 通用性评分行(日志最尾)
+        if: always()
+        run: |
+          j=$(ls -t engine_bench/mobile_cases/runs/cases_*.json 2>/dev/null | head -1)
+          [ -n "$j" ] || exit 0
+          python engine_bench/score_generality.py --emit-rows "$j"
