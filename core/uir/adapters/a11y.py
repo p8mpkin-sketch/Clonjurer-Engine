@@ -240,7 +240,8 @@ def walk_ax(elem, get_attr, max_depth: int = 40, max_nodes: int = 4000) -> dict:
         sub = get_attr(e, "AXSubrole") or ""
         node = {
             "role": role, "subrole": sub, "name": text(get_attr(e, "AXTitle")),
-            "value": text(value) if not isinstance(value, bool) else "",
+            "value": (text(value) if not isinstance(value, bool) else ""
+                      ) if not text(value).startswith("<AXUIElement") else "",   # 值是另一个元素(选中的分段/页签), 不是文字
             "desc": text(get_attr(e, "AXDescription")) or text(get_attr(e, "AXPlaceholderValue")),
             "id": text(get_attr(e, "AXIdentifier")),
             "bounds": [float(pos[0]), float(pos[1]), float(size[0]), float(size[1])],
@@ -537,6 +538,16 @@ class _Sampler:
         # 低分屏上平滑过的细笔画, 大半像素是字色与底色的混合: 只取最接近笔画核心的那部分, 否则深色字被平均成灰色
         far = px[dist >= max(60, int(dist.max() * (0.88 if self.core_stroke and self.s <= 1.25 else 0.7)))]
         return self._hex(far.mean(axis=0).round())
+
+    def ring_clear(self, x, y, w, h, bg_hex) -> bool:
+        """框最外一圈像素是不是几乎全是底色(≥90%): 是 = 这个框没有画边线。"""
+        a = self._crop(x, y, w, h)
+        if a is None or min(a.shape[:2]) < 6 or not (isinstance(bg_hex, str) and bg_hex.startswith("#")):
+            return False
+        np = self.np
+        bc = np.array([int(bg_hex[i:i + 2], 16) for i in (1, 3, 5)])
+        ring = np.concatenate([a[0], a[-1], a[:, 0], a[:, -1]]).astype(np.int32)
+        return float((np.abs(ring - bc).sum(axis=1) <= 24).mean()) >= 0.9
 
     def square_corners(self, x, y, w, h, border_hex) -> bool:
         """边框的四个角是不是直角: 角上那个像素就是边线色(圆角控件的角上是外面的底色)。"""
@@ -881,6 +892,19 @@ def _same_box(a, b) -> bool:
     return all(abs(a[i] - b[i]) <= _TOL for i in range(4))
 
 
+def _near_hex(a, b, tol: int = 12) -> bool:
+    """两个 #rrggbb 颜色是否几乎相同(通道差之和 ≤ tol); 任一不是十六进制色时为 False。"""
+    if not (isinstance(a, str) and isinstance(b, str) and re.match(r"^#[0-9a-fA-F]{6}$", a) and re.match(r"^#[0-9a-fA-F]{6}$", b)):
+        return False
+    return sum(abs(int(a[i:i + 2], 16) - int(b[i:i + 2], 16)) for i in (1, 3, 5)) <= tol
+
+
+def _is_header(n: dict) -> bool:
+    """表头行: 子节点全是排序按钮的容器。"""
+    ks = n.get("children") or []
+    return bool(ks) and all(k.get("subrole") == "AXSortButton" for k in ks)
+
+
 def _prepare(tree: dict) -> dict:
     """逻辑坐标 + 裁剪 + 去不可见 + 折叠冗余包装。返回新树(不改入参)。"""
     platform = tree.get("platform", "")
@@ -894,8 +918,17 @@ def _prepare(tree: dict) -> dict:
         vis = _intersect(b, clip)
         if vis[2] < 1 or vis[3] < 1:
             return None
-        kids = [k for k in (rec(c, vis, depth + 1) for c in (n.get("children") or [])) if k]
+        # 表头属于表格却画在表格框外面(紧贴上缘): 不按表格框裁掉, 表格框并上表头
+        kids = [k for k in (rec(c, clip if _is_header(c) else vis, depth + 1) for c in (n.get("children") or [])) if k]
         out = {k: v for k, v in n.items() if k != "children"}
+        if isinstance(out.get("value"), str) and out["value"].startswith("<AXUIElement"):
+            out["value"] = ""
+        for k in kids:
+            if _is_header(k):
+                kb = k["bounds"]
+                x1, y1 = min(vis[0], kb[0]), min(vis[1], kb[1])
+                x2, y2 = max(vis[0] + vis[2], kb[0] + kb[2]), max(vis[1] + vis[3], kb[1] + kb[3])
+                vis = [x1, y1, x2 - x1, y2 - y1]
         out["bounds"] = [round(v, 2) for v in vis]
         out["uir_role"] = normalize_role(platform, n.get("role", ""), n)
         out["children"] = kids
@@ -1180,7 +1213,8 @@ class _Builder:
                     if hair:
                         border, bg = hair
             else:
-                bg, border = self.sampler.bg_border(x, y, w, h, thin_only=bool(kids))
+                # 输入框自己就是带框控件(里面的子节点只是图标按钮/编辑区), 边线不限细线
+                bg, border = self.sampler.bg_border(x, y, w, h, thin_only=bool(kids) and role != "input")
                 framed = bg is not None and bg != self.sampler.bg(x, y, w, h)
             if bg and (bg != parent_bg or opaque):
                 box["bg"] = bg
@@ -1319,17 +1353,29 @@ class _Builder:
                        "type": "password" if n.get("password") else "text"}
             isize = _font_size(content["text"] or content["placeholder"] or "字", w, min(h, 30), self.ratio)
             iink = None
-            if self.sampler and content["text"]:
-                # 量墨迹的范围: 组合框取里面的编辑区子节点(不含下拉按钮), 否则内缩 3 个单位避开边框线
+            shown = content["text"] or content["placeholder"]
+            if self.sampler and shown:
+                # 量墨迹的范围: 组合框取里面的编辑区子节点(不含下拉按钮), 否则内缩 3 个单位避开边框线;
+                # 框里靠左的图标按钮(搜索框的放大镜)不算文字, 从它右边量起
                 ek = next((k for k in kids if k.get("uir_role") == "input"), None)
-                ix, iy, iw, ih = ek["bounds"] if ek else ((x + 3, y + 3, w - 6, h - 6) if min(w, h) >= 14 else (x, y, w, h))
+                bare = (not box.get("border") and _near_hex(bg, parent_bg)
+                        and self.sampler.ring_clear(x, y, w, h, bg))               # 没有边线可避: 不内缩
+                ix, iy, iw, ih = ek["bounds"] if ek else ((x + 3, y + 3, w - 6, h - 6) if min(w, h) >= 14 and not bare
+                                                          else (x, y, w, h))
+                lead = max([k["bounds"][0] + k["bounds"][2] for k in kids
+                            if not ek and k["bounds"][0] + k["bounds"][2] <= x + w * 0.4] + [ix])
+                ix, iw = lead, iw - (lead - ix)
                 iink = self.sampler.ink(ix, iy, iw, ih, eff_bg)
+                if bare and not ek and iink and min(w, h) >= 14 and (
+                        iink["top"] <= y + 0.5 or iink["bottom"] >= y + h - 0.5 or iink["left"] <= x + 0.5):
+                    # 墨迹贴着框边 = 量到的是没认出来的边线, 退回内缩后再量
+                    iink = self.sampler.ink(max(ix, x + 3), y + 3, iw - 6, h - 6, eff_bg)
             content["text"] = re.sub(r"\r\n?", "\n", content["text"])
             multi = "\n" in content["text"].strip() and h >= 3 * isize
             box["pad"] = [0, 8, 0, 8]
             iline = 0.0
             if iink and iink["lines"] == 1:
-                isize = _font_from_ink(iink, isize, content["text"], tight=False, fringe=self.fringe)
+                isize = _font_from_ink(iink, isize, shown, tight=False, fringe=self.fringe)
                 box["pad"] = [0, 4, 0, round(max(0.0, min(16.0, iink["left"] - x - 1.5)), 1)]
             elif iink and multi and iink["lines"] > 1 and iink["pitch"] > 0:
                 # 多行编辑区: 字号按行墨迹高、行距按行间距, 内边距照首行墨迹位置(文本从左上角起排, 不垂直居中)
@@ -1340,8 +1386,14 @@ class _Builder:
                               round(max(0.0, iink["left"] - x - 0.5), 1)]
             if multi:
                 content["multiline"] = True  # type: ignore[assignment]
+            if (self.sampler and not box.get("border") and _near_hex(bg, parent_bg)
+                    and self.sampler.ring_clear(x, y, w, h, bg)):
+                # 截图上这个可编辑框没有边线、底色与四周连成一片(表格单元格、就地编辑的标签): 不画输入框的框
+                box["bg"] = bg
+                box["border"] = {"w": 0, "color": bg}
+                box["radius"] = 0
             text_ref = self.text_style(isize, fg or "c1", 0, line=iline or None)
-            if box.get("border") and self.sampler.square_corners(x, y, w, h, box["border"]["color"]):
+            if box.get("border") and box["border"].get("w") and self.sampler.square_corners(x, y, w, h, box["border"]["color"]):
                 box["radius"] = 0
             intents = [{"on": "input", "do": "input"}]
         elif role == "image":
