@@ -90,6 +90,10 @@ _UIA_ROLE = {
     "HeaderItem": "text", "ScrollBar": "box", "Thumb": "box", "ToolTip": "overlay", "AppBar": "header",
     "Calendar": "box", "SemanticZoom": "box",
 }
+# 勾选/单选/开关类控件的原生角色名: 采集后端没给出勾选状态时也按图形控件处理(方框/圆点是画出来的, 不是文字)
+_TOGGLE_RAW = {"CheckBox", "RadioButton", "Switch", "SwitchCompat", "ToggleButton", "AXCheckBox", "AXRadioButton", "AXSwitch"}
+# 进度条/评分条/电量条: 画出来的量表, 可访问名(如"Progress")并不显示在屏幕上
+_GAUGE_RAW = {"ProgressBar", "RatingBar", "AXProgressIndicator", "AXLevelIndicator", "AXBusyIndicator"}
 # 不参与界面重建的系统装饰(滚动条/窗口按钮等): 渲染出来只会是噪声
 _SKIP_RAW = {"AXScrollBar", "AXValueIndicator", "ScrollBar", "Thumb", "AXGrowArea"}
 
@@ -451,6 +455,38 @@ class _Sampler:
         sel = ring.reshape(-1, 3)[keys == top]
         return self._hex(sel.mean(axis=0).round())
 
+    def bg_border(self, x, y, w, h, thin_only: bool = False):
+        """(底色, 边框色或 None)。边缘一圈的众数色与内部主色不同、且内部主色占内部面积 ≥50% 时, 边缘那圈是描边
+        (带边框的按钮/输入框/分组框): 底色取内部主色; 描边颜色一致(占一圈 ≥60%)才当作边框返回。"""
+        ring_hex = self.bg(x, y, w, h)
+        a = self._crop(x, y, w, h)
+        if ring_hex is None or a is None or min(a.shape[:2]) < 10:
+            return ring_hex, None
+        np = self.np
+        m = max(2, int(min(a.shape[:2]) * 0.08))
+        inner = a[m:-m, m:-m][::2, ::2].reshape(-1, 3)
+        if inner.size == 0:
+            return ring_hex, None
+        vals, counts, order, keys = self._mode(inner)
+        if counts[order[0]] < 0.5 * len(inner):
+            return ring_hex, None
+        dom = inner[keys == vals[order[0]]].mean(axis=0)
+        rc = np.array([int(ring_hex[i:i + 2], 16) for i in (1, 3, 5)])
+        if np.abs(dom - rc).sum() <= 40:
+            return ring_hex, None
+        ring = np.concatenate([a[0], a[-1], a[:, 0], a[:, -1]]).astype(np.int32)
+        share = float((np.abs(ring - rc).sum(axis=1) <= 24).mean())
+        if thin_only:
+            # 容器: 只认"细描边"(分组框/面板的线框) —— 往里 3 个截图像素那一圈已经是内部主色; 顶部色带、
+            # 侧栏这类成片的异色区域不是描边, 容器底色照旧按边缘取
+            k = 3
+            if min(a.shape[:2]) < 6 * k + 4:
+                return ring_hex, None
+            r2 = np.concatenate([a[-1 - k, k:-k], a[k:-k, k], a[k:-k, -1 - k]]).astype(np.int32)   # 不看上边(标题常压在上边线上)
+            if float((np.abs(r2 - dom).sum(axis=1) <= 24).mean()) < 0.7 or share < 0.4:
+                return ring_hex, None
+        return self._hex(dom.round()), (ring_hex if share >= 0.6 else None)
+
     def fg(self, x, y, w, h, bg_hex):
         """框内与背景色差最大的显著颜色(文字色)。"""
         a = self._crop(x, y, w, h)
@@ -591,6 +627,23 @@ class _Sampler:
         return {"top": y + top, "bottom": y + bottom, "left": x + cols[0] / k,
                 "right": x + (cols[-1] + 1) / k, "lines": len(merged), "line_h": line_h, "pitch": pitch,
                 "stroke": stroke, "left_spread": spread}
+
+    def dominant(self, x, y, w, h):
+        """框内整块面积的众数色。顶层窗口用它定底色: 窗口矩形常含不可见的缩放边/阴影(边缘一圈是桌面像素),
+        按"边缘一圈"取色会把桌面色当成窗口背景。"""
+        a = self._crop(x, y, w, h)
+        if a is None or a.size == 0:
+            return None
+        np = self.np
+        if min(a.shape[:2]) > 2:
+            # 边缘一圈颜色一致(占 ≥50%)时它就是窗口自己的边/遮罩(对话框四周的半透明遮罩), 照旧用边缘色
+            ring = np.concatenate([a[0], a[-1], a[:, 0], a[:, -1]])
+            rv, rc, ro, rk = self._mode(ring)
+            if rc[ro[0]] >= 0.5 * len(ring):
+                return self._hex(ring.reshape(-1, 3)[rk == rv[ro[0]]].mean(axis=0).round())
+        px = a[::2, ::2].reshape(-1, 3)
+        vals, counts, order, keys = self._mode(px)
+        return self._hex(px[keys == vals[order[0]]].mean(axis=0).round())
 
     def detail(self, x, y, w, h, bg_hex=None) -> float:
         """框内与背景色明显不同的像素占比(0~1): 判断一个没有文字/子节点的叶子框里是否画了东西。"""
@@ -755,13 +808,13 @@ def _ink_em(text: str) -> float:
     return asc + desc
 
 
-def _font_from_ink(ink: dict, box_size: int, text: str = "", tight: bool = True) -> int:
+def _font_from_ink(ink: dict, box_size: int, text: str = "", tight: bool = True, hi: float = 1.3) -> int:
     """墨迹反解字号; 紧框(框高 < 34)单行且框与墨迹一致时信框(控件框由字号决定, 更稳)。"""
     if ink["lines"] > 1 and ink["pitch"]:
         s_ink = ink["pitch"] / 1.3
     else:
         s_ink = ink["line_h"] / _ink_em(text)
-    if tight and ink["lines"] == 1 and s_ink * 0.8 <= box_size <= s_ink * 1.3:
+    if tight and ink["lines"] == 1 and s_ink * 0.8 <= box_size <= s_ink * hi:
         return box_size
     return int(max(9, min(48, round(s_ink))))
 
@@ -770,6 +823,10 @@ class _Builder:
     def __init__(self, sampler: "_Sampler" = None, platform: str = ""):
         self.sampler = sampler
         self.ratio = _BOX_FONT_RATIO.get(platform, 0.75)
+        # 横向笔画游程/字号 的加粗判定线: Windows 的 ClearType 子像素渲染在字形两侧各多出约半个像素的彩边
+        # 桌面控件的文本框比字形松(24 高的标签里是 12 号字), 框高与墨迹相差 15% 以上就信墨迹
+        self.tight_hi = 1.15 if platform in ("windows", "macos") else 1.3
+        self.bold_k = 0.24 if platform == "windows" else 0.175
         font = {"android": {"family": "Roboto", "fallback": "'Noto Sans SC','PingFang SC',system-ui,sans-serif"},
                 "macos": {"family": "-apple-system", "fallback": "'SF Pro Text','PingFang SC',system-ui,sans-serif"},
                 "windows": {"family": "Segoe UI", "fallback": "'Microsoft YaHei',system-ui,sans-serif"}}
@@ -807,14 +864,23 @@ class _Builder:
                 return self.build({"role": "", "uir_role": "box", "bounds": n["bounds"], "children": [inner],
                                    "_inner": True}, parent_bg, opaque)
         self.stats["nodes_in"] += 1
+        framed = False
         label = _label(n)
         box = {"w": round(w, 1), "h": round(h, 1)}
         content, intents, layout, text_ref = {}, [], {}, ""
         bg = None
         if self.sampler and role not in ("text", "image", "icon", "divider"):
-            bg = self.sampler.bg(x, y, w, h)
+            border = None
+            if n.get("_window"):
+                bg = self.sampler.dominant(x, y, w, h)
+            else:
+                bg, border = self.sampler.bg_border(x, y, w, h, thin_only=bool(kids))
+                framed = bg is not None and bg != self.sampler.bg(x, y, w, h)
             if bg and (bg != parent_bg or opaque):
                 box["bg"] = bg
+            if border:
+                box["bg"] = bg
+                box["border"] = {"w": 1, "color": border}
         eff_bg = box.get("bg") or parent_bg
 
         if role in ("button", "link") and kids:
@@ -829,10 +895,13 @@ class _Builder:
             if role in ("button", "link") or n.get("clickable"):
                 intents = [{"on": "click", "do": "navigate"}]
             role = "image"
+        raw_short = re.sub(r"Control$", "", str(n.get("role") or "")).rsplit(".", 1)[-1]
+        toggle_like = n.get("checked") is not None or raw_short in _TOGGLE_RAW
         if self.sampler and not kids and (
-                (role == "input" and not n.get("editable")) or (n.get("checked") is not None and role == "button")):
+                (role == "input" and not n.get("editable")) or (toggle_like and role == "button")
+                or (role == "badge" and raw_short in _GAUGE_RAW)):
             # 滑块/进度/开关/复选框是图形控件: 有截图时按图裁剪重建外观, 意图保留
-            intents = [{"on": "click", "do": "toggle"}] if n.get("checked") is not None else [{"on": "change", "do": "input"}]
+            intents = [{"on": "click", "do": "toggle"}] if toggle_like else [{"on": "change", "do": "input"}]
             role = "image"
         if (role in ("box", "list_item") and not kids and not text and n.get("_excl") and self.sampler
                 and self.sampler.budget > 0 and w >= 16 and h >= 16
@@ -850,11 +919,23 @@ class _Builder:
             box.pop("bg", None)
         ink = None
         if role in ("text", "button", "link", "badge") and self.sampler:
-            ink = self.sampler.ink(x, y, w, h, eff_bg)
+            # 带边框的控件(按钮的立体边、默认按钮的粗边与虚线焦点框)在框内缩一圈再量墨迹, 边框线不当字形
+            gi = min(5.0, h * 0.2, w * 0.2) if (framed and not kids and h >= 16) else 0.0
+            ink = self.sampler.ink(x + gi, y + gi, w - 2 * gi, h - 2 * gi, eff_bg)
             if not ink:
                 # 截图上该框内没有任何字形像素: 文字被遮挡/裁掉(折叠面板、屏外抽屉), 不渲染文字
                 text, role = "", "box"
                 intents = [{"on": "click", "do": "navigate"}] if n.get("clickable") else []
+            elif (role in ("button", "link") and not kids and ink["lines"] == 1 and len(text) >= 3
+                  and self.sampler.budget > 0):
+                # 可访问名没有画在屏幕上: 墨迹宽度远小于这段文字在任何可读字号下的宽度(窗口的最小化/关闭按钮、
+                # 工具栏图标按钮, 名字只给读屏用) → 是图标, 按图裁剪
+                cjk = sum(1 for ch in text if ord(ch) > 0x2E80)
+                units = cjk + (len(text) - cjk) * 0.55
+                s_ink = max(9.0, ink["line_h"] / _ink_em(text))
+                if (ink["right"] - ink["left"]) < 0.45 * units * s_ink:
+                    intents = [{"on": "click", "do": "navigate"}]
+                    role, ink = "image", None
         if role in ("text", "button", "link", "badge"):
             fg = self.sampler.fg(x, y, w, h, eff_bg) if self.sampler else None
             size = _font_size(text, w, h, self.ratio)
@@ -862,9 +943,9 @@ class _Builder:
             if ink:
                 symbolic = not re.search(r"[0-9A-Za-z\u2e80-\u9fff\uac00-\ud7af]", text)
                 if not symbolic:
-                    size = _font_from_ink(ink, size, text, tight=h < 34)
+                    size = _font_from_ink(ink, size, text, tight=h < 34, hi=self.tight_hi)
                 # 横向墨迹游程 / 字号: 常规体实测 0.13~0.17em, 中粗/粗体 ≥0.18em(含抗锯齿); 字号过小时被抗锯齿淹没, 不判
-                if size >= 12 and ink["stroke"] >= 0.175 * size and not symbolic:
+                if size >= 12 and ink["stroke"] >= self.bold_k * size and not symbolic:
                     weight = 600
                 line = 1.3 if ink["lines"] > 1 else 1.25
                 lh = size * line
@@ -885,7 +966,7 @@ class _Builder:
                 elif lgap > 4 and abs(lgap - rgap) <= max(3.0, 0.08 * w):
                     align, left = "center", 0.0
                 else:
-                    align, left = "", max(0.0, lgap - 0.5)
+                    align, left = ("left" if role == "button" else ""), max(0.0, lgap - 0.5)
                 top = max(0.0, top)
                 # 下内边距补齐到框高: 行框恰好占满内容区, 按钮等默认垂直居中的元素不再二次居中
                 bottom = max(0.0, h - top - lh * n_lines)
@@ -907,7 +988,7 @@ class _Builder:
                 intents = [{"on": "click", "do": "navigate"}]
             if (ink and ink["lines"] == 1) or (not ink and h < size * 1.9):
                 box["overflow"] = "hidden"
-                if align != "center":
+                if align != "center":   # 左对齐("" 或按钮的显式 "left")
                     # 回落字体比原平台字体宽时不截断: 单行文本框右侧放宽 15%, 由负右外边距抵消, 不推挤兄弟节点
                     extra = round(min(w * 0.15 + 4, 80), 1)
                     box["w"] = round(w + extra, 1)
@@ -917,8 +998,11 @@ class _Builder:
             content = {"placeholder": (n.get("desc") or "") if not n.get("value") else "",
                        "text": n.get("value") or n.get("name") or "",
                        "type": "password" if n.get("password") else "text"}
-            text_ref = self.text_style(_font_size(content["text"] or content["placeholder"] or "字", w, min(h, 30),
-                                                  self.ratio), fg or "c1", 0)
+            isize = _font_size(content["text"] or content["placeholder"] or "字", w, min(h, 30), self.ratio)
+            iink = self.sampler.ink(x, y, w, h, eff_bg) if (self.sampler and content["text"]) else None
+            if iink and iink["lines"] == 1:
+                isize = _font_from_ink(iink, isize, content["text"], tight=False)
+            text_ref = self.text_style(isize, fg or "c1", 0)
             intents = [{"on": "input", "do": "input"}]
             box["pad"] = [0, 8, 0, 8]
         elif role == "image":
@@ -1034,8 +1118,14 @@ def tree_to_uir(tree: dict, screenshot=None, embed_images: bool = True) -> UIR:
         _mark_graphic_leaves(prep["root"])
     b = _Builder(sampler, prep["platform"])
     wx, wy, ww, wh = prep["window"]
-    root_bg = sampler.bg(wx, wy, ww, wh) if sampler else "c0"
+    root_bg = sampler.dominant(wx, wy, ww, wh) if sampler else "c0"
     rootn = prep["root"]
+    cur = rootn
+    while cur is not None:                       # 与窗口同框的最外层包装都按整块面积取底色
+        if not _same_box(cur["bounds"], rootn["bounds"]):
+            break
+        cur["_window"] = True
+        cur = cur["children"][0] if len(cur["children"]) == 1 else None
     node = b.build(rootn, root_bg or "c0")
     node.box.pop("_slack", None)
     for nd in node.walk():                      # 无同级可参照的符号文本保留墨迹估计
