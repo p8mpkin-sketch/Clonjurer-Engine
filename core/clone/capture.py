@@ -707,6 +707,18 @@ class CaptureMixin:
             budget_s = min(24.0, max(8.0, float(getattr(self, "_nav_ready_s", 0) or 0) * 1.5))
         loads, t0 = {}, time.monotonic()
         kept = []
+        if getattr(config, "NARROW_PARALLEL_WAITS", False):
+            # 各窄屏首载页(平板/手机/桌面 UA 同宽/0.92 倍宽对照)的「静置 300ms」原本逐页串行等, 忙页各等满 1.5s;
+            # 先等全部页 load(浏览器里本就并行加载), 再同时在各页里起静置, 后面逐页读路径时只等各自的结果
+            allp = [p for _t, p in (getattr(self, "_cv_pages", []) or [])]
+            if getattr(self, "_cv_mdesk", None) is not None:
+                allp.append(self._cv_mdesk)
+            allp += [pp for pp, _w in (getattr(self, "_cv_pair", {}) or {}).values()]
+            for pp in allp:
+                with suppress(Exception):
+                    left = max(0.5, budget_s - (time.monotonic() - t0))
+                    pp.wait_for_load_state("load", timeout=int(left * 1000))
+                    CaptureMixin._kick_quiet(pp)
         for tag, p2 in getattr(self, "_cv_pages", []) or []:
             try:
                 left = max(0.5, budget_s - (time.monotonic() - t0))
@@ -733,7 +745,7 @@ class CaptureMixin:
                             p2.close()
                         continue
                 kept.append((tag, p2))
-                p2.evaluate(CV_QUIET_JS, 300)
+                CaptureMixin._await_quiet(p2)
                 loads[tag] = p2.evaluate(CV_PATHS_JS) or {}
                 if self.cfg.get("viewport_variants", True):
                     CaptureMixin._start_settle_narrow(p2)
@@ -749,7 +761,7 @@ class CaptureMixin:
             try:
                 left = max(0.5, budget_s - (time.monotonic() - t0))
                 p4.wait_for_load_state("load", timeout=int(left * 1000))
-                p4.evaluate(CV_QUIET_JS, 300)
+                CaptureMixin._await_quiet(p4)
                 loads["__mdesk"] = p4.evaluate(CV_PATHS_JS) or {}
             except Exception as exc:   # noqa: BLE001
                 self.log("WARN", f"桌面 UA 窄屏对照页未加载完, 不分 UA({type(exc).__name__})")
@@ -761,7 +773,7 @@ class CaptureMixin:
             try:
                 left = max(0.5, budget_s - (time.monotonic() - t0))
                 p3.wait_for_load_state("load", timeout=int(left * 1000))
-                p3.evaluate(CV_QUIET_JS, 300)
+                CaptureMixin._await_quiet(p3)
                 # 对照页的内联样式按路径交给 CV_EMIT_JS: 手机段 px 与之同比(值比≈宽比)的写 vw
                 if tag in loads:
                     loads.setdefault("__pair", {})[tag] = {"w": w3, "paths": p3.evaluate(CV_PATHS_JS) or {}}
@@ -785,6 +797,37 @@ class CaptureMixin:
             self.log("RENDER", f"窄屏首载页收回: 主两页 {t_main:.1f}s / 合计 {time.monotonic() - t0:.1f}s(预算 {budget_s:.0f}s)")
         return loads
 
+
+    @staticmethod
+    def _kick_settle_tail(p2):
+        """页内起「等平滑滚动结束 → 400ms → 回顶 → 静置 300ms → 稳定(2.5s 封顶)」链(window.__cvTail, 结果为稳定 1/0)。"""
+        with suppress(Exception):
+            p2.evaluate("""([quiet, stab]) => {
+                const Q = (0, eval)(quiet), S = (0, eval)(stab);
+                window.__cvTail = (async () => {
+                  try { if (window.__cvSettle) await window.__cvSettle; } catch (e) {}
+                  await new Promise(r => setTimeout(r, 400));
+                  window.scrollTo({top: 0, left: 0, behavior: 'instant'});
+                  try { await Q(300); } catch (e) {}
+                  try { return await S(2500); } catch (e) { return 1; }
+                })();
+                return 1; }""", [CV_QUIET_JS, NARROW_STABLE_JS])
+
+    @staticmethod
+    def _kick_quiet(p2):
+        """在页里起一次静置等待(CV_QUIET 300ms), 不阻塞; 之后 _await_quiet 取结果。"""
+        with suppress(Exception):
+            p2.evaluate("([src]) => { window.__cvQ = (0, eval)(src)(300).catch(() => 0); return 1; }", [CV_QUIET_JS])
+
+    @staticmethod
+    def _await_quiet(p2):
+        """等先前起的静置结束; 没起过(或已取过)就当场等一次, 与原逐页 CV_QUIET 同口径。"""
+        try:
+            done = p2.evaluate("async () => { const q = window.__cvQ; window.__cvQ = null; if (!q) return 0; await q; return 1; }")
+        except Exception:   # noqa: BLE001
+            done = 0
+        if not done:
+            p2.evaluate(CV_QUIET_JS, 300)
 
     def _mhtml_retry(self, page, cdp):
         """MHTML 快照首次超时: 探测卡住的 frame(document.readyState 1s 内不返回)写进日志,
@@ -872,6 +915,30 @@ class CaptureMixin:
         滚动已由 _start_settle_narrow 提前发起时这里只等它结束。"""
         budget = max(1.0, float(getattr(config, "VIEWPORT_VARIANT_SETTLE", 4.0)))
         st = [time.monotonic()]
+        tail = None
+        with suppress(Exception):
+            tail = p2.evaluate("async () => { const t = window.__cvTail; window.__cvTail = null; if (!t) return null; return await t; }")
+        if tail is not None:
+            st += [time.monotonic(), time.monotonic()]
+            t_idle = time.monotonic()
+            with suppress(Exception):
+                p2.wait_for_load_state("networkidle", timeout=3000)
+            st.append(time.monotonic())
+            stable, counts = int(tail or 0), {}
+            if time.monotonic() - t_idle > 0.3:
+                # 网络真忙了一阵: 稳定判定要在静下来之后重测(原顺序是先网络静置再稳定)
+                with suppress(Exception):
+                    stable = p2.evaluate(NARROW_STABLE_JS, 2500)
+            st.append(time.monotonic())
+            with suppress(Exception):
+                counts = p2.evaluate(DOM_COUNTS_JS) or {}
+            with suppress(Exception):
+                p2.evaluate(ANIM_PHASE_JS)
+            st.append(time.monotonic())
+            counts = dict(counts or {})
+            counts["_steps"] = "并行链 " + " / ".join(f"{k} {b - a:.1f}s" for k, a, b in zip(
+                ("链", "-", "网络静置", "稳定", "计数相位"), st, st[1:]))
+            return bool(stable), counts
         with suppress(Exception):
             started = p2.evaluate("() => !!window.__cvSettle")
             if started:
@@ -938,10 +1005,17 @@ class CaptureMixin:
                 p2.set_viewport_size({"width": w, "height": h})
                 p2.wait_for_timeout(250)
                 _t, ft["改宽"] = time.monotonic(), ft["改宽"] + time.monotonic() - _t
-                with suppress(Exception):
-                    p2.evaluate(CV_QUIET_JS, 300)
-                _t, ft["静置"] = time.monotonic(), ft["静置"] + time.monotonic() - _t
-                if not unstable:
+                if not unstable and getattr(config, "NARROW_PARALLEL_WAITS", False):
+                    # 静置(无样式/class/结构变动 300ms)与稳定(文字/图/控件计数连续不变)同时等, 取两者都到
+                    with suppress(Exception):
+                        p2.evaluate("([q, s]) => Promise.all([(0, eval)(q)(300), (0, eval)(s)(1500)])",
+                                    [CV_QUIET_JS, NARROW_STABLE_JS])
+                    _t, ft["静置"] = time.monotonic(), ft["静置"] + time.monotonic() - _t
+                else:
+                    with suppress(Exception):
+                        p2.evaluate(CV_QUIET_JS, 300)
+                    _t, ft["静置"] = time.monotonic(), ft["静置"] + time.monotonic() - _t
+                if not unstable and not getattr(config, "NARROW_PARALLEL_WAITS", False):
                     with suppress(Exception):
                         p2.evaluate(NARROW_STABLE_JS, 1500)
                 _t, ft["稳定"] = time.monotonic(), ft["稳定"] + time.monotonic() - _t
@@ -1052,6 +1126,11 @@ class CaptureMixin:
             return 0
         main = page.evaluate(CV_PATHS_JS) or {}
         pages = dict(getattr(self, "_cv_pages", []) or [])
+        if getattr(config, "NARROW_PARALLEL_WAITS", False):
+            # 各页「滚完 → 400ms → 回顶 → 静置 → 稳定」原本逐页阻塞等(平板等完才轮到手机), 改为先在每张页里同时起这条链,
+            # 逐页处理时只取结果; 网络静置仍逐页等(之后若真等了才重测稳定)
+            for p2 in pages.values():
+                CaptureMixin._kick_settle_tail(p2)
         variants = {}                      # path -> {tag: html}
         hidden_all = set()
         style_pre = {}                     # tag -> STYLE_TEXTS_JS 结果(窄屏页提前关闭前取)

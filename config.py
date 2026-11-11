@@ -268,6 +268,8 @@ SHORT_PAGE_NO_SCROLL_WAIT = SPEED8 and os.environ.get("CLONER_SHORT_PAGE_NO_SCRO
 # 少并发让单站变快却拖慢整批吞吐; 单用户一次只克隆一个站时并发数不起作用。适合"交互式要单站快"的场景手动开。
 # 交付首屏: srcset 候选全落到同一本地文件(按宽出图 CDN 去查询串后同名)时去掉 srcset, 用 src
 DEPLOY_SRCSET_DEDUP = SPEED8 and os.environ.get("CLONER_DEPLOY_SRCSET_DEDUP", "1") != "0"
+# 窄屏首载页的静置/到位/随宽等待改为各页同时起、逐页取结果(原逐页串行等满)
+NARROW_PARALLEL_WAITS = SPEED8 and os.environ.get("CLONER_NARROW_PARALLEL_WAITS", "1") != "0"
 # 评分整页截图用 JPEG q92 编码(整页 PNG 编码是截图耗时大头, 约 5 倍); 所有评分截图同口径
 SHOT_JPEG = SPEED8 and os.environ.get("CLONER_SHOT_JPEG", "1") != "0"
 SHOT_JPEG_QUALITY = int(os.environ.get("CLONER_SHOT_JPEG_QUALITY", "92"))
