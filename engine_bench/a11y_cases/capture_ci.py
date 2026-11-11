@@ -164,8 +164,8 @@ def macos():
     print(f"辅助功能授权: {bool(AS.AXIsProcessTrusted())}")
     apps = [
         ("tune", "mac_form_prefs", [sys.executable, str(HERE / "apps" / "mac" / "form_prefs.py")], None),
-        ("holdout", "mac_platypus", ["open", "-a", "Platypus"], "Platypus"),
-        ("holdout", "mac_coteditor", ["open", "-a", "CotEditor"], "CotEditor"),
+        ("holdout", "mac_sqlitebrowser", ["open", "/Applications/DB Browser for SQLite.app"], "DB Browser for SQLite"),
+        ("holdout", "mac_coteditor", ["open", "/Applications/CotEditor.app"], "CotEditor"),
     ]
     ok = 0
     tmp = HERE / "runs" / "capture_tmp"

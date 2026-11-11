@@ -102,9 +102,10 @@ jobs:
       - name: 依赖与开源样本应用
         run: |
           python -m pip install pillow numpy requests pyobjc-framework-Cocoa pyobjc-framework-ApplicationServices
-          brew install --cask platypus 2>&1 | tail -5 || true
+          brew install --cask db-browser-for-sqlite 2>&1 | tail -5 || true
           brew install --cask coteditor 2>&1 | tail -5 || true
-          sudo xattr -dr com.apple.quarantine /Applications/Platypus.app /Applications/CotEditor.app || true
+          sudo xattr -dr com.apple.quarantine "/Applications/DB Browser for SQLite.app" || true
+          sudo xattr -dr com.apple.quarantine /Applications/CotEditor.app || true
           ls /Applications | tr '\n' ' '
       - name: 采集
         run: python engine_bench/a11y_cases/capture_ci.py macos
