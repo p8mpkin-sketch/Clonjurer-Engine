@@ -77,7 +77,10 @@ API_REQ_SIG = True
 REPLAY_SEED_RANDOM = True
 REPLAY_SEED = 20261111
 NARROW_PAIR_TAGS = ("m", "t")   # 哪些窄屏段再开一张 0.92 倍宽的独立首载对照页(确认"内容更少"是该宽度本来如此, 而非没加载完)
-TIMER_JOURNAL = True   # 采集期长定时器改过的周期性状态(轮播帧等)序列化前退回初始值
+# 采集期长定时器改过的周期性状态(轮播帧等)序列化前退回初始值。默认关: 合成用例 drift_rotator 51→100, 但真实站实测
+# (国内语料 mi 首页, 探针 100/100/69.5 → 65.5/54.4/54.7)退回第 1 帧后与探针等待期间已自转一帧的原站错开 ——
+# 在探针对轮播区有相位无关的口径之前不能默认开。CLONER_CFG_TIMER_JOURNAL=1 可开来做 A/B
+TIMER_JOURNAL = False
 API_VARIANTS_PER_PATH = 48              # 同一 方法+路径 最多保留多少份不同请求体的录制
 PROXY_CACHE_MAX_BYTES = 8 * 1024 * 1024   # 反向代理兜底单响应缓存上限(8MB)
 # 交付产物反代兜底超时(秒): 部署机离原站远/原站慢时, 旧值 20s 会把阻塞请求拖成

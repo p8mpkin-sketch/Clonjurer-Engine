@@ -2968,7 +2968,7 @@ TIMER_JOURNAL_JS = r"""(() => {
 })();"""
 
 # 把日志里有周期性证据的改动退回"第一次被定时器改之前"的值, 并停掉仍在跑的长定时器(页面即将截图/序列化)。
-TIMER_JOURNAL_REWIND_JS = r"""() => {
+TIMER_JOURNAL_REWIND_JS = r"""(noStyle) => {
   const J = window.__tj;
   const out = {els: 0, cls: 0, sty: 0, fires: J ? J.fires : -1, dbg: []};
   if (!J) return out;
@@ -2984,7 +2984,8 @@ TIMER_JOURNAL_REWIND_JS = r"""() => {
       out.cls++; hit = true;
       if (out.dbg.length < 4) out.dbg.push(el.tagName.toLowerCase() + (x.init ? '+' : '-') + '.' + t);
     }
-    for (const [p, x] of e.s) {
+    // 样式只在多视口改写之前退(noStyle: 之后引擎已把内联 px 改写成百分比/分视口规则, 再退回会写回采集宽的 px)
+    for (const [p, x] of (noStyle ? [] : e.s)) {
       if (!(x.n >= 2)) continue;
       const cur = el.style.getPropertyValue(p), pr = el.style.getPropertyPriority(p);
       const want = x.init ? x.init[0] : '', wp = x.init ? x.init[1] : '';

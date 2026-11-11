@@ -831,6 +831,11 @@ class _Builder:
                 intents = [{"on": "click", "do": "navigate"}]
             role = "image"
             box.pop("bg", None)
+        elif (role in ("box", "list_item") and not kids and not text and not n.get("_excl") and self.sampler
+                and box.get("bg") and w >= 16 and h >= 16 and self.sampler.detail(x, y, w, h, box["bg"]) >= 0.01):
+            # 与别的叶子重叠的空叶子(拖放目标/触摸层/占位层), 截图上这块区域里能看到别的内容 → 它是透明的,
+            # 不上底色(否则按树序叠在上面, 把下面的标签页图标/按钮盖成一块纯色)
+            box.pop("bg", None)
         ink = None
         if role in ("text", "button", "link", "badge") and self.sampler:
             ink = self.sampler.ink(x, y, w, h, eff_bg)
@@ -1013,7 +1018,7 @@ def tree_to_uir(tree: dict, screenshot=None, embed_images: bool = True) -> UIR:
             sampler = _Sampler(shot, px, origin=origin, embed_budget=4_000_000 if embed_images else 0)
         except Exception:
             sampler = None
-    if sampler is not None and sampler.budget > 0:
+    if sampler is not None:
         _mark_graphic_leaves(prep["root"])
     b = _Builder(sampler, prep["platform"])
     wx, wy, ww, wh = prep["window"]

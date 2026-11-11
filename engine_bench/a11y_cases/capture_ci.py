@@ -21,6 +21,10 @@ from core.uir.adapters import a11y  # noqa: E402
 
 def _save(group: str, name: str, tree: dict, png_bytes: bytes = None, image=None):
     d = HERE / group / name
+    if (d / "tree.json").exists() and "--refresh" not in sys.argv:
+        # 已入库的样本不覆盖: 留出样本一旦采下就冻结(重采会换一帧截图, 分数跟着漂)
+        print(f"已有 {group}/{name}, 不覆盖(加 --refresh 才重采)")
+        return
     d.mkdir(parents=True, exist_ok=True)
     tree.pop("screenshot", None)
     (d / "tree.json").write_text(json.dumps(tree, ensure_ascii=False), encoding="utf-8")
@@ -138,4 +142,3 @@ if __name__ == "__main__":
     which = sys.argv[1] if len(sys.argv) > 1 else ""
     n = {"windows": windows, "android": android}[which]()
     print(f"共采集 {n} 例")
-    sys.exit(0 if n else 1)
