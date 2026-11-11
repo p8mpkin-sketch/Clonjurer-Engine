@@ -681,7 +681,7 @@ CASES = {
 # 这些类别原页每次加载都不同(随机/时钟), 活体探针没有意义: 门槛看引擎交互轨分(克隆对采集时冻结的基准)
 ENGINE_GATED = {"drift"}
 # 这些类别探针照常算, 另加一格引擎交互轨分: 交互轨塌了时引擎会改交付静态版, 探针看不出来(sohu 类: 头条 99 / 交互 66)
-INTERACTIVE_ALSO = {"api"}
+INTERACTIVE_ALSO = {"api", "state"}
 # 已知缺口: 用例保留、照常出分, 但不计入 --gate 门槛(修好后从这里删掉)
 KNOWN_GAPS = {
     "measured_canvas": "iPad 820 宽 ~94: canvas 固化成位图后按宽缩放, 图里按固定 px 画的边距/间隙不会像原站那样重画",

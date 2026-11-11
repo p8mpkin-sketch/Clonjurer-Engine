@@ -2868,3 +2868,132 @@ def seed_random_hash(text: str) -> int:
 def seed_random_js(seed: int, src_map=None) -> str:
     return (SEED_RANDOM_JS.replace("__SEED__", str(int(seed) & 0xFFFFFFFF))
             .replace("__MAP__", "null" if src_map is None else json.dumps(src_map, separators=(",", ":"))))
+
+
+# 定时器改动日志(采集侧, 导航前注入): 长周期定时器(≥1s 的 setInterval / setTimeout)回调里对 class/style 的改动记下
+# "第一次被改之前的值"。自动轮播/轮换横幅/进度条这类周期性状态在采集的十几秒里已经转过几格, 冻进 DOM 的是"第 k 帧";
+# 新开的原站从初始帧起播, 克隆里站点脚本又从自己的初始帧起播(与冻进去的第 k 帧叠成两帧同时显示)。
+# 回退(TIMER_JOURNAL_REWIND_JS)只动有周期性证据的改动: 同一元素同一 class 词/样式属性在 ≥2 次回调里被改,
+# 或同一次回调里某个 class 词从一个元素摘下、戴到同父同标签的另一个元素上(当前项迁移)。只改一次的(轮询到条件后
+# 一次性揭示内容)不动。
+TIMER_JOURNAL_JS = r"""(() => {
+  if (window.__tj) return;
+  const J = window.__tj = {els: new Map(), frozen: 0, fires: 0};
+  const MIN = 1000, MAX_ELS = 3000;
+  let mo = null;
+  const ensure = () => {
+    if (mo) return true;
+    if (!document.documentElement) return false;
+    try {
+      mo = new MutationObserver(() => {});
+      mo.observe(document.documentElement, {attributes: true, attributeFilter: ['class', 'style'], attributeOldValue: true, subtree: true});
+    } catch (e) { mo = null; }
+    return !!mo;
+  };
+  const toks = s => (s || '').split(/\s+/).filter(Boolean);
+  let dummy = null;
+  const parse = css => {
+    const o = {};
+    if (!css) return o;
+    dummy = dummy || document.createElement('div');
+    dummy.style.cssText = css;
+    for (let i = 0; i < dummy.style.length; i++) {
+      const p = dummy.style[i];
+      o[p] = [dummy.style.getPropertyValue(p), dummy.style.getPropertyPriority(p)];
+    }
+    return o;
+  };
+  const note = recs => {
+    if (!recs || !recs.length) return;
+    const first = new Map();
+    for (const r of recs) {
+      const el = r.target;
+      if (!el || el.nodeType !== 1) continue;
+      let m = first.get(el);
+      if (!m) first.set(el, m = {});
+      if (!(r.attributeName in m)) m[r.attributeName] = r.oldValue;
+    }
+    const add = new Map(), del = new Map();
+    for (const [el, m] of first) {
+      let e = J.els.get(el);
+      if (!e) { if (J.els.size >= MAX_ELS) continue; J.els.set(el, e = {c: new Map(), s: new Map()}); }
+      if ('class' in m) {
+        const a = toks(m['class']), b = toks(el.getAttribute('class'));
+        const ch = (t, was) => {
+          let x = e.c.get(t);
+          if (!x) e.c.set(t, x = {init: was, n: 0, mig: 0});
+          x.n++;
+          const k = t + '|' + el.tagName;
+          const bag = was ? del : add;
+          if (!bag.has(k)) bag.set(k, []);
+          bag.get(k).push([el, x]);
+        };
+        a.forEach(t => { if (!b.includes(t)) ch(t, true); });
+        b.forEach(t => { if (!a.includes(t)) ch(t, false); });
+      }
+      if ('style' in m) {
+        const a = parse(m['style']), b = parse(el.getAttribute('style'));
+        const ks = new Set(Object.keys(a).concat(Object.keys(b)));
+        for (const p of ks) {
+          const va = a[p] ? a[p].join('!') : null, vb = b[p] ? b[p].join('!') : null;
+          if (va === vb) continue;
+          let x = e.s.get(p);
+          if (!x) e.s.set(p, x = {init: a[p] || null, n: 0});
+          x.n++;
+        }
+      }
+    }
+    for (const [k, as] of add) {
+      const ds = del.get(k);
+      if (!ds) continue;
+      for (const [ea, xa] of as) for (const [ed, xd] of ds) {
+        if (ea !== ed && ea.parentNode && ea.parentNode === ed.parentNode) { xa.mig = 1; xd.mig = 1; }
+      }
+    }
+  };
+  const wrap = (fn, ms) => {
+    if (typeof fn !== 'function' || !(ms >= MIN)) return fn;
+    return function () {
+      if (J.frozen) return undefined;
+      const ok = ensure();
+      if (ok) { try { mo.takeRecords(); } catch (e) {} }
+      try { return fn.apply(this, arguments); }
+      finally { if (ok) { J.fires++; try { note(mo.takeRecords()); } catch (e) {} } }
+    };
+  };
+  const si = window.setInterval, st = window.setTimeout;
+  window.setInterval = function (fn, ms) { const a = Array.prototype.slice.call(arguments); a[0] = wrap(fn, +ms); return si.apply(window, a); };
+  window.setTimeout = function (fn, ms) { const a = Array.prototype.slice.call(arguments); a[0] = wrap(fn, +ms); return st.apply(window, a); };
+  try { window.setInterval.toString = () => si.toString(); window.setTimeout.toString = () => st.toString(); } catch (e) {}
+})();"""
+
+# 把日志里有周期性证据的改动退回"第一次被定时器改之前"的值, 并停掉仍在跑的长定时器(页面即将截图/序列化)。
+TIMER_JOURNAL_REWIND_JS = r"""() => {
+  const J = window.__tj;
+  const out = {els: 0, cls: 0, sty: 0, fires: J ? J.fires : -1, dbg: []};
+  if (!J) return out;
+  J.frozen = 1;
+  for (const [el, e] of J.els) {
+    if (!el.isConnected) continue;
+    let hit = false;
+    for (const [t, x] of e.c) {
+      if (!(x.n >= 2 || x.mig)) continue;
+      const has = el.classList.contains(t);
+      if (has === x.init) continue;
+      if (x.init) el.classList.add(t); else el.classList.remove(t);
+      out.cls++; hit = true;
+      if (out.dbg.length < 4) out.dbg.push(el.tagName.toLowerCase() + (x.init ? '+' : '-') + '.' + t);
+    }
+    for (const [p, x] of e.s) {
+      if (!(x.n >= 2)) continue;
+      const cur = el.style.getPropertyValue(p), pr = el.style.getPropertyPriority(p);
+      const want = x.init ? x.init[0] : '', wp = x.init ? x.init[1] : '';
+      if (cur === want && pr === wp) continue;
+      if (x.init) el.style.setProperty(p, want, wp); else el.style.removeProperty(p);
+      out.sty++; hit = true;
+      if (out.dbg.length < 4) out.dbg.push(el.tagName.toLowerCase() + ' ' + p + ':' + cur.slice(0, 24) + '>' + want.slice(0, 24));
+    }
+    if (hit) out.els++;
+  }
+  return out;
+}"""

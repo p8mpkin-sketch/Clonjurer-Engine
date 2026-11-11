@@ -44,6 +44,8 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     ROUNDTRIP_PIN_JS,
     SCROLL_LOCK_STRIP_JS,
     STATE_PHASE_RESET_JS,
+    TIMER_JOURNAL_JS,
+    TIMER_JOURNAL_REWIND_JS,
     TRANSITION_FINISH_JS,
     VISIBLE_PATHS_JS,
     DEPLOY_DEFER_IMG_JS,
@@ -1186,6 +1188,7 @@ class CaptureMixin:
             # 窄屏首载页同样做状态类相位复位: 它滚到底再回顶后, 进视口才展开/自动轮换的同类组件(折叠卡、高亮卡)已不在
             # 源码 HTML 的首载分配上, 变体把那一刻的状态烘进交付页(主页做过复位, 变体没做: 手机端多展开一张卡, 其下整页错位)。
             # 源码用该页自己上下文再取一次(手机 UA 下发的 HTML 可能不同), 取不到退回主页源码
+            CaptureMixin._timer_rewind(self, pages[tag], f"窄屏首载页 {tag}")
             if getattr(config, "NARROW_PHASE_RESET", True):
                 with suppress(Exception):
                     src2 = None
@@ -1540,6 +1543,7 @@ class CaptureMixin:
                                        f"清空定时器 {frz.get('timers', 0)} 个")
             # 基准也按源码相位: 定时器已清, 把轮换过的同类组件(轮播/折叠卡)先复位成源码 HTML 的分配再截。否则基准是
             # 「采集那一刻转到的第 k 项」、克隆是复位后的第一项, 布局校准会按基准把收起的那项撑回展开时的高度(一块空白)
+            self._timer_rewind(page, "基准截图前")
             if getattr(config, "BASELINE_PHASE_RESET", True):
                 with suppress(Exception):
                     src_cls, src_grp = self._phase_src(getattr(self, "_src_html", None))
@@ -1599,7 +1603,20 @@ class CaptureMixin:
         if getattr(config, "REPLAY_SEED_RANDOM", True):
             with suppress(Exception):
                 page.add_init_script(seed_random_js(getattr(config, "REPLAY_SEED", 0)))
+        if getattr(config, "TIMER_JOURNAL", True):
+            with suppress(Exception):
+                page.add_init_script(TIMER_JOURNAL_JS)
         return page
+
+    def _timer_rewind(self, page, where: str):
+        """长定时器改过的周期性状态(轮播帧/轮换横幅/进度条)退回初始值, 见 js.TIMER_JOURNAL_JS。"""
+        if not getattr(config, "TIMER_JOURNAL", True):
+            return
+        with suppress(Exception):
+            tj = page.evaluate(TIMER_JOURNAL_REWIND_JS) or {}
+            if tj.get("els"):
+                self.log("RENDER", f"定时器改动回退({where}): {tj.get('els')} 个元素(class 词 {tj.get('cls', 0)} / 样式属性 {tj.get('sty', 0)})"
+                                   f"退回首次被定时器改动前的值, 定时器共触发 {tj.get('fires')} 次 {tj.get('dbg') or ''}"[:500])
 
     def _render_page(self, ctx, url: str, screenshot: bool, collect_links: bool, is_frame: bool = False):
         page = self._seed_page(ctx.new_page())
@@ -1744,6 +1761,7 @@ class CaptureMixin:
                 self.log("RENDER", f"冻结前等样式表: {ws_.get('ms')}ms, 直取补副本 {ws_.get('fetched', 0)} 张,"
                                    f" 仍未到 {ws_.get('pending', 0)} 张")
         counts = _safe_eval(DEEP_FREEZE_JS)
+        self._timer_rewind(page, "冻结后")
         with suppress(Exception):
             src_cls, src_grp = self._phase_src(getattr(self, "_src_html", None))
             if not src_cls and not src_grp:
@@ -1859,6 +1877,7 @@ class CaptureMixin:
             self.log("WARN", f"多视口内联样式/窄屏变体整步失败: {type(exc).__name__}: {str(exc)[:200]}")
         # 序列化前再做一次状态类相位复位: 第一次复位之后页面仍活着(多视口样式/变体注入期间组件框架重渲染会按自己的
         # 状态把 class 写回去, 或进视口观察器又展开一张), 复位过的展开态回到交付 HTML 里(wix 手机多展开一张卡, 整页错位)
+        self._timer_rewind(page, "序列化前复查")
         if getattr(config, "LATE_PHASE_RESET", True):
             with suppress(Exception):
                 src_cls, src_grp = self._phase_src(getattr(self, "_src_html", None))
