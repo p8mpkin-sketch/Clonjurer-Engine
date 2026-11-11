@@ -91,6 +91,8 @@ _UIA_ROLE = {
     "Calendar": "box", "SemanticZoom": "box",
 }
 # 勾选/单选/开关类控件的原生角色名: 采集后端没给出勾选状态时也按图形控件处理(方框/圆点是画出来的, 不是文字)
+# 弹出式选择按钮: 圆角槽 + 右侧箭头块都是画出来的控件外观, 与复选框/滑块同属图形控件
+_POPUP_RAW = {"AXPopUpButton"}
 _TOGGLE_RAW = {"CheckBox", "RadioButton", "Switch", "SwitchCompat", "ToggleButton", "AXCheckBox", "AXRadioButton", "AXSwitch"}
 # 进度条/评分条/电量条: 画出来的量表, 可访问名(如"Progress")并不显示在屏幕上
 _GAUGE_RAW = {"ProgressBar", "RatingBar", "AXProgressIndicator", "AXLevelIndicator", "AXBusyIndicator"}
@@ -532,7 +534,8 @@ class _Sampler:
         dist = np.abs(px - bgc).sum(axis=1)
         if dist.max() < 60:
             return None
-        far = px[dist >= max(60, int(dist.max() * 0.7))]
+        # 低分屏上平滑过的细笔画, 大半像素是字色与底色的混合: 只取最接近笔画核心的那部分, 否则深色字被平均成灰色
+        far = px[dist >= max(60, int(dist.max() * (0.88 if self.core_stroke and self.s <= 1.25 else 0.7)))]
         return self._hex(far.mean(axis=0).round())
 
     def _bg_vec(self, bg_hex, px):
@@ -1014,12 +1017,14 @@ def _ink_em(text: str) -> float:
     return asc + desc
 
 
-def _font_from_ink(ink: dict, box_size: int, text: str = "", tight: bool = True, hi: float = 1.3) -> int:
+def _font_from_ink(ink: dict, box_size: int, text: str = "", tight: bool = True, hi: float = 1.3,
+                   fringe: float = 0.0) -> int:
     """墨迹反解字号; 紧框(框高 < 34)单行且框与墨迹一致时信框(控件框由字号决定, 更稳)。"""
     if ink["lines"] > 1 and ink["pitch"]:
         s_ink = ink["pitch"] / 1.3
     else:
-        s_ink = ink["line_h"] / _ink_em(text)
+        # fringe: 低分屏抗锯齿在字形上下各抹出的半像素边, 量到的墨迹高比字形高出这么多
+        s_ink = max(1.0, ink["line_h"] - fringe) / _ink_em(text)
     if tight and ink["lines"] == 1 and s_ink * 0.8 <= box_size <= s_ink * hi:
         return box_size
     return int(max(9, min(48, round(s_ink))))
@@ -1032,9 +1037,11 @@ class _Builder:
         # 横向笔画游程/字号 的加粗判定线: Windows 的 ClearType 彩边不计入笔画(_Sampler.core_stroke), 常规体约 0.10~0.12em
         # 桌面控件的文本框比字形松(24 高的标签里是 12 号字), 框高与墨迹相差 15% 以上就信墨迹
         self.tight_hi = 1.0 if platform == "windows" else (1.15 if platform == "macos" else 1.3)
-        self.bold_k = 0.17 if platform == "windows" else 0.175
+        # macOS 的字体平滑同样把笔画两侧抹出半透明边, 只数核心像素: 常规体约 0.13~0.15em, 中粗/粗体 ≥0.21em
+        self.bold_k = {"windows": 0.17, "macos": 0.19}.get(platform, 0.175)
         # Windows 的同级子窗口按 Z 序枚举(最上面的排最前), 与绘制顺序相反; 其余平台树序 ≈ 绘制顺序
         self.z_top_first = platform == "windows"
+        self.fringe = 0.8 if (platform in ("windows", "macos") and sampler and sampler.s <= 1.25) else 0.0
         font = {"android": {"family": "Roboto", "fallback": "'Noto Sans SC','PingFang SC',system-ui,sans-serif"},
                 "macos": {"family": "-apple-system", "fallback": "'SF Pro Text','PingFang SC',system-ui,sans-serif"},
                 "windows": {"family": "Segoe UI", "fallback": "Tahoma,Arial,'Microsoft YaHei',system-ui,sans-serif",
@@ -1116,6 +1123,7 @@ class _Builder:
         toggle_like = n.get("checked") is not None or raw_short in _TOGGLE_RAW
         if self.sampler and not kids and (
                 (role == "input" and not n.get("editable")) or (toggle_like and role == "button")
+                or (role == "button" and raw_short in _POPUP_RAW)
                 or (role == "badge" and raw_short in _GAUGE_RAW)):
             # 滑块/进度/开关/复选框是图形控件: 有截图时按图裁剪重建外观, 意图保留
             intents = [{"on": "click", "do": "toggle"}] if toggle_like else [{"on": "change", "do": "input"}]
@@ -1165,7 +1173,7 @@ class _Builder:
             if ink:
                 symbolic = not re.search(r"[0-9A-Za-z\u2e80-\u9fff\uac00-\ud7af]", text)
                 if not symbolic:
-                    size = _font_from_ink(ink, size, text, tight=h < 34, hi=self.tight_hi)
+                    size = _font_from_ink(ink, size, text, tight=h < 34, hi=self.tight_hi, fringe=self.fringe)
                 # 横向墨迹游程 / 字号: 常规体实测 0.13~0.17em, 中粗/粗体 ≥0.18em(含抗锯齿); 字号过小时被抗锯齿淹没, 不判
                 if size >= 12 and ink["stroke"] >= self.bold_k * size and not symbolic:
                     weight = 600
@@ -1234,7 +1242,7 @@ class _Builder:
             box["pad"] = [0, 8, 0, 8]
             iline = 0.0
             if iink and iink["lines"] == 1:
-                isize = _font_from_ink(iink, isize, content["text"], tight=False)
+                isize = _font_from_ink(iink, isize, content["text"], tight=False, fringe=self.fringe)
                 box["pad"] = [0, 4, 0, round(max(0.0, min(16.0, iink["left"] - x - 1.5)), 1)]
             elif iink and multi and iink["lines"] > 1 and iink["pitch"] > 0:
                 # 多行编辑区: 字号按行墨迹高、行距按行间距, 内边距照首行墨迹位置(文本从左上角起排, 不垂直居中)
@@ -1361,7 +1369,7 @@ def tree_to_uir(tree: dict, screenshot=None, embed_images: bool = True) -> UIR:
             sampler = None
     _add_window_title(prep["root"], prep["platform"])
     if sampler is not None:
-        sampler.core_stroke = prep["platform"] == "windows"
+        sampler.core_stroke = prep["platform"] in ("windows", "macos")
         _refine_leaves(prep["root"], sampler)
         _mark_graphic_leaves(prep["root"])
     b = _Builder(sampler, prep["platform"])
