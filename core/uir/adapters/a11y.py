@@ -548,6 +548,26 @@ class _Sampler:
                   if int(self.np.abs(a[cy, cx].astype(self.np.int32) - bc).sum()) <= 36)
         return hit >= 3
 
+    def top_band(self, x, y, w, h, body_hex):
+        """窗口顶部一条与正文底色不同的横带(标题栏/工具条)的高度(逻辑单位); 没有则 0。
+        逐行取中段的中位色: 从顶往下一直不是正文底色, 到某一行起变成正文底色并保持。"""
+        a = self._crop(x, y, w, h)
+        if a is None or a.shape[0] < 60 or a.shape[1] < 60 or not body_hex:
+            return 0.0
+        np = self.np
+        body = np.array([int(body_hex[i:i + 2], 16) for i in (1, 3, 5)])
+        lim = int(min(a.shape[0] / 3, 90 * self.s))
+        mid = a[:lim + 4, int(a.shape[1] * 0.2):int(a.shape[1] * 0.8)].astype(np.int32)
+        diff = np.abs(np.median(mid, axis=1) - body).sum(axis=1)
+        end = 0
+        for r in range(lim):
+            if diff[r] <= 3 and (diff[r:r + 4] <= 3).all():
+                end = r
+                break
+        if end < 12 * self.s or (diff[:end] >= 6).mean() < 0.9:
+            return 0.0
+        return end / self.s
+
     def _bg_vec(self, bg_hex, px):
         np = self.np
         if isinstance(bg_hex, str) and re.match(r"^#[0-9a-fA-F]{6}$", bg_hex):
@@ -771,6 +791,27 @@ class _Sampler:
             return None
         return self._hex(ring[far].mean(axis=0).round())
 
+    def frame_hairline(self, x, y, w, h):
+        """窗口最外一圈是一条与内侧底色只差一点的发丝线(系统画的高光/描边, 整圈同色): 返回 (线色, 内侧底色), 否则 None。
+        与 frame_line 互补: 那边认"明显不同但不均匀"的边线, 这里认"差别很小但整圈一致"的边线。"""
+        a = self._crop(x, y, w, h)
+        if a is None or min(a.shape[:2]) < 40:
+            return None
+        np = self.np
+
+        def exact_mode(px):
+            keys = px[:, 0].astype(np.int64) * 65536 + px[:, 1] * 256 + px[:, 2]
+            vals, counts = np.unique(keys, return_counts=True)
+            i = int(np.argmax(counts))
+            return int(vals[i]), counts[i] / len(keys)
+        ring = np.concatenate([a[0], a[-1], a[:, 0], a[:, -1]]).astype(np.int64)
+        inner = np.concatenate([a[-3], a[:, 2], a[:, -3]]).astype(np.int64)
+        (rk, rs), (ik, isr) = exact_mode(ring), exact_mode(inner)
+        if rk == ik or rs < 0.6 or isr < 0.8:
+            return None
+        hx = lambda k: "#%02x%02x%02x" % (k >> 16, (k >> 8) & 255, k & 255)   # noqa: E731
+        return hx(rk), hx(ik)
+
     def dominant(self, x, y, w, h):
         """框内整块面积的众数色。顶层窗口用它定底色: 窗口矩形常含不可见的缩放边/阴影(边缘一圈是桌面像素),
         按"边缘一圈"取色会把桌面色当成窗口背景。"""
@@ -970,6 +1011,26 @@ def _refine_leaves(root: dict, sampler: "_Sampler") -> None:
     walk(root)
 
 
+def _add_title_band(root: dict, sampler: "_Sampler", platform: str) -> None:
+    """窗口顶部的标题栏在树里没有对应容器(只有散落的窗口按钮与标题文字)、截图上却是一条异色横带时, 补一个
+    容器节点把落在横带里的子节点收进去 —— 横带的底色与分隔线才有节点承载。"""
+    kids = root.get("children") or []
+    if platform not in ("windows", "macos") or sampler is None or len(kids) < 2:
+        return
+    if any(re.sub(r"Control$", "", str(k.get("role") or "")) == "TitleBar" for k in kids):
+        return
+    x, y, w, h = root["bounds"]
+    band = sampler.top_band(x, y, w, h, sampler.dominant(x, y, w, h))
+    if not band:
+        return
+    inside = [k for k in kids if k["bounds"][1] + k["bounds"][3] <= y + band + _TOL]
+    if not inside or any(k["bounds"][1] < y + band - _TOL for k in kids if k not in inside):
+        return                      # 有子节点跨在横带边界上: 不是独立的标题栏
+    bar = {"role": "", "uir_role": "box", "name": "", "value": "", "desc": "", "id": "",
+           "bounds": [x, y, w, round(band, 2)], "children": inside}
+    root["children"] = [bar] + [k for k in kids if k not in inside]
+
+
 def _add_window_title(root: dict, platform: str) -> None:
     """窗口标题: 桌面平台的标题文字只在窗口节点的名字里, 标题栏子树里没有对应的文本节点 —— 在标题栏空着的
     那一段(左侧系统菜单与右侧窗口按钮之间)补一个文本叶子。截图上那里没有字时, 建树阶段会按"无墨迹"丢掉。"""
@@ -1115,6 +1176,9 @@ class _Builder:
                 bg = self.sampler.dominant(x, y, w, h)
                 if n.get("_frame") and bg:
                     border = self.sampler.frame_line(x, y, w, h, bg)
+                    hair = None if border else self.sampler.frame_hairline(x, y, w, h)
+                    if hair:
+                        border, bg = hair
             else:
                 bg, border = self.sampler.bg_border(x, y, w, h, thin_only=bool(kids))
                 framed = bg is not None and bg != self.sampler.bg(x, y, w, h)
@@ -1395,6 +1459,7 @@ def tree_to_uir(tree: dict, screenshot=None, embed_images: bool = True) -> UIR:
     _add_window_title(prep["root"], prep["platform"])
     if sampler is not None:
         sampler.core_stroke = prep["platform"] in ("windows", "macos")
+        _add_title_band(prep["root"], sampler, prep["platform"])
         _refine_leaves(prep["root"], sampler)
         _mark_graphic_leaves(prep["root"])
     b = _Builder(sampler, prep["platform"])
