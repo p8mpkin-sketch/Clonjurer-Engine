@@ -684,8 +684,6 @@ ENGINE_GATED = {"drift"}
 INTERACTIVE_ALSO = {"api", "state"}
 # 已知缺口: 用例保留、照常出分, 但不计入 --gate 门槛(修好后从这里删掉)
 KNOWN_GAPS = {
-    "drift_rotator": "定时轮换横幅: 采集时已转过一格, 克隆里脚本又从初始格起转(两格同时显示)。config.TIMER_JOURNAL=1 的回退能修(51→100), "
-                     "但真实站轮播上与探针口径冲突(见 config 注释), 默认关",
     "measured_canvas": "iPad 820 宽 ~94: canvas 固化成位图后按宽缩放, 图里按固定 px 画的边距/间隙不会像原站那样重画",
     "measured_inline": "420 宽: 脚本按文字折行算的等高卡片高度, 手机段只有 390/359 两个采样, 高度随宽不单调, 仍钉 390 的 px",
 }
