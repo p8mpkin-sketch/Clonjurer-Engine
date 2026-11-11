@@ -48,6 +48,7 @@ def windows():
         ("tune", "win_form_list", ps + [str(HERE / "apps" / "win" / "form_list.ps1")], None),
         ("tune", "win_form_explorer", ps + [str(HERE / "apps" / "win" / "form_explorer.ps1")], None),
         ("tune", "win_form_editor", ps + [str(HERE / "apps" / "win" / "form_editor.ps1")], None),
+        ("tune", "win_form_codepad", ps + [str(HERE / "apps" / "win" / "form_codepad.ps1")], None),
         ("holdout", "win_7zip_fm", [str(pf / "7-Zip" / "7zFM.exe"), str(ROOT / "engine_bench")], (0, 0, 900, 640)),
         ("holdout", "win_notepadpp", [str(pf / "Notepad++" / "notepad++.exe"), "-multiInst", "-nosession", str(ROOT / "requirements.txt")],
          (0, 0, 900, 640)),
