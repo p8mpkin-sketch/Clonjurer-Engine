@@ -439,10 +439,23 @@ class ScoringMixin:
         揭示的内容(此前校准重渲染不滚动, 懒挂载区块在重截图里缺失却仍可能"提分")。
         """
         tp = time.monotonic()
+        pend: dict = {}
+        if phases:
+            # 归因: 克隆加载分步耗时 + 网络静置等不到时还挂着哪些请求(本地沙盒里重页加载 25~55s 慢在哪步)
+            def _rq(r):
+                pend[id(r)] = r
+            def _rq_done(r):
+                pend.pop(id(r), None)
+            with suppress(Exception):
+                page.on("request", _rq)
+                page.on("requestfinished", _rq_done)
+                page.on("requestfailed", _rq_done)
         page.goto(base + self._page_dir + self._page_frag,
                   wait_until="domcontentloaded", timeout=30000)
+        t_dcl = time.monotonic()
         with suppress(Exception):
             page.wait_for_load_state("load", timeout=self._strategy_pack.wait_load_timeout)
+        t_load = time.monotonic()
         # 主线程看门狗: page.evaluate 没有超时, 克隆页脚本一旦死循环(截断的库让播放器
         # Promise 自旋), 后面的滚动/截图 evaluate 会让整个任务永久挂起。wait_for_function
         # 的超时由驱动侧计时, 主线程卡死也能返回
@@ -458,6 +471,22 @@ class ScoringMixin:
             with suppress(Exception):
                 page.wait_for_load_state(
                     "networkidle", timeout=self._strategy_pack.wait_networkidle_timeout)
+            t_idle = time.monotonic()
+            if t_idle - tp >= 5:
+                kinds: dict = {}
+                for r in list(pend.values()):
+                    with suppress(Exception):
+                        k = r.resource_type + ("" if r.url.startswith(base) else "(外)")
+                        kinds[k] = kinds.get(k, 0) + 1
+                sample = ""
+                with suppress(Exception):
+                    sample = " ; ".join(urlsplit(r.url).path[-60:] for r in list(pend.values())[:4])
+                self.log("RENDER", f"克隆加载分步: dcl {t_dcl - tp:.1f}s / load {t_load - t_dcl:.1f}s / "
+                                   f"网络静置 {t_idle - t_load:.1f}s; 仍挂起 {len(pend)} 个 {kinds} {sample}"[:400])
+            with suppress(Exception):
+                page.remove_listener("request", _rq)
+                page.remove_listener("requestfinished", _rq_done)
+                page.remove_listener("requestfailed", _rq_done)
             tp = self._phase("评分-克隆加载", tp)
         if self._strategy_pack.scroll_pass:
             # 懒加载触发: 分段滚动到底再回顶, 派发 IntersectionObserver
