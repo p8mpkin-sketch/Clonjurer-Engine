@@ -783,11 +783,13 @@ class DomVariants(unittest.TestCase):
             try:
                 page = b.new_page(viewport={"width": 390, "height": 800})
                 page.set_content(html.replace("<script>", "<script type='x'>"))
-                self.assertFalse(page.evaluate("document.querySelector('.cards').checkVisibility()"))
+                # 变体换入换出运行时(VARIANT_DOM_SWAP)把非当前段的那份移出 DOM: 不在 DOM 里也算不可见
+                self.assertFalse(page.evaluate("!!(document.querySelector('.cards') && document.querySelector('.cards').checkVisibility())"))
                 self.assertEqual(page.evaluate("getComputedStyle(document.querySelector('.slider')).backgroundColor"),
                                  "rgb(1, 2, 3)")                # 窄屏运行时样式随变体带上
                 page.set_viewport_size({"width": 1440, "height": 800})
-                self.assertFalse(page.evaluate("document.querySelector('.slider').checkVisibility()"))
+                page.wait_for_timeout(100)
+                self.assertFalse(page.evaluate("!!(document.querySelector('.slider') && document.querySelector('.slider').checkVisibility())"))
                 self.assertTrue(page.evaluate("document.querySelector('.cards').checkVisibility()"))
             finally:
                 b.close()

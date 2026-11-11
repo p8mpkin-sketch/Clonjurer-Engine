@@ -3296,3 +3296,14 @@ SRI_RELAX_SCRIPT = r"""<script data-clone-preview="sri-relax">(function(){try{[w
 
 def sri_relax_script() -> str:
     return SRI_RELAX_SCRIPT if SRI_RELAX else ""
+
+
+def _same_document(u1: str, u2: str) -> bool:
+    """两个地址是否同一文档: 主机(忽略大小写与端口默认值)与路径(忽略末尾斜杠)相同, 不计协议/查询串/锚点。
+    手机 UA 302 到 m. 子域、跳 /m/ 路径或下载引导页都算另一个文档。"""
+    a, b = urlsplit(u1 or ""), urlsplit(u2 or "")
+    if not a.netloc or not b.netloc:
+        return True
+    host = lambda u: (u.hostname or "").lower()   # noqa: E731
+    path = lambda u: (u.path or "/").rstrip("/") or "/"   # noqa: E731
+    return host(a) == host(b) and path(a) == path(b)

@@ -418,6 +418,16 @@ def case_device_hscroll(ctx):
     return _shell("Device hscroll", mid, head=f"<style>{css}</style>")
 
 
+def case_structure_nth(ctx):
+    """按 UA 换组件 + 奇偶样式: 区块用 :nth-child(2n) 交替底色; 手机 UA 下脚本把第一个区块的内容换成另一种结构的引导条(区块本身还在, 变体根落在它上)。
+    克隆里备选子树若作常驻兄弟插入, 隐藏着也参与计数, 桌面/平板全页底色对调。"""
+    css = ".sec{padding:28px 24px;min-height:160px}.sec:nth-child(2n){background:#dfe7f0}.sec:nth-child(2n+1){background:#fff}.app{padding:18px;background:#263238;color:#fff}"
+    secs = "".join(f'<section class="sec"><h2>Section {i + 1}</h2><p>{LOREM}</p></section>' for i in range(6))
+    js = """<script>(function(){if(!/iPhone|Android/.test(navigator.userAgent))return;var s=document.querySelector('#secs .sec');
+s.innerHTML='<div class="app"><b>Get the app</b><ul><li>Faster</li><li>Offline</li></ul></div>';})();</script>"""
+    return _shell("Structure nth", f'<div id="secs">{secs}</div>{js}', head=f"<style>{css}</style>")
+
+
 CASES = {
     "responsive_grid": ("responsive", case_responsive_grid),
     "responsive_nav": ("responsive", case_responsive_nav),
@@ -425,6 +435,7 @@ CASES = {
     "ua_redirect": ("ua", case_ua_redirect),
     "ua_client_branch": ("ua", case_ua_client_branch),
     "structure_swap": ("structure", case_structure_swap),
+    "structure_nth": ("structure", case_structure_nth),
     "rerun_list_trim": ("rerun", case_rerun_list_trim),
     "rerun_block_drop": ("rerun", case_rerun_block_drop),
     "rerun_append": ("rerun", case_rerun_append),

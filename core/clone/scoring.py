@@ -262,6 +262,10 @@ class ScoringMixin:
         保留, 与 MHTML 保真轨同语义但资源已本地化), 用同一评分实测; 静态版也明显领先才
         设为默认页, 交互版另存 <页>.interactive.html。返回静态版分数(未采用返回 None)。"""
         fid = getattr(self, "_fidelity_score", None)
+        if inter_score is None and getattr(self, "_clone_render_failed", False) \
+                and getattr(config, "CLONE_FAIL_FAST", True):
+            # 交互轨克隆页打不开(脚本把主文档卡在 loading / 渲染超时): 预览与导出不能给一张打不开的页, 按 0 分参与比较
+            inter_score = 0.0
         margin = config.STATIC_TRACK_MARGIN
         if not (isinstance(fid, (int, float)) and isinstance(inter_score, (int, float))) \
                 or fid - inter_score < margin:
@@ -779,6 +783,7 @@ class ScoringMixin:
         diff_path = None if defer_diff else self.ws / "diff_preview.png"
 
         def render_and_score():
+            self._clone_render_failed = False
             server = _LocalPreviewServer(
                 self.ws, use_tape=self._strategy_pack.net_tape)
             server.start()
@@ -920,11 +925,13 @@ class ScoringMixin:
                 tp = self._phase("评分-克隆截图", tp)
             except CloneUnresponsive as exc:
                 # 卡死的页面上截图也会挂起: 交互轨本轮作废, 由保真轨(MHTML 禁脚本)出分
+                self._clone_render_failed = True
                 self.log("WARN", f"克隆页渲染失败: {exc}")
                 with suppress(OSError):
                     (self.ws / "cloned_preview.png").unlink()
                 clone_text = ""
             except Exception as exc:
+                self._clone_render_failed = True
                 self.log("WARN", f"克隆页渲染失败: {exc}")
                 with suppress(Exception):
                     self._full_shot(page, self.ws / "cloned_preview.png", "克隆页")

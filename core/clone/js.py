@@ -1070,7 +1070,18 @@ DOM_COUNTS_JS = r"""() => { const im = document.images; let s = 0; for (const i 
     ctrl: document.querySelectorAll('input:not([type=hidden]),textarea,select').length,
     btn: document.querySelectorAll('button,[role=button]').length, els: document.getElementsByTagName('*').length }; }"""
 
+# 窄屏变体 DOM 换入换出运行时(随 ALT_INJECT_JS 写入): 只让当前段可见的那份备选子树留在 DOM 里, 保持原页兄弟序
+CV_VP_SWAP_RUNTIME = r"""(function(){if(window.__cvVpLive)return;var items=null,cur=null,frag=document.createDocumentFragment();
+function band(){try{return (getComputedStyle(document.documentElement).getPropertyValue('--cv-vpband')||'').trim();}catch(x){return '';}}
+function on(e,b,tc){var v=' '+(e.getAttribute('data-cv-vp')||'')+' ';if(b==='m'&&tc)return (v.indexOf(' m ')>=0||v.indexOf(' mt ')>=0)&&v.indexOf(' mx ')<0;return v.indexOf(' '+b+' ')>=0;}
+function init(){items=[];var es=document.querySelectorAll('[data-cv-vp]');for(var i=0;i<es.length;i++){var e=es[i];if(!e.parentNode||(e.parentElement&&e.parentElement.closest('[data-cv-vp]')))continue;var c=document.createComment('cv-vp');e.parentNode.insertBefore(c,e);items.push([c,e]);}}
+function apply(){var b=band();if(!b)return;if(!document.body)return;if(!items)init();var tc=document.documentElement.hasAttribute('data-cv-touch'),k=b+(tc?'1':'0');if(k===cur)return;cur=k;
+for(var i=0;i<items.length;i++){var c=items[i][0],e=items[i][1],a=on(e,b,tc);if(a&&!e.isConnected&&c.parentNode){c.parentNode.insertBefore(e,c.nextSibling);}else if(!a&&e.isConnected&&e.parentNode===c.parentNode){frag.appendChild(e);}}}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',apply);else apply();addEventListener('resize',apply);addEventListener('load',apply);})();"""
+
+
 ALT_INJECT_JS = r"""({items, css}) => {
+  const VPSWAP = 1;
   // 与 CV_PATH_FN 同口径: body 这一层有唯一 id 的段写成 tag#id, 序号段只数同标签且无唯一 id 的兄弟
   const resolve = (path) => {
     let e = document.body;
@@ -1134,6 +1145,21 @@ ALT_INJECT_JS = r"""({items, css}) => {
       + 'html[data-cv-touch] [data-cv-vp]:not([data-cv-vp~="m"]):not([data-cv-vp~="mt"]),html[data-cv-touch] [data-cv-vp~="mx"]{display:none!important}}\n'
       + (css ? '@media (min-width: 99999px)/*cv-x*/{\n' + css + '\n}' : '');
     (document.head || document.documentElement).appendChild(st);
+    if (VPSWAP) {
+      // 备选子树作常驻兄弟会改变兄弟序: 隐藏着也参与 :nth-child / :nth-of-type / + / ~ 计数, 站点按奇偶写的
+      // 底色/间距整体错一位(合成用例同类; 实测某门户桌面段 98→65)。运行时只把当前段生效的那一份留在 DOM 里,
+      // 其余挪进文档片段(appendChild 移出, 不触发内容守卫), 段切换时换回; 无脚本回放(MHTML)仍靠上面的 CSS 隐藏
+      const vs = document.createElement('style');
+      vs.setAttribute('data-clone-vp', 'altband');
+      vs.textContent = '@media all/*cv-d*/{:root{--cv-vpband:d}}\n@media (min-width: 99999px)/*cv-t*/{:root{--cv-vpband:t}}\n'
+        + '@media (min-width: 99999px)/*cv-m*/{:root{--cv-vpband:m}}';
+      (document.head || document.documentElement).appendChild(vs);
+      const rs = document.createElement('script');
+      rs.setAttribute('data-clone-preview', 'cv-vp-swap');
+      window.__cvVpLive = 1;   // 采集活页里不运行(否则序列化前就把备选子树移出了 DOM)
+      rs.textContent = CV_VP_SWAP_RUNTIME;
+      (document.head || document.documentElement).appendChild(rs);
+    }
     if (items.some(it => / mx$/.test(it.own))) {
       // 触屏标记在解析期最早设上(先于分视口样式生效): 粗指针 = 手机/平板真机
       const sc = document.createElement('script');
@@ -2720,3 +2746,6 @@ if not getattr(_config, "VARIANT_CANVAS_FILL", True):
     ALT_EXTRACT_JS = ALT_EXTRACT_JS.replace("const VFILL = 1;", "const VFILL = 0;")
 if not getattr(_config, "ROOT_CLS_UA_SPLIT", True):
     CV_EMIT_JS = CV_EMIT_JS.replace("const ROOTUA = 1;", "const ROOTUA = 0;")
+ALT_INJECT_JS = ALT_INJECT_JS.replace("rs.textContent = CV_VP_SWAP_RUNTIME;", "rs.textContent = " + json.dumps(CV_VP_SWAP_RUNTIME) + ";")
+if not getattr(_config, "VARIANT_DOM_SWAP", True):
+    ALT_INJECT_JS = ALT_INJECT_JS.replace("const VPSWAP = 1;", "const VPSWAP = 0;")

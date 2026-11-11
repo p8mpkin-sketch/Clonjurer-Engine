@@ -115,6 +115,7 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     WAAPI_BAKE_JS,
 )
 from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部 import 路径不变
+    _same_document,
     _id_misaligned_parents,
     _root_inline_varies,
     _source_id_classes,
@@ -601,6 +602,7 @@ class CaptureMixin:
         self._cv_mdesk = None
         self._cv_extra_ctx = []
         self._cv_pair = {}
+        self._cv_main_page = page
         for tag, w in (("t", 768), ("m", 390)):
             p2 = None
             try:
@@ -619,6 +621,8 @@ class CaptureMixin:
                     if getattr(config, "NARROW_UA_SPLIT", True):
                         try:
                             p4 = self._narrow_desktop_page(page, w, height)
+                            # 手机 UA 页跳到别的文档时它要顶替成手机段来源, 窄屏才加载的图同样要登记
+                            p4.on("response", lambda r, pp=p4: self._on_narrow_response(r, pp))
                             p4.set_viewport_size({"width": w, "height": height})
                             p4.goto(page.url, wait_until="commit", timeout=10000)
                             self._cv_mdesk = p4
@@ -628,7 +632,7 @@ class CaptureMixin:
                     p2 = self._narrow_desktop_page(page, w, height)
                 # 窄屏才显示/才加载的图(手机版首屏图、按断点换的 picture 源)桌面活体从没请求过, 不登记就
                 # 进不了活体回补, 克隆在手机宽度下整块裂图(wix 手机首屏 ~40 分)
-                p2.on("response", lambda r: self._on_asset_response(r, bodies=False))
+                p2.on("response", lambda r, pp=p2: self._on_narrow_response(r, pp))
                 p2.set_viewport_size({"width": w, "height": height})
                 p2.goto(page.url, wait_until="commit", timeout=10000)
                 self._cv_pages.append((tag, p2))
@@ -638,7 +642,7 @@ class CaptureMixin:
                     w2 = int(round(w * 0.92))
                     try:
                         p3 = p2.context.new_page()
-                        p3.on("response", lambda r: self._on_asset_response(r, bodies=False))
+                        p3.on("response", lambda r, pp=p3: self._on_narrow_response(r, pp))
                         p3.set_viewport_size({"width": w2, "height": height})
                         p3.goto(page.url, wait_until="commit", timeout=10000)
                         self._cv_pair[tag] = (p3, w2)
@@ -651,6 +655,24 @@ class CaptureMixin:
                 self.log("WARN", f"窄屏首载对照({w}px)启动失败: {str(exc)[:120]}")
 
 
+    def _narrow_same_doc(self, p2):
+        """窄屏首载页最终停在与主页同一文档(同主机同路径, 不计查询串/锚点/末尾斜杠)上。手机 UA 下 302/脚本跳到
+        m. 子域或下载引导页的, 是另一个文档 —— 那由「手机版」子克隆处理, 不能按路径对齐当成同页的窄屏变体。"""
+        if not getattr(config, "NARROW_SAME_DOC", True):
+            return True
+        try:
+            mp = getattr(self, "_cv_main_page", None)
+            return _same_document(p2.url, mp.url if mp is not None else "")
+        except Exception:   # noqa: BLE001
+            return True
+
+    def _on_narrow_response(self, response, p2):
+        """窄屏首载页的资源只在页面仍是主页同一文档时登记: 跳到手机站后加载的另一套应用包会被当成活体资源,
+        先于框架识别落盘, 把识别从「水合 MPA(剥离脚本)」改判成 SPA(保留脚本), 克隆里广告加载器重建 iframe 卡死。"""
+        if not self._narrow_same_doc(p2):
+            return
+        self._on_asset_response(response, bodies=False)
+
     def _collect_narrow_loads(self, budget_s=None):
         """收回窄屏首载页的内联样式表并关页; 预算内没加载完的放弃(记日志: 否则该站手机端没有变体/分视口
         样式却看不出原因)。预算随主页就绪耗时放大: 跨境慢站(CI 美国出口访问国内站就绪 11s+)固定 8s 两页都等不到,
@@ -658,10 +680,33 @@ class CaptureMixin:
         if budget_s is None:
             budget_s = min(24.0, max(8.0, float(getattr(self, "_nav_ready_s", 0) or 0) * 1.5))
         loads, t0 = {}, time.monotonic()
+        kept = []
         for tag, p2 in getattr(self, "_cv_pages", []) or []:
             try:
                 left = max(0.5, budget_s - (time.monotonic() - t0))
                 p2.wait_for_load_state("load", timeout=int(left * 1000))
+                if not self._narrow_same_doc(p2):
+                    # 跳到了另一个文档: 不拿它出变体/分视口 class/内联补采; 手机段退回桌面 UA 同宽对照页(同文档)
+                    alt = getattr(self, "_cv_mdesk", None) if tag == "m" else None
+                    self.log("RENDER", f"窄屏首载页 {tag} 跳到另一个文档({str(p2.url)[:100]}), 不作窄屏变体来源"
+                                       + ("; 改用桌面 UA 同宽首载页" if alt is not None else ""))
+                    with suppress(Exception):
+                        p2.close()
+                    pr = (getattr(self, "_cv_pair", {}) or {}).pop(tag, None)
+                    if pr:
+                        with suppress(Exception):
+                            pr[0].close()
+                    if alt is None:
+                        continue
+                    self._cv_mdesk = None
+                    p2 = alt
+                    left = max(0.5, budget_s - (time.monotonic() - t0))
+                    p2.wait_for_load_state("load", timeout=int(left * 1000))
+                    if not self._narrow_same_doc(p2):
+                        with suppress(Exception):
+                            p2.close()
+                        continue
+                kept.append((tag, p2))
                 p2.evaluate(CV_QUIET_JS, 300)
                 loads[tag] = p2.evaluate(CV_PATHS_JS) or {}
                 if self.cfg.get("viewport_variants", True):
@@ -671,6 +716,7 @@ class CaptureMixin:
                                  f"该宽度无首载对照/变体")
                 with suppress(Exception):
                     p2.close()
+        self._cv_pages = kept
         p4 = getattr(self, "_cv_mdesk", None)
         if p4 is not None and "m" in loads:
             try:

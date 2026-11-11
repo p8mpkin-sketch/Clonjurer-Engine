@@ -258,6 +258,12 @@ VIEWPORT_META_HOIST = True
 ROOT_CLS_UA_SPLIT = True
 # 桌面 UA 的窄屏首载页(平板段/手机桌面 UA 对照)开在全新上下文: 不继承主页的 cookie/localStorage(首访状态)
 NARROW_FRESH_CTX = True
+# 窄屏首载页(尤其手机 UA)跳到另一个文档(m. 子域/下载引导页)时不作变体来源、其资源不进活体登记; 手机段改用桌面 UA 同宽页
+NARROW_SAME_DOC = True
+# 窄屏变体运行时只把当前段生效的那份子树留在 DOM(隐藏的备选兄弟仍参与 :nth-child 计数, 奇偶样式整体错位)
+VARIANT_DOM_SWAP = True
+# 交互轨克隆页打不开时: 修复循环立即收敛, 静态版按交互轨 0 分参与比较(预览/导出不给打不开的页)
+CLONE_FAIL_FAST = True
 
 # ---------------------------------------------------------------------------
 # 常量环境覆盖(A/B 用): CLONER_CFG_<常量名>=值 覆盖本模块同名的 bool/int/float/str 常量。

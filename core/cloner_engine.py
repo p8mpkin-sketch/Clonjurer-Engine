@@ -691,6 +691,11 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
                     self.log("WARN", f"[评分告警] {warning}")
                 if best is None or score > best["detail"]["score"]:
                     best = self._snapshot_round(round_i, detail, results)
+            if getattr(self, "_clone_render_failed", False) and getattr(config, "CLONE_FAIL_FAST", True):
+                # 克隆页本身打不开(主文档到不了 DOMContentLoaded、整页截图超时): 回补资源治不了它, 再跑一轮只是
+                # 再等两个 30s 超时(实测每轮 60~84s, 任务累计 260s+)。收敛, 交给保真轨出分 + 静态版交付
+                self.log("RENDER", f"交互轨克隆页渲染失败, 修复循环第 {round_i + 1} 轮收敛(回补治不了打不开的页面)")
+                break
             if not failed_local and not remote_missing:
                 break
             if detail is not None and config.REPAIR_STRUCTURAL_ONLY and \
@@ -770,10 +775,10 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
 
         # 修复轮不保证单调(回补进来的埋点/广告资源可能让克隆页更偏离原站):
         # 末轮低于最优轮时恢复最优轮产物(页面/新增文件/截图/校准样式), 交付与分数一致
-        if best is not None and detail is not None and \
-                detail["score"] < best["detail"]["score"] - 0.05:
+        if best is not None and (detail is None or
+                                 detail["score"] < best["detail"]["score"] - 0.05):
             self._restore_round(best, results)
-            self.log("RENDER", f"修复轮回退({detail['score']}→最优 {best['detail']['score']}), "
+            self.log("RENDER", f"修复轮回退({detail['score'] if detail is not None else '渲染失败'}→最优 {best['detail']['score']}), "
                                f"已恢复第 {best['round'] + 1} 轮产物")
             detail = best["detail"]
             score = detail["score"]
@@ -996,8 +1001,9 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
                 self._fid_page = None
                 with suppress(Exception):
                     fp_left.close()
-            if want_score and detail is not None:
-                self._write_final_diff()
+            if want_score and (detail is not None or getattr(self, "_clone_render_failed", False)):
+                if detail is not None:
+                    self._write_final_diff()
                 with suppress(Exception):
                     self._static_score = self._try_static_track(ctx, score)
 
