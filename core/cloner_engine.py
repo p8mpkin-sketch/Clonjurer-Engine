@@ -64,6 +64,15 @@ from core import pattern_detector, strategy_packs
 from core import pixel_calibrator
 
 from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 import 路径不变
+    CANVAS_PIN_JS,
+    CV_CANVAS_DRIFT_JS,
+    HIDDEN_ROOTS_JS,
+    IMG_SRC_PIN_JS,
+    ROUNDTRIP_PIN_JS,
+    SCROLL_LOCK_STRIP_JS,
+    STATE_PHASE_RESET_JS,
+    TRANSITION_FINISH_JS,
+    VISIBLE_PATHS_JS,
     AD_RECTS_JS,
     INTERSTITIAL_HIDE_JS,
     ROOT_FONT_APPLY_JS,
@@ -135,6 +144,15 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     WAAPI_BAKE_JS,
 )
 from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部 import 路径不变
+    _drop_slider_tracks,
+    _id_misaligned_parents,
+    _root_inline_varies,
+    _source_id_classes,
+    _source_sibling_groups,
+    _subtree_sig,
+    CONTENT_KEEP_GUARD_JS,
+    SCROLL_UNLOCK_GUARD_JS,
+    relax_font_display,
     beacon_like,
     neutralize_deploy_hazards,
     deploy_hazard_audit,
@@ -781,6 +799,7 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
         if self.cfg.get("bearer"):
             ctx_headers["Authorization"] = f"Bearer {self.cfg['bearer']}"
         ua = self.cfg.get("user_agent") or config.DEFAULT_USER_AGENT
+        self._ctx_headers = dict(ctx_headers)
 
         pages = []          # [(route, html)]
         iframe_pages = []   # [(src, html)] 同源 iframe 固化子页

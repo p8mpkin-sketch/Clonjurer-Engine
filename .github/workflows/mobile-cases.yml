@@ -1,0 +1,48 @@
+name: mobile-cases
+
+# 手机端适配分类测试集: 本地合成站点(每个用例只含一种机制) → 克隆 → 6 个视口探针, 按机制类别出表。
+# 不依赖外网与真实站点, 结果可复现, 作门槛: 任一用例任一视口低于 95 即红(case_site.KNOWN_GAPS 里登记的已知缺口除外)。
+on:
+  pull_request:
+    paths:
+      - "core/**"
+      - "config.py"
+      - "engine_bench/mobile_cases/**"
+      - "engine_bench/real_sites/viewport_probe.py"
+      - ".github/workflows/mobile-cases.yml"
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "逗号分隔的类别或用例名(留空=全部)"
+        required: false
+        default: ""
+      engine_env:
+        description: "引擎常量 A/B: 空格分隔的 CLONER_CFG_<常量>=值"
+        required: false
+        default: ""
+
+jobs:
+  cases:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 安装依赖与 Chromium
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+      - name: 跑分类测试集
+        run: |
+          for kv in ${{ github.event.inputs.engine_env }}; do export "$kv"; echo "引擎常量覆盖: $kv"; done
+          python engine_bench/mobile_cases/run.py --gate 95 --only "${{ github.event.inputs.only }}"
+      - name: 结果写入运行摘要
+        if: always()
+        run: |
+          f=$(ls -t engine_bench/mobile_cases/runs/CASES_*.md 2>/dev/null | head -1)
+          if [ -n "$f" ]; then cat "$f" >> "$GITHUB_STEP_SUMMARY"; fi
+          tail -40 engine_bench/mobile_cases/runs/instance.log 2>/dev/null || true

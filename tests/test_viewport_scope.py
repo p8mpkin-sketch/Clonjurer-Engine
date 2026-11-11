@@ -558,8 +558,8 @@ class FluidSizeProbe(unittest.TestCase):
                 eng._probe_root_font(page)
                 self.assertEqual(eng._root_fluid, {})
                 fl = eng._fluid
-                self.assertEqual(sorted(fl["paths"]), ["h1:1", "h2:1"])
-                self.assertEqual(fl["inline"], {"h2:1": {"font-size": "10.0000vw"}, "div:1": {"width": "80.0000vw"}})
+                self.assertEqual(sorted(fl["paths"]), ["h1#css", "h2#js"])   # body 直接子元素有唯一 id 时路径按 id 认
+                self.assertEqual(fl["inline"], {"h2#js": {"font-size": "10.0000vw"}, "div#box": {"width": "80.0000vw"}})
                 self.assertEqual(len(ctx.pages), 1)
                 page.evaluate(ce.FLUID_APPLY_JS, fl)
                 self.assertEqual(page.evaluate("document.getElementById('js').style.fontSize"), "10vw")
@@ -577,6 +577,33 @@ class FluidSizeProbe(unittest.TestCase):
                 self.assertEqual(page2.evaluate("getComputedStyle(document.getElementById('fixed')).fontSize"), "18px")
             finally:
                 b.close()
+
+
+class FluidAttrGeometry(unittest.TestCase):
+    """img 的 width/height 属性按宽写死(wix 手机图 325x215): 以 attr-width/attr-height 伪声明进同比探测, 应用写成 style vw。"""
+
+    def test_attr_width_height_scale(self):
+        fa = {"div:1>img:1": ["IMG", 0, ";attr-width:325px;attr-height:215px"], "p:1": ["P", 16, "margin-top:20px"]}
+        fb = {"div:1>img:1": ["IMG", 0, ";attr-width:299px;attr-height:198px"], "p:1": ["P", 16, "margin-top:20px"]}
+        fl = ce._fluid_elements(fa, fb, 390, 359)
+        self.assertEqual(fl["paths"], [])
+        self.assertEqual(set(fl["inline"]["div:1>img:1"]), {"attr-width", "attr-height"})
+        self.assertAlmostEqual(float(fl["inline"]["div:1>img:1"]["attr-width"][:-2]), 325 / 390 * 100, places=3)
+        self.assertNotIn("p:1", fl["inline"])          # 定值不改
+        self.assertIn("startsWith('attr-')", ce.FLUID_APPLY_JS)   # 应用侧把 attr- 前缀映射回 style 属性
+
+    def test_three_point_clamp(self):
+        # 390→359 同比, 390→440 不再长(封顶 360px) → min(vw, 360px); 字号窄侧垫底 → max; 三点不成线 → 保留 px
+        fa = {"a:1": ["DIV", 0, "width:325px;padding-top:40px;margin-top:20px"]}
+        fb = {"a:1": ["DIV", 0, "width:299px;padding-top:40px;margin-top:17px"]}
+        fc = {"a:1": ["DIV", 0, "width:360px;padding-top:45px;margin-top:29px"]}
+        fl = ce._fluid_elements(fa, fb, 390, 359, fc=fc, w3=440)
+        got = fl["inline"]["a:1"]
+        self.assertEqual(got["width"], "min(83.3333vw, 360px)")
+        self.assertEqual(got["padding-top"], "max(10.2564vw, 40px)")
+        self.assertNotIn("margin-top", got)       # 17/20=0.85 vs 0.92, 29/20=1.45 vs 1.128: 不成线
+        fl2 = ce._fluid_elements(fa, fb, 390, 359)   # 无第三点: 退回两点直线
+        self.assertEqual(fl2["inline"]["a:1"]["width"], "83.3333vw")
 
 
 @unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
@@ -766,6 +793,68 @@ class DomVariants(unittest.TestCase):
                 b.close()
 
 
+FLUID_VARIANT_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<style>body{margin:0}</style></head><body><header>站头</header>
+<main id="m"></main>
+<script>
+var m = document.getElementById('m');
+function render(){
+  if (innerWidth >= 1000) {
+    m.innerHTML = '<div class="cards"><div class="card">甲</div><div class="card">乙</div></div>';
+  } else {
+    var w = Math.round(innerWidth * 0.8333), h = Math.round(w * 0.662);
+    m.innerHTML = '<section class="hero" style="margin-top:' + Math.round(innerWidth * 0.1) + 'px;padding:12px">'
+      + '<img id="pic" width="' + w + '" height="' + h + '" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="">'
+      + '<p>手机版</p></section>';
+  }
+}
+render(); addEventListener('resize', render);
+</script></body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class FluidVariant(unittest.TestCase):
+    """窄屏变体抽取前的随宽同比: 脚本按加载宽度写死的 img width/height 属性与内联 margin px 改写成 vw,
+    变体到了 360~440 宽按比例渲染, 不再是 390 的尺寸。"""
+
+    def test_variant_geometry_follows_width(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 1440, "height": 800})
+                page.set_content(FLUID_VARIANT_PAGE)
+                eng = _FakeEngine()
+                eng.log = lambda *a: logs.append(a[-1])
+                logs = []
+                eng._cv_pages = []
+                loads = {}
+                p2 = b.new_page(viewport={"width": 390, "height": 800})
+                p2.set_content(FLUID_VARIANT_PAGE)
+                eng._cv_pages.append(("m", p2))
+                loads["m"] = p2.evaluate(ce.CV_PATHS_JS)
+                n = ce.ClonerEngine._inject_dom_variants(eng, page, loads)
+                self.assertEqual(n, 1)
+                self.assertTrue(any("随宽同比" in l for l in logs), logs)
+                html = page.content()
+            finally:
+                b.close()
+            html = ce.scope_viewport_css(html, 1000, 0).replace("<script>", "<script type='x'>")
+            b = p.chromium.launch()
+            try:
+                for w in (360, 420, 440):
+                    pg = b.new_page(viewport={"width": w, "height": 800})
+                    pg.set_content(html)
+                    r = pg.evaluate("document.getElementById('pic').getBoundingClientRect()")
+                    self.assertAlmostEqual(r["width"], w * 0.8333, delta=1.5, msg=f"{w}: {r}")
+                    self.assertAlmostEqual(r["height"], w * 0.8333 * 0.662, delta=1.5, msg=f"{w}: {r}")
+                    mt = pg.evaluate("parseFloat(getComputedStyle(document.querySelector('.hero')).marginTop)")
+                    self.assertAlmostEqual(mt, w * 0.1, delta=1.0, msg=f"{w}: margin {mt}")
+                    pg.close()
+            finally:
+                b.close()
+
+
 SVG_ATTR_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
 <style>body{margin:0}</style></head><body>
 <svg id="logo" viewBox="0 0 100 10"><rect width="100" height="10"/></svg>
@@ -936,3 +1025,308 @@ class VariantControlCount(unittest.TestCase):
             self.assertEqual(alt[3], 1, "hidden input 不计, button 不计")
             self.assertEqual(size[2], 1)
             b.close()
+
+
+HIDDEN_ROOT_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<style>body{margin:0}.xs{display:none}@media (max-width:767px){.xs{display:block}}
+.item{display:none}.item.active{display:block;height:100px}</style></head><body>
+<header>站头</header>
+<div class="xs"><div class="item active">甲<img alt="" width="100" height="50"></div><div class="item active">乙<img alt="" width="100" height="50"></div><div class="item">丙<img alt="" width="100" height="50"></div></div>
+<p>正文</p>
+<script>
+// 桌面上 .xs 不渲染, 后台轮播卡在两项同时 active; 窄屏首载页里脚本正常收尾只留一项
+if (innerWidth < 768) document.querySelectorAll('.xs .item')[1].classList.remove('active');
+</script></body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class HiddenRootVariant(unittest.TestCase):
+    """桌面采集时 display:none 的子树(手机版横幅)状态不可信: 窄屏首载页里可见且 class 不同 → 整棵换成窄屏版,
+    手机段只显示一项, 不再两项叠着(cgnpc 手机端横幅下多出一整项)。"""
+
+    def test_hidden_root_uses_narrow_version(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 1440, "height": 800})
+                page.set_content(HIDDEN_ROOT_PAGE)
+                eng = _FakeEngine()
+                logs = []
+                eng.log = lambda *a: logs.append(a[-1])
+                eng._cv_pages = []
+                p2 = b.new_page(viewport={"width": 390, "height": 800})
+                p2.set_content(HIDDEN_ROOT_PAGE)
+                eng._cv_pages.append(("m", p2))
+                loads = {"m": p2.evaluate(ce.CV_PATHS_JS)}
+                n = ce.ClonerEngine._inject_dom_variants(eng, page, loads)
+                self.assertEqual(n, 1)
+                self.assertTrue(any("桌面不渲染而窄屏状态不同的子树 1" in l for l in logs), logs)
+                html = page.content()
+            finally:
+                b.close()
+            html = ce.scope_viewport_css(html, 1000, 0).replace("<script>", "<script type='x'>")
+            b = p.chromium.launch()
+            try:
+                pg = b.new_page(viewport={"width": 390, "height": 800})
+                pg.set_content(html)
+                shown = pg.evaluate("Array.from(document.querySelectorAll('.xs .item')).filter(e => e.checkVisibility()).length")
+                self.assertEqual(shown, 1)                   # 手机段: 窄屏版, 只一项 active
+                # 正文紧跟一项(100px)+ p 默认外边距 16px, 不是两项叠着的 200px
+                self.assertEqual(pg.evaluate("document.querySelector('p').getBoundingClientRect().top"),
+                                 116 + pg.evaluate("document.querySelector('header').getBoundingClientRect().height"))
+                pg.set_viewport_size({"width": 1440, "height": 800})
+                self.assertEqual(pg.evaluate("Array.from(document.querySelectorAll('.xs')).filter(e => e.checkVisibility()).length"), 0)
+            finally:
+                b.close()
+
+
+MID_TRANSITION_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<style>body{margin:0}.xs{display:none}@media (max-width:767px){.xs{display:block}}
+.inner{position:relative;overflow:hidden}.item{display:none;transition:transform 30s linear}
+.item.active,.item.next{display:block;height:100px}.item.next{position:absolute;top:0;width:100%;transform:translateX(100%)}
+.item.next.left{transform:translateX(0)}.item.active.left{transform:translateX(-100%)}</style></head><body>
+<header>站头</header>
+<div class="xs"><div class="inner"><div class="item active">甲<img alt="" width="100" height="50"></div><div class="item">乙<img alt="" width="100" height="50"></div><div class="item">丙<img alt="" width="100" height="50"></div></div></div>
+<p>正文</p>
+<script>
+// 窄屏页: 加载后立刻开始一段 30s 的翻页过渡(Bootstrap 轮播写法), transitionend 时收尾 class
+if (innerWidth < 768) {
+  var items = document.querySelectorAll('.xs .item'), a = items[0], b = items[1];
+  b.classList.add('next'); void b.offsetWidth; a.classList.add('left'); b.classList.add('left');
+  a.addEventListener('transitionend', function () { b.classList.remove('next', 'left'); b.classList.add('active'); a.classList.remove('active', 'left'); });
+}
+</script></body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class VariantFinishesTransitions(unittest.TestCase):
+    """抽取窄屏变体前把进行中的 CSS 过渡跳到终点: 轮播翻页半途抽到的是两项同时有盒, 收尾后只剩一项。"""
+
+    def test_mid_transition_finished_before_extract(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 1440, "height": 800})
+                page.set_content(MID_TRANSITION_PAGE)
+                eng = _FakeEngine()
+                logs = []
+                eng.log = lambda *a: logs.append(a[-1])
+                eng._cv_pages = []
+                p2 = b.new_page(viewport={"width": 390, "height": 800})
+                p2.set_content(MID_TRANSITION_PAGE)
+                eng._cv_pages.append(("m", p2))
+                loads = {"m": p2.evaluate(ce.CV_PATHS_JS)}
+                n = ce.ClonerEngine._inject_dom_variants(eng, page, loads)
+                self.assertEqual(n, 1)
+                self.assertTrue(any("过渡跳到终点" in l for l in logs), logs)
+                html = page.content()
+            finally:
+                b.close()
+            html = ce.scope_viewport_css(html, 1000, 0).replace("<script>", "<script type='x'>")
+            b = p.chromium.launch()
+            try:
+                pg = b.new_page(viewport={"width": 390, "height": 800})
+                pg.set_content(html)
+                shown = pg.evaluate("Array.from(document.querySelectorAll('.xs .item')).filter(e => e.checkVisibility()).length")
+                self.assertEqual(shown, 1)
+                # 过渡收尾后当前项是乙, 再按互斥组规则对调回第一项: 克隆与原站同从甲起播
+                self.assertEqual(pg.evaluate("document.querySelector('[data-cv-vp=m] .item.active').textContent.trim()"), "甲")
+            finally:
+                b.close()
+
+
+AD_HIDDEN_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<style>body{margin:0}.m{display:none}@media (max-width:767px){.m{display:block}}</style></head><body>
+<header>站头</header>
+<div class="m ad-unit"><div id="div-gpt-ad-1" style="height:250px"><div class="ph">广告加载中, 请稍候片刻再看</div></div></div>
+<p>正文</p>
+<script>if (innerWidth < 768) document.querySelector('.ad-unit').classList.add('ad-unit--has-placeholder');</script>
+</body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class HiddenRootSkipsAdSlots(unittest.TestCase):
+    """桌面不渲染的子树是程序化广告位(GPT 容器)时不换窄屏版: 窄屏页里的 250px 占位态不是原站评分时的样子。"""
+
+    def test_ad_slot_not_swapped(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 1440, "height": 800})
+                page.set_content(AD_HIDDEN_PAGE)
+                eng = _FakeEngine()
+                eng._cv_pages = []
+                p2 = b.new_page(viewport={"width": 390, "height": 800})
+                p2.set_content(AD_HIDDEN_PAGE)
+                eng._cv_pages.append(("m", p2))
+                loads = {"m": p2.evaluate(ce.CV_PATHS_JS)}
+                n = ce.ClonerEngine._inject_dom_variants(eng, page, loads)
+                self.assertEqual(n, 0)
+                self.assertFalse(page.evaluate("!!document.querySelector('[data-cv-vp]')"))
+            finally:
+                b.close()
+
+
+CYCLED_CAROUSEL_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<style>body{margin:0}.xs{display:none}@media (max-width:767px){.xs{display:block}}
+.item{display:none}.item.active{display:block;height:100px}</style></head><body>
+<header>站头</header>
+<div class="xs"><div class="inner"><div class="item">甲<img alt="" width="100" height="50"></div><div class="item">乙<img alt="" width="100" height="50"></div><div class="item">丙<img alt="" width="100" height="50"></div></div></div>
+<p>正文</p>
+<script>
+// 站点脚本: 无条件给第一项加 active(原站首载是空操作); 窄屏页模拟已翻到第二项
+var items = document.querySelectorAll('.xs .item');
+items[0].classList.add('active');
+if (innerWidth < 768) { items[0].classList.remove('active'); items[1].classList.add('active'); }
+</script></body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class VariantNormalizesCycledGroup(unittest.TestCase):
+    """窄屏页里轮播已翻到第 k 项: 变体里把第一项与当前项的 class 对调, 克隆重跑站点脚本(给第一项加 active)后仍只一项可见。"""
+
+    def test_cycled_item_swapped_to_first(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 1440, "height": 800})
+                page.set_content(CYCLED_CAROUSEL_PAGE)
+                eng = _FakeEngine()
+                logs = []
+                eng.log = lambda *a: logs.append(a[-1])
+                eng._cv_pages = []
+                p2 = b.new_page(viewport={"width": 390, "height": 800})
+                p2.set_content(CYCLED_CAROUSEL_PAGE)
+                eng._cv_pages.append(("m", p2))
+                loads = {"m": p2.evaluate(ce.CV_PATHS_JS)}
+                n = ce.ClonerEngine._inject_dom_variants(eng, page, loads)
+                self.assertEqual(n, 1)
+                self.assertTrue(any("对调到第一项" in l for l in logs), logs)
+                html = page.content()
+            finally:
+                b.close()
+            html = ce.scope_viewport_css(html, 1000, 0)
+            b = p.chromium.launch()
+            try:
+                pg = b.new_page(viewport={"width": 390, "height": 800})
+                pg.set_content(html)       # 脚本照常重跑: 给第一项加 active
+                shown = pg.evaluate("Array.from(document.querySelectorAll('[data-cv-vp=m] .item')).filter(e => e.checkVisibility()).map(e => e.textContent.trim())")
+                self.assertEqual(shown, ["甲"])
+            finally:
+                b.close()
+
+
+LOAD_ONCE_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<style>body{margin:0}img{display:block;width:100%}</style></head><body><header>站头</header>
+<main id="m"></main>
+<script>
+var m = document.getElementById('m');
+if (innerWidth >= 1000) {
+  m.innerHTML = '<div class="cards"><div class="card">甲</div><div class="card">乙</div></div>';
+} else {
+  // 图片组件只在加载时按宽度写一次 height px(wix 图片组件), resize 不重写
+  var h = Math.round(innerWidth * 0.8333 * 0.889);
+  m.innerHTML = '<section class="hero"><img id="pic" style="height:' + h + 'px" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt=""><p>手机版文案在图片下面</p></section>';
+}
+</script></body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class FluidPairPage(unittest.TestCase):
+    """只在加载时按宽度写一次的内联 height px: 同页三点采样(resize)看不出, 0.92 倍宽的另一张首载页对照认出同比 → vw。"""
+
+    def test_load_once_height_follows_width(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 1440, "height": 800})
+                page.set_content(LOAD_ONCE_PAGE)
+                eng = _FakeEngine()
+                logs = []
+                eng.log = lambda *a: logs.append(a[-1])
+                eng._cv_pages = []
+                p2 = b.new_page(viewport={"width": 390, "height": 800})
+                p2.set_content(LOAD_ONCE_PAGE)
+                p3 = b.new_page(viewport={"width": 359, "height": 800})
+                p3.set_content(LOAD_ONCE_PAGE)
+                eng._cv_pages.append(("m", p2))
+                eng._cv_pair = {"m": (p3, 359)}
+                loads = {"m": p2.evaluate(ce.CV_PATHS_JS)}
+                n = ce.ClonerEngine._inject_dom_variants(eng, page, loads)
+                self.assertEqual(n, 1)
+                self.assertTrue(any("首载对照页认出" in l for l in logs), logs)
+                html = page.content()
+            finally:
+                b.close()
+            html = ce.scope_viewport_css(html, 1000, 0).replace("<script>", "<script type='x'>")
+            b = p.chromium.launch()
+            try:
+                for w in (360, 420, 440):
+                    pg = b.new_page(viewport={"width": w, "height": 800})
+                    pg.set_content(html)
+                    h = pg.evaluate("document.getElementById('pic').getBoundingClientRect().height")
+                    self.assertAlmostEqual(h, w * 0.8333 * 0.889, delta=1.5, msg=f"{w}: {h}")
+                    pg.close()
+            finally:
+                b.close()
+
+
+PAIR_EMIT_PAGE = """<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<style>body{margin:0}#card{width:100%}</style></head><body>
+<div id="card"><img id="pic" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt=""></div>
+<script>
+// 卡片图高度只在加载时按宽算一次写成内联 px; 窄于 768 时与宽同比, 桌面/平板是另一套列数(不同比), resize 不重写
+var pic = document.getElementById('pic'), w = innerWidth;
+pic.style.width = '100%';
+pic.style.height = (w < 768 ? Math.round(w * 0.741) : (w < 1000 ? 300 : 420)) + 'px';
+</script></body></html>"""
+
+
+@unittest.skipUnless(_chromium_available(), "需要 Playwright Chromium")
+class PairPageBand(unittest.TestCase):
+    """CV_EMIT 手机段: 平板/手机两段不同比时, 与 0.92 倍宽首载对照页同比(值比≈宽比)的 px 仍写 vw。"""
+
+    def test_phone_band_px_fluid_by_pair(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 1440, "height": 800})
+                page.set_content(PAIR_EMIT_PAGE)
+                page.evaluate(ce.CV_RECORD_JS, "d")
+                for tag, w in (("t", 768), ("m", 390)):
+                    page.set_viewport_size({"width": w, "height": 800})
+                    page.evaluate(ce.CV_QUIET_JS, 100)
+                    page.evaluate(ce.CV_RECORD_JS, tag)
+                page.set_viewport_size({"width": 1440, "height": 800})
+                page.evaluate(ce.CV_QUIET_JS, 100)
+                page.evaluate(ce.CV_RECORD_JS, "b")
+                loads = {}
+                for tag, w in (("t", 768), ("m", 390)):
+                    pg = b.new_page(viewport={"width": w, "height": 800}); pg.set_content(PAIR_EMIT_PAGE)
+                    loads[tag] = pg.evaluate(ce.CV_PATHS_JS); pg.close()
+                pg = b.new_page(viewport={"width": 359, "height": 800}); pg.set_content(PAIR_EMIT_PAGE)
+                loads["__pair"] = {"m": {"w": 359, "paths": pg.evaluate(ce.CV_PATHS_JS)}}; pg.close()
+                out = page.evaluate(ce.CV_EMIT_JS, loads)
+                self.assertEqual(out.get("pairvw"), 1, out)
+                html = page.content()
+            finally:
+                b.close()
+            html = ce.scope_viewport_css(html, 1000, 0).replace("<script>", "<script type='x'>")
+            b = p.chromium.launch()
+            try:
+                for w in (360, 420, 440):
+                    pg = b.new_page(viewport={"width": w, "height": 800})
+                    pg.set_content(html)
+                    h = pg.evaluate("document.getElementById('pic').getBoundingClientRect().height")
+                    self.assertAlmostEqual(h, w * 0.741, delta=1.5, msg=f"{w}: {h}")
+                    pg.close()
+                pg = b.new_page(viewport={"width": 1440, "height": 800}); pg.set_content(html)
+                self.assertAlmostEqual(pg.evaluate("document.getElementById('pic').getBoundingClientRect().height"), 420, delta=1)
+            finally:
+                b.close()

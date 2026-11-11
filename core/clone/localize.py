@@ -95,6 +95,9 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     WAAPI_BAKE_JS,
 )
 from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部 import 路径不变
+    CONTENT_KEEP_GUARD_JS,
+    SCROLL_UNLOCK_GUARD_JS,
+    relax_font_display,
     beacon_like,
     neutralize_deploy_hazards,
     ASSET_RESOURCE_TYPES,
@@ -444,6 +447,10 @@ class LocalizeMixin:
                 localized = self._inject_after_head(localized, bg_css)
             localized = self._inject_after_head(localized, sim_script)
             localized = self._inject_after_head(localized, REPLAY_DEDUPE_JS)
+            localized = self._inject_after_head(localized, SCROLL_UNLOCK_GUARD_JS)
+            localized = self._inject_after_head(localized, CONTENT_KEEP_GUARD_JS if getattr(config, "CONTENT_KEEP_GROUP", True)
+                                                else CONTENT_KEEP_GUARD_JS.replace(",GRP=1;", ",GRP=0;"))
+            localized = relax_font_display(localized)
             # 部署性能守卫: 未本地化的阻塞外链脚本(采集期已 404/跳过的计数/埋点、跨域图标)
             # 不得在本地部署时走反代兜底阻塞首屏 —— 删信标 / 其余转 async。
             localized = neutralize_deploy_hazards(

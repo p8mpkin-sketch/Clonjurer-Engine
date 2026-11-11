@@ -142,6 +142,24 @@ REPAIR_MIN_GAIN = 0.5          # 修复循环收敛判定: 缺失集合不变且
 FIDELITY_SKIP_ABOVE = 97.0    # 交互轨达到此分时不渲染保真轨(头条取优不受影响)
 VIEWPORT_VARIANT_MAX = 40      # 窄屏 DOM 变体: 结构不同的子树超过此数视为内容随机(推荐流), 不注入
 VIEWPORT_VARIANT_BYTES = 3_000_000   # 窄屏变体 HTML / 附带样式各自上限
+VARIANT_FLUID = True           # 窄屏首载页抽取变体前: 0.92 倍宽对照, 随宽同比的内联 px/img 尺寸属性改写为 vw
+VARIANT_FLUID_RESTORE = True   # 随宽对照(0.92/1.128 倍宽来回)后把内联 style/class 复原成首载态再抽变体
+NARROW_PHASE_RESET = True        # 窄屏首载页抽变体前也做状态类相位复位(滚动后才展开/轮换的同类组件回到源码 HTML 的首载分配)
+LATE_PHASE_RESET = True          # 序列化前复查一次状态类相位复位(首次复位后被页面脚本/重渲染写回的)
+VARIANT_ID_ALIGN = True          # 窄屏变体: 容器子项标签序列相同但带 id 的子项只在一侧存在 → 变体根提到容器
+VARIANT_ID_ALIGN_MAX = 12        # 上述容器数超过此值视为 id 不稳定(随机 id), 整体不用
+CONTENT_KEEP_GROUP = True        # 内容守卫: 同一父元素下成批同类兄弟(横向列表/轮播条目)被脚本重跑删掉、幸存不到 1/3 → 按原顺序放回
+VARIANT_PAIR_CONFIRM = True      # 窄屏变体比主页内容少/表单控件少时: 0.92 倍宽对照页(另一次加载)该子树结构相同 → 不算未水合, 采用
+BASELINE_PHASE_RESET = True      # 基准截图前也做状态类相位复位(基准与克隆同为源码相位, 布局校准不再把收起项撑回展开高度)
+PHASE_RESET_SIBLINGS = True      # 状态类相位复位也认没有 id 的同类兄弟组(按源码里父元素路径 + 子元素标签序列对上才用)
+CANVAS_FILL_BANDS = True         # 固化 canvas 撑满容器且宽高比各段恒定 → 平板/手机段写 width:100%+height:auto, 不钉首载宽度的 px
+VARIANT_CANVAS_CANON = False     # 结构对比时把已固化的 canvas 按 CANVAS 记(不再给 canvas 父元素出窄屏变体)。默认关: vite 手机 98→60, 窄屏变体里的 canvas 才是该宽度的真状态
+VARIANT_CANVAS_FILL = True       # 窄屏变体里脚本写了内联 px 宽高且撑满父元素的 canvas → width:100%+height:auto, 不钉首载宽度的 px
+ROOT_INLINE_VARIES_NOSIZE = True  # 根字号(html/body 内联 px)被脚本按屏宽改写时, 桌面宽采集的字体烘焙不烘字号/行高/字距(交回 rem 规则)
+NARROW_UA_SPLIT = True           # 手机 UA 首载页之外再开一张桌面 UA 390 页: 只在手机 UA 下才换结构的变体只给触屏显示
+NARROW_UA_CLS = True             # 手机 UA 首载页与桌面 UA 同宽页同路径 class 不同(桌面 UA 同宽与主页相同)→ 只给触屏手机段换 class(wix 手机卡片默认收起)
+NARROW_PHONE_UA = True           # 窄屏首载对照的手机宽(390)页用手机 UA + 触屏仿真单独上下文加载(与评分真机口径一致)
+NARROW_FLUID_PAIR = True         # 手机首载页旁再开一张 0.92 倍宽首载页, 认出只在加载时按宽度写一次的内联尺寸
 MAIN_SETTLE_MS = 4000          # 主页懒加载滚动后等 DOM「到位」(文字量/有源图片数/控件数连续不变)的上限(毫秒):
                                # 晚水合的表单/标签页组件(wix 首屏邮箱表单)抽早了克隆整块缺失
 VIEWPORT_VARIANT_SETTLE = 4.0  # 窄屏首载页抽取变体前平滑滚动的时限(秒): 触发进视口才起播的入场动画
@@ -232,3 +250,32 @@ MHTML_RETRY_TIMEOUT_S = float(os.environ.get("CLONER_MHTML_RETRY_TIMEOUT_S", "30
 THIN_STATIC_NO_RETRY = os.environ.get("CLONER_THIN_STATIC_NO_RETRY", "1") != "0"
 # 布局校准就地预评: 尺寸覆盖先注入活页重截图评分, 不升即不做整页重渲染(与 CALIB_INPLACE_GATE 同口径)
 LAYOUT_CALIB_INPLACE_GATE = os.environ.get("CLONER_LAYOUT_CALIB_INPLACE_GATE", "1") != "0"
+
+# ---------------------------------------------------------------------------
+# 常量环境覆盖(A/B 用): CLONER_CFG_<常量名>=值 覆盖本模块同名的 bool/int/float/str 常量。
+# 例 CLONER_CFG_NARROW_PHONE_UA=0 CLONER_CFG_MAIN_SETTLE_MS=0。CI 的 engine_env 输入就是一串这样的赋值,
+# 同一分支不改代码就能对照开关; 类型随原值, 解析失败忽略。
+# ---------------------------------------------------------------------------
+def _apply_env_overrides():
+    g = globals()
+    for k, v in os.environ.items():
+        if not k.startswith("CLONER_CFG_"):
+            continue
+        name = k[len("CLONER_CFG_"):]
+        if name not in g or name.startswith("_"):
+            continue
+        cur = g[name]
+        try:
+            if isinstance(cur, bool):
+                g[name] = v.strip().lower() in ("1", "true", "yes", "on")
+            elif isinstance(cur, int):
+                g[name] = int(v)
+            elif isinstance(cur, float):
+                g[name] = float(v)
+            elif isinstance(cur, str):
+                g[name] = v
+        except ValueError:
+            pass
+
+
+_apply_env_overrides()

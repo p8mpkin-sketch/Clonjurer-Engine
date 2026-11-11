@@ -50,6 +50,10 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     CV_ATTR_FN,
     CV_EMIT_JS,
     CV_PATHS_JS,
+    HIDDEN_ROOTS_JS,
+    TRANSITION_FINISH_JS,
+    SCROLL_LOCK_STRIP_JS,
+    VISIBLE_PATHS_JS,
     CV_PATH_FN,
     CV_QUIET_JS,
     CV_RECORD_JS,
@@ -1442,7 +1446,7 @@ _DIFF_DIM_LUT = [int(p * 0.45) for p in range(256)]
 
 def compute_visual_similarity(image_a: Path, image_b: Path, diff_path: Path = None,
                               orig_text: str = "", clone_text: str = "",
-                              prime_calibration: bool = False) -> dict:
+                              prime_calibration: bool = False, seg_detail: bool = False) -> dict:
     """诚实相似度 v3。返回 {score, structure, edge, text, ..., warnings[]}。
 
     v3 相对 v2 的口径修正:
@@ -1477,6 +1481,7 @@ def compute_visual_similarity(image_a: Path, image_b: Path, diff_path: Path = No
             diff_job = pool.submit(_write_diff, ra, rb, view_h, diff_path)
 
     s_sum = e_sum = w_sum = 0.0
+    segs = []
     if _np is not None:
         arr_b = _np.asarray(rb.convert("L"))
         # 参考图侧中间量(边缘掩码/NCC 去均值块)按内容缓存; 克隆图侧边缘 /
@@ -1493,6 +1498,7 @@ def compute_visual_similarity(image_a: Path, image_b: Path, diff_path: Path = No
             s_sum += w * nccs[k]
             e_sum += w * edges[k]
             w_sum += w
+            segs.append((round(float(nccs[k]), 3), round(float(edges[k]), 3)))
     else:  # pragma: no cover
         ga, gb = ra.convert("L"), rb.convert("L")
         for k in range(seg_count):
@@ -1536,7 +1542,7 @@ def compute_visual_similarity(image_a: Path, image_b: Path, diff_path: Path = No
     if structure < 0.5:
         warnings.append(f"块级结构相关性仅 {structure:.0%}: 存在大面积错位/缺失区域")
 
-    return {
+    out = {
         "score": round(max(0.0, min(100.0, score)), 1),
         "structure": round(structure, 3),
         "edge": round(edge, 3),
@@ -1548,6 +1554,9 @@ def compute_visual_similarity(image_a: Path, image_b: Path, diff_path: Path = No
         "scoring": "v3-segmented",
         "warnings": warnings,
     }
+    if seg_detail:   # 逐 512 段 (块级NCC, 边缘IoU): 定位失分落在整页哪一段(探针诊断用, 默认不加键, 基线等价闸门不变)
+        out["seg_detail"] = segs
+    return out
 
 
 def write_diff_preview(image_a: Path, image_b: Path, diff_path: Path) -> None:
@@ -2369,6 +2378,89 @@ def deploy_hazard_audit(html: str, page_host: str = "", local_root=None) -> dict
 # 移除旧节点, 提前去重会两边都丢, 实测 airpods-pro 交互轨 70.5→48); 若被标记元素在同一父节点
 # 下有相同(outerHTML, 忽略引擎自加的 data-cb/data-cv/data-cssom/data-clone-* 属性)且未被标记的兄弟——即冻结 DOM 里已有的同一份——则移除这份重放副本。
 # 框架水合/重渲染会先移除旧节点, 不会留下"旧的仍在"的孪生, 因而不受影响。
+# 克隆页运行时滚动锁守卫: 站点脚本在已序列化(脚本跑过)的 DOM 上重跑, 把弹层/抽屉当作"已打开"去水合,
+# 不等用户任何动作就给 html/body 写 overflow:hidden + position:fixed|absolute 的锁(allbirds 手机端 body 运行后
+# 多出 overflow:hidden;position:absolute;inset:0, 原站运行后 body 无内联样式)。页面加载后 12s 内、用户还没有
+# 任何激活手势时写上的锁, 一律撤掉; 用户点开菜单后的锁不管。「手势」= 守卫自己在捕获阶段听到的可信
+# pointerdown/keydown/touchstart/wheel(不用 navigator.userActivation: Playwright 的 evaluate 带 userGesture, 引擎评分/探针
+# 一调 evaluate 它就为真, 守卫在评分里形同虚设, 真机上却生效 —— 评分看不到的修复不可信)。
+SCROLL_UNLOCK_GUARD_JS = r"""<script data-clone-preview="scroll-unlock">(function(){try{if(window.__cloneUnlock)return;window.__cloneUnlock=1;var T0=Date.now(),LOCK=/^(overflow(?:-[xy])?|position|inset|top|right|bottom|left|height|width|padding-right|touch-action|overscroll-behavior(?:-[xy])?|scrollbar-gutter)$/i;function active(){return !!window.__cloneUserAct;}if(!window.__cloneActHook){window.__cloneActHook=1;['pointerdown','keydown','touchstart','wheel'].forEach(function(t){try{addEventListener(t,function(e){if(e.isTrusted)window.__cloneUserAct=1;},{capture:true,passive:true});}catch(e){}});}function strip(el){if(!el)return;var st=el.getAttribute('style')||'';if(!/(?:^|;)\s*overflow(?:-y)?\s*:\s*(?:hidden|clip)\b/i.test(st))return;var keep=[],parts=st.split(';'),n=0;for(var i=0;i<parts.length;i++){var d=parts[i],m=d.match(/^\s*([a-z-]+)\s*:\s*([\s\S]*)$/i);if(!m){if(d.trim())keep.push(d.trim());continue;}var k=m[1].toLowerCase(),v=m[2].trim();var lock=LOCK.test(k)&&!(k==='position'&&!/^(fixed|absolute)/i.test(v))&&!(k==='height'&&!/^(100%|100vh|100dvh|unset|auto|initial)$/i.test(v))&&!(k==='width'&&!/^(100%|100vw|unset|auto)$/i.test(v));if(lock)n++;else keep.push(k+': '+v);}if(!n)return;busy=1;try{if(keep.length)el.setAttribute('style',keep.join('; '));else el.removeAttribute('style');}finally{busy=0;}window.__cloneUnlocked=(window.__cloneUnlocked||0)+n;}var busy=0,mo=new MutationObserver(function(rs){if(busy||active()||Date.now()-T0>12000){try{mo.disconnect();}catch(e){}return;}for(var i=0;i<rs.length;i++){var t=rs[i].target;if(t===document.documentElement||t===document.body)strip(t);}});function arm(){try{mo.observe(document.documentElement,{attributes:true,attributeFilter:['style']});if(document.body)mo.observe(document.body,{attributes:true,attributeFilter:['style']});}catch(e){}strip(document.documentElement);strip(document.body);}if(document.body)arm();else document.addEventListener('DOMContentLoaded',arm);setTimeout(function(){try{mo.disconnect();}catch(e){}},12500);}catch(e){}})();</script>"""
+
+# 网页字体展示策略放宽(通用): @font-face{font-display:optional|fallback} 下, 字体没在首帧(optional 约 100ms /
+# fallback 3s)前到位, 浏览器就整页按后备字体排到底, 之后字体 loaded 也不再换(qwik 克隆手机端 41/100 双峰: 两张
+# Poppins 都 loaded, 却按后备字体行高排版; 原站有 CDN 预热/预加载, 首帧前到位)。克隆是离线交付, 字体从本地盘
+# 加载, 首帧前到不到位看运气; 真机看原站的稳态是网页字体, 所以改为 swap: 迟到也换上。
+_FONT_DISPLAY_RE = re.compile(r"(font-display\s*:\s*)(optional|fallback)\b", re.I)
+_FONT_DISPLAY_RE_B = re.compile(rb"(font-display\s*:\s*)(optional|fallback)\b", re.I)
+
+
+def relax_font_display(text):
+    """str 或 bytes 中的 font-display:optional|fallback → swap。"""
+    if isinstance(text, bytes):
+        return _FONT_DISPLAY_RE_B.sub(rb"\1swap", text)
+    return _FONT_DISPLAY_RE.sub(r"\1swap", text)
+
+
+# 克隆页运行时内容守卫(通用): 站点脚本在已序列化的 DOM 上重跑, 框架水合失配后按"客户端渲染"重建组件, 数据接口
+# 在克隆里拿不到就把已经渲染好的一整块拆掉(allbirds 手机端 Best Sellers 轮播 394px 整块被 Vue 移除, 页脚被
+# 换成空网格)。守卫在所有页面脚本之前挂钩 DOM 移除 API(removeChild/remove/replaceChild/replaceChildren/
+# innerHTML/textContent): 加载后 12s 内、用户没有任何激活手势时, 移除一块 ≥100px 高的已连接元素, 先量下它和
+# 父元素的高; 600ms 后若该块没有被放回文档、父元素又真的塌掉了被移除块 60% 以上的高度(即不是"拆了再换一份"),
+# 就把原块放回原位(先按原前一个兄弟定位, 它不在了才按原后一个: 站点脚本会把埋点/沙箱容器挪到 body 开头, 单按后兄弟定位曾把 739px 页脚放到 main 之前)(父元素下已有同签名、高度相近的孪生块 = 先插新再删旧的替换, 不放回)。放回后一直看着(不限时): 父元素后来又长回来(异步数据到了 / 滚到视口才挂载, 新内容补上), 再把放回的
+# 旧块撤掉, 避免双份(allbirds 轮播: Vue 先插入空壳、图片到了/swiper 初始化后才长高, 父元素 childList 不再变 —— 用
+# ResizeObserver 盯父元素尺寸 + 子树变动兜底; 曾与放回块并存 394px×2)。
+# 同类兄弟成批丢失(CONTENT_KEEP_GROUP): 横向列表/轮播的条目被拆时父元素不变矮, 上面的"塌高"判据看不见(allbirds
+# Best Sellers: 序列化 12 张卡, Vue 在克隆里按 1 条数据水合, 把其余 11 张当多余节点删掉)。同一父元素下 ≥3 个同签名
+# 兄弟在窗口内被删、幸存的同签名兄弟不到被删数的 1/3 → 按原顺序放回(与幸存者文案逐字相同的不放, 免重复);
+# 之后父元素里脚本自己又渲染出一半以上数量的同类条目(数据到了) → 撤掉放回的。
+CONTENT_KEEP_GUARD_JS = r"""<script data-clone-preview="content-keep">(function(){try{if(window.__cloneKeep)return;window.__cloneKeep=1;var T0=Date.now(),WIN=12000,MIN=100,REC=[],KEPT=[],measured=0,done=false,RST=new WeakSet(),GRP=1;
+function active(){return !!window.__cloneUserAct;}if(!window.__cloneActHook){window.__cloneActHook=1;['pointerdown','keydown','touchstart','wheel'].forEach(function(t){try{addEventListener(t,function(e){if(e.isTrusted)window.__cloneUserAct=1;},{capture:true,passive:true});}catch(e){}});}
+function over(){return done||active()||Date.now()-T0>WIN;}
+function hOf(el){try{var r=el.getBoundingClientRect();return r.width>=60?r.height:0;}catch(e){return 0;}}
+var selfRm=0;function twin(r){try{var ch=r.p.children;for(var i=0;i<ch.length;i++){var c=ch[i];if(c!==r.n&&c.tagName===r.n.tagName&&sim(c,r.n)&&hOf(c)>=r.h*0.75)return true;}}catch(e){}return false;}
+function note(n,parent){if(selfRm||over()||measured>300||!n||n.nodeType!==1||!n.isConnected||!parent||parent.nodeType!==1)return;var t=n.tagName;if(/^(SCRIPT|STYLE|LINK|TEMPLATE|NOSCRIPT|META|HTML|HEAD|BODY)$/.test(t)||n.closest('svg'))return;measured++;var h=hOf(n);if(h<MIN)return;REC.push({n:n,p:parent,next:n.nextElementSibling,prev:n.previousElementSibling,h:h,ph:hOf(parent),t:Date.now()});sched();}
+function noteAll(parent){if(over()||!parent||parent.nodeType!==1||!parent.isConnected||!parent.children)return;var ch=parent.children;for(var i=0;i<ch.length;i++)note(ch[i],parent);}
+var tm=0;function sched(){if(tm)return;tm=setTimeout(check,600);}
+function grpMark(now){var by=new Map();for(var i=0;i<REC.length;i++){var r=REC[i];if(r.back||r.grp||now-r.t<550||r.n.isConnected||!r.p.isConnected)continue;var a=by.get(r.p);if(!a){a=[];by.set(r.p,a);}a.push(r);}
+by.forEach(function(a,p){if(a.length<3)return;var f=a[0].n,k=0;for(var i=0;i<a.length;i++)if(a[i].n.tagName===f.tagName&&sim(a[i].n,f))k++;if(k<3)return;var s=0,ch=p.children;for(var j=0;j<ch.length;j++){var c=ch[j];if(c.tagName===f.tagName&&sim(c,f)&&hOf(c)>=MIN)s++;}if(s*3>k)return;for(var i2=0;i2<a.length;i2++)if(a[i2].n.tagName===f.tagName&&sim(a[i2].n,f)){a[i2].grp=1;a[i2].gk=k;}});}
+function nt(e){return String(e.textContent||'').replace(/\s+/g,' ').trim();}
+function dupText(r){try{var ch=r.p.children;for(var i=0;i<ch.length;i++){var c=ch[i];if(c!==r.n&&c.tagName===r.n.tagName&&nt(c)===nt(r.n)&&nt(c).length>0)return true;}}catch(e){}return false;}
+function check(){tm=0;if(over()){return;}var now=Date.now(),rest=[];if(GRP)try{grpMark(now);}catch(e){}
+for(var i=REC.length-1;i>=0;i--){var r=REC[i];if(r.dead)continue;if(r.back){rest.push(r);continue;}if(now-r.t<550){rest.push(r);continue;}if(r.n.isConnected||!r.p.isConnected)continue;if(r.grp){if(dupText(r))continue;}else{var ph=hOf(r.p);if(ph>r.ph-r.h*0.6)continue;if(twin(r))continue;}try{var nx=r.prev&&r.prev.parentNode===r.p?r.prev.nextSibling:(r.next&&r.next.parentNode===r.p?r.next:null);r.p.insertBefore(r.n,nx);r.back=1;KEPT.push(r);RST.add(r.n);r.phBack=hOf(r.p);window.__cloneKept=(window.__cloneKept||0)+1;rest.push(r);try{mo.observe(r.p,{childList:true,subtree:true});if(ro)ro.observe(r.p);}catch(e){}}catch(e){}}
+rest.reverse();REC=rest;if(REC.length)sched();}
+function undo(){for(var i=0;i<KEPT.length;i++){var r=KEPT[i];if(!r.back||!r.n.isConnected)continue;if(r.grp){var c2=0,ch=r.p.children;for(var j=0;j<ch.length;j++){var c=ch[j];if(!RST.has(c)&&c.tagName===r.n.tagName&&hOf(c)>=MIN)c2++;}if(c2*2>=r.gk){try{selfRm=1;r.n.remove();selfRm=0;r.back=0;r.dead=1;window.__cloneKept=(window.__cloneKept||0)-1;}catch(e){selfRm=0;}}continue;}var ph=hOf(r.p);if(ph-r.h>=r.ph*0.7){try{r.n.remove();r.back=0;window.__cloneKept=(window.__cloneKept||0)-1;}catch(e){}}}}
+function wrap(P,k,pick){var d=Object.getOwnPropertyDescriptor(P,k);if(!d||typeof d.value!=='function')return;var f=d.value;P[k]=function(){try{pick(this,arguments);}catch(e){}return f.apply(this,arguments);};}
+function wrapSet(P,k){var d=Object.getOwnPropertyDescriptor(P,k);if(!d||!d.set)return;Object.defineProperty(P,k,{configurable:true,enumerable:d.enumerable,get:d.get,set:function(v){try{noteAll(this);}catch(e){}d.set.call(this,v);}});}
+wrap(Node.prototype,'removeChild',function(self,a){note(a[0],self);});
+wrap(Node.prototype,'replaceChild',function(self,a){note(a[1],self);});
+wrap(Element.prototype,'remove',function(self){note(self,self.parentNode);});
+wrap(Element.prototype,'replaceChildren',function(self){noteAll(self);});
+wrap(Element.prototype,'replaceWith',function(self){note(self,self.parentNode);});
+wrapSet(Element.prototype,'innerHTML');wrapSet(Node.prototype,'textContent');
+// 放回后的撤销不限时: 父元素里后来又长出新内容(懒挂载/滚到视口才渲染, 可能远在 12s 之后), 旧块必须撤, 否则双份
+var ud=0,bump=function(){clearTimeout(ud);ud=setTimeout(undo,400);},mo=new MutationObserver(bump),ro=window.ResizeObserver?new ResizeObserver(bump):null;
+setTimeout(function(){done=true;},WIN+500);
+// 水合"追加而非接管": 框架在克隆里重跑时把组件当作未渲染, 在已有 SSR 块旁边再插一份同签名(同标签、class 几乎相同且
+// 高度相近 ±25%; 或换了标签/class 但文案基本相同、高度差 ≤60%)的大块(allbirds 手机端 Best Sellers 轮播 394px×2)。加载后 12s 内、无手势、父元素下该签名块从 1 个变 2 个,
+// 1.5s 后两块仍都在且高度仍相近 → 移除序列化的旧块, 留脚本新渲染的那份(苹果类页面"先插新再删旧"会在 1.5s 内自己删旧, 不触发)
+var NEWS=new WeakSet(),PAIRS=[];
+function toks(e){return String(e.className&&e.className.baseVal!==undefined?e.className.baseVal:e.className||'').split(/\s+/).filter(Boolean);}
+function sim(a,b){var A=toks(a),B=toks(b);if(!A.length&&!B.length)return true;var S=new Set(A),n=0;for(var i=0;i<B.length;i++)if(S.has(B[i]))n++;return n/Math.max(A.length,B.length)>=0.6;}
+// 文本签名: 同一页脚/同一组件换了标签和 class 重渲染(allbirds 页脚 footer.bg-black 801px → div.grid 526px, 链接文案相同),
+// 用前 80 个词的 Jaccard 认亲
+function words(e){try{return new Set(String(e.innerText||'').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(function(w){return w.length>1;}).slice(0,80));}catch(e){return new Set();}}
+function tsim(a,b){var A=words(a),B=words(b);if(A.size<6||B.size<6)return false;var n=0;A.forEach(function(w){if(B.has(w))n++;});return n/Math.max(A.size,B.size)>=0.5;}
+function onAdded(n){if(over()||!n||n.nodeType!==1||RST.has(n)||!n.parentNode||n.parentNode.nodeType!==1)return;if(/^(SCRIPT|STYLE|LINK|TEMPLATE|NOSCRIPT|META|HTML|HEAD|BODY)$/.test(n.tagName))return;NEWS.add(n);
+  if(PAIRS.length<200){PAIRS.push({n:n,t:Date.now()});setTimeout(dedup,1600);}}
+function dedup(){if(over())return;var now=Date.now(),rest=[];for(var i=0;i<PAIRS.length;i++){var q=PAIRS[i];if(now-q.t<1500){rest.push(q);continue;}var n=q.n;if(!n.isConnected||!n.parentNode||n.parentNode.nodeType!==1)continue;var a=hOf(n);if(a<MIN)continue;
+  var old=null,cnt=0,ch=n.parentNode.children;for(var j=0;j<ch.length;j++){var c=ch[j];if(c===n||NEWS.has(c))continue;var b=hOf(c);if(b<MIN)continue;if(c.tagName===n.tagName&&sim(c,n)){cnt++;old=c;continue;}if(Math.abs(a-b)<=Math.max(a,b)*0.6&&tsim(c,n)){cnt++;old=c;}}
+  if(cnt!==1||!old)continue;var b2=hOf(old);if(old.tagName===n.tagName&&sim(old,n)&&Math.abs(a-b2)>Math.max(a,b2)*0.25)continue;
+  try{selfRm=1;old.remove();selfRm=0;window.__cloneHydrDedup=(window.__cloneHydrDedup||0)+1;}catch(e){}}PAIRS=rest;}
+var addMo=new MutationObserver(function(rs){if(over()){try{addMo.disconnect();}catch(e){}return;}for(var i=0;i<rs.length;i++){var a=rs[i].addedNodes;for(var j=0;j<a.length;j++)onAdded(a[j]);}});
+function armAdd(){try{addMo.observe(document.documentElement,{childList:true,subtree:true});}catch(e){}}
+if(document.readyState!=='loading')armAdd();else document.addEventListener('DOMContentLoaded',armAdd);
+window.__cloneKeepDbg=function(){return KEPT.map(function(r){return [r.n.tagName+'.'+String(r.n.className).slice(0,30),r.h,r.ph,hOf(r.p),r.back?1:0,r.n.isConnected?1:0];});};}catch(e){}})();</script>"""
+
 REPLAY_DEDUPE_JS = r"""<script data-clone-preview="replay-dedupe">(function(){try{if(window.__cloneDedupe)return;window.__cloneDedupe=1;var M=[],mark=new WeakSet(),mo=new MutationObserver(function(){});mo.observe(document.documentElement,{childList:true,subtree:true});
 function take(was){var rs=mo.takeRecords();if(document.readyState!=='loading')return;for(var i=0;i<rs.length;i++){var a=rs[i].addedNodes;for(var j=0;j<a.length;j++){var n=a[j];if(n.nodeType===1&&!(was&&was.indexOf(n)>=0)&&!mark.has(n)){mark.add(n);if(M.length<4000)M.push(n);}}}}
 function wrap(P,k){var d=Object.getOwnPropertyDescriptor(P,k);if(!d||typeof d.value!=='function')return;var f=d.value;P[k]=function(){var was=[];for(var i=0;i<arguments.length;i++){var x=arguments[i];if(x&&x.nodeType===1&&x.isConnected)was.push(x);}mo.takeRecords();var r=f.apply(this,arguments);take(was);return r;};}
@@ -2640,34 +2732,215 @@ def fontface_plan(css_text: str, base_url: str, cps=None):
 
 
 # ---- 窄屏/流式字号辅助(来自移动端适配线) ----
-_FLUID_GEOM_RE = re.compile(r"(?:^|;)\s*(width|height|min-width|max-width|min-height|max-height|font-size|line-height|"
+_FLUID_GEOM_RE = re.compile(r"(?:^|;)\s*(attr-width|attr-height|width|height|min-width|max-width|min-height|max-height|font-size|line-height|"
                             r"letter-spacing|top|left|right|bottom|margin-[a-z]+|padding-[a-z]+|gap|column-gap|row-gap)\s*:\s*"
                             r"(-?\d+(?:\.\d+)?)px\s*(!important)?(?=;|$)", re.I)
 
 
-def _fluid_elements(fa: dict, fb: dict, w1: float, w2: float, tol: float = 0.015):
-    """两个宽度下的 FLUID_READ_JS 快照 → 字号随宽同比的元素路径 + 内联 px 同比的属性(改 vw)。
-    同比: 值比 ≈ 宽比(±tol), 且值不同(定值不算)。"""
+def _root_inline_varies(reads) -> bool:
+    """reads: 各视口宽下 ROOT_FONT_READ_JS 的读数 [宽, html 内联px, html 计算px, body 内联px, body 计算px]。
+    <html> 或 <body> 的内联 px 字号在不同宽度下相差 >1.5% 即认定由脚本按屏宽改写。"""
+    for i in (1, 3):
+        vals = [r[i] for r in reads if r and len(r) > i and r[i] > 0]
+        if len(vals) >= 2 and max(vals) / min(vals) > 1.015:
+            return True
+    return False
+
+
+def _subtree_sig(paths, root):
+    """CV_PATHS_JS 结果里 root 及其后代的结构签名(路径 → 标签 + 子元素标签序列); root 不在则为 None。"""
+    if root not in paths:
+        return None
+    pre = root + ">"
+    return {k: (v[0], v[3]) for k, v in paths.items() if k == root or k.startswith(pre)}
+
+
+def _id_misaligned_parents(main, other):
+    """CV_PATHS_JS 两页结果里, 子元素标签序列相同而 id 序列错位的容器路径。
+    错位: 同一序号两侧 id 不同, 且其中带 id 的那个在另一页整页都不存在(不是换了位置, 是另一页没有这个组件)。"""
+    def _all_ids(tbl):
+        out = set()
+        for v in tbl.values():
+            if len(v) > 8 and v[8]:
+                out.update(x for x in v[8].split(",") if x)
+        return out
+    ids_m, ids_o = _all_ids(main), _all_ids(other)
+    if not ids_m or not ids_o:
+        return []
+    out = []
+    for p, v in main.items():
+        o = other.get(p)
+        if not p or not o or len(v) <= 8 or len(o) <= 8 or o[0] != v[0] or o[3] != v[3] or v[8] == o[8]:
+            continue
+        a, b = v[8].split(","), o[8].split(",")
+        if len(a) != len(b):
+            continue
+        if any(x != y and ((x and x not in ids_o) or (y and y not in ids_m)) for x, y in zip(a, b)):
+            out.append(p)
+    return out
+
+
+def _source_id_classes(html, limit=6000):
+    """源码 HTML 里带 id 的开标签的 class: {id: class}。只做状态类相位复位的对照, 解析失败返回空。"""
+    if not html or len(html) > 8_000_000:
+        return {}
+    from html.parser import HTMLParser
+
+    out = {}
+
+    class _P(HTMLParser):
+        def handle_starttag(self, tag, attrs):
+            if len(out) >= limit:
+                return
+            d = dict(attrs)
+            i, c = d.get("id"), d.get("class")
+            if i and c is not None and i not in out:
+                out[i] = c
+
+    try:
+        _P(convert_charrefs=True).feed(html)
+    except Exception:  # noqa: BLE001
+        return out
+    return out
+
+
+_VOID_TAGS = frozenset("area base br col embed hr img input link meta param source track wbr".split())
+
+
+def _source_sibling_groups(html, limit=4000, kid_limit=24000):
+    """源码 HTML 里 <body> 下「≥2 个子元素且有子元素带 class」的父元素: [{a: 最近的带 id 祖先(或 ""=body), i: 从它往下的子元素序号链,
+    k: [[子标签, class 或 None, id 或 ""], ...]}]。给状态类相位复位认没有 id 的同类兄弟组(轮播项/指示点/折叠卡)。
+    html.parser 不做隐式闭合, 路径可能与活体 DOM 对不上: 使用方必须再核对子元素个数与标签序列, 对不上就不用。"""
+    if not html or len(html) > 8_000_000:
+        return []
+    from html.parser import HTMLParser
+
+    root = {"tag": "body", "id": "", "cls": None, "kids": [], "up": None}
+    stack = []
+
+    class _P(HTMLParser):
+        def handle_starttag(self, tag, attrs):
+            if not stack:
+                if tag == "body":
+                    stack.append(root)
+                return
+            d = dict(attrs)
+            node = {"tag": tag, "id": d.get("id") or "", "cls": d.get("class"), "kids": [], "up": stack[-1]}
+            stack[-1]["kids"].append(node)
+            if tag not in _VOID_TAGS:
+                stack.append(node)
+
+        def handle_startendtag(self, tag, attrs):
+            if stack:
+                d = dict(attrs)
+                stack[-1]["kids"].append({"tag": tag, "id": d.get("id") or "", "cls": d.get("class"), "kids": [], "up": stack[-1]})
+
+        def handle_endtag(self, tag):
+            for j in range(len(stack) - 1, 0, -1):
+                if stack[j]["tag"] == tag:
+                    del stack[j:]
+                    return
+
+    try:
+        _P(convert_charrefs=True).feed(html)
+    except Exception:  # noqa: BLE001
+        return []
+    out, total = [], 0
+    todo = [root]
+    while todo and len(out) < limit and total < kid_limit:
+        node = todo.pop()
+        kids = node["kids"]
+        todo.extend(reversed(kids))
+        if len(kids) < 2 or not any(k["cls"] for k in kids) or len(kids) > 200:
+            continue
+        idx, cur = [], node
+        while cur is not root and not cur["id"]:
+            idx.append(cur["up"]["kids"].index(cur))
+            cur = cur["up"]
+        out.append({"a": cur["id"] if cur is not root else "", "i": idx[::-1],
+                    "k": [[k["tag"], k["cls"], k["id"]] for k in kids]})
+        total += len(kids)
+    return out
+
+
+def _fluid_elements(fa: dict, fb: dict, w1: float, w2: float, tol: float = 0.015, fc: dict = None, w3: float = None):
+    """两/三个宽度下的 FLUID_READ_JS 快照 → 字号随宽同比的元素路径 + 内联 px 同比的属性(改 vw)。
+    同比: 值比 ≈ 宽比(±tol), 且值不同(定值不算)。
+    第三个样本(更宽, fc/w3)用来认"同比但封顶/垫底"的分段函数: 窄侧同比、宽侧不再长 → min(Xvw, 封顶px);
+    窄侧不再缩、宽侧同比 → max(Xvw, 垫底px)。两个样本只能外推直线, 到更宽的机型(440)就偏一两行字的高度
+    (wix Pro Max 段落少换一行, 其后整页位移 38px)。三点都不成线性(断点换公式)就不改, 保留 px。"""
     paths, inline = [], {}
     if not fa or not fb or not w1 or not w2 or w1 == w2:
         return {"paths": paths, "inline": inline}
     ratio = w2 / w1
+    r3 = (w3 / w1) if (fc and w3 and w3 != w1) else None
     for path, va in fa.items():
         vb = fb.get(path)
         if not vb or vb[0] != va[0]:
+            continue
+        # canvas 的位图/显示尺寸归 canvas 固化(aspect-ratio + 分视口盒高)管: 位图宽高属性写成 vw 后在 820 宽
+        # 把固化图撑大(vite iPad Air 87→77)
+        if va[0] == "CANVAS":
             continue
         f1, f2 = va[1] or 0, vb[1] or 0
         if f1 >= 6 and f2 > 0 and f1 != f2 and abs((f2 / f1) / ratio - 1) <= tol:
             paths.append(path)
         if va[2] and vb[2] and va[2] != vb[2]:
             pb = {m.group(1).lower(): float(m.group(2)) for m in _FLUID_GEOM_RE.finditer(vb[2])}
+            vc = fc.get(path) if r3 else None
+            pc = ({m.group(1).lower(): float(m.group(2)) for m in _FLUID_GEOM_RE.finditer(vc[2])}
+                  if vc and vc[0] == va[0] and vc[2] else None)
             for m in _FLUID_GEOM_RE.finditer(va[2]):
                 k, v1 = m.group(1).lower(), float(m.group(2))
                 v2 = pb.get(k)
-                if v2 is None or v1 == 0 or v1 == v2 or abs((v2 / v1) / ratio - 1) > tol:
+                if v2 is None or v1 == 0:
                     continue
-                inline.setdefault(path, {})[k] = f"{v1 / w1 * 100:.4f}vw"
+                v3 = pc.get(k) if pc is not None else None
+                if v1 == v2 and (v3 is None or v3 == v1):
+                    continue
+                lin12 = v1 != v2 and abs((v2 / v1) / ratio - 1) <= tol
+                vw = f"{v1 / w1 * 100:.4f}vw"
+                if v3 is None:
+                    if lin12:
+                        inline.setdefault(path, {})[k] = vw
+                    continue
+                lin13 = v3 != v1 and abs((v3 / v1) / r3 - 1) <= tol
+                if lin12 and lin13:
+                    inline.setdefault(path, {})[k] = vw
+                elif v1 > 0 and lin12 and v1 <= v3 < v1 * r3 * (1 - tol):
+                    inline.setdefault(path, {})[k] = f"min({vw}, {v3:g}px)"       # 宽侧封顶
+                elif v1 > 0 and lin13 and v1 * ratio * (1 + tol) < v2 <= v1:
+                    inline.setdefault(path, {})[k] = f"max({vw}, {v2:g}px)"       # 窄侧垫底
+    _drop_slider_tracks(inline)
     return {"paths": paths, "inline": inline}
+
+
+def _vw_num(v):
+    m = re.match(r"^([\d.]+)vw$", v or "")
+    return float(m.group(1)) if m else None
+
+
+def _drop_slider_tracks(inline: dict) -> int:
+    """轮播轨道(父元素内联宽 = 各子项内联宽之和, 子项 ≥2 且等宽)不改 vw: 轨道/子项宽由轮播脚本按容器宽维护,
+    克隆里脚本照样会重算, 写死成 vw 反而和脚本的当前项/位移对不上(ant.design 手机 91→61, 两项叠成两倍高)。"""
+    kids = {}
+    for path, props in inline.items():
+        if ">" in path and _vw_num(props.get("width")) is not None:
+            kids.setdefault(path.rsplit(">", 1)[0], []).append(path)
+    n = 0
+    for parent, ch in kids.items():
+        pw = _vw_num((inline.get(parent) or {}).get("width"))
+        if pw is None or len(ch) < 2:
+            continue
+        ws = [_vw_num(inline[c]["width"]) for c in ch]
+        if max(ws) - min(ws) > max(ws) * 0.02 or abs(sum(ws) - pw) > pw * 0.02:
+            continue
+        for c in ch + [parent]:
+            inline[c].pop("width", None)
+            if not inline[c]:
+                inline.pop(c)
+            n += 1
+    return n
 
 
 _HIDE_DECL_RE = re.compile(

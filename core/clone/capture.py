@@ -35,6 +35,15 @@ from core import pattern_detector, strategy_packs
 from core import pixel_calibrator
 
 from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 import 路径不变
+    CANVAS_PIN_JS,
+    CV_CANVAS_DRIFT_JS,
+    HIDDEN_ROOTS_JS,
+    IMG_SRC_PIN_JS,
+    ROUNDTRIP_PIN_JS,
+    SCROLL_LOCK_STRIP_JS,
+    STATE_PHASE_RESET_JS,
+    TRANSITION_FINISH_JS,
+    VISIBLE_PATHS_JS,
     AD_RECTS_JS,
     INTERSTITIAL_HIDE_JS,
     ROOT_FONT_APPLY_JS,
@@ -106,6 +115,11 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     WAAPI_BAKE_JS,
 )
 from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部 import 路径不变
+    _id_misaligned_parents,
+    _root_inline_varies,
+    _source_id_classes,
+    _source_sibling_groups,
+    _subtree_sig,
     beacon_like,
     ASSET_RESOURCE_TYPES,
     ASSET_SKIP_PREFIXES,
@@ -458,7 +472,11 @@ class CaptureMixin:
         try:
             parts = []   # 分步耗时(缩放/静置/记录, 秒): 远程归因慢站在哪一步
             tq = time.monotonic()
+            with suppress(Exception):
+                page.evaluate(CANVAS_PIN_JS, "save")
+                page.evaluate(IMG_SRC_PIN_JS, "save")
             n = page.evaluate(CV_RECORD_JS, "d")
+            roots = [page.evaluate(ROOT_FONT_READ_JS)]
             parts.append(f"d 记录 {time.monotonic() - tq:.1f}")
             for tag, w in (("t", 768), ("m", 390), ("b", width)):
                 t1 = time.monotonic()
@@ -467,8 +485,32 @@ class CaptureMixin:
                 page.evaluate(CV_QUIET_JS, 300 if tag == "b" else 250)
                 t3 = time.monotonic()
                 if tag == "b":
+                    with suppress(Exception):
+                        k = page.evaluate(IMG_SRC_PIN_JS, "restore")
+                        if k:
+                            self.log("RENDER", f"多视口内联采集: {k} 张图片缩放来回后地址被站点脚本清空, 已按缩放前还原")
+                    # 图表/动画库的 canvas 在来回缩放后可能按还原瞬间(布局未稳)量到的盒子重设位图(vite 首页 638x339 → 548),
+                    # 基准截图、布局校准、固化都会接着用这个错态: 尺寸与缩放前不同的 canvas 存在时再派发一次 resize 让库按稳定布局重算
+                    with suppress(Exception):
+                        for _ in range(2):
+                            if not page.evaluate(CV_CANVAS_DRIFT_JS):
+                                break
+                            page.evaluate("window.dispatchEvent(new Event('resize'))")
+                            page.evaluate(CV_QUIET_JS, 300)
+                        drift = page.evaluate(CV_CANVAS_DRIFT_JS)
+                        pinned = page.evaluate(CANVAS_PIN_JS, "restore")
+                        if drift or pinned:
+                            self.log("RENDER", f"多视口内联采集: {drift} 个 canvas 缩放来回后尺寸未回到原值, {pinned} 个按缩放前显示盒钉住")
                     page.evaluate(SCROLL_TOP_JS)
                 page.evaluate(CV_RECORD_JS, tag)
+                if tag != "b":
+                    roots.append(page.evaluate(ROOT_FONT_READ_JS))
+                else:
+                    # 脚本按屏宽改写 <html>/<body> 内联字号(rem 基准; 桌面宽下常已封顶, 与宽不成正比): 桌面宽烘焙的 px 字号/行高
+                    # 没有断点可限定区间时会在所有宽度压过 rem 规则 —— 窄屏下盒子按新基准缩了、字仍是桌面 px。认定后不烘字号度量
+                    self._root_inline_varies = bool(config.ROOT_INLINE_VARIES_NOSIZE and _root_inline_varies(roots))
+                    if self._root_inline_varies:
+                        self.log("RENDER", "多视口内联采集: 根字号由脚本按屏宽改写, 字体烘焙不烘字号/行高/字距")
                 parts.append(f"{tag} 缩放 {t2 - t1:.1f}/静置 {t3 - t2:.1f}/记录 {time.monotonic() - t3:.1f}")
             self.log("RENDER", f"多视口内联采集: {n} 个元素 × 平板/手机视口 {time.monotonic() - t0:.1f}s"
                                f"({'; '.join(parts)})")
@@ -481,6 +523,16 @@ class CaptureMixin:
                 page.evaluate("window.__cvRec = null")
             self.log("WARN", f"多视口内联采集失败: {exc}")
 
+
+    def _phase_src(self, html):
+        """状态类相位复位的源码对照: ({id: class}, 同类兄弟组)。同一份源码只解析一次。"""
+        if not html:
+            return {}, []
+        memo = getattr(self, "_phase_src_memo", None)
+        if memo is None or memo[0] is not html:
+            grp = _source_sibling_groups(html) if getattr(config, "PHASE_RESET_SIBLINGS", True) else []
+            memo = self._phase_src_memo = (html, _source_id_classes(html), grp)
+        return memo[1], memo[2]
 
     def _probe_root_font(self, page):
         """rem 基准随视口宽成正比(<html>/<body> 内联 font-size = 宽/N)时, 冻结后改写成 vw(见
@@ -531,16 +583,52 @@ class CaptureMixin:
         """同上下文另开平板/手机宽的页面重新加载目标页(只等到响应提交, 与主页后续采集并行):
         只在加载时按宽度写一次的内联样式, 缩放采不到, 要靠窄屏首载对照(见 CV_EMIT_JS)。"""
         self._cv_pages = []
+        self._cv_mdesk = None
+        self._cv_extra_ctx = []
+        self._cv_pair = {}
         for tag, w in (("t", 768), ("m", 390)):
             p2 = None
             try:
-                p2 = page.context.new_page()
+                if tag == "m" and getattr(config, "NARROW_PHONE_UA", True):
+                    # 手机宽页按真机口径加载: 手机 UA + 触屏仿真, 单独上下文(UA 是上下文级)。服务端/脚本按 UA
+                    # 或按 A/B 下发的首屏组件(wix 邮箱表单: 桌面 UA 采集 5 轮里 3 轮没有, 手机 UA 评分侧 8/8 有)
+                    # 只在手机 UA 下才稳定出现, 桌面上下文里再开 390 宽页抽不到, 克隆手机端整块缺失
+                    hdrs = dict(getattr(self, "_ctx_headers", {}) or {})
+                    ctx2 = page.context.browser.new_context(
+                        viewport={"width": w, "height": height}, user_agent=config.PHONE_USER_AGENT,
+                        extra_http_headers=hdrs, ignore_https_errors=True, **config.PHONE_DEVICE)
+                    self._cv_extra_ctx.append(ctx2)
+                    p2 = ctx2.new_page()
+                    # 同宽再开一张桌面 UA 页(只读结构): 手机 UA 页换了结构而桌面 UA 同宽页没换的子树是按 UA 下发的,
+                    # 不是按宽度; 这类变体只给触屏设备显示, 桌面浏览器窄窗口仍显示主页版(wix 手机 390 89→43)
+                    if getattr(config, "NARROW_UA_SPLIT", True):
+                        try:
+                            p4 = page.context.new_page()
+                            p4.set_viewport_size({"width": w, "height": height})
+                            p4.goto(page.url, wait_until="commit", timeout=10000)
+                            self._cv_mdesk = p4
+                        except Exception as exc:   # noqa: BLE001 可有可无
+                            self.log("WARN", f"桌面 UA 窄屏对照页启动失败: {str(exc)[:120]}")
+                else:
+                    p2 = page.context.new_page()
                 # 窄屏才显示/才加载的图(手机版首屏图、按断点换的 picture 源)桌面活体从没请求过, 不登记就
                 # 进不了活体回补, 克隆在手机宽度下整块裂图(wix 手机首屏 ~40 分)
                 p2.on("response", lambda r: self._on_asset_response(r, bodies=False))
                 p2.set_viewport_size({"width": w, "height": height})
                 p2.goto(page.url, wait_until="commit", timeout=10000)
                 self._cv_pages.append((tag, p2))
+                # 手机页旁再开一张 0.92 倍宽的首载对照页(同上下文): 只在加载时按宽度写一次的内联尺寸(wix 图片组件
+                # 的 height px)缩放不会重写, 同页三点采样看不出; 两张不同宽度的首载页对照才认得出同比
+                if tag == "m" and getattr(config, "NARROW_FLUID_PAIR", True):
+                    w2 = int(round(w * 0.92))
+                    try:
+                        p3 = p2.context.new_page()
+                        p3.on("response", lambda r: self._on_asset_response(r, bodies=False))
+                        p3.set_viewport_size({"width": w2, "height": height})
+                        p3.goto(page.url, wait_until="commit", timeout=10000)
+                        self._cv_pair[tag] = (p3, w2)
+                    except Exception as exc:   # noqa: BLE001 对照页可有可无
+                        self.log("WARN", f"窄屏首载对照页({w2}px)启动失败: {str(exc)[:120]}")
             except Exception as exc:
                 with suppress(Exception):
                     if p2 is not None:
@@ -548,8 +636,12 @@ class CaptureMixin:
                 self.log("WARN", f"窄屏首载对照({w}px)启动失败: {str(exc)[:120]}")
 
 
-    def _collect_narrow_loads(self, budget_s=8.0):
-        """收回窄屏首载页的内联样式表并关页; 预算内没加载完的放弃。"""
+    def _collect_narrow_loads(self, budget_s=None):
+        """收回窄屏首载页的内联样式表并关页; 预算内没加载完的放弃(记日志: 否则该站手机端没有变体/分视口
+        样式却看不出原因)。预算随主页就绪耗时放大: 跨境慢站(CI 美国出口访问国内站就绪 11s+)固定 8s 两页都等不到,
+        窄屏首载页一张没有, 手机端整块桌面横幅留在克隆里。"""
+        if budget_s is None:
+            budget_s = min(24.0, max(8.0, float(getattr(self, "_nav_ready_s", 0) or 0) * 1.5))
         loads, t0 = {}, time.monotonic()
         for tag, p2 in getattr(self, "_cv_pages", []) or []:
             try:
@@ -559,9 +651,36 @@ class CaptureMixin:
                 loads[tag] = p2.evaluate(CV_PATHS_JS) or {}
                 if self.cfg.get("viewport_variants", True):
                     CaptureMixin._start_settle_narrow(p2)
-            except Exception:
+            except Exception as exc:
+                self.log("WARN", f"窄屏首载页 {tag} 在 {budget_s:.0f}s 预算内未加载完, 放弃({type(exc).__name__}): "
+                                 f"该宽度无首载对照/变体")
                 with suppress(Exception):
                     p2.close()
+        p4 = getattr(self, "_cv_mdesk", None)
+        if p4 is not None and "m" in loads:
+            try:
+                left = max(0.5, budget_s - (time.monotonic() - t0))
+                p4.wait_for_load_state("load", timeout=int(left * 1000))
+                p4.evaluate(CV_QUIET_JS, 300)
+                loads["__mdesk"] = p4.evaluate(CV_PATHS_JS) or {}
+            except Exception as exc:   # noqa: BLE001
+                self.log("WARN", f"桌面 UA 窄屏对照页未加载完, 不分 UA({type(exc).__name__})")
+        if p4 is not None:
+            with suppress(Exception):
+                p4.close()
+            self._cv_mdesk = None
+        for tag, (p3, w3) in list((getattr(self, "_cv_pair", {}) or {}).items()):
+            try:
+                left = max(0.5, budget_s - (time.monotonic() - t0))
+                p3.wait_for_load_state("load", timeout=int(left * 1000))
+                p3.evaluate(CV_QUIET_JS, 300)
+                # 对照页的内联样式按路径交给 CV_EMIT_JS: 手机段 px 与之同比(值比≈宽比)的写 vw
+                if tag in loads:
+                    loads.setdefault("__pair", {})[tag] = {"w": w3, "paths": p3.evaluate(CV_PATHS_JS) or {}}
+            except Exception:   # noqa: BLE001
+                with suppress(Exception):
+                    p3.close()
+                self._cv_pair.pop(tag, None)
         return loads
 
 
@@ -605,6 +724,18 @@ class CaptureMixin:
                 if "closed" not in str(exc).lower():
                     self.log("WARN", f"窄屏首载页 {_tag} 关闭失败: {type(exc).__name__}: {str(exc)[:120]}")
         self._cv_pages = []
+        for p3, _w in (getattr(self, "_cv_pair", {}) or {}).values():
+            with suppress(Exception):
+                p3.close()
+        self._cv_pair = {}
+        if getattr(self, "_cv_mdesk", None) is not None:
+            with suppress(Exception):
+                self._cv_mdesk.close()
+            self._cv_mdesk = None
+        for ctx2 in getattr(self, "_cv_extra_ctx", []) or []:
+            with suppress(Exception):
+                ctx2.close()
+        self._cv_extra_ctx = []
 
 
     @staticmethod
@@ -647,6 +778,126 @@ class CaptureMixin:
         return bool(stable), counts
 
 
+    def _fluidize_narrow_page(self, p2, tag):
+        """窄屏首载页抽取变体前的随宽同比: 页面脚本按加载宽度把几何写死成 px(内联 style / img 的 width·height 属性,
+        wix 手机图 325x215), 变体只在 390 采一次, 到 360~440 宽就按 390 的尺寸渲染, 整页从该处起位移十几像素
+        (iPhone Air 70 / Pro Max 59 / S24 50~96 双峰)。同页改到 0.92 倍宽再读一遍, 值比≈宽比(±1.5%)的 px 改写成
+        vw 后再抽取(与主页 _probe_root_font 同口径, 见 _fluid_elements)。改宽触发整页重载的站: 两次读的路径对不上,
+        自然什么都不改。"""
+        if not getattr(config, "VARIANT_FLUID", True):
+            return
+        try:
+            vp = p2.viewport_size or {}
+            w1, h = int(vp.get("width") or 0), int(vp.get("height") or 800)
+            if not w1:
+                return
+            fa = p2.evaluate(FLUID_READ_JS) or {}
+            with suppress(Exception):
+                p2.evaluate(CANVAS_PIN_JS, "save")
+                p2.evaluate(IMG_SRC_PIN_JS, "save")
+            rt_on = bool(getattr(config, "VARIANT_FLUID_RESTORE", True))
+            if rt_on:
+                with suppress(Exception):
+                    p2.evaluate(ROUNDTRIP_PIN_JS, "save")
+            samples = {}
+            # 窄一档(0.92×)与宽一档(1.128×: 390→440 正好是最宽的主流手机)各读一次, 三点判直线/封顶/垫底
+            for w in (int(round(w1 * 0.92)), int(round(w1 * 1.128)), w1):
+                p2.set_viewport_size({"width": w, "height": h})
+                p2.wait_for_timeout(250)
+                with suppress(Exception):
+                    p2.evaluate(CV_QUIET_JS, 300)
+                with suppress(Exception):
+                    p2.evaluate(NARROW_STABLE_JS, 1500)
+                if w != w1:
+                    samples[w] = p2.evaluate(FLUID_READ_JS) or {}
+            # 先复原内联态, 再钉 canvas 显示盒(反过来会把刚钉上的 aspect-ratio 一并抹掉, vite 平板 98→64)
+            if rt_on:
+                with suppress(Exception):
+                    k = p2.evaluate(ROUNDTRIP_PIN_JS, "restore")
+                    if k:
+                        self.log("RENDER", f"窄屏首载页 {tag} 随宽对照来回后 {k} 个元素的内联样式/class 没回到首载态, 已复原")
+            with suppress(Exception):
+                p2.evaluate(CANVAS_PIN_JS, "restore")
+                p2.evaluate(IMG_SRC_PIN_JS, "restore")
+            w2, w3 = int(round(w1 * 0.92)), int(round(w1 * 1.128))
+            fb = samples.get(w2) or {}
+            fl = _fluid_elements(fa, fb, w1, w2, fc=samples.get(w3) or None, w3=w3)
+            # 另一张不同宽度的首载页对照: 只在加载时按宽度写一次的内联尺寸(缩放不重写, 上面三点看不出)
+            pair_n = 0
+            pair = (getattr(self, "_cv_pair", {}) or {}).get(tag)
+            if pair:
+                p3, wp = pair
+                try:
+                    with suppress(Exception):
+                        p3.evaluate(CV_QUIET_JS, 300)
+                    with suppress(Exception):
+                        p3.evaluate(NARROW_STABLE_JS, 1500)
+                    fp = p3.evaluate(FLUID_READ_JS) or {}
+                    fl2 = _fluid_elements(fa, fp, w1, wp)
+                    for path, props in fl2["inline"].items():
+                        # canvas 位图尺寸由图表库在改宽时重设(不是"只在首载写一次"), 同页三点采样已覆盖; 两张首载页对照
+                        # 只有窄侧两点, 往 420/440 外推会把位图/固化图拉大(vite iPhone Air 90→76)
+                        if (fa.get(path) or [""])[0] == "CANVAS":
+                            continue
+                        cur = fl["inline"].setdefault(path, {})
+                        for k, v in props.items():
+                            if k not in cur:
+                                cur[k] = v
+                                pair_n += 1
+                                if pair_n <= 12:
+                                    self.log("RENDER", f"窄屏首载对照页同比 {tag}: {path[-90:]} {k} {(fa.get(path) or [0, 0, ''])[2][:80]!r} → {v}")
+                    for path in fl2["paths"]:
+                        if path not in fl["paths"]:
+                            fl["paths"].append(path)
+                            pair_n += 1
+                except Exception as exc:   # noqa: BLE001
+                    self.log("WARN", f"窄屏首载对照页({tag})读取失败: {str(exc)[:120]}")
+            if fl["paths"] or fl["inline"]:
+                dbg = [f"{pth[-70:]} {k}={v}" for pth, props in list(fl["inline"].items())[:40] for k, v in props.items()][:14]
+                if dbg:
+                    self.log("RENDER", f"窄屏首载页 {tag} 随宽同比明细: " + " | ".join(dbg)[:1800])
+                res = p2.evaluate(FLUID_APPLY_JS, fl) or {}
+                piece = sum(1 for v in fl["inline"].values() for x in v.values() if x.startswith(("min(", "max(")))
+                self.log("RENDER", f"窄屏首载页 {tag} 随宽同比: {res.get('vw', 0)} 个内联 px/尺寸属性改写为 vw(其中 {piece} 个封顶/垫底),"
+                                   f" {res.get('marked', 0)} 个元素字号随宽(0.92/1.128 倍宽对照, 同比 ±1.5%)"
+                                   + (f"; 其中 {pair_n} 项只在首载时按宽度写一次, 由 {pair[1]}px 首载对照页认出" if pair_n else ""))
+        except Exception as exc:   # noqa: BLE001 探测失败就按原样抽取
+            self.log("WARN", f"窄屏首载页 {tag} 随宽同比探测失败: {str(exc)[:120]}")
+
+    @staticmethod
+    def _hidden_root_variants(self, page, p2, main, other, top):
+        """桌面采集时整棵 display:none 的子树(手机版横幅/visible-xs 块), 窄屏首载页里可见, 且子树内任一元素的
+        class 或内联 style 与窄屏页不同 → 作为变体根返回(不与已有结构变体重叠)。桌面上这些子树的状态来自后台
+        脚本(轮播对不渲染的项翻页, 过渡事件不触发, 时间冻结截掉其兜底定时器 → 两项同时 active), 无法验证;
+        窄屏页里它渲染着、已静置, 才是该视口的真实状态(cgnpc 手机端横幅下多出一整项, 49 分)。"""
+        try:
+            roots = page.evaluate(HIDDEN_ROOTS_JS) or []
+            roots = [p for p in roots if p in other and p in main and not any(p == q or p.startswith(q + ">") for q in top)]
+            if not roots:
+                return []
+            vis = set(p2.evaluate(VISIBLE_PATHS_JS, roots) or [])
+        except Exception as exc:   # noqa: BLE001 诊断性增强, 失败不影响主流程
+            self.log("WARN", f"桌面隐藏子树窄屏对照失败: {str(exc)[:120]}")
+            return []
+        out = []
+        _dv = lambda st: sorted(m.group(1).lower() + ":" + m.group(2).strip().lower()
+                                for m in re.finditer(r"(?:^|;)\s*(display|visibility)\s*:\s*([^;!]+)", st or ""))
+        for p in roots:
+            if p not in vis:
+                continue
+            # 窄屏页里靠根自身内联 display/visibility 才显示的(脚本轮换消息条/标签页当前项写的), 是时间状态不是视口
+            # 差异: 换成窄屏版就和主页正显示的那一项同时可见(apple iphone 页平板横幅多出一行, 81→43)
+            if _dv(other[p][2]) and _dv(other[p][2]) != _dv(main[p][2]):
+                self.log("RENDER", f"桌面不渲染子树 {p[-80:]} 在窄屏页靠内联 {_dv(other[p][2])} 显示(脚本轮换态), 不换窄屏版")
+                continue
+            pre = p + ">"
+            diff = (other[p][1] != main[p][1] or other[p][2] != main[p][2]) or any(
+                k in other and (other[k][1] != v[1] or other[k][2] != v[2])
+                for k, v in main.items() if k.startswith(pre))
+            if diff and not any(p.startswith(q + ">") for q in out):
+                out.append(p)
+        return out
+
     def _inject_dom_variants(self, page, loads):
         """窄屏 DOM 变体(见 ALT_EXTRACT_JS): 结构不同的最上层子树把窄屏版并列插入主页。"""
         if not loads or not self.cfg.get("viewport_variants", True):
@@ -654,35 +905,97 @@ class CaptureMixin:
         main = page.evaluate(CV_PATHS_JS) or {}
         pages = dict(getattr(self, "_cv_pages", []) or [])
         variants = {}                      # path -> {tag: html}
+        hidden_all = set()
         for tag, other in loads.items():
+            if tag.startswith("__"):
+                continue
             diff = sorted(p for p, v in main.items() if p and not p.startswith("@") and p in other
                           and other[p][0] == v[0] and other[p][3] != v[3])
+            # 子元素标签序列相同、但某个带 id 的子项只在一侧存在(另一侧整页都没有这个 id): 两页在这个容器里各有对方
+            # 没有的组件, 按序号对齐会把不同组件配成一对, 变体只换其中一个、另一侧独有的兄弟丢掉(wix 手机首屏表单:
+            # 原站多一个占第三行的 0 高兄弟, 克隆少一道行距, 其下整页上移 16px)。把变体根提到这个容器, 整个换成窄屏版。
+            # id 每次加载都变的站(随机 id)会大面积命中, 超过上限就整体不用这条判据
+            if getattr(config, "VARIANT_ID_ALIGN", True):
+                lifted = _id_misaligned_parents(main, other)
+                if lifted:
+                    if len(lifted) > int(getattr(config, "VARIANT_ID_ALIGN_MAX", 12)):
+                        self.log("RENDER", f"窄屏首载页 {tag}: 子项 id 错位的容器 {len(lifted)} 个超上限, 视为 id 不稳定, 不按 id 提升变体根")
+                    else:
+                        self.log("RENDER", f"窄屏首载页 {tag}: {len(lifted)} 个容器的子项 id 与主页错位(各有对方没有的组件), 变体根提到容器: "
+                                           + "; ".join(q[-60:] for q in lifted[:4]))
+                        diff = sorted(set(diff) | set(lifted))
             top = []
             for p in diff:
                 if not any(p.startswith(q + ">") for q in top):
                     top.append(p)
-            if not top or len(top) > config.VIEWPORT_VARIANT_MAX or tag not in pages:
+            if tag not in pages:
+                continue
+            # 桌面不渲染、窄屏可见的子树: 类或内联样式与窄屏首载页不同就整棵换成窄屏版(状态只在窄屏页里可信)
+            hidden_tops = CaptureMixin._hidden_root_variants(self, page, pages[tag], main, other, top)
+            hidden_all.update(hidden_tops)
+            top += hidden_tops
+            if not top or len(top) > config.VIEWPORT_VARIANT_MAX:
                 continue
             stable, counts = CaptureMixin._settle_narrow_page(pages[tag])
+            # 随宽对照只做手机段: 手机机型宽度 360~440 一档内连续变化, 平板段(768/820)两档之间断点换布局, 来回改宽
+            # 反而让图表/轮播停在错态(vite 平板 98→64、iPad Air 87→77)
+            if tag == "m":
+                CaptureMixin._fluidize_narrow_page(self, pages[tag], tag)
             mc = getattr(self, "_main_counts", {}) or {}
             self.log("RENDER", f"窄屏首载页 {tag}: {'到位' if stable else '到时限仍在变化'}, 控件 {counts.get('ctrl', '?')}"
                                f"(主页 {mc.get('ctrl', '?')}) / 按钮 {counts.get('btn', '?')}(主页 {mc.get('btn', '?')})"
-                               f" / 文字 {counts.get('text', '?')}(主页 {mc.get('text', '?')}); 结构不同子树 {len(top)}")
+                               f" / 文字 {counts.get('text', '?')}(主页 {mc.get('text', '?')}); 结构不同子树 {len(top) - len(hidden_tops)}"
+                               + (f", 桌面不渲染而窄屏状态不同的子树 {len(hidden_tops)}" if hidden_tops else ""))
+            # 窄屏首载页同样做状态类相位复位: 它滚到底再回顶后, 进视口才展开/自动轮换的同类组件(折叠卡、高亮卡)已不在
+            # 源码 HTML 的首载分配上, 变体把那一刻的状态烘进交付页(主页做过复位, 变体没做: 手机端多展开一张卡, 其下整页错位)。
+            # 源码用该页自己上下文再取一次(手机 UA 下发的 HTML 可能不同), 取不到退回主页源码
+            if getattr(config, "NARROW_PHASE_RESET", True):
+                with suppress(Exception):
+                    src2 = None
+                    with suppress(Exception):
+                        r2 = pages[tag].request.get(pages[tag].url, timeout=6000)
+                        src2 = r2.text() if r2 is not None and r2.ok else None
+                    cls2, grp2 = CaptureMixin._phase_src(self, src2)
+                    if not cls2 and not grp2:
+                        cls2, grp2 = CaptureMixin._phase_src(self, getattr(self, "_src_html", None))
+                    if cls2 or grp2:
+                        ph = pages[tag].evaluate(STATE_PHASE_RESET_JS, [cls2, grp2]) or {}
+                        if ph.get("els") or ph.get("cand"):
+                            self.log("RENDER", f"窄屏首载页 {tag} 状态类相位复位: {ph.get('groups', 0)} 组 / {ph.get('els', 0)} 个实例复位成源码分配"
+                                               f"({'本页源码' if src2 else '主页源码'}); 候选组 {ph.get('cand', 0)} {ph.get('dbg') or ''}"[:700])
+            with suppress(Exception):
+                fin = pages[tag].evaluate(TRANSITION_FINISH_JS) or 0
+                if fin:
+                    self.log("RENDER", f"窄屏首载页 {tag}: 抽取前 {fin} 个进行中的 CSS 过渡跳到终点(轮播翻页半途两项同时可见)")
             with suppress(Exception):
                 htmls = pages[tag].evaluate(ALT_EXTRACT_JS, top) or {}
                 sizes = page.evaluate(SUBTREE_SIZE_JS, list(htmls))
+                normed = sum((v[4] if len(v) > 4 else 0) for v in htmls.values())
+                if normed:
+                    self.log("RENDER", f"窄屏首载页 {tag}: {normed} 个互斥兄弟组(轮播项/标签页)当前项对调到第一项(与原站首载同相位)")
                 for p, (h, alt_text, alt_n, *alt_rest) in htmls.items():
                     main_text, main_n, *main_rest = sizes.get(p, (0, 0, 0))
                     alt_ctrl = alt_rest[0] if alt_rest else 0
                     main_ctrl = main_rest[0] if main_rest else 0
                     # 窄屏版明显"更空": 多半是异步内容(赞助位/推荐流)还没到, 不是换了结构
-                    if alt_text < 0.5 * main_text or alt_n < 0.3 * main_n:
+                    # (桌面不渲染的子树 innerText 退化为 textContent, 含未激活项的文字, 不比文字量)
+                    # 例外(两处判据共用): 同 UA 的 0.92 倍宽对照页是另一次独立加载, 它在该子树下的结构与本页逐节点相同
+                    # → 两次加载一致, 是这个宽度本来就这样(手机版换成紧凑列表/表单只留邮箱), 不是内容没到或水合时序
+                    pair = ((loads.get("__pair") or {}).get(tag) or {}).get("paths") or {}
+                    confirmed = bool(config.VARIANT_PAIR_CONFIRM and pair
+                                     and _subtree_sig(loads.get(tag) or {}, p) == _subtree_sig(pair, p))
+                    if ((alt_text < 0.5 * main_text and p not in hidden_tops) or alt_n < 0.3 * main_n) and not confirmed:
+                        self.log("RENDER", f"窄屏 DOM 变体: {p[:60]} 的 {tag} 版内容明显更少(文字 {alt_text}/{main_text}, 节点 {alt_n}/{main_n}), 视为未到位, 不用")
                         continue
                     # 窄屏版表单控件比主页少: 组件晚水合(wix 首屏邮箱表单在窄屏页里时有时无 → 手机端整块表单消失),
                     # 不是响应式换结构; 退回主页子树 + 分视口样式
                     if main_ctrl and alt_ctrl < main_ctrl:
-                        self.log("RENDER", f"窄屏 DOM 变体: {p[:60]} 的 {tag} 版表单控件 {alt_ctrl} < 主页 {main_ctrl}, 视为未水合, 不用")
-                        continue
+                        if confirmed:
+                            self.log("RENDER", f"窄屏 DOM 变体: {p[:60]} 的 {tag} 版表单控件 {alt_ctrl} < 主页 {main_ctrl}, "
+                                               f"但对照页(另一次加载)结构相同, 采用窄屏版")
+                        else:
+                            self.log("RENDER", f"窄屏 DOM 变体: {p[:60]} 的 {tag} 版表单控件 {alt_ctrl} < 主页 {main_ctrl}, 视为未水合, 不用")
+                            continue
                     if alt_ctrl > main_ctrl:
                         self.log("RENDER", f"窄屏 DOM 变体: {p[:60]} 的 {tag} 版表单控件 {alt_ctrl} > 主页 {main_ctrl}(主页该组件可能未水合), 采用窄屏版")
                     variants.setdefault(p, {})[tag] = h
@@ -692,14 +1005,23 @@ class CaptureMixin:
         if total > config.VIEWPORT_VARIANT_BYTES:
             self.log("RENDER", f"窄屏 DOM 变体 {len(variants)} 处共 {total // 1024}KB 超上限, 不注入")
             return 0
+        # 只在手机 UA 下换结构的子树: 桌面 UA 同宽页该处子元素结构与主页相同(状态类隐藏子树除外)
+        md = loads.get("__mdesk") or {}
+        ua_only = {p for p, v in variants.items() if "m" in v and md and p not in hidden_all and p in md and p in main
+                   and md[p][0] == main[p][0] and md[p][3] == main[p][3]
+                   and (len(md[p]) <= 8 or len(main[p]) <= 8 or md[p][8] == main[p][8])}
+        if ua_only:
+            self.log("RENDER", f"窄屏 DOM 变体: {len(ua_only)} 处只在手机 UA 下换结构, 只给触屏显示(桌面浏览器窄窗口仍用主页版): "
+                               + "; ".join(p[-60:] for p in list(ua_only)[:4]))
         items = []
         for p, v in variants.items():
             alts = []
+            mt = "mt" if p in ua_only else "m"
             if len(v) == 2 and v.get("t") == v.get("m"):
-                alts.append({"bands": "t m", "html": v["t"]})
+                alts.append({"bands": "t " + mt, "html": v["t"]})
             else:
-                alts += [{"bands": t, "html": h} for t, h in v.items()]
-            own = " ".join(["d"] + [t for t in ("t", "m") if t not in v])
+                alts += [{"bands": (mt if t == "m" else t), "html": h} for t, h in v.items()]
+            own = " ".join(["d"] + [t for t in ("t", "m") if t not in v] + (["m", "mx"] if p in ua_only else []))
             items.append({"path": p, "own": own, "alts": alts})
         main_rows = page.evaluate(STYLE_TEXTS_JS) or []
         css_main = {(g, t) for g, t, *_ in main_rows}
@@ -964,6 +1286,15 @@ class CaptureMixin:
                 if frz.get("anims"):
                     self.log("RENDER", f"时间冻结: 暂停 {frz['anims']} 个动画, "
                                        f"清空定时器 {frz.get('timers', 0)} 个")
+            # 基准也按源码相位: 定时器已清, 把轮换过的同类组件(轮播/折叠卡)先复位成源码 HTML 的分配再截。否则基准是
+            # 「采集那一刻转到的第 k 项」、克隆是复位后的第一项, 布局校准会按基准把收起的那项撑回展开时的高度(一块空白)
+            if getattr(config, "BASELINE_PHASE_RESET", True):
+                with suppress(Exception):
+                    src_cls, src_grp = self._phase_src(getattr(self, "_src_html", None))
+                    if src_cls or src_grp:
+                        ph = page.evaluate(STATE_PHASE_RESET_JS, [src_cls, src_grp]) or {}
+                        if ph.get("els"):
+                            self.log("RENDER", f"基准截图前状态类相位复位: {ph.get('groups', 0)} 组 / {ph.get('els', 0)} 个实例 {ph.get('dbg') or ''}"[:500])
             t_frz = time.monotonic()
             # 冻结后再等一轮可见图: 上面等图期间轮播定时器还在翻页, 冻结那一刻露出的往往
             # 是刚翻到、图还没到的一页(mi.com 基准整屏空白)。冻结后版面不再动, 等的就是截图里那几张
@@ -1029,8 +1360,11 @@ class CaptureMixin:
         if getattr(config, "NAV_STALE_GATE", True):
             with suppress(Exception):
                 nav_tr = self._nav_tracker(page)
+        self._src_html = None
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=config.PAGELOAD_TIMEOUT)
+            _resp = page.goto(url, wait_until="domcontentloaded", timeout=config.PAGELOAD_TIMEOUT)
+            with suppress(Exception):
+                self._src_html = _resp.text() if _resp is not None else None
         except Exception as exc:
             # 首导航瞬时失败(超时/连接抖动): 先用轻量请求探测网络层可达性 ——
             # 不可达(DNS/连接/超时)直接判失败, 不再白等第二个 45s 导航;
@@ -1057,15 +1391,16 @@ class CaptureMixin:
                     else self._wait_quiet(page, config.NETWORK_IDLE_TIMEOUT))
         if not quiet_ok:
             self.log("RENDER", "网络静置等待超时, 继续后续固化流程")
+        self._nav_ready_s = time.time() - t_nav
         if nav_tr:
             t_load = nav_tr["load"][0]
             hang = len(nav_tr["ignored"]) + sum(1 for t in nav_tr["inflight"].values()
                                                 if time.monotonic() - t >= config.NAV_STALE_MS / 1000)
-            self.log("RENDER", f"页面就绪 {time.time() - t_nav:.1f}s ("
+            self.log("RENDER", f"页面就绪 {self._nav_ready_s:.1f}s ("
                      + (f"load {t_load - nav_tr['t0']:.1f}s" if t_load else f"load 未触发, 挂起请求 {hang} 个")
                      + ")")
         else:
-            self.log("RENDER", f"页面就绪 {time.time() - t_nav:.1f}s")
+            self.log("RENDER", f"页面就绪 {self._nav_ready_s:.1f}s")
         if screenshot:
             with suppress(Exception):
                 rt = page.evaluate(RUNTIME_FP_JS) or []
@@ -1144,6 +1479,20 @@ class CaptureMixin:
                 self.log("RENDER", f"冻结前等样式表: {ws_.get('ms')}ms, 直取补副本 {ws_.get('fetched', 0)} 张,"
                                    f" 仍未到 {ws_.get('pending', 0)} 张")
         counts = _safe_eval(DEEP_FREEZE_JS)
+        with suppress(Exception):
+            src_cls, src_grp = self._phase_src(getattr(self, "_src_html", None))
+            if not src_cls and not src_grp:
+                self.log("RENDER", f"状态类相位复位跳过: 源码 HTML {'未取到' if not getattr(self, '_src_html', None) else '无带 id 的 class、无同类兄弟组'}")
+            else:
+                ph = page.evaluate(STATE_PHASE_RESET_JS, [src_cls, src_grp]) or {}
+                if ph.get("els") or ph.get("cand"):
+                    self.log("RENDER", f"状态类相位复位: {ph.get('groups', 0)} 组同类组件的 open/active 状态在采集时已轮换, "
+                                       f"{ph.get('els', 0)} 个实例复位成源码 HTML 的分配(克隆与原站同相位起步); 候选组 {ph.get('cand', 0)} {ph.get('dbg') or ''}"[:900])
+        with suppress(Exception):
+            # 定时器已停, 弹层脚本不会再把锁写回
+            n_lock = page.evaluate(SCROLL_LOCK_STRIP_JS) or 0
+            if n_lock:
+                self.log("RENDER", f"滚动锁剥离: html/body 内联 style 上 {n_lock} 条弹层打开时写的锁滚动声明(overflow:hidden/position/inset)不进交付 HTML")
         if getattr(self, "_root_fluid", None):
             # 定时器已停, 页面脚本不会再改回 px
             with suppress(Exception):
@@ -1193,7 +1542,7 @@ class CaptureMixin:
         # A2 字体度量固化(W7): 活体 computed font 采样为 !important 覆盖,
         # 序列化进 HTML/MHTML —— 回放文本度量与采集态一致。
         try:
-            baked = _safe_eval(FONT_BAKE_NOSIZE_JS if getattr(self, "_root_fluid", None) else FONT_BAKE_JS)
+            baked = _safe_eval(FONT_BAKE_NOSIZE_JS if (getattr(self, "_root_fluid", None) or getattr(self, "_root_inline_varies", False)) else FONT_BAKE_JS)
             if baked:
                 self.log("RENDER", f"字体度量固化: {baked} 个元素逐元素烘焙(差分继承)")
         except Exception:
@@ -1203,17 +1552,27 @@ class CaptureMixin:
             if any(fl.values()):
                 self.log("RENDER", f"内联尺寸流式化: 全宽 {fl.get('width', 0)} / 轨道 {fl.get('track', 0)}"
                                    f" / 位移 {fl.get('shift', 0)}(采集视口下不变, 换视口随容器伸缩)")
-        with suppress(Exception):
-            td = self._phase("细分·冻结与字体烘焙", td)
-            loads = self._collect_narrow_loads()
+        td = self._phase("细分·冻结与字体烘焙", td)
+        try:
             try:
-                cv = page.evaluate(CV_EMIT_JS, loads) or {}
+                loads = self._collect_narrow_loads()
+                emit_loads = loads if config.NARROW_UA_CLS else {k: v for k, v in loads.items() if k != "__mdesk"}
+                cv = page.evaluate(CV_EMIT_JS if getattr(config, "CANVAS_FILL_BANDS", True)
+                                   else CV_EMIT_JS.replace("const CVFILL = 1;", "const CVFILL = 0;"), emit_loads) or {}
                 if cv.get("els") or cv.get("cls") or cv.get("srcFill") or cv.get("textFill"):
-                    self.log("RENDER", f"多视口内联样式: {cv['els']} 个元素, {cv.get('vw', 0)} 个按视口宽比例改写为 vw,"
+                    self.log("RENDER", f"多视口内联样式: {cv['els']} 个元素, {cv.get('vw', 0)} 个按视口宽比例改写为 vw"
+                                       + (f"(另 {cv['pairvw']} 个手机段 px 由 0.92 倍宽首载对照认出同比)" if cv.get("pairvw") else "") + ","
                                        f" {cv.get('banded', 0)} 个移入分视口样式表(其中窄屏首载补采 {cv.get('reload', 0)})"
                                        f"; 分视口 class {cv.get('cls', 0)} 个"
+                                       + (f"(其中只随手机 UA 变、只给触屏 {cv['clsTouch']} 个)" if cv.get("clsTouch") else "")
+                                       + (f"; 只随 UA 的状态词触屏上先拿掉 {cv['touchOff']} 个元素" if cv.get("touchOff") else "")
                                        + (f"; 桌面隐藏元素补窄屏 src {cv['srcFill']} 个" if cv.get("srcFill") else "")
-                                       + (f", 补文本 {cv['textFill']} 个" if cv.get("textFill") else ""))
+                                       + (f", 补文本 {cv['textFill']} 个" if cv.get("textFill") else "")
+                                       + (f"; 固化 canvas 按缩放前尺寸定盒 {cv['cvFix']} 个" if cv.get("cvFix") else ""))
+                if cv.get("pairdbg"):
+                    self.log("RENDER", f"手机段首载对照同比明细: {json.dumps(cv['pairdbg'], ensure_ascii=False)[:1500]}")
+                if cv.get("cvdbg"):
+                    self.log("RENDER", f"固化 canvas 分视口对照: {json.dumps(cv['cvdbg'], ensure_ascii=False)[:1500]}")
                 try:
                     self._inject_dom_variants(page, loads)
                 except Exception as exc:
@@ -1223,6 +1582,17 @@ class CaptureMixin:
                 self._close_narrow_loads()
                 if time.monotonic() - t_close > 3:
                     self.log("RENDER", f"窄屏首载页关闭耗时 {time.monotonic() - t_close:.1f}s")
+        except Exception as exc:   # noqa: BLE001 以前静默吞掉: 该站手机端没有分视口样式/变体却看不出原因(qwik 手机 41/100 双峰)
+            self.log("WARN", f"多视口内联样式/窄屏变体整步失败: {type(exc).__name__}: {str(exc)[:200]}")
+        # 序列化前再做一次状态类相位复位: 第一次复位之后页面仍活着(多视口样式/变体注入期间组件框架重渲染会按自己的
+        # 状态把 class 写回去, 或进视口观察器又展开一张), 复位过的展开态回到交付 HTML 里(wix 手机多展开一张卡, 整页错位)
+        if getattr(config, "LATE_PHASE_RESET", True):
+            with suppress(Exception):
+                src_cls, src_grp = self._phase_src(getattr(self, "_src_html", None))
+                if src_cls or src_grp:
+                    ph = page.evaluate(STATE_PHASE_RESET_JS, [src_cls, src_grp]) or {}
+                    if ph.get("els"):
+                        self.log("RENDER", f"状态类相位复位(序列化前复查): 又有 {ph.get('els', 0)} 个实例偏离源码分配, 已再次复位 {ph.get('dbg') or ''}"[:600])
         # N1 保真轨: MHTML 快照(采集期活体渲染的权威固化)。
         # Chromium 对 MHTML 的回放默认禁脚本 —— 确定性由构造保证。
         if screenshot:
@@ -1462,9 +1832,29 @@ class CaptureMixin:
             msg += " 样例 " + " | ".join(f"{u[-70:]} {f}" for _rt, u, f in failed[:3])
         self.log("RENDER", msg)
 
+    def _unlock_scroll(self, page, when: str) -> int:
+        """滚动前/后剥掉 html/body 内联的锁滚动声明。自动弹层(短信订阅/优惠券/Cookie 墙)在采集窗口内打开时
+        给 html/body 写 overflow:hidden; position:fixed|absolute; inset:0 锁住页面: 文档高度只剩一屏, 自动滚动
+        原地不动, IntersectionObserver 驱动的懒加载/入场显形全都不触发, 首屏以下整段空白被当成"原站本来如此"
+        序列化并当作基准(allbirds: 基准与克隆都只有一屏, 保真轨 98.5 虚高; 对真机 4628px 的原站只有 38 分)。"""
+        try:
+            n = page.evaluate(SCROLL_LOCK_STRIP_JS) or 0
+        except Exception:
+            return 0
+        if n:
+            self.log("RENDER", f"{when}解锁滚动: 弹层给 html/body 写的 {n} 条锁滚动声明已剥离, 页面恢复可滚")
+        return n
+
     def _auto_scroll(self, page):
         """平滑滚动到底再回顶, 触发 IntersectionObserver / 无限加载(见 AUTO_SCROLL_JS)。
-        总时长受 AUTO_SCROLL_BUDGET 约束(页内计时, 一次往返)。"""
+        总时长受 AUTO_SCROLL_BUDGET 约束(页内计时, 一次往返)。滚动前后各查一次滚动锁: 滚动途中弹出的
+        层锁住页面时, 剥离后再滚一遍。"""
+        self._unlock_scroll(page, "滚动前")
+        self._auto_scroll_once(page)
+        if self._unlock_scroll(page, "滚动后"):
+            self._auto_scroll_once(page)
+
+    def _auto_scroll_once(self, page):
         if not config.AUTO_SCROLL_SMOOTH:
             return self._auto_scroll_stepped(page)
         try:
