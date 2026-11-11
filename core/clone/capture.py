@@ -661,7 +661,7 @@ class CaptureMixin:
                 self._cv_pages.append((tag, p2))
                 # 手机页旁再开一张 0.92 倍宽的首载对照页(同上下文): 只在加载时按宽度写一次的内联尺寸(wix 图片组件
                 # 的 height px)缩放不会重写, 同页三点采样看不出; 两张不同宽度的首载页对照才认得出同比
-                if tag == "m" and getattr(config, "NARROW_FLUID_PAIR", True):
+                if tag in getattr(config, "NARROW_PAIR_TAGS", ("m",)) and getattr(config, "NARROW_FLUID_PAIR", True):
                     w2 = int(round(w * 0.92))
                     try:
                         p3 = self._seed_page(p2.context.new_page())

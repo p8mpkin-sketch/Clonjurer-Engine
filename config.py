@@ -76,6 +76,7 @@ API_REQ_SIG = True
 # 随机推荐位/随机轮播起始相位在克隆里脚本重跑时抽到与采集时相同的一版; 0 = 关
 REPLAY_SEED_RANDOM = True
 REPLAY_SEED = 20261111
+NARROW_PAIR_TAGS = ("m", "t")   # 哪些窄屏段再开一张 0.92 倍宽的独立首载对照页(确认"内容更少"是该宽度本来如此, 而非没加载完)
 TIMER_JOURNAL = True   # 采集期长定时器改过的周期性状态(轮播帧等)序列化前退回初始值
 API_VARIANTS_PER_PATH = 48              # 同一 方法+路径 最多保留多少份不同请求体的录制
 PROXY_CACHE_MAX_BYTES = 8 * 1024 * 1024   # 反向代理兜底单响应缓存上限(8MB)
