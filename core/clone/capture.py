@@ -743,6 +743,7 @@ class CaptureMixin:
                 with suppress(Exception):
                     p2.close()
         self._cv_pages = kept
+        t_main = time.monotonic() - t0
         p4 = getattr(self, "_cv_mdesk", None)
         if p4 is not None and "m" in loads:
             try:
@@ -780,6 +781,8 @@ class CaptureMixin:
                 with suppress(Exception):
                     p3.close()
                 self._cv_pair.pop(tag, None)
+        if time.monotonic() - t0 >= 3:
+            self.log("RENDER", f"窄屏首载页收回: 主两页 {t_main:.1f}s / 合计 {time.monotonic() - t0:.1f}s(预算 {budget_s:.0f}s)")
         return loads
 
 
@@ -1727,12 +1730,15 @@ class CaptureMixin:
                 self.log("RENDER", f"内联尺寸流式化: 全宽 {fl.get('width', 0)} / 轨道 {fl.get('track', 0)}"
                                    f" / 位移 {fl.get('shift', 0)}(采集视口下不变, 换视口随容器伸缩)")
         td = self._phase("细分·冻结与字体烘焙", td)
+        nt = [time.monotonic()]   # 窄屏阶段分段耗时: 收回(等加载+读路径) / 多视口样式落地 / 变体 / 关页
         try:
             try:
                 loads = self._collect_narrow_loads()
+                nt.append(time.monotonic())
                 emit_loads = loads if config.NARROW_UA_CLS else {k: v for k, v in loads.items() if k != "__mdesk"}
                 cv = page.evaluate(CV_EMIT_JS if getattr(config, "CANVAS_FILL_BANDS", True)
                                    else CV_EMIT_JS.replace("const CVFILL = 1;", "const CVFILL = 0;"), emit_loads) or {}
+                nt.append(time.monotonic())
                 if cv.get("els") or cv.get("cls") or cv.get("srcFill") or cv.get("textFill"):
                     self.log("RENDER", f"多视口内联样式: {cv['els']} 个元素, {cv.get('vw', 0)} 个按视口宽比例改写为 vw"
                                        + (f"(另 {cv['pairvw']} 个手机段 px 由 0.92 倍宽首载对照认出同比)" if cv.get("pairvw") else "") + ","
@@ -1751,11 +1757,16 @@ class CaptureMixin:
                     self._inject_dom_variants(page, loads)
                 except Exception as exc:
                     self.log("WARN", f"窄屏 DOM 变体注入失败: {str(exc)[:160]}")
+                nt.append(time.monotonic())
             finally:
                 t_close = time.monotonic()
                 self._close_narrow_loads()
                 if time.monotonic() - t_close > 3:
                     self.log("RENDER", f"窄屏首载页关闭耗时 {time.monotonic() - t_close:.1f}s")
+                nt.append(time.monotonic())
+                if len(nt) == 5 and nt[-1] - nt[0] >= 5:
+                    self.log("RENDER", "窄屏阶段分段: " + " / ".join(
+                        f"{k} {b - a:.1f}s" for k, a, b in zip(("收回", "多视口样式", "变体", "关页"), nt, nt[1:])))
         except Exception as exc:   # noqa: BLE001 以前静默吞掉: 该站手机端没有分视口样式/变体却看不出原因(qwik 手机 41/100 双峰)
             self.log("WARN", f"多视口内联样式/窄屏变体整步失败: {type(exc).__name__}: {str(exc)[:200]}")
         # 序列化前再做一次状态类相位复位: 第一次复位之后页面仍活着(多视口样式/变体注入期间组件框架重渲染会按自己的
