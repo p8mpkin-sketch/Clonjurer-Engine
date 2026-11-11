@@ -130,3 +130,38 @@ class ContentKeepGroup(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+INSERT_FIRST = """<!doctype html><html><head>GUARD</head><body style="margin:0">
+<div id="app"><main id="old" class="feed-layout" style="height:4700px">ssr feed</main><div id="foot" style="height:200px">foot</div></div>
+<script>
+  // Vue 补丁顺序: 先 insertBefore 插新块(更短), 下一刻再 removeChild 旧块 → 是换了一份, 不放回
+  window.addEventListener('DOMContentLoaded', function(){ setTimeout(function(){
+    var app = document.getElementById('app'), d = document.createElement('main');
+    d.id = 'new'; d.className = 'feed-layout'; d.style.height = '1800px'; app.insertBefore(d, document.getElementById('old'));
+    setTimeout(function(){ app.removeChild(document.getElementById('old')); }, 1);
+  }, 200); });
+</script></body></html>"""
+
+
+@unittest.skipUnless(chromium_available(), "需要 Playwright Chromium")
+class ContentKeepInsertFirst(unittest.TestCase):
+    def _run(self, js):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page(viewport={"width": 1280, "height": 800})
+                page.set_content(INSERT_FIRST.replace("GUARD", js))
+                page.wait_for_timeout(1800)
+                return page.evaluate("[!!document.getElementById('old'), !!document.getElementById('new')]")
+            finally:
+                b.close()
+
+    def test_insert_then_remove_not_restored(self):
+        self.assertEqual(self._run(CONTENT_KEEP_GUARD_JS), [False, True])
+
+    def test_switch_off_restores(self):
+        off = CONTENT_KEEP_GUARD_JS.replace(",TWN=1;", ",TWN=0;")
+        self.assertEqual(self._run(off), [True, True])
+
