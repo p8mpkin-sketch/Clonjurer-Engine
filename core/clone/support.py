@@ -2497,10 +2497,18 @@ function sim(a,b){var A=toks(a),B=toks(b);if(!A.length&&!B.length)return true;va
 // 用前 80 个词的 Jaccard 认亲
 function words(e){try{return new Set(String(e.innerText||'').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(function(w){return w.length>1;}).slice(0,80));}catch(e){return new Set();}}
 function tsim(a,b){var A=words(a),B=words(b);if(A.size<6||B.size<6)return false;var n=0;A.forEach(function(w){if(B.has(w))n++;});return n/Math.max(A.size,B.size)>=0.5;}
+// 非幂等的客户端渲染(脚本不先清空容器就追加): 序列化 DOM 里已有上次运行追加的那批, 克隆里脚本重跑又追加一批(页底索引 3 组→6 组)。
+// 解析结束后脚本新插入的元素, 同父元素下仍有一个**逐字相同**(忽略引擎自加属性)的序列化旧兄弟(约 0.35s 后查, 赶在评分/首屏之前) → 一对一移除旧的那份
+// (留脚本新建、带事件绑定的)。"先插新再删旧"的页面同一轮渲染里自己删了旧的, 不会命中
+var XR=/ data-(?:cb|cv[\w-]*|cssom|clone[\w-]*)="[^"]*"/g,XT=1;
+function exact(n){try{var h=n.outerHTML;if(h.length<24||h.length>200000)return null;h=h.replace(XR,'');var tc=n.textContent,ch=n.parentNode.children;for(var j=0;j<ch.length;j++){var c=ch[j];if(c===n||NEWS.has(c)||c.tagName!==n.tagName||c.textContent!==tc)continue;if(c.outerHTML.replace(XR,'')===h)return c;}}catch(e){}return null;}
+var xtm=0;function dedupX(){xtm=0;if(over())return;var now=Date.now(),more=0;for(var i=0;i<PAIRS.length;i++){var q=PAIRS[i];if(q.x)continue;if(now-q.t<340){more=1;continue;}q.x=1;var n=q.n;if(!n.isConnected||!n.parentNode||n.parentNode.nodeType!==1)continue;
+  var ex=exact(n);if(ex){try{selfRm=1;ex.remove();selfRm=0;window.__cloneHydrDedup=(window.__cloneHydrDedup||0)+1;}catch(e){selfRm=0;}}}if(more)xtm=setTimeout(dedupX,200);}
 function onAdded(n){if(over()||!n||n.nodeType!==1||RST.has(n)||!n.parentNode||n.parentNode.nodeType!==1)return;if(/^(SCRIPT|STYLE|LINK|TEMPLATE|NOSCRIPT|META|HTML|HEAD|BODY)$/.test(n.tagName))return;
   NEWS.add(n);if(!DCL)return;
-  if(PAIRS.length<200){PAIRS.push({n:n,t:Date.now()});setTimeout(dedup,1600);}}
-function dedup(){if(over())return;var now=Date.now(),rest=[];for(var i=0;i<PAIRS.length;i++){var q=PAIRS[i];if(now-q.t<1500){rest.push(q);continue;}var n=q.n;if(!n.isConnected||!n.parentNode||n.parentNode.nodeType!==1)continue;var a=hOf(n);if(a<MIN)continue;
+  if(PAIRS.length<200){PAIRS.push({n:n,t:Date.now()});setTimeout(dedup,1600);if(XT&&!xtm)xtm=setTimeout(dedupX,360);}}
+function dedup(){if(over())return;var now=Date.now(),rest=[];for(var i=0;i<PAIRS.length;i++){var q=PAIRS[i];if(now-q.t<1500){rest.push(q);continue;}var n=q.n;if(!n.isConnected||!n.parentNode||n.parentNode.nodeType!==1)continue;
+  var a=hOf(n);if(a<MIN)continue;
   var old=null,cnt=0,ch=n.parentNode.children;for(var j=0;j<ch.length;j++){var c=ch[j];if(c===n||NEWS.has(c))continue;var b=hOf(c);if(b<MIN)continue;if(c.tagName===n.tagName&&sim(c,n)){cnt++;old=c;continue;}if(Math.abs(a-b)<=Math.max(a,b)*0.6&&tsim(c,n)){cnt++;old=c;}}
   if(cnt!==1||!old)continue;var b2=hOf(old);if(old.tagName===n.tagName&&sim(old,n)&&Math.abs(a-b2)>Math.max(a,b2)*0.25)continue;
   try{selfRm=1;old.remove();selfRm=0;window.__cloneHydrDedup=(window.__cloneHydrDedup||0)+1;}catch(e){}}PAIRS=rest;}
