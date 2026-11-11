@@ -1095,6 +1095,11 @@ class _Builder:
             role = "list_item" if n.get("role") in ("AXRow", "AXCell", "ListItem") else "box"
             intents = [{"on": "click", "do": "navigate"}]
         text = re.sub(r"\r\n?", "\n", _visible_text(n))
+        if (role == "box" and not kids and "\n" in text and self.sampler and self.sampler.budget > 0
+                and w >= 160 and h >= 80 and not n.get("editable")):
+            # 普通面板(不是文本/编辑控件)把整段多行内容放在可访问名里 = 自绘的文本视图(代码编辑区/终端/日志窗):
+            # 行号栏、当前行高亮、语法着色都是画出来的, 树里没有结构可重建 —— 与其他自绘视图一样按图裁剪, 文字留作替代文本
+            role, text = "image", ""
         if role in ("box", "list_item") and not kids and text:
             role = "button" if n.get("clickable") else "text"
         if role in ("text", "button", "link", "badge") and not kids and not text:
@@ -1129,6 +1134,11 @@ class _Builder:
             # 带边框的控件(按钮的立体边、默认按钮的粗边与虚线焦点框)在框内缩一圈再量墨迹, 边框线不当字形
             gi = min(5.0, h * 0.2, w * 0.2) if (framed and not kids and h >= 16) else 0.0
             ink = self.sampler.ink(x + gi, y + gi, w - 2 * gi, h - 2 * gi, eff_bg)
+            if (ink and "\n" not in text and ink["lines"] >= 3 and n.get("uir_role") in ("box", "list_item")
+                    and _text_units(text) * 14 <= 0.5 * (ink["right"] - ink["left"])):
+                # 一行就放得下的短名字, 框里却是三行以上、宽得多的墨迹: 那是叠在这个面板上的别的内容(标签页面板的名字
+                # 只显示在页签上), 不是它自己的文字
+                ink = None
             if not ink:
                 # 截图上该框内没有任何字形像素: 文字被遮挡/裁掉(折叠面板、屏外抽屉), 不渲染文字
                 text, role = "", "box"
