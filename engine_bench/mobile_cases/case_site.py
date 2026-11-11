@@ -483,6 +483,27 @@ setInterval(function(){s[k].classList.remove('on');k=(k+1)%s.length;s[k].classLi
     return _shell("Drift rotator", mid, head=f"<style>{css}</style>")
 
 
+def case_drift_rotator_async(ctx):
+    """框架式自动轮换的选项卡: setTimeout 链驱动, 状态在回调里改、DOM 在回调之后才刷(一组走微任务, 一组走下一个任务,
+    对应 Vue / React 的批量渲染); 各面板高度不同。采集时已转过几格, 克隆应回到初始格, 不与脚本重新起转的那格叠在一起。"""
+    css = ".rt b{display:inline-block;padding:6px 10px;margin:0 6px 10px 0;border:1px solid #b9c2cc;border-radius:6px}.rt b.is-on{background:#14324d;color:#fff}.rt>div{display:none;padding:20px;border-radius:10px;color:#fff}.rt>div.is-on{display:block}"
+    js = """<script>(function(){function mount(id,flush){var root=document.getElementById(id),ts=root.querySelectorAll('b'),ps=root.querySelectorAll(':scope>div'),k=0,dirty=false;
+function render(){dirty=false;for(var j=0;j<ps.length;j++){ps[j].classList.toggle('is-on',j===k);ts[j].classList.toggle('is-on',j===k);}}
+function set(i){k=i;if(!dirty){dirty=true;flush(render);}}
+function tick(){set((k+1)%ps.length);setTimeout(tick,2500);}render();setTimeout(tick,2500);}
+mount('rt-a',function(f){Promise.resolve().then(f);});
+var ch=new MessageChannel(),q=[];ch.port1.onmessage=function(){var f;while((f=q.shift()))f();};
+mount('rt-b',function(f){q.push(f);ch.port2.postMessage(0);});})();</script>"""
+    def block(rid, cols):
+        tabs = "".join(f"<b>Tab {c}</b>" for c in "ABCD")
+        panes = "".join(f'<div style="background:#{c}"><h2>Panel {i + 1}</h2>' + f"<p>{LOREM}</p>" * (i + 1) + "</div>" for i, c in enumerate(cols))
+        return f'<div class="rt" id="{rid}">{tabs}{panes}</div>'
+    mid = (f'<div class="band"><div class="wrap">{block("rt-a", ("1f5f8b", "7b3f8c", "2e7d32", "8c5a1f"))}</div></div>'
+           f'<div class="band alt"><div class="wrap">{block("rt-b", ("8c5a1f", "2e7d32", "7b3f8c", "1f5f8b"))}</div></div>'
+           f'<div class="band"><div class="wrap"><div class="grid">{_cards(3)}</div></div></div>{js}')
+    return _shell("Drift rotator async", mid, head=f"<style>{css}</style>")
+
+
 def case_scrollfx_progress(ctx):
     """滚动驱动的钉住舞台(产品页常见): 300vh 轨道里 sticky 舞台, 脚本按滚动进度改标题透明度/位移与色块缩放。"""
     css = """.track{height:300vh;position:relative;background:#0f1722}.stage{position:sticky;top:0;height:100vh;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff}
@@ -674,6 +695,7 @@ CASES = {
     "drift_random_late": ("drift", case_drift_random_late),
     "drift_clock": ("drift", case_drift_clock),
     "drift_rotator": ("drift", case_drift_rotator),
+    "drift_rotator_async": ("drift", case_drift_rotator_async),
     "scrollfx_progress": ("scrollfx", case_scrollfx_progress),
     "scrollfx_parallax": ("scrollfx", case_scrollfx_parallax),
     "scrollfx_timeline": ("scrollfx", case_scrollfx_timeline),
