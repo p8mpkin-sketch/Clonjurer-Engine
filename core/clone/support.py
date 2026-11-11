@@ -3475,13 +3475,13 @@ def shrink_oversized_images(ws: Path, min_width: int = 1600, min_bytes: int = 30
 # 让浏览器用 src。只动 src 为本地 /static/ 且文件在盘上、srcset ≥2 个候选全指向同一 URL 且与 src 不同的 <img>。
 # ---------------------------------------------------------------------------
 _IMG_TAG_RE = re.compile(r"<img\b[^>]*>", re.I)
-_ATTR_RE_CACHE: dict = {}
+_SRCSET_ATTR_RE: dict = {}
 
 
-def _tag_attr(tag: str, name: str):
-    rx = _ATTR_RE_CACHE.get(name)
+def _img_attr(tag: str, name: str):
+    rx = _SRCSET_ATTR_RE.get(name)
     if rx is None:
-        rx = _ATTR_RE_CACHE[name] = re.compile(r"""\s%s\s*=\s*(?:"([^"]*)"|'([^']*)')""" % re.escape(name), re.I)
+        rx = _SRCSET_ATTR_RE[name] = re.compile(r"""\s%s\s*=\s*(?:"([^"]*)"|'([^']*)')""" % re.escape(name), re.I)
     m = rx.search(tag)
     if not m:
         return None, None
@@ -3496,8 +3496,8 @@ def collapse_degenerate_srcset(html: str, ws: Path):
 
     def fix(m):
         tag = m.group(0)
-        srcset, sm = _tag_attr(tag, "srcset")
-        src, _ = _tag_attr(tag, "src")
+        srcset, sm = _img_attr(tag, "srcset")
+        src, _ = _img_attr(tag, "src")
         if not srcset or not src or not src.startswith("/static/"):
             return tag
         urls = [c.strip().split()[0] for c in srcset.split(",") if c.strip()]
@@ -3506,7 +3506,7 @@ def collapse_degenerate_srcset(html: str, ws: Path):
         if not (ws / src.lstrip("/").split("?")[0]).is_file():
             return tag
         out = tag[:sm.start()] + tag[sm.end():]
-        _, zm = _tag_attr(out, "sizes")
+        _, zm = _img_attr(out, "sizes")
         if zm:
             out = out[:zm.start()] + out[zm.end():]
         n[0] += 1
