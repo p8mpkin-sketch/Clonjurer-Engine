@@ -485,7 +485,7 @@ setInterval(function(){s[k].classList.remove('on');k=(k+1)%s.length;s[k].classLi
 
 def case_drift_rotator_async(ctx):
     """框架式自动轮换的选项卡: setTimeout 链驱动, 状态在回调里改、DOM 在回调之后才刷(一组走微任务, 一组走下一个任务,
-    对应 Vue / React 的批量渲染); 各面板高度不同。采集时已转过几格, 克隆应回到初始格, 不与脚本重新起转的那格叠在一起。"""
+    一组隔 80ms 才提交, 对应 Vue / React 的批量渲染与分片提交); 各面板高度不同。采集时已转过几格, 克隆应回到初始格, 不与脚本重新起转的那格叠在一起。"""
     css = ".rt b{display:inline-block;padding:6px 10px;margin:0 6px 10px 0;border:1px solid #b9c2cc;border-radius:6px}.rt b.is-on{background:#14324d;color:#fff}.rt>div{display:none;padding:20px;border-radius:10px;color:#fff}.rt>div.is-on{display:block}"
     js = """<script>(function(){function mount(id,flush){var root=document.getElementById(id),ts=root.querySelectorAll('b'),ps=root.querySelectorAll(':scope>div'),k=0,dirty=false;
 function render(){dirty=false;for(var j=0;j<ps.length;j++){ps[j].classList.toggle('is-on',j===k);ts[j].classList.toggle('is-on',j===k);}}
@@ -493,14 +493,16 @@ function set(i){k=i;if(!dirty){dirty=true;flush(render);}}
 function tick(){set((k+1)%ps.length);setTimeout(tick,2500);}render();setTimeout(tick,2500);}
 mount('rt-a',function(f){Promise.resolve().then(f);});
 var ch=new MessageChannel(),q=[];ch.port1.onmessage=function(){var f;while((f=q.shift()))f();};
-mount('rt-b',function(f){q.push(f);ch.port2.postMessage(0);});})();</script>"""
+mount('rt-b',function(f){q.push(f);ch.port2.postMessage(0);});
+mount('rt-c',function(f){setTimeout(f,80);});})();</script>"""
     def block(rid, cols):
         tabs = "".join(f"<b>Tab {c}</b>" for c in "ABCD")
         panes = "".join(f'<div style="background:#{c}"><h2>Panel {i + 1}</h2>' + f"<p>{LOREM}</p>" * (i + 1) + "</div>" for i, c in enumerate(cols))
         return f'<div class="rt" id="{rid}">{tabs}{panes}</div>'
     mid = (f'<div class="band"><div class="wrap">{block("rt-a", ("1f5f8b", "7b3f8c", "2e7d32", "8c5a1f"))}</div></div>'
            f'<div class="band alt"><div class="wrap">{block("rt-b", ("8c5a1f", "2e7d32", "7b3f8c", "1f5f8b"))}</div></div>'
-           f'<div class="band"><div class="wrap"><div class="grid">{_cards(3)}</div></div></div>{js}')
+           f'<div class="band"><div class="wrap">{block("rt-c", ("2e7d32", "1f5f8b", "8c5a1f", "7b3f8c"))}</div></div>'
+           f'<div class="band alt"><div class="wrap"><div class="grid">{_cards(3)}</div></div></div>{js}')
     return _shell("Drift rotator async", mid, head=f"<style>{css}</style>")
 
 

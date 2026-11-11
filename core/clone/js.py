@@ -2885,8 +2885,8 @@ def seed_random_js(seed: int, src_map=None, t0_ms=None) -> str:
     return js
 
 
-# 定时器改动日志(采集侧, 导航前注入): 长周期定时器(≥1s 的 setInterval / setTimeout)回调里(含回调之后紧跟的微任务与
-# 下一个任务, 框架的批量渲染在那里刷 DOM)对 class/style 的改动记下
+# 定时器改动日志(采集侧, 导航前注入): 长周期定时器(≥1s 的 setInterval / setTimeout)回调里(含回调结束后 250ms 内,
+# 框架的批量渲染/分片提交在那里刷 DOM)对 class/style 的改动记下
 # "第一次被改之前的值"。自动轮播/轮换横幅/进度条这类周期性状态在采集的十几秒里已经转过几格, 冻进 DOM 的是"第 k 帧";
 # 新开的原站从初始帧起播, 克隆里站点脚本又从自己的初始帧起播(与冻进去的第 k 帧叠成两帧同时显示)。
 # 回退(TIMER_JOURNAL_REWIND_JS)只动有周期性证据的改动: 同一元素同一 class 词/样式属性在 ≥2 次回调里被改,
@@ -2894,14 +2894,14 @@ def seed_random_js(seed: int, src_map=None, t0_ms=None) -> str:
 # 一次性揭示内容)不动。
 TIMER_JOURNAL_JS = r"""(() => {
   if (window.__tj) return;
-  const J = window.__tj = {els: new Map(), frozen: 0, fires: 0};
-  const MIN = 1000, MAX_ELS = 3000;
+  const J = window.__tj = {els: new Map(), frozen: 0, fires: 0, until: 0};
+  const MIN = 1000, MAX_ELS = 3000, LATE = 250;
   let mo = null;
   const ensure = () => {
     if (mo) return true;
     if (!document.documentElement) return false;
     try {
-      mo = new MutationObserver(() => {});
+      mo = new MutationObserver(recs => { if (!J.frozen && performance.now() <= J.until) { try { note(recs); } catch (e) {} } });
       mo.observe(document.documentElement, {attributes: true, attributeFilter: ['class', 'style'], attributeOldValue: true, subtree: true});
     } catch (e) { mo = null; }
     return !!mo;
@@ -2972,28 +2972,19 @@ TIMER_JOURNAL_JS = r"""(() => {
     return function () {
       if (J.frozen) return undefined;
       const ok = ensure();
-      if (ok) { try { mo.takeRecords(); } catch (e) {} }
+      if (ok) { try { const pend = mo.takeRecords(); if (performance.now() <= J.until) note(pend); } catch (e) {} }
       try { return fn.apply(this, arguments); }
       finally {
         if (ok) {
           J.fires++;
           try { note(mo.takeRecords()); } catch (e) {}
-          // 框架式渲染: 回调里只改状态, DOM 在回调之后的微任务(Vue)或紧接着的下一个任务(React 调度器)里才刷。
-          // 这两段窗口里出现的改动同样记在这次定时器名下(回退仍要求周期性证据, 偶然混进来的一次性改动不会被退)
-          const late = () => { if (!J.frozen) { try { note(mo.takeRecords()); } catch (e) {} } };
-          try { Promise.resolve().then(late); } catch (e) {}
-          try { hop(late); } catch (e) {}
+          // 框架式渲染: 回调里只改状态, DOM 在回调之后才刷 —— 微任务(Vue)、下一个任务(React 调度器), 或隔几十毫秒
+          // 的分片提交(实测 React 的 setTimeout 链轮换, 回调到提交约 80ms, 中间穿插别的任务)。回调结束后 LATE 毫秒内
+          // 观察到的改动同样记在这次定时器名下(回退仍要求周期性证据, 偶然混进来的一次性改动不会被退)
+          J.until = performance.now() + LATE;
         }
       }
     };
-  };
-  let hopCh = null; const hopQ = [];
-  const hop = f => {
-    if (!hopCh) {
-      hopCh = new MessageChannel();
-      hopCh.port1.onmessage = () => { const fs = hopQ.splice(0); for (const g of fs) g(); };
-    }
-    hopQ.push(f); hopCh.port2.postMessage(0);
   };
   const si = window.setInterval, st = window.setTimeout;
   window.setInterval = function (fn, ms) { const a = Array.prototype.slice.call(arguments); a[0] = wrap(fn, +ms); return si.apply(window, a); };
