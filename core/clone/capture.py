@@ -280,6 +280,15 @@ from core.clone.support import (  # noqa: E402  手机版(按 UA 分发)
 )
 
 
+
+def _shot_fmt() -> dict:
+    """评分整页截图编码: SHOT_JPEG 开时用 JPEG(文件名仍 .png, 读取方按内容解码)。
+    1280×16000 整页 PNG 编码 ~3s, JPEG q92 ~0.6s; 评分先等比缩到 512 宽, 两侧同为 JPEG 时
+    分数与两侧同为 PNG 一致(合成页 5 组扰动逐一相同)。基准/克隆/保真轨/校准预评都走这里, 口径同源。"""
+    if getattr(config, "SHOT_JPEG", False):
+        return {"type": "jpeg", "quality": int(getattr(config, "SHOT_JPEG_QUALITY", 92))}
+    return {}
+
 class CaptureMixin:
 
     def _full_shot(self, page, path, label="截图", _fresh=False):
@@ -336,14 +345,14 @@ class CaptureMixin:
                 try:
                     page.screenshot(path=str(path), full_page=True,
                                     clip={"x": 0, "y": 0, "width": w, "height": cap},
-                                    timeout=config.SHOT_TIMEOUT)
+                                    timeout=config.SHOT_TIMEOUT, **_shot_fmt())
                     self.log("RENDER", f"{label}超长({int(dims[1])}px > 评分区 {cap}px), "
                                        f"限高截图")
                     return
                 except Exception as exc:
                     self.log("WARN", f"{label}限高截图失败, 改走整页截图: {str(exc)[:160]}")
         try:
-            page.screenshot(path=str(path), full_page=True, timeout=config.SHOT_TIMEOUT)
+            page.screenshot(path=str(path), full_page=True, timeout=config.SHOT_TIMEOUT, **_shot_fmt())
             return
         except Exception as exc:
             self.log("WARN", f"{label}整页截图失败, 退化为限高截图: {str(exc)[:160]}")
@@ -354,7 +363,7 @@ class CaptureMixin:
         try:
             page.screenshot(path=str(path), full_page=True, animations="disabled",
                             clip={"x": 0, "y": 0, "width": w, "height": h},
-                            timeout=config.SHOT_TIMEOUT)
+                            timeout=config.SHOT_TIMEOUT, **_shot_fmt())
             return
         except Exception as exc:
             self.log("WARN", f"{label}限高截图失败, 退化为视口分块拼接: {str(exc)[:160]}")
@@ -428,7 +437,7 @@ class CaptureMixin:
         while y < height:
             actual = page.evaluate(f"() => {{ window.scrollTo(0, {y}); return window.scrollY; }}")
             page.wait_for_timeout(120)
-            tile = Image.open(io.BytesIO(page.screenshot(full_page=False,
+            tile = Image.open(io.BytesIO(page.screenshot(full_page=False, **_shot_fmt(),
                                                           timeout=config.SHOT_TIMEOUT)))
             tile = tile.convert("RGB")
             top = int(actual) if isinstance(actual, (int, float)) else y

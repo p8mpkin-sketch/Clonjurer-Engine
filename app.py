@@ -658,7 +658,10 @@ def task_screenshot(task_id, img_type):
     target = ws / filename
     if not target.is_file():
         return jsonify({"error": f"{filename} 尚未生成"}), 404
-    return send_file(target, mimetype="image/png", max_age=0)
+    # 评分截图可能是 JPEG 编码(config.SHOT_JPEG, 文件名仍 .png), 按内容给类型
+    with open(target, "rb") as fh:
+        is_jpeg = fh.read(3) == b"\xff\xd8\xff"
+    return send_file(target, mimetype="image/jpeg" if is_jpeg else "image/png", max_age=0)
 
 
 THUMB_WIDTH = 480

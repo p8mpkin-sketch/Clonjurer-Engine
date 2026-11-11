@@ -266,6 +266,9 @@ SHORT_PAGE_NO_SCROLL_WAIT = SPEED8 and os.environ.get("CLONER_SHORT_PAGE_NO_SCRO
 # 每个克隆至少留 2 个核; 8 核以上不变(上限仍是 MAX_CONCURRENT_CONTEXTS)。CLONER_CFG_MAX_CONCURRENT_CONTEXTS 可覆盖
 # 默认关(=1 开): CI 4 核同时段 A/B, 并发 2/3/4 的单站均耗时 61.5/80.1/90.3s, 但整批墙钟 635/576/478s,
 # 少并发让单站变快却拖慢整批吞吐; 单用户一次只克隆一个站时并发数不起作用。适合"交互式要单站快"的场景手动开。
+# 评分整页截图用 JPEG q92 编码(整页 PNG 编码是截图耗时大头, 约 5 倍); 所有评分截图同口径
+SHOT_JPEG = SPEED8 and os.environ.get("CLONER_SHOT_JPEG", "1") != "0"
+SHOT_JPEG_QUALITY = int(os.environ.get("CLONER_SHOT_JPEG_QUALITY", "92"))
 CPU_AWARE_CONCURRENCY = SPEED8 and os.environ.get("CLONER_CPU_AWARE_CONCURRENCY", "0") == "1"
 if CPU_AWARE_CONCURRENCY:
     MAX_CONCURRENT_CONTEXTS = max(1, min(MAX_CONCURRENT_CONTEXTS, (os.cpu_count() or 4) // 2))
