@@ -169,6 +169,7 @@ def macos():
                    "- samples are committed by the CI bot\n- scores are computed offline\n\nNext: review the open items.\n")
     apps = [
         ("tune", "mac_form_prefs", [sys.executable, str(HERE / "apps" / "mac" / "form_prefs.py")], None),
+        ("tune", "mac_form_library", [sys.executable, str(HERE / "apps" / "mac" / "form_library.py")], None),
         ("holdout", "mac_sqlitebrowser", ["open", "/Applications/DB Browser for SQLite.app"], "DB Browser for SQLite"),
         ("holdout", "mac_coteditor", ["open", "-a", "/Applications/CotEditor.app", str(doc)], "CotEditor"),
     ]
