@@ -447,11 +447,20 @@ DIAG_JS = r"""() => {
 
 # 周期 ≥1s 的 setInterval(轮播翻页/折叠卡轮换/倒计时)两侧都不触发: 比的是首载状态。否则截图那一刻各自转到第几项
 # 取决于加载耗时, 分屏滚动截图期间翻页还会在拼接处留错位。与引擎自评同口径; PROBE_TIMERS=live 恢复放行
-HOLD_INTERVALS = (os.environ.get("PROBE_TIMERS") or "hold") != "live"
+# PROBE_TIMERS=hold3(提案口径, 默认不启用): 另外把 ≥3s 的 setTimeout 也两侧都不触发 —— 框架里的自动轮换常写成
+# "setTimeout 链"(每轮渲染后重新登记, gitee 首页选项卡 5s 一换、swiper autoplay 同类), setInterval 这条规则拦不住;
+# 3s 以下的长延时多是内容装配, 不拦。改口径须在评分卡注明, 并与同口径的基线比
+_PROBE_TIMERS = os.environ.get("PROBE_TIMERS") or "hold"
+HOLD_INTERVALS = _PROBE_TIMERS != "live"
 HOLD_INTERVALS_JS = r"""(() => {
   const real = window.setInterval; let fake = 1 << 30;
   window.setInterval = function (fn, ms) { if (+ms >= 1000) return fake++; return real.apply(this, arguments); };
-})();"""
+  const LONG = __LONG__;
+  if (LONG > 0) {
+    const st = window.setTimeout;
+    window.setTimeout = function (fn, ms) { if (+ms >= LONG) return fake++; return st.apply(this, arguments); };
+  }
+})();""".replace("__LONG__", "3000" if _PROBE_TIMERS == "hold3" else "0")
 
 
 def _shoot(ctx, url, vp, out: Path, timeout_ms=45000, extra_wait_ms=0, focus_keys=None):
