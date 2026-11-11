@@ -211,6 +211,10 @@ def main():
                 res.get("total_mb"), res.get("mb_before_load"), res.get("requests"),
                 res.get("requests_before_load"), nav.get("html_kb"), res.get("proxied_to_upstream"),
                 res.get("failed"), (res.get("load_err") or res.get("error") or "")[:60]), flush=True)
+            big = res.get("biggest") or []
+            if big and (res.get("total_mb") or 0) >= 2:
+                print("COMPACTDL-BIG|{}|{}".format(Path(t).stem, " ; ".join(
+                    f"{b['url'][-48:]} {b['kb']:.0f}KB" for b in big[:5])), flush=True)
         else:
             print(json.dumps(res, ensure_ascii=False, indent=1))
             dcl = (res.get("nav") or {}).get("dcl") or 0

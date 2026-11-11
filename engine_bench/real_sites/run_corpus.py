@@ -183,6 +183,7 @@ def run(args):
             print("\n超时, 停止等待(未完成的站点记为 timeout)")
             break
         time.sleep(args.poll)
+    batch_wall = round(time.time() - started, 1)   # 整批墙钟(提交→全部完成, 不含探针): 并发度变化时看吞吐
     print()
 
     expect_by_url = {_norm(s["url"]): s for s in sites}
@@ -254,7 +255,7 @@ def run(args):
     prev_name, prev = _previous_run()
     out = {"stamp": stamp, "base": args.base, "batch_id": batch_id, "viewport": args.viewport,
            "tag": args.tag, "rejected": rejected, "results": results,
-           "summary": _summary(results)}
+           "summary": dict(_summary(results), batch_wall_s=batch_wall)}
     json_path = RUNS / f"run_{stamp}.json"
     json_path.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     md_path = RUNS / f"REPORT_{stamp}.md"

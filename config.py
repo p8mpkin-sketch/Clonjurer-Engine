@@ -255,6 +255,14 @@ SPEED8 = os.environ.get("CLONER_SPEED8", "1") != "0"
 # 交付首屏: 前 N 屏以外、原站加载过的图改原生懒加载(部署后 load 不等页尾图片; 评分截图前转回 eager)
 DEPLOY_DEFER_IMG = SPEED8 and os.environ.get("CLONER_DEPLOY_DEFER_IMG", "1") != "0"
 DEPLOY_DEFER_SCREENS = float(os.environ.get("CLONER_DEPLOY_DEFER_SCREENS", "2"))
+# 按 CPU 定并发克隆数: 每个克隆同时开主页 + 窄屏对照页 + 保真轨页(3~5 个渲染进程), 4 核机上并发 4 个
+# 互相抢 CPU, 单站各阶段都被拉长(CI 4 核同批 20 站: 重页滚动/截图/评分加载 2~3 倍于单跑)。
+# 每个克隆至少留 2 个核; 8 核以上不变(上限仍是 MAX_CONCURRENT_CONTEXTS)。CLONER_CFG_MAX_CONCURRENT_CONTEXTS 可覆盖
+# 一屏放得下的页面采集滚动不再固定等 1s(没有真的滚动, 没有进视口事件)
+SHORT_PAGE_NO_SCROLL_WAIT = SPEED8 and os.environ.get("CLONER_SHORT_PAGE_NO_SCROLL_WAIT", "1") != "0"
+CPU_AWARE_CONCURRENCY = SPEED8 and os.environ.get("CLONER_CPU_AWARE_CONCURRENCY", "1") != "0"
+if CPU_AWARE_CONCURRENCY:
+    MAX_CONCURRENT_CONTEXTS = max(1, min(MAX_CONCURRENT_CONTEXTS, (os.cpu_count() or 4) // 2))
 
 # 第二批合成用例的通用修法(2026-11-11 合并线)
 # 排在脚本之后的 viewport meta(脚本运行时写的)序列化后挪到第一个脚本前, 克隆里脚本照常改写它

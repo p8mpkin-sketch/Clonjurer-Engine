@@ -468,7 +468,7 @@ jobs:
               ph = {k: v for k, v in (r.get("phase_times") or {}).items() if isinstance(v, (int, float)) and v >= 0.5}
               print("COMPACTPH|{}|{}".format((r.get("url") or "")[8:48], json.dumps(ph, ensure_ascii=False, separators=(",", ":"))))
           s = run.get("summary") or {}
-          print("COMPACT summary " + json.dumps({k: s.get(k) for k in ("mean", "interactive_mean", "mean_elapsed", "p50_elapsed", "p90_elapsed")}, ensure_ascii=False))
+          print("COMPACT summary " + json.dumps({k: s.get(k) for k in ("mean", "interactive_mean", "mean_elapsed", "p50_elapsed", "p90_elapsed", "batch_wall_s")}, ensure_ascii=False))
           PY
           # 部署首屏逐站(task_id → 站点): 与 COMPACT 行同在日志尾部
           [ -f logs/deploy_probe.txt ] && grep '^COMPACTDL' logs/deploy_probe.txt || true

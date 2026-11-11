@@ -2039,6 +2039,7 @@ class CaptureMixin:
         try:
             step = 900
             position = 0
+            height = 0
             for _ in range(60):
                 position += step
                 # 滚动 + 等待 + 取高合并为一次往返(重页上每次 evaluate 都要排主线程)
@@ -2052,6 +2053,10 @@ class CaptureMixin:
                     self.log("RENDER", f"自动滚动达到时限({config.AUTO_SCROLL_BUDGET}s), "
                                        f"停在 {position}/{height}px")
                     break
+            vh = int((page.viewport_size or {}).get("height") or 0)
+            if getattr(config, "SHORT_PAGE_NO_SCROLL_WAIT", True) and vh and height <= vh:
+                # 一屏放得下的页面没有真的滚动过: 没有进视口事件要等, 也不用回顶
+                return
             page.wait_for_timeout(600)
             page.evaluate(SCROLL_TOP_JS)
             page.wait_for_timeout(400)
