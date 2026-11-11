@@ -270,8 +270,9 @@ SHORT_PAGE_NO_SCROLL_WAIT = SPEED8 and os.environ.get("CLONER_SHORT_PAGE_NO_SCRO
 DEPLOY_SRCSET_DEDUP = SPEED8 and os.environ.get("CLONER_DEPLOY_SRCSET_DEDUP", "1") != "0"
 # 窄屏首载页的静置/到位/随宽等待改为各页同时起、逐页取结果(原逐页串行等满)
 NARROW_PARALLEL_WAITS = SPEED8 and os.environ.get("CLONER_NARROW_PARALLEL_WAITS", "1") != "0"
-# 评分整页截图用 JPEG q92 编码(整页 PNG 编码是截图耗时大头, 约 5 倍); 所有评分截图同口径
-SHOT_JPEG = SPEED8 and os.environ.get("CLONER_SHOT_JPEG", "1") != "0"
+# 评分整页截图用 JPEG 编码(=1 开)。默认关: CI 同时段二分里像素级一致的克隆(angular.dev 原 100.0)
+# 在 JPEG 下稳定掉到 97.5(结构 0.984 / 边缘 0.942), q100 也一样; 而 CI 上整页截图省时每站不到 1s
+SHOT_JPEG = SPEED8 and os.environ.get("CLONER_SHOT_JPEG", "0") == "1"
 SHOT_JPEG_QUALITY = int(os.environ.get("CLONER_SHOT_JPEG_QUALITY", "92"))
 CPU_AWARE_CONCURRENCY = SPEED8 and os.environ.get("CLONER_CPU_AWARE_CONCURRENCY", "0") == "1"
 if CPU_AWARE_CONCURRENCY:
