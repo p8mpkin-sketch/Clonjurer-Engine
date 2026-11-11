@@ -2764,6 +2764,10 @@ DEPLOY_DEFER_IMG_JS = r"""
       if (!im.getAttribute('src') && !im.getAttribute('srcset')) continue;
       const r = im.getBoundingClientRect();
       const top = r.top + (scrollY || 0);
+      // 原图比显示尺寸大得多(4000px 原片缩到 600px 显示): 记下显示宽度, 交付时按 2 倍显示宽缩小(见 shrink_oversized_images)
+      if (r.width >= 16 && im.naturalWidth > r.width * 2.5 && !im.getAttribute('srcset') && !im.closest('picture')) {
+        im.setAttribute('data-clone-dw', String(Math.ceil(r.width)));
+      }
       if (r.width > 0 && r.height > 0 && top < vh && r.bottom > 0) {
         const a = Math.min(r.width, innerWidth) * Math.min(r.height, vh);
         if (a > bestA) { bestA = a; best = im; }

@@ -3382,3 +3382,86 @@ def externalize_data_uris(html: str, ws: Path, min_bytes: int = 8192):
         if "base64," in parts[i]:
             parts[i] = _BIG_DATA_URI_RE.sub(repl, parts[i])
     return "".join(parts), stats[0], stats[1]
+
+
+# ---------------------------------------------------------------------------
+# 交付首屏: 远大于显示尺寸的原图按 2 倍显示宽缩小
+# 采集到的是原站原图(新闻/电商站常见 4000~6000px、8~16MB 的 JPEG 显示在 600px 宽的卡片里), 部署后首屏
+# 要把它们整张搬完。采集时 DEPLOY_DEFER_IMG_JS 给"原图宽 > 2.5 倍显示宽"且无 srcset/<picture> 的 <img>
+# 记 data-clone-dw(显示宽); 这里把只被这类 <img> 引用的文件缩到 max(2×显示宽, 下限) 并按原格式重编码。
+# 被样式表/脚本/别的 <img>(无 data-clone-dw)引用的文件不动 —— 不知道它在别处显示多大。
+# ---------------------------------------------------------------------------
+_IMG_DW_RE = re.compile(r"<img\b[^>]*>", re.I)
+_SRC_ATTR_RE = re.compile(r'\ssrc="(/static/img/[0-9a-f]{16}\.(?:jpe?g|png|webp))"', re.I)
+_DW_ATTR_RE = re.compile(r'\sdata-clone-dw="(\d+)"')
+
+
+def shrink_oversized_images(ws: Path, min_width: int = 1600, min_bytes: int = 300_000):
+    """返回 (缩小个数, 省下字节)。只处理 ws/static/img 下 CAS 命名的 jpg/png/webp。"""
+    pages = [p for p in ws.rglob("*.html") if "flask_app" not in p.parts]
+    want = {}        # 文件名 -> 最大显示宽
+    plain_refs = {}  # 文件名 -> 不带显示宽的引用次数
+    texts = []
+    for p in pages:
+        with suppress(OSError):
+            texts.append(p.read_text(encoding="utf-8", errors="replace"))
+    for t in texts:
+        for tag in _IMG_DW_RE.finditer(t):
+            m = _SRC_ATTR_RE.search(tag.group(0))
+            if not m:
+                continue
+            name = m.group(1).rsplit("/", 1)[-1]
+            dw = _DW_ATTR_RE.search(tag.group(0))
+            if dw:
+                want[name] = max(want.get(name, 0), int(dw.group(1)))
+            else:
+                plain_refs[name] = plain_refs.get(name, 0) + 1
+    if not want:
+        return 0, 0
+    # 文件在 HTML 的 <img src> 之外(样式表/脚本/srcset/内联 style)出现过 → 不动
+    others = []
+    for sub in ("css", "js"):
+        d = ws / "static" / sub
+        if d.is_dir():
+            for f in d.iterdir():
+                with suppress(OSError):
+                    others.append(f.read_text(encoding="utf-8", errors="replace"))
+    n, saved = 0, 0
+    for name, dw in want.items():
+        if plain_refs.get(name):
+            continue
+        img_refs = sum(t.count(f'src="/static/img/{name}"') for t in texts)
+        if sum(t.count(name) for t in texts) != img_refs or any(name in o for o in others):
+            continue
+        f = ws / "static" / "img" / name
+        try:
+            size = f.stat().st_size
+            if size < min_bytes:
+                continue
+            with Image.open(f) as im:
+                w, h = im.size
+                target = max(min_width, dw * 2)
+                if w <= target * 1.25 or getattr(im, "n_frames", 1) > 1:
+                    continue
+                fmt = (im.format or "").upper()
+                nh = max(1, round(h * target / w))
+                small = im.convert("RGBA" if im.mode in ("RGBA", "LA", "P") and fmt != "JPEG" else "RGB") \
+                    .resize((target, nh), Image.LANCZOS)
+                buf = io.BytesIO()
+                if fmt == "JPEG":
+                    small.save(buf, "JPEG", quality=88, optimize=True, progressive=True)
+                elif fmt == "PNG":
+                    small.save(buf, "PNG", optimize=True)
+                elif fmt == "WEBP":
+                    small.save(buf, "WEBP", quality=88)
+                else:
+                    continue
+            data = buf.getvalue()
+            if len(data) >= size * 0.8:
+                continue
+            f.write_bytes(data)
+            n += 1
+            saved += size - len(data)
+        except Exception:   # noqa: BLE001 单张失败不影响交付
+            continue
+    return n, saved

@@ -260,6 +260,8 @@ DEPLOY_DEFER_SCREENS = float(os.environ.get("CLONER_DEPLOY_DEFER_SCREENS", "2"))
 # 每个克隆至少留 2 个核; 8 核以上不变(上限仍是 MAX_CONCURRENT_CONTEXTS)。CLONER_CFG_MAX_CONCURRENT_CONTEXTS 可覆盖
 # 交付首屏: HTML 里(脚本块以外)解码后 ≥8KB 的图片/字体 data: URI 外置为 /static/ 文件
 DEPLOY_EXTERNALIZE_DATA_URI = SPEED8 and os.environ.get("CLONER_DEPLOY_EXTERNALIZE_DATA_URI", "1") != "0"
+# 交付首屏: 原图宽 > 2.5 倍显示宽、只被 <img src> 引用的大图(≥300KB)缩到 max(2×显示宽, 1600px)
+DEPLOY_SHRINK_IMG = SPEED8 and os.environ.get("CLONER_DEPLOY_SHRINK_IMG", "1") != "0"
 # 一屏放得下的页面采集滚动不再固定等 1s(没有真的滚动, 没有进视口事件)
 SHORT_PAGE_NO_SCROLL_WAIT = SPEED8 and os.environ.get("CLONER_SHORT_PAGE_NO_SCROLL_WAIT", "1") != "0"
 CPU_AWARE_CONCURRENCY = SPEED8 and os.environ.get("CLONER_CPU_AWARE_CONCURRENCY", "1") != "0"

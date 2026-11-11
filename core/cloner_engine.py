@@ -309,7 +309,7 @@ from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部
     text_overlap_score,
     write_diff_preview,
 )
-from core.clone.support import _fluid_elements, _is_global_reset_rule, _is_transient_hide_rule, _regroup_css_rules  # noqa: F401
+from core.clone.support import shrink_oversized_images, _fluid_elements, _is_global_reset_rule, _is_transient_hide_rule, _regroup_css_rules  # noqa: F401
 
 
 from core.clone.support import (  # noqa: E402  手机版(按 UA 分发)
@@ -674,6 +674,12 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
             pairs = self._compose_pairs(results, routes, origin, srcset_map,
                                         iframe_pages, frame_records)
             self._localize(pages, iframe_pages, frame_records, pairs, pages_map)
+            if round_i == 0 and getattr(config, "DEPLOY_SHRINK_IMG", True):
+                # 首轮本地化后、首次评分前: 评分看到的就是交付的缩小版
+                with suppress(Exception):
+                    n_sh, b_sh = shrink_oversized_images(self.ws)
+                    if n_sh:
+                        self.log("DEPLOY", f"超大原图缩小: {n_sh} 张按 2 倍显示宽重编码, 交付少 {b_sh // 1048576} MB")
             self._rewrite_js_files(results, pairs)
             self._rewrite_mock_bodies(mock_entries, pairs)
             self._phase("本地化重写", tp)
