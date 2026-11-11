@@ -451,7 +451,9 @@ class LocalizeMixin:
             keep_js = CONTENT_KEEP_GUARD_JS if getattr(config, "CONTENT_KEEP_GROUP", True) \
                 else CONTENT_KEEP_GUARD_JS.replace(",GRP=1,", ",GRP=0,")
             if not getattr(config, "CONTENT_KEEP_NEW_TWIN", True):
-                keep_js = keep_js.replace(",TWN=1;", ",TWN=0;")
+                keep_js = keep_js.replace(",TWN=1,", ",TWN=0,")
+            if not getattr(config, "CONTENT_KEEP_EARLY_ADD", True):
+                keep_js = keep_js.replace(",EARLY=1;", ",EARLY=0;")
             localized = self._inject_after_head(localized, keep_js)
             localized = relax_font_display(localized)
             # 部署性能守卫: 未本地化的阻塞外链脚本(采集期已 404/跳过的计数/埋点、跨域图标)

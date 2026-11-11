@@ -1510,6 +1510,13 @@ class CaptureMixin:
         if not quiet_ok:
             self.log("RENDER", "网络静置等待超时, 继续后续固化流程")
         self._nav_ready_s = time.time() - t_nav
+        self._storage_first = None
+        if screenshot and getattr(config, "STATE_SNAPSHOT_FIRST_VALUE", True):
+            # 主页首载静置后的存储值: 采集后续还会在同源页面里多次加载目标页(窄屏首载页/对照页/重试), 站点按
+            # localStorage 计数的「第 N 次访问」状态(苹果顶栏消息条按访问计数轮换文案)会被引擎自己加上去, 终态快照
+            # 写回克隆就成了回访态, 而原站对新访客显示首访态(iphone 平板 81→43)
+            with suppress(Exception):
+                self._storage_first = page.evaluate(STORAGE_SNAPSHOT_JS)
         if nav_tr:
             t_load = nav_tr["load"][0]
             hang = len(nav_tr["ignored"]) + sum(1 for t in nav_tr["inflight"].values()
@@ -1818,6 +1825,16 @@ class CaptureMixin:
         if screenshot:  # 仅主页面快照 Cookie/Storage 终态
             try:
                 storage = page.evaluate(STORAGE_SNAPSHOT_JS)
+                first = getattr(self, "_storage_first", None) or {}
+                n_rev = 0
+                for kind in ("local", "session"):
+                    cur, f0 = storage.get(kind) or {}, first.get(kind) or {}
+                    for k, v in f0.items():
+                        if k in cur and cur[k] != v:
+                            cur[k] = v
+                            n_rev += 1
+                if n_rev:
+                    self.log("RENDER", f"状态快照: {n_rev} 个存储键在首载后被改写(引擎多次加载同源页), 写回首载值")
                 state = {"cookies": ctx.cookies(), "local": storage.get("local", {}),
                          "session": storage.get("session", {})}
             except Exception as exc:

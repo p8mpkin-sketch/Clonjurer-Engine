@@ -161,7 +161,27 @@ class ContentKeepInsertFirst(unittest.TestCase):
     def test_insert_then_remove_not_restored(self):
         self.assertEqual(self._run(CONTENT_KEEP_GUARD_JS), [False, True])
 
+    def test_defer_phase_insert_first(self):
+        # bilibili: 模块脚本在解析完、DOMContentLoaded 前先插新 MAIN 再删旧的(观察器要在 DCL 前就挂上)
+        html = INSERT_FIRST.replace("window.addEventListener('DOMContentLoaded', function(){ setTimeout(function(){", "(function(){ (function(){") \
+                           .replace("}, 200); });", "})(); })();").replace("<script>", '<script type="module">', 1)
+        self.assertIn('type="module"', html)
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                res = {}
+                for name, js in (("on", CONTENT_KEEP_GUARD_JS), ("off", CONTENT_KEEP_GUARD_JS.replace(",EARLY=1;", ",EARLY=0;"))):
+                    page = b.new_page(viewport={"width": 1280, "height": 800})
+                    page.set_content(html.replace("GUARD", js))
+                    page.wait_for_timeout(1800)
+                    res[name] = page.evaluate("[!!document.getElementById('old'), !!document.getElementById('new')]")
+            finally:
+                b.close()
+        self.assertEqual(res["on"], [False, True])
+        self.assertEqual(res["off"], [True, True], "关掉开关应复现旧行为(放回成两份)")
+
     def test_switch_off_restores(self):
-        off = CONTENT_KEEP_GUARD_JS.replace(",TWN=1;", ",TWN=0;")
+        off = CONTENT_KEEP_GUARD_JS.replace(",TWN=1,", ",TWN=0,")
         self.assertEqual(self._run(off), [True, True])
 

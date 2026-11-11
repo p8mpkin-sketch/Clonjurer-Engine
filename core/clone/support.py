@@ -2440,7 +2440,7 @@ def relax_font_display(text):
 # Best Sellers: 序列化 12 张卡, Vue 在克隆里按 1 条数据水合, 把其余 11 张当多余节点删掉)。同一父元素下 ≥3 个同签名
 # 兄弟在窗口内被删、幸存的同签名兄弟不到被删数的 1/3 → 按原顺序放回(与幸存者文案逐字相同的不放, 免重复);
 # 之后父元素里脚本自己又渲染出一半以上数量的同类条目(数据到了) → 撤掉放回的。
-CONTENT_KEEP_GUARD_JS = r"""<script data-clone-preview="content-keep">(function(){try{if(window.__cloneKeep)return;window.__cloneKeep=1;var T0=Date.now(),WIN=12000,MIN=100,REC=[],KEPT=[],measured=0,done=false,RST=new WeakSet(),GRP=1,TWN=1;
+CONTENT_KEEP_GUARD_JS = r"""<script data-clone-preview="content-keep">(function(){try{if(window.__cloneKeep)return;window.__cloneKeep=1;var T0=Date.now(),WIN=12000,MIN=100,REC=[],KEPT=[],measured=0,done=false,RST=new WeakSet(),GRP=1,TWN=1,EARLY=1;
 function active(){return !!window.__cloneUserAct;}if(!window.__cloneActHook){window.__cloneActHook=1;['pointerdown','keydown','touchstart','wheel'].forEach(function(t){try{addEventListener(t,function(e){if(e.isTrusted)window.__cloneUserAct=1;},{capture:true,passive:true});}catch(e){}});}
 function over(){return done||active()||Date.now()-T0>WIN;}
 function hOf(el){try{var r=el.getBoundingClientRect();return r.width>=60?r.height:0;}catch(e){return 0;}}
@@ -2477,15 +2477,19 @@ function sim(a,b){var A=toks(a),B=toks(b);if(!A.length&&!B.length)return true;va
 // 用前 80 个词的 Jaccard 认亲
 function words(e){try{return new Set(String(e.innerText||'').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(function(w){return w.length>1;}).slice(0,80));}catch(e){return new Set();}}
 function tsim(a,b){var A=words(a),B=words(b);if(A.size<6||B.size<6)return false;var n=0;A.forEach(function(w){if(B.has(w))n++;});return n/Math.max(A.size,B.size)>=0.5;}
-function onAdded(n){if(over()||!n||n.nodeType!==1||RST.has(n)||!n.parentNode||n.parentNode.nodeType!==1)return;if(/^(SCRIPT|STYLE|LINK|TEMPLATE|NOSCRIPT|META|HTML|HEAD|BODY)$/.test(n.tagName))return;NEWS.add(n);
+function onAdded(n){if(over()||!n||n.nodeType!==1||RST.has(n)||!n.parentNode||n.parentNode.nodeType!==1)return;if(/^(SCRIPT|STYLE|LINK|TEMPLATE|NOSCRIPT|META|HTML|HEAD|BODY)$/.test(n.tagName))return;
+  NEWS.add(n);if(!DCL)return;
   if(PAIRS.length<200){PAIRS.push({n:n,t:Date.now()});setTimeout(dedup,1600);}}
 function dedup(){if(over())return;var now=Date.now(),rest=[];for(var i=0;i<PAIRS.length;i++){var q=PAIRS[i];if(now-q.t<1500){rest.push(q);continue;}var n=q.n;if(!n.isConnected||!n.parentNode||n.parentNode.nodeType!==1)continue;var a=hOf(n);if(a<MIN)continue;
   var old=null,cnt=0,ch=n.parentNode.children;for(var j=0;j<ch.length;j++){var c=ch[j];if(c===n||NEWS.has(c))continue;var b=hOf(c);if(b<MIN)continue;if(c.tagName===n.tagName&&sim(c,n)){cnt++;old=c;continue;}if(Math.abs(a-b)<=Math.max(a,b)*0.6&&tsim(c,n)){cnt++;old=c;}}
   if(cnt!==1||!old)continue;var b2=hOf(old);if(old.tagName===n.tagName&&sim(old,n)&&Math.abs(a-b2)>Math.max(a,b2)*0.25)continue;
   try{selfRm=1;old.remove();selfRm=0;window.__cloneHydrDedup=(window.__cloneHydrDedup||0)+1;}catch(e){}}PAIRS=rest;}
-var addMo=new MutationObserver(function(rs){if(over()){try{addMo.disconnect();}catch(e){}return;}for(var i=0;i<rs.length;i++){var a=rs[i].addedNodes;for(var j=0;j<a.length;j++)onAdded(a[j]);}});
-function armAdd(){try{addMo.observe(document.documentElement,{childList:true,subtree:true});}catch(e){}}
-if(document.readyState!=='loading')armAdd();else document.addEventListener('DOMContentLoaded',armAdd);
+var addMo=new MutationObserver(function(rs){if(over()){try{addMo.disconnect();}catch(e){}return;}if(!PARSED)return;for(var i=0;i<rs.length;i++){var a=rs[i].addedNodes;for(var j=0;j<a.length;j++)onAdded(a[j]);}});
+var DCL=document.readyState!=='loading',PARSED=DCL;
+// 解析期插入的是序列化内容本身, 不算新块(观察器回调可能晚到解析结束后才批量送达, 不能看回调时的 readyState):
+// 解析一结束(readyState→interactive, defer/module 脚本之前)把积压记录丢掉, 之后的插入才算 —— Vue 在这一段先插新块再删旧块
+if(!PARSED)document.addEventListener('readystatechange',function(){if(!PARSED&&document.readyState!=='loading'){try{addMo.takeRecords();}catch(e){}PARSED=true;}});function armAdd(){try{addMo.observe(document.documentElement,{childList:true,subtree:true});}catch(e){}}
+if(DCL||EARLY)armAdd();if(!DCL)document.addEventListener('DOMContentLoaded',function(){DCL=true;if(!EARLY)armAdd();});
 window.__cloneKeepDbg=function(){return KEPT.map(function(r){return [r.n.tagName+'.'+String(r.n.className).slice(0,30),r.h,r.ph,hOf(r.p),r.back?1:0,r.n.isConnected?1:0];});};}catch(e){}})();</script>"""
 
 REPLAY_DEDUPE_JS = r"""<script data-clone-preview="replay-dedupe">(function(){try{if(window.__cloneDedupe)return;window.__cloneDedupe=1;var M=[],mark=new WeakSet(),mo=new MutationObserver(function(){});mo.observe(document.documentElement,{childList:true,subtree:true});
