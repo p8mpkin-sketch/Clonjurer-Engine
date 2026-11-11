@@ -1598,11 +1598,19 @@ class CaptureMixin:
                     json.dumps(stable, ensure_ascii=False), encoding="utf-8")
         return baseline_text, layout_stable
 
+    def _replay_clock_t0(self):
+        """时钟锚点(毫秒): 本次采集第一张页面创建的时刻; 采集各页与克隆回放的 Date 都从这一刻起走。"""
+        if not getattr(config, "REPLAY_CLOCK", True):
+            return None
+        if not getattr(self, "_clock_t0", None):
+            self._clock_t0 = int(time.time() * 1000)
+        return self._clock_t0
+
     def _seed_page(self, page):
         """采集侧页面装上种子随机数(与克隆页同一套, 见 js.SEED_RANDOM_JS); 须在导航前调用。"""
         if getattr(config, "REPLAY_SEED_RANDOM", True):
             with suppress(Exception):
-                page.add_init_script(seed_random_js(getattr(config, "REPLAY_SEED", 0)))
+                page.add_init_script(seed_random_js(getattr(config, "REPLAY_SEED", 0), t0_ms=self._replay_clock_t0()))
         if getattr(config, "TIMER_JOURNAL", True):
             with suppress(Exception):
                 page.add_init_script(TIMER_JOURNAL_JS)

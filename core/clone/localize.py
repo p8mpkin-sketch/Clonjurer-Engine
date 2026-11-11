@@ -393,7 +393,8 @@ class LocalizeMixin:
                         and local.split("?")[0].endswith((".js", ".mjs")):
                     src_map.setdefault(local.split("?")[0].rsplit("/", 1)[-1], seed_random_hash(orig))
             seed_script = ('<script data-clone-preview="seed-random">'
-                           + seed_random_js(getattr(config, "REPLAY_SEED", 0), src_map) + "</script>")
+                           + seed_random_js(getattr(config, "REPLAY_SEED", 0), src_map,
+                                            t0_ms=getattr(self, "_clock_t0", None)) + "</script>")
         if self.db.get_tracker_config(self.task_id) and \
                 (self.db.get_tracker_config(self.task_id) or {}).get("enabled"):
             # 启用埋点的任务: 附加观察器胶水(交互层拦截前回调 __ft_observe 触发上报)

@@ -2865,9 +2865,24 @@ def seed_random_hash(text: str) -> int:
     return x
 
 
-def seed_random_js(seed: int, src_map=None) -> str:
-    return (SEED_RANDOM_JS.replace("__SEED__", str(int(seed) & 0xFFFFFFFF))
-            .replace("__MAP__", "null" if src_map is None else json.dumps(src_map, separators=(",", ":"))))
+# 时钟锚定: 页面每次加载时, Date 从采集开始的那一刻(T0)起走(之后照常前进)。按当前时刻选内容的页面
+# ("今日专题"按分钟/小时取模、"更新于 hh:mm"、相对时间"3 分钟前")在采集的各张页面(主页/窄屏对照页/基准页)
+# 与克隆回放里都落在同一刻, 录制的接口数据与页面时钟也对得上。performance.now / 定时器不动。
+# 偏移不到 1 秒(采集主页面自身)不装。
+CLOCK_ANCHOR_JS = r"""(function(){try{if(window.__cloneClk)return;window.__cloneClk=1;var D=Date,off=__T0__-D.now();if(!(Math.abs(off)>=1000))return;
+var now=function now(){return D.now()+off;};
+var P=new Proxy(D,{construct:function(t,a,nt){return a.length?Reflect.construct(t,a,nt):Reflect.construct(t,[D.now()+off],nt);},
+apply:function(){return new D(D.now()+off).toString();},get:function(t,k){return k==='now'?now:Reflect.get(t,k);}});
+try{Object.defineProperty(D.prototype,'constructor',{value:P,writable:true,configurable:true});}catch(e){}
+window.Date=P;}catch(e){}})();"""
+
+
+def seed_random_js(seed: int, src_map=None, t0_ms=None) -> str:
+    js = (SEED_RANDOM_JS.replace("__SEED__", str(int(seed) & 0xFFFFFFFF))
+          .replace("__MAP__", "null" if src_map is None else json.dumps(src_map, separators=(",", ":"))))
+    if t0_ms:
+        js += CLOCK_ANCHOR_JS.replace("__T0__", str(int(t0_ms)))
+    return js
 
 
 # 定时器改动日志(采集侧, 导航前注入): 长周期定时器(≥1s 的 setInterval / setTimeout)回调里对 class/style 的改动记下
