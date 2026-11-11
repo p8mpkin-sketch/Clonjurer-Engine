@@ -1,0 +1,1044 @@
+{
+  "uir_version": "1",
+  "meta": {
+    "source_kind": "a11y",
+    "title": "com.android.settings",
+    "lang": "zh",
+    "viewport": {
+      "w": 411,
+      "h": 683
+    },
+    "report": {
+      "platform": "android",
+      "nodes_in": 47,
+      "nodes_kept": 36,
+      "layout": {
+        "col": 12,
+        "row": 4,
+        "stack": 1
+      },
+      "images_embedded": 2,
+      "dividers": 2,
+      "sampled_colors": true,
+      "scale": 2.625
+    },
+    "edge_to_edge": true
+  },
+  "tokens": {
+    "color": {
+      "c0": "#ffffff",
+      "c1": "#1f2937",
+      "c2": "#2563eb",
+      "c3": "#6b7280"
+    },
+    "font": {
+      "f0": {
+        "family": "Roboto",
+        "fallback": "'Noto Sans SC','PingFang SC',system-ui,sans-serif"
+      }
+    },
+    "text_style": {
+      "t0": {
+        "size": 14,
+        "weight": 400,
+        "line": 1.35,
+        "color": "c1"
+      },
+      "ta0": {
+        "size": 20,
+        "weight": 600,
+        "line": 1.25,
+        "color": "#fbfbfb"
+      },
+      "ta1": {
+        "size": 14,
+        "weight": 600,
+        "line": 1.25,
+        "color": "#09998c"
+      },
+      "ta2": {
+        "size": 16,
+        "weight": 400,
+        "line": 1.25,
+        "color": "#282828"
+      },
+      "ta3": {
+        "size": 14,
+        "weight": 400,
+        "line": 1.25,
+        "color": "#777777"
+      },
+      "ta4": {
+        "size": 16,
+        "weight": 400,
+        "line": 1.25,
+        "color": "#c3c3c3"
+      },
+      "ta5": {
+        "size": 14,
+        "weight": 400,
+        "line": 1.25,
+        "color": "#d8d8d8"
+      },
+      "ta6": {
+        "size": 14,
+        "weight": 600,
+        "line": 1.25,
+        "color": "#099a8c"
+      },
+      "ta7": {
+        "size": 16,
+        "weight": 400,
+        "line": 1.25,
+        "color": "#272727"
+      },
+      "ta8": {
+        "size": 15,
+        "weight": 400,
+        "line": 1.25,
+        "color": "#099a8c"
+      },
+      "ta9": {
+        "size": 15,
+        "weight": 600,
+        "line": 1.25,
+        "color": "#08998c"
+      },
+      "ta10": {
+        "size": 13,
+        "weight": 600,
+        "line": 1.25,
+        "color": "#0a9a8c"
+      }
+    },
+    "space": {
+      "s0": 0,
+      "s1": 4,
+      "s2": 8,
+      "s3": 12,
+      "s4": 16,
+      "s5": 24
+    }
+  },
+  "root": {
+    "id": "n1",
+    "role": "box",
+    "layout": {
+      "mode": "stack"
+    },
+    "box": {
+      "w": 411.4,
+      "h": 683.4,
+      "pad": [
+        0
+      ],
+      "bg": "#fafafa"
+    },
+    "children": [
+      {
+        "id": "n2",
+        "role": "box",
+        "layout": {
+          "mode": "flex",
+          "direction": "col",
+          "align": "start"
+        },
+        "box": {
+          "w": 411.4,
+          "h": 683.4,
+          "bg": "#fafafa",
+          "pad": [
+            0
+          ],
+          "position": {
+            "top": 0.0,
+            "left": 0.0
+          }
+        },
+        "content": {
+          "ref": "com.android.settings:id/content_parent"
+        },
+        "children": [
+          {
+            "id": "n3",
+            "role": "box",
+            "layout": {
+              "mode": "flex",
+              "direction": "row",
+              "align": "start"
+            },
+            "box": {
+              "w": 411.4,
+              "h": 56.0,
+              "bg": "#263238",
+              "pad": [
+                0
+              ],
+              "margin": [
+                24.0,
+                0,
+                0,
+                0.0
+              ]
+            },
+            "content": {
+              "ref": "com.android.settings:id/action_bar"
+            },
+            "children": [
+              {
+                "id": "n4",
+                "role": "image",
+                "box": {
+                  "w": 56.0,
+                  "h": 56.0,
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    0.0,
+                    0,
+                    0,
+                    0.0
+                  ]
+                },
+                "content": {
+                  "alt": "Menu",
+                  "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAJMAAACTCAIAAAAFh7xCAAAByklEQVR4nO3dMUoDQRiAUSOexV4F8TJp0+SggpDUcb2FegDLhRBYsJn54L0T/PAxw+xMsbvH57c7gu5HD8A/KVelXJVyVcpVKVelXJVyVcpVKVelXJVyVcpVKVelXJVyVcpVKVelXJVyVcpVKVelXJVyVcpVKVelXJVyVcpVKVelXJVyVcpVKVelXJVyVcpVKVelXJVyVcpVKVelXJVyVcpVKVelXJVyVcpVKVelXJVyVcpVKVelXJVyVQ+jB7jt9eVp9Airy/L1/fM7eopruzn/EfJ5eh89wmp/OH6czqOnuGa3rFKuSrkq5aomPaGwyZqrUq5KuSrlqpSrUq5KuapJ3wrcOG+y5qqUq1KuSrmqSU8o+8Nx9Airy7KMHuEGbwVVdssq5aqUq1KuSrkq5aom/Z5z47zJmqtSrkq5KuWqJj2huHHe5Ma5ym5ZpVyVclXKVSlXpVyVclXKVSlXpVyVclXKVSlXpVyVclXKVSlXpVyVclXKVSlXpVyVclXKVSlXpVyVclXKVSlXpVyVclXKVSlXpVyVclXKVSlXpVyVclXKVSlXpVyVclXKVSlXpVyVclXKVSlXpVyVclXKVSlXpVyVclXKVf0Bg5kjcDd39usAAAAASUVORK5CYII="
+                },
+                "intents": [
+                  {
+                    "on": "click",
+                    "do": "navigate"
+                  }
+                ]
+              },
+              {
+                "id": "n5",
+                "role": "text",
+                "box": {
+                  "w": 89.0,
+                  "h": 27.1,
+                  "pad": [
+                    1.6,
+                    0,
+                    0.5,
+                    0.3
+                  ],
+                  "overflow": "hidden",
+                  "margin": [
+                    14.5,
+                    -15.1,
+                    0,
+                    16.0
+                  ]
+                },
+                "text_ref": "ta0",
+                "content": {
+                  "text": "Security"
+                }
+              }
+            ]
+          },
+          {
+            "id": "n6",
+            "role": "list",
+            "layout": {
+              "mode": "flex",
+              "direction": "col",
+              "align": "start"
+            },
+            "box": {
+              "w": 411.4,
+              "h": 603.4,
+              "pad": [
+                0
+              ],
+              "margin": [
+                0.0,
+                0,
+                0,
+                0.0
+              ]
+            },
+            "content": {
+              "ref": "com.android.settings:id/list"
+            },
+            "children": [
+              {
+                "id": "n7",
+                "role": "text",
+                "box": {
+                  "w": 477.1,
+                  "h": 35.4,
+                  "pad": [
+                    17.4,
+                    0,
+                    0.5,
+                    16.3
+                  ],
+                  "overflow": "hidden",
+                  "margin": [
+                    0.0,
+                    -65.7,
+                    0,
+                    0.0
+                  ]
+                },
+                "text_ref": "ta1",
+                "content": {
+                  "text": "Device security"
+                }
+              },
+              {
+                "id": "n8",
+                "role": "box",
+                "layout": {
+                  "mode": "flex",
+                  "direction": "row",
+                  "align": "start"
+                },
+                "box": {
+                  "w": 411.4,
+                  "h": 73.1,
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    16.0,
+                    0,
+                    0,
+                    0.0
+                  ]
+                },
+                "children": [
+                  {
+                    "id": "n9",
+                    "role": "box",
+                    "layout": {
+                      "mode": "flex",
+                      "direction": "col",
+                      "align": "start"
+                    },
+                    "box": {
+                      "w": 363.4,
+                      "h": 73.1,
+                      "pad": [
+                        0
+                      ],
+                      "margin": [
+                        0.0,
+                        0,
+                        0,
+                        16.0
+                      ]
+                    },
+                    "children": [
+                      {
+                        "id": "n10",
+                        "role": "text",
+                        "box": {
+                          "w": 98.2,
+                          "h": 21.7,
+                          "pad": [
+                            1.2,
+                            0,
+                            0.5,
+                            0.0
+                          ],
+                          "overflow": "hidden",
+                          "margin": [
+                            16.0,
+                            -16.3,
+                            0,
+                            0.0
+                          ]
+                        },
+                        "text_ref": "ta2",
+                        "content": {
+                          "text": "Screen lock",
+                          "ref": "android:id/title"
+                        }
+                      },
+                      {
+                        "id": "n11",
+                        "role": "text",
+                        "box": {
+                          "w": 42.1,
+                          "h": 19.4,
+                          "pad": [
+                            1.5,
+                            0,
+                            0.4,
+                            0.6
+                          ],
+                          "overflow": "hidden",
+                          "margin": [
+                            -0.0,
+                            -9.0,
+                            0,
+                            0.0
+                          ]
+                        },
+                        "text_ref": "ta3",
+                        "content": {
+                          "text": "None",
+                          "ref": "android:id/summary"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "n12",
+                    "role": "box",
+                    "box": {
+                      "w": 16.0,
+                      "h": 73.1,
+                      "pad": [
+                        0
+                      ],
+                      "margin": [
+                        0.0,
+                        0,
+                        0,
+                        0.0
+                      ]
+                    },
+                    "content": {
+                      "ref": "android:id/widget_frame"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "n13",
+                "role": "divider",
+                "box": {
+                  "w": 411.43,
+                  "h": 1.14,
+                  "bg": "#dcdcdc",
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    -0.1,
+                    0,
+                    0,
+                    0.0
+                  ]
+                }
+              },
+              {
+                "id": "n14",
+                "role": "box",
+                "layout": {
+                  "mode": "flex",
+                  "direction": "col",
+                  "align": "start"
+                },
+                "box": {
+                  "w": 411.4,
+                  "h": 53.7,
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    0.1,
+                    0,
+                    0,
+                    0.0
+                  ]
+                },
+                "children": [
+                  {
+                    "id": "n15",
+                    "role": "box",
+                    "layout": {
+                      "mode": "flex",
+                      "direction": "col",
+                      "align": "start"
+                    },
+                    "box": {
+                      "w": 379.4,
+                      "h": 53.7,
+                      "pad": [
+                        0
+                      ],
+                      "margin": [
+                        0.0,
+                        0,
+                        0,
+                        16.0
+                      ]
+                    },
+                    "children": [
+                      {
+                        "id": "n16",
+                        "role": "text",
+                        "box": {
+                          "w": 92.1,
+                          "h": 21.7,
+                          "pad": [
+                            1.3,
+                            0,
+                            0.4,
+                            0.6
+                          ],
+                          "overflow": "hidden",
+                          "margin": [
+                            16.0,
+                            -15.5,
+                            0,
+                            0.0
+                          ]
+                        },
+                        "text_ref": "ta2",
+                        "content": {
+                          "text": "Fingerprint",
+                          "ref": "android:id/title"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "n17",
+                "role": "divider",
+                "box": {
+                  "w": 411.43,
+                  "h": 1.14,
+                  "bg": "#dcdcdc",
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    -0.1,
+                    0,
+                    0,
+                    0.0
+                  ]
+                }
+              },
+              {
+                "id": "n18",
+                "role": "box",
+                "layout": {
+                  "mode": "flex",
+                  "direction": "row",
+                  "align": "start"
+                },
+                "box": {
+                  "w": 411.4,
+                  "h": 73.1,
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    0.1,
+                    0,
+                    0,
+                    0.0
+                  ]
+                },
+                "children": [
+                  {
+                    "id": "n19",
+                    "role": "box",
+                    "layout": {
+                      "mode": "flex",
+                      "direction": "col",
+                      "align": "start"
+                    },
+                    "box": {
+                      "w": 363.4,
+                      "h": 73.1,
+                      "pad": [
+                        0
+                      ],
+                      "margin": [
+                        0.0,
+                        0,
+                        0,
+                        16.0
+                      ]
+                    },
+                    "children": [
+                      {
+                        "id": "n20",
+                        "role": "text",
+                        "box": {
+                          "w": 97.7,
+                          "h": 21.7,
+                          "pad": [
+                            1.0,
+                            0,
+                            0.7,
+                            0.3
+                          ],
+                          "overflow": "hidden",
+                          "margin": [
+                            16.0,
+                            -16.2,
+                            0,
+                            0.0
+                          ]
+                        },
+                        "text_ref": "ta4",
+                        "content": {
+                          "text": "Smart Lock",
+                          "ref": "android:id/title"
+                        }
+                      },
+                      {
+                        "id": "n21",
+                        "role": "text",
+                        "box": {
+                          "w": 211.7,
+                          "h": 19.4,
+                          "pad": [
+                            0.6,
+                            0,
+                            1.3,
+                            0.0
+                          ],
+                          "overflow": "hidden",
+                          "margin": [
+                            0.0,
+                            -31.1,
+                            0,
+                            0.0
+                          ]
+                        },
+                        "text_ref": "ta5",
+                        "content": {
+                          "text": "To use, first set a screen lock",
+                          "ref": "android:id/summary"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "n22",
+                    "role": "box",
+                    "box": {
+                      "w": 16.0,
+                      "h": 73.1,
+                      "pad": [
+                        0
+                      ],
+                      "margin": [
+                        0.0,
+                        0,
+                        0,
+                        0.0
+                      ]
+                    },
+                    "content": {
+                      "ref": "android:id/widget_frame"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "n23",
+                "role": "text",
+                "box": {
+                  "w": 477.1,
+                  "h": 35.4,
+                  "pad": [
+                    17.4,
+                    0,
+                    0.5,
+                    16.3
+                  ],
+                  "overflow": "hidden",
+                  "margin": [
+                    1.2,
+                    -65.7,
+                    0,
+                    0.0
+                  ]
+                },
+                "text_ref": "ta6",
+                "content": {
+                  "text": "Encryption"
+                }
+              },
+              {
+                "id": "n24",
+                "role": "box",
+                "layout": {
+                  "mode": "flex",
+                  "direction": "col",
+                  "align": "start"
+                },
+                "box": {
+                  "w": 411.4,
+                  "h": 53.7,
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    16.0,
+                    0,
+                    0,
+                    0.0
+                  ]
+                },
+                "children": [
+                  {
+                    "id": "n25",
+                    "role": "box",
+                    "layout": {
+                      "mode": "flex",
+                      "direction": "col",
+                      "align": "start"
+                    },
+                    "box": {
+                      "w": 379.4,
+                      "h": 53.7,
+                      "pad": [
+                        0
+                      ],
+                      "margin": [
+                        0.0,
+                        0,
+                        0,
+                        16.0
+                      ]
+                    },
+                    "children": [
+                      {
+                        "id": "n26",
+                        "role": "text",
+                        "box": {
+                          "w": 121.0,
+                          "h": 21.7,
+                          "pad": [
+                            1.1,
+                            0,
+                            0.6,
+                            0.6
+                          ],
+                          "overflow": "hidden",
+                          "margin": [
+                            16.0,
+                            -19.3,
+                            0,
+                            0.0
+                          ]
+                        },
+                        "text_ref": "ta7",
+                        "content": {
+                          "text": "Encrypt phone",
+                          "ref": "android:id/title"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "n27",
+                "role": "text",
+                "box": {
+                  "w": 477.1,
+                  "h": 35.4,
+                  "pad": [
+                    16.7,
+                    0,
+                    0.0,
+                    15.9
+                  ],
+                  "overflow": "hidden",
+                  "margin": [
+                    1.1,
+                    -65.7,
+                    0,
+                    0.0
+                  ]
+                },
+                "text_ref": "ta8",
+                "content": {
+                  "text": "SIM card lock"
+                }
+              },
+              {
+                "id": "n28",
+                "role": "box",
+                "layout": {
+                  "mode": "flex",
+                  "direction": "col",
+                  "align": "start"
+                },
+                "box": {
+                  "w": 411.4,
+                  "h": 53.7,
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    16.0,
+                    0,
+                    0,
+                    0.0
+                  ]
+                },
+                "children": [
+                  {
+                    "id": "n29",
+                    "role": "box",
+                    "layout": {
+                      "mode": "flex",
+                      "direction": "col",
+                      "align": "start"
+                    },
+                    "box": {
+                      "w": 379.4,
+                      "h": 53.7,
+                      "pad": [
+                        0
+                      ],
+                      "margin": [
+                        0.0,
+                        0,
+                        0,
+                        16.0
+                      ]
+                    },
+                    "children": [
+                      {
+                        "id": "n30",
+                        "role": "text",
+                        "box": {
+                          "w": 170.9,
+                          "h": 21.7,
+                          "pad": [
+                            1.1,
+                            0,
+                            0.6,
+                            0.0
+                          ],
+                          "overflow": "hidden",
+                          "margin": [
+                            16.0,
+                            -25.8,
+                            0,
+                            0.0
+                          ]
+                        },
+                        "text_ref": "ta2",
+                        "content": {
+                          "text": "Set up SIM card lock",
+                          "ref": "android:id/title"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "n31",
+                "role": "text",
+                "box": {
+                  "w": 477.1,
+                  "h": 35.4,
+                  "pad": [
+                    16.7,
+                    0,
+                    0.0,
+                    16.3
+                  ],
+                  "overflow": "hidden",
+                  "margin": [
+                    1.1,
+                    -65.7,
+                    0,
+                    0.0
+                  ]
+                },
+                "text_ref": "ta9",
+                "content": {
+                  "text": "Passwords"
+                }
+              },
+              {
+                "id": "n32",
+                "role": "box",
+                "layout": {
+                  "mode": "flex",
+                  "direction": "row",
+                  "align": "start"
+                },
+                "box": {
+                  "w": 411.4,
+                  "h": 53.7,
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    16.0,
+                    0,
+                    0,
+                    0.0
+                  ]
+                },
+                "children": [
+                  {
+                    "id": "n33",
+                    "role": "box",
+                    "layout": {
+                      "mode": "flex",
+                      "direction": "col",
+                      "align": "start"
+                    },
+                    "box": {
+                      "w": 316.9,
+                      "h": 53.7,
+                      "pad": [
+                        0
+                      ],
+                      "margin": [
+                        0.0,
+                        0,
+                        0,
+                        16.0
+                      ]
+                    },
+                    "children": [
+                      {
+                        "id": "n34",
+                        "role": "text",
+                        "box": {
+                          "w": 200.3,
+                          "h": 21.7,
+                          "pad": [
+                            1.1,
+                            0,
+                            0.6,
+                            0.6
+                          ],
+                          "overflow": "hidden",
+                          "margin": [
+                            16.0,
+                            -29.6,
+                            0,
+                            0.0
+                          ]
+                        },
+                        "text_ref": "ta2",
+                        "content": {
+                          "text": "Make passwords visible",
+                          "ref": "android:id/title"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "n35",
+                    "role": "box",
+                    "layout": {
+                      "mode": "flex",
+                      "direction": "col",
+                      "align": "start"
+                    },
+                    "box": {
+                      "w": 62.5,
+                      "h": 53.7,
+                      "pad": [
+                        0
+                      ],
+                      "margin": [
+                        0.0,
+                        0,
+                        0,
+                        0.0
+                      ]
+                    },
+                    "content": {
+                      "ref": "android:id/widget_frame"
+                    },
+                    "children": [
+                      {
+                        "id": "n36",
+                        "role": "image",
+                        "box": {
+                          "w": 46.5,
+                          "h": 27.1,
+                          "pad": [
+                            0
+                          ],
+                          "margin": [
+                            13.3,
+                            0,
+                            0,
+                            16.0
+                          ]
+                        },
+                        "content": {
+                          "alt": "ON",
+                          "src": "data:image/png;base64,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",
+                          "ref": "android:id/switch_widget"
+                        },
+                        "intents": [
+                          {
+                            "on": "click",
+                            "do": "toggle"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "n37",
+                "role": "text",
+                "box": {
+                  "w": 477.1,
+                  "h": 29.7,
+                  "pad": [
+                    17.0,
+                    0,
+                    0.0,
+                    16.3
+                  ],
+                  "overflow": "hidden",
+                  "margin": [
+                    1.1,
+                    -65.7,
+                    0,
+                    0.0
+                  ]
+                },
+                "text_ref": "ta10",
+                "content": {
+                  "text": "Device administration"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "n38",
+        "role": "box",
+        "box": {
+          "w": 411.4,
+          "h": 24.0,
+          "bg": "#14171a",
+          "pad": [
+            0
+          ],
+          "position": {
+            "top": 0.0,
+            "left": 0.0
+          }
+        },
+        "content": {
+          "ref": "android:id/statusBarBackground"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,1194 @@
+{
+  "uir_version": "1",
+  "meta": {
+    "source_kind": "a11y",
+    "title": "com.android.calculator2",
+    "lang": "zh",
+    "viewport": {
+      "w": 411,
+      "h": 683
+    },
+    "report": {
+      "platform": "android",
+      "nodes_in": 40,
+      "nodes_kept": 38,
+      "layout": {
+        "col": 6,
+        "row": 2,
+        "stack": 3
+      },
+      "images_embedded": 4,
+      "dividers": 0,
+      "sampled_colors": true,
+      "scale": 2.625
+    },
+    "edge_to_edge": true
+  },
+  "tokens": {
+    "color": {
+      "c0": "#ffffff",
+      "c1": "#1f2937",
+      "c2": "#2563eb",
+      "c3": "#6b7280"
+    },
+    "font": {
+      "f0": {
+        "family": "Roboto",
+        "fallback": "'Noto Sans SC','PingFang SC',system-ui,sans-serif"
+      }
+    },
+    "text_style": {
+      "t0": {
+        "size": 14,
+        "weight": 400,
+        "line": 1.35,
+        "color": "c1"
+      },
+      "ta0": {
+        "size": 16,
+        "weight": 600,
+        "line": 1.25,
+        "color": "#787878"
+      },
+      "ta1": {
+        "size": 36,
+        "weight": 400,
+        "line": 1.25,
+        "color": "#fcfcfc",
+        "align": "center"
+      },
+      "ta2": {
+        "size": 37,
+        "weight": 400,
+        "line": 1.25,
+        "color": "#fbfbfb",
+        "align": "center"
+      },
+      "ta3": {
+        "size": 37,
+        "weight": 400,
+        "line": 1.25,
+        "color": "#f9f9f9",
+        "align": "center"
+      },
+      "ta4": {
+        "size": 36,
+        "weight": 400,
+        "line": 1.25,
+        "color": "#fdfdfd",
+        "align": "center"
+      },
+      "ta5": {
+        "size": 37,
+        "weight": 400,
+        "line": 1.25,
+        "color": "#fafafa",
+        "align": "center"
+      },
+      "ta6": {
+        "size": 20,
+        "weight": 400,
+        "line": 1.25,
+        "color": "#fbfbfb",
+        "align": "center"
+      },
+      "ta7": {
+        "size": 37,
+        "weight": 400,
+        "line": 1.25,
+        "color": "#fcfcfc",
+        "align": "center"
+      },
+      "ta8": {
+        "size": 20,
+        "weight": 400,
+        "line": 1.3,
+        "color": "#f8f8f8"
+      },
+      "ta9": {
+        "size": 37,
+        "weight": 400,
+        "line": 1.3,
+        "color": "#f8f8f8"
+      },
+      "ta10": {
+        "size": 20,
+        "weight": 400,
+        "line": 1.25,
+        "color": "#f9f9f9",
+        "align": "center"
+      },
+      "ta11": {
+        "size": 20,
+        "weight": 400,
+        "line": 1.3,
+        "color": "#f6f6f6",
+        "align": "center"
+      },
+      "ta12": {
+        "size": 20,
+        "weight": 400,
+        "line": 1.25,
+        "color": "#f8f8f8",
+        "align": "center"
+      },
+      "ta13": {
+        "size": 20,
+        "weight": 400,
+        "line": 1.25,
+        "color": "#fefefe",
+        "align": "center"
+      }
+    },
+    "space": {
+      "s0": 0,
+      "s1": 4,
+      "s2": 8,
+      "s3": 12,
+      "s4": 16,
+      "s5": 24
+    }
+  },
+  "root": {
+    "id": "n1",
+    "role": "box",
+    "layout": {
+      "mode": "stack"
+    },
+    "box": {
+      "w": 411.4,
+      "h": 683.4,
+      "pad": [
+        0
+      ],
+      "bg": "#434343"
+    },
+    "children": [
+      {
+        "id": "n2",
+        "role": "box",
+        "layout": {
+          "mode": "flex",
+          "direction": "col",
+          "align": "start"
+        },
+        "box": {
+          "w": 411.4,
+          "h": 683.4,
+          "bg": "#434343",
+          "pad": [
+            0
+          ],
+          "position": {
+            "top": 0.0,
+            "left": 0.0
+          }
+        },
+        "children": [
+          {
+            "id": "n3",
+            "role": "box",
+            "layout": {
+              "mode": "flex",
+              "direction": "col",
+              "align": "start"
+            },
+            "box": {
+              "w": 411.4,
+              "h": 659.4,
+              "bg": "#ffffff",
+              "pad": [
+                0
+              ],
+              "margin": [
+                24.0,
+                0,
+                0,
+                0.0
+              ]
+            },
+            "children": [
+              {
+                "id": "n4",
+                "role": "box",
+                "layout": {
+                  "mode": "flex",
+                  "direction": "col",
+                  "align": "start"
+                },
+                "box": {
+                  "w": 411.4,
+                  "h": 240.0,
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    0.0,
+                    0,
+                    0,
+                    0.0
+                  ]
+                },
+                "content": {
+                  "ref": "com.android.calculator2:id/display"
+                },
+                "children": [
+                  {
+                    "id": "n5",
+                    "role": "box",
+                    "layout": {
+                      "mode": "flex",
+                      "direction": "row",
+                      "align": "start"
+                    },
+                    "box": {
+                      "w": 411.4,
+                      "h": 56.0,
+                      "pad": [
+                        0
+                      ],
+                      "margin": [
+                        0.0,
+                        0,
+                        0,
+                        0.0
+                      ]
+                    },
+                    "content": {
+                      "ref": "com.android.calculator2:id/toolbar"
+                    },
+                    "children": [
+                      {
+                        "id": "n6",
+                        "role": "text",
+                        "box": {
+                          "w": 39.5,
+                          "h": 21.7,
+                          "pad": [
+                            1.4,
+                            0.0,
+                            0.3,
+                            0.6
+                          ],
+                          "overflow": "hidden",
+                          "margin": [
+                            17.1,
+                            -8.6,
+                            0,
+                            16.0
+                          ]
+                        },
+                        "text_ref": "ta0",
+                        "content": {
+                          "text": "RAD",
+                          "ref": "com.android.calculator2:id/mode"
+                        }
+                      },
+                      {
+                        "id": "n7",
+                        "role": "box",
+                        "layout": {
+                          "mode": "flex",
+                          "direction": "col",
+                          "align": "start"
+                        },
+                        "box": {
+                          "w": 40.0,
+                          "h": 56.0,
+                          "pad": [
+                            0
+                          ],
+                          "margin": [
+                            0.0,
+                            0,
+                            0,
+                            324.6
+                          ]
+                        },
+                        "children": [
+                          {
+                            "id": "n8",
+                            "role": "image",
+                            "box": {
+                              "w": 40.0,
+                              "h": 48.0,
+                              "pad": [
+                                0
+                              ],
+                              "margin": [
+                                3.8,
+                                0,
+                                0,
+                                0.0
+                              ]
+                            },
+                            "content": {
+                              "alt": "More options",
+                              "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGkAAAB+CAIAAACoM6hOAAAC4ElEQVR4nO3boXLqQBiG4e2ZI4JMXSKDRCayldSB5BbIJcEl1CJbWxlkJZHBdWUkR3CmwxS6pa/Iv8x8j2TNzjtNN/sz3B0OByfIH+sN3DC149SOUztO7Ti149SOUztO7Ti149SOUztO7Ti149SOUztO7Ti149SOUztO7Ti149SOUztO7Ti149SOUztO7Ti149SOUztO7Ti149SOUztO7Ti149SOUztO7bi/1hv4z3vftu3Hx8f9/X1RFGmaWu/oZ1G022w2b29vp588Pj7OZjOr/Vzpzvz3ZM/Pz9vt9vzzqqoWi8Xw+7me8f+73W53MZxzrmma3W438H5+xbhd0zSB1ff398F2Ahi3894HVruuG2wngHG70WiEV80ZtyuKAq+aM25XVVWSJBeXkiSpqmrg/fyK/TNb1/V5viRJ6rqO/Jm1f79zznnvX15e2rb13qdpWhTF09NT/FeLKNrdKM0COLXj1I5TOy6KGZRzrmmaz3N2PB6XZWm9o5/Zn7N936/X6y9X1zzPl8tl5O939s/sarU6v/N3Xbder032cz37GdR+v7+41HVdeEJlzrhdeEKn2WdI3/eB1fB0z5xxu/ClNfIrrXG78XiMV83Zz++yLLu4lGWZ5nc/qOv6PF+WZXVdm+znevbvxkfHbxQ/7xWR/8UdxdLuFtk/s7dL7Ti149SOi2J+571/fX09PWen02nklwoXwzl7HDd9udiORqPlcpnnudWurmE/CzgPF/g8Kvbzu+8C9X2v+V1IeH7Xtu1gOwGiPmf1zIaETwOdFSGTyQSvmrOffX73VWxZlpHPPu3f79yl31c8PDzM53Or/VwpinbOOe/96b0i/kuFi6fdLYr6HSVyasepHad2nNpxasepHad2nNpxasepHad2nNpxasepHad2nNpxasepHad2nNpxasepHad2nNpxasepHad2nNpxasepHad2nNpxasepHad2nNpxasepHad23D+bIuTKjYBEvAAAAABJRU5ErkJggg=="
+                            },
+                            "intents": [
+                              {
+                                "on": "click",
+                                "do": "navigate"
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": "n9",
+                    "role": "image",
+                    "box": {
+                      "w": 411.4,
+                      "h": 96.4,
+                      "pad": [
+                        0
+                      ],
+                      "margin": [
+                        0.0,
+                        0,
+                        0,
+                        0.0
+                      ]
+                    },
+                    "content": {
+                      "alt": "图片",
+                      "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABDgAAAD9CAIAAADWGFDMAAAFbUlEQVR4nO3XMQEAIAzAMMC/5/FjgB6Jgr7dM7MAAABKzu8AAACAl1EBAAByjAoAAJBjVAAAgByjAgAA5BgVAAAgx6gAAAA5RgUAAMgxKgAAQI5RAQAAcowKAACQY1QAAIAcowIAAOQYFQAAIMeoAAAAOUYFAADIMSoAAECOUQEAAHKMCgAAkGNUAACAHKMCAADkGBUAACDHqAAAADlGBQAAyDEqAABAjlEBAAByjAoAAJBjVAAAgByjAgAA5BgVAAAgx6gAAAA5RgUAAMgxKgAAQI5RAQAAcowKAACQY1QAAIAcowIAAOQYFQAAIMeoAAAAOUYFAADIMSoAAECOUQEAAHKMCgAAkGNUAACAHKMCAADkGBUAACDHqAAAADlGBQAAyDEqAABAjlEBAAByjAoAAJBjVAAAgByjAgAA5BgVAAAgx6gAAAA5RgUAAMgxKgAAQI5RAQAAcowKAACQY1QAAIAcowIAAOQYFQAAIMeoAAAAOUYFAADIMSoAAECOUQEAAHKMCgAAkGNUAACAHKMCAADkGBUAACDHqAAAADlGBQAAyDEqAABAjlEBAAByjAoAAJBjVAAAgByjAgAA5BgVAAAgx6gAAAA5RgUAAMgxKgAAQI5RAQAAcowKAACQY1QAAIAcowIAAOQYFQAAIMeoAAAAOUYFAADIMSoAAECOUQEAAHKMCgAAkGNUAACAHKMCAADkGBUAACDHqAAAADlGBQAAyDEqAABAjlEBAAByjAoAAJBjVAAAgByjAgAA5BgVAAAgx6gAAAA5RgUAAMgxKgAAQI5RAQAAcowKAACQY1QAAIAcowIAAOQYFQAAIMeoAAAAOUYFAADIMSoAAECOUQEAAHKMCgAAkGNUAACAHKMCAADkGBUAACDHqAAAADlGBQAAyDEqAABAjlEBAAByjAoAAJBjVAAAgByjAgAA5BgVAAAgx6gAAAA5RgUAAMgxKgAAQI5RAQAAcowKAACQY1QAAIAcowIAAOQYFQAAIMeoAAAAOUYFAADIMSoAAECOUQEAAHKMCgAAkGNUAACAHKMCAADkGBUAACDHqAAAADlGBQAAyDEqAABAjlEBAAByjAoAAJBjVAAAgByjAgAA5BgVAAAgx6gAAAA5RgUAAMgxKgAAQI5RAQAAcowKAACQY1QAAIAcowIAAOQYFQAAIMeoAAAAOUYFAADIMSoAAECOUQEAAHKMCgAAkGNUAACAHKMCAADkGBUAACDHqAAAADlGBQAAyDEqAABAjlEBAAByjAoAAJBjVAAAgByjAgAA5BgVAAAgx6gAAAA5RgUAAMgxKgAAQI5RAQAAcowKAACQY1QAAIAcowIAAOQYFQAAIMeoAAAAOUYFAADIMSoAAECOUQEAAHKMCgAAkGNUAACAHKMCAADkGBUAACDHqAAAADlGBQAAyDEqAABAjlEBAAByjAoAAJBjVAAAgByjAgAA5BgVAAAgx6gAAAA5RgUAAMgxKgAAQI5RAQAAcowKAACQY1QAAIAcowIAAOQYFQAAIMeoAAAAOUYFAADIMSoAAECOUQEAAHKMCgAAkGNUAACAHKMCAADkGBUAACDHqAAAADlGBQAAyDEqAABAjlEBAAByjAoAAJBjVAAAgByjAgAA5BgVAAAgx6gAAAA5RgUAAMgxKgAAQI5RAQAAcowKAACQY1QAAIAcowIAAOQYFQAAIMeoAAAAOUYFAADIMSoAAECOUQEAAHKMCgAAkGNUAACAHKMCAADkGBUAACDHqAAAADlGBQAAyDEqAABAjlEBAAByjAoAAJBjVAAAgByjAgAA5BgVAAAgx6gAAAA5RgUAAMgxKgAAQI5RAQAAcowKAACQY1QAAICcC2odBPf6T1v7AAAAAElFTkSuQmCC",
+                      "ref": "com.android.calculator2:id/formula"
+                    },
+                    "intents": [
+                      {
+                        "on": "click",
+                        "do": "navigate"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "n10",
+                    "role": "image",
+                    "box": {
+                      "w": 411.4,
+                      "h": 87.6,
+                      "pad": [
+                        0
+                      ],
+                      "margin": [
+                        0.0,
+                        0,
+                        0,
+                        0.0
+                      ]
+                    },
+                    "content": {
+                      "alt": "图片",
+                      "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABDgAAADmCAIAAAC/CaKUAAAE8UlEQVR4nO3XMQEAIAzAMMC/5/FjgB6Jgr7dM7MAAABKzu8AAACAl1EBAAByjAoAAJBjVAAAgByjAgAA5BgVAAAgx6gAAAA5RgUAAMgxKgAAQI5RAQAAcowKAACQY1QAAIAcowIAAOQYFQAAIMeoAAAAOUYFAADIMSoAAECOUQEAAHKMCgAAkGNUAACAHKMCAADkGBUAACDHqAAAADlGBQAAyDEqAABAjlEBAAByjAoAAJBjVAAAgByjAgAA5BgVAAAgx6gAAAA5RgUAAMgxKgAAQI5RAQAAcowKAACQY1QAAIAcowIAAOQYFQAAIMeoAAAAOUYFAADIMSoAAECOUQEAAHKMCgAAkGNUAACAHKMCAADkGBUAACDHqAAAADlGBQAAyDEqAABAjlEBAAByjAoAAJBjVAAAgByjAgAA5BgVAAAgx6gAAAA5RgUAAMgxKgAAQI5RAQAAcowKAACQY1QAAIAcowIAAOQYFQAAIMeoAAAAOUYFAADIMSoAAECOUQEAAHKMCgAAkGNUAACAHKMCAADkGBUAACDHqAAAADlGBQAAyDEqAABAjlEBAAByjAoAAJBjVAAAgByjAgAA5BgVAAAgx6gAAAA5RgUAAMgxKgAAQI5RAQAAcowKAACQY1QAAIAcowIAAOQYFQAAIMeoAAAAOUYFAADIMSoAAECOUQEAAHKMCgAAkGNUAACAHKMCAADkGBUAACDHqAAAADlGBQAAyDEqAABAjlEBAAByjAoAAJBjVAAAgByjAgAA5BgVAAAgx6gAAAA5RgUAAMgxKgAAQI5RAQAAcowKAACQY1QAAIAcowIAAOQYFQAAIMeoAAAAOUYFAADIMSoAAECOUQEAAHKMCgAAkGNUAACAHKMCAADkGBUAACDHqAAAADlGBQAAyDEqAABAjlEBAAByjAoAAJBjVAAAgByjAgAA5BgVAAAgx6gAAAA5RgUAAMgxKgAAQI5RAQAAcowKAACQY1QAAIAcowIAAOQYFQAAIMeoAAAAOUYFAADIMSoAAECOUQEAAHKMCgAAkGNUAACAHKMCAADkGBUAACDHqAAAADlGBQAAyDEqAABAjlEBAAByjAoAAJBjVAAAgByjAgAA5BgVAAAgx6gAAAA5RgUAAMgxKgAAQI5RAQAAcowKAACQY1QAAIAcowIAAOQYFQAAIMeoAAAAOUYFAADIMSoAAECOUQEAAHKMCgAAkGNUAACAHKMCAADkGBUAACDHqAAAADlGBQAAyDEqAABAjlEBAAByjAoAAJBjVAAAgByjAgAA5BgVAAAgx6gAAAA5RgUAAMgxKgAAQI5RAQAAcowKAACQY1QAAIAcowIAAOQYFQAAIMeoAAAAOUYFAADIMSoAAECOUQEAAHKMCgAAkGNUAACAHKMCAADkGBUAACDHqAAAADlGBQAAyDEqAABAjlEBAAByjAoAAJBjVAAAgByjAgAA5BgVAAAgx6gAAAA5RgUAAMgxKgAAQI5RAQAAcowKAACQY1QAAIAcowIAAOQYFQAAIMeoAAAAOUYFAADIMSoAAECOUQEAAHKMCgAAkGNUAACAHKMCAADkGBUAACDHqAAAADlGBQAAyDEqAABAjlEBAAByjAoAAJBjVAAAgByjAgAA5BgVAAAgx6gAAAA5RgUAAMgxKgAAQI5RAQAAcowKAACQY1QAAIAcowIAAORcbosEyfdXqF8AAAAASUVORK5CYII=",
+                      "ref": "com.android.calculator2:id/result"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "n11",
+                "role": "list",
+                "layout": {
+                  "mode": "stack"
+                },
+                "box": {
+                  "w": 411.4,
+                  "h": 419.4,
+                  "bg": "#434343",
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    0.0,
+                    0,
+                    0,
+                    0.0
+                  ]
+                },
+                "content": {
+                  "ref": "com.android.calculator2:id/pad_pager"
+                },
+                "children": [
+                  {
+                    "id": "n12",
+                    "role": "box",
+                    "layout": {
+                      "mode": "flex",
+                      "direction": "row",
+                      "align": "start"
+                    },
+                    "box": {
+                      "w": 411.4,
+                      "h": 419.4,
+                      "bg": "#434343",
+                      "pad": [
+                        0
+                      ],
+                      "position": {
+                        "top": 0.0,
+                        "left": 0.0
+                      }
+                    },
+                    "children": [
+                      {
+                        "id": "n13",
+                        "role": "box",
+                        "layout": {
+                          "mode": "stack"
+                        },
+                        "box": {
+                          "w": 301.7,
+                          "h": 419.4,
+                          "pad": [
+                            0
+                          ],
+                          "margin": [
+                            0.0,
+                            0,
+                            0,
+                            0.0
+                          ]
+                        },
+                        "content": {
+                          "ref": "com.android.calculator2:id/pad_numeric"
+                        },
+                        "children": [
+                          {
+                            "id": "n14",
+                            "role": "button",
+                            "box": {
+                              "w": 92.2,
+                              "h": 96.8,
+                              "pad": [
+                                25.1,
+                                0.0,
+                                26.6,
+                                0.0
+                              ],
+                              "overflow": "hidden",
+                              "position": {
+                                "top": 12.2,
+                                "left": 12.2
+                              }
+                            },
+                            "text_ref": "ta1",
+                            "content": {
+                              "text": "7",
+                              "ref": "com.android.calculator2:id/digit_7"
+                            },
+                            "intents": [
+                              {
+                                "on": "click",
+                                "do": "navigate"
+                              }
+                            ]
+                          },
+                          {
+                            "id": "n15",
+                            "role": "button",
+                            "box": {
+                              "w": 92.6,
+                              "h": 96.8,
+                              "pad": [
+                                24.5,
+                                0.0,
+                                26.0,
+                                0.0
+                              ],
+                              "overflow": "hidden",
+                              "position": {
+                                "top": 12.2,
+                                "left": 104.4
+                              }
+                            },
+                            "text_ref": "ta2",
+                            "content": {
+                              "text": "8",
+                              "ref": "com.android.calculator2:id/digit_8"
+                            },
+                            "intents": [
+                              {
+                                "on": "click",
+                                "do": "navigate"
+                              }
+                            ]
+                          },
+                          {
+                            "id": "n16",
+                            "role": "button",
+                            "box": {
+                              "w": 92.6,
+                              "h": 96.8,
+                              "pad": [
+                                24.5,
+                                0.0,
+                                26.0,
+                                0.0
+                              ],
+                              "overflow": "hidden",
+                              "position": {
+                                "top": 12.2,
+                                "left": 196.9
+                              }
+                            },
+                            "text_ref": "ta2",
+                            "content": {
+                              "text": "9",
+                              "ref": "com.android.calculator2:id/digit_9"
+                            },
+                            "intents": [
+                              {
+                                "on": "click",
+                                "do": "navigate"
+                              }
+                            ]
+                          },
+                          {
+                            "id": "n17",
+                            "role": "button",
+                            "box": {
+                              "w": 92.2,
+                              "h": 96.8,
+                              "pad": [
+                                25.1,
+                                0.0,
+                                26.6,
+                                0.0
+                              ],
+                              "overflow": "hidden",
+                              "position": {
+                                "top": 108.9,
+                                "left": 12.2
+                              }
+                            },
+                            "text_ref": "ta1",
+                            "content": {
+                              "text": "4",
+                              "ref": "com.android.calculator2:id/digit_4"
+                            },
+                            "intents": [
+                              {
+                                "on": "click",
+                                "do": "navigate"
+                              }
+                            ]
+                          },
+                          {
+                            "id": "n18",
+                            "role": "button",
+                            "box": {
+                              "w": 92.6,
+                              "h": 96.8,
+                              "pad": [
+                                24.7,
+                                0.0,
+                                25.8,
+                                0.0
+                              ],
+                              "overflow": "hidden",
+                              "position": {
+                                "top": 108.9,
+                                "left": 104.4
+                              }
+                            },
+                            "text_ref": "ta3",
+                            "content": {
+                              "text": "5",
+                              "ref": "com.android.calculator2:id/digit_5"
+                            },
+                            "intents": [
+                              {
+                                "on": "click",
+                                "do": "navigate"
+                              }
+                            ]
+                          },
+                          {
+                            "id": "n19",
+                            "role": "button",
+                            "box": {
+                              "w": 92.6,
+                              "h": 96.8,
+                              "pad": [
+                                24.7,
+                                0.0,
+                                25.8,
+                                0.0
+                              ],
+                              "overflow": "hidden",
+                              "position": {
+                                "top": 108.9,
+                                "left": 196.9
+                              }
+                            },
+                            "text_ref": "ta2",
+                            "content": {
+                              "text": "6",
+                              "ref": "com.android.calculator2:id/digit_6"
+                            },
+                            "intents": [
+                              {
+                                "on": "click",
+                                "do": "navigate"
+                              }
+                            ]
+                          },
+                          {
+                            "id": "n20",
+                            "role": "button",
+                            "box": {
+                              "w": 92.2,
+                              "h": 96.8,
+                              "pad": [
+                                25.1,
+                                0.0,
+                                26.6,
+                                0.0
+                              ],
+                              "overflow": "hidden",
+                              "position": {
+                                "top": 205.7,
+                                "left": 12.2
+                              }
+                            },
+                            "text_ref": "ta4",
+                            "content": {
+                              "text": "1",
+                              "ref": "com.android.calculator2:id/digit_1"
+                            },
+                            "intents": [
+                              {
+                                "on": "click",
+                                "do": "navigate"
+                              }
+                            ]
+                          },
+                          {
+                            "id": "n21",
+                            "role": "button",
+                            "box": {
+                              "w": 92.6,
+                              "h": 96.8,
+                              "pad": [
+                                24.3,
+                                0.0,
+                                26.2,
+                                0.0
+                              ],
+                              "overflow": "hidden",
+                              "position": {
+                                "top": 205.7,
+                                "left": 104.4
+                              }
+                            },
+                            "text_ref": "ta3",
+                            "content": {
+                              "text": "2",
+                              "ref": "com.android.calculator2:id/digit_2"
+                            },
+                            "intents": [
+                              {
+                                "on": "click",
+                                "do": "navigate"
+                              }
+                            ]
+                          },
+                          {
+                            "id": "n22",
+                            "role": "button",
+                            "box": {
+                              "w": 92.6,
+                              "h": 96.8,
+                              "pad": [
+                                24.5,
+                                0.0,
+                                26.0,
+                                0.0
+                              ],
+                              "overflow": "hidden",
+                              "position": {
+                                "top": 205.7,
+                                "left": 196.9
+                              }
+                            },
+                            "text_ref": "ta5",
+                            "content": {
+                              "text": "3",
+                              "ref": "com.android.calculator2:id/digit_3"
+                            },
+                            "intents": [
+                              {
+                                "on": "click",
+                                "do": "navigate"
+                              }
+                            ]
+                          },
+                          {
+                            "id": "n23",
+                            "role": "button",
+                            "box": {
+                              "w": 92.2,
+                              "h": 96.8,
+                              "pad": [
+                                34.2,
+                                0,
+                                16.4,
+                                0.0
+                              ],
+                              "overflow": "hidden",
+                              "position": {
+                                "top": 302.5,
+                                "left": 12.2
+                              }
+                            },
+                            "text_ref": "ta2",
+                            "content": {
+                              "text": ".",
+                              "ref": "com.android.calculator2:id/dec_point"
+                            },
+                            "intents": [
+                              {
+                                "on": "click",
+                                "do": "navigate"
+                              }
+                            ]
+                          },
+                          {
+                            "id": "n24",
+                            "role": "button",
+                            "box": {
+                              "w": 92.6,
+                              "h": 96.8,
+                              "pad": [
+                                24.5,
+                                0.0,
+                                26.0,
+                                0.0
+                              ],
+                              "overflow": "hidden",
+                              "position": {
+                                "top": 302.5,
+                                "left": 104.4
+                              }
+                            },
+                            "text_ref": "ta7",
+                            "content": {
+                              "text": "0",
+                              "ref": "com.android.calculator2:id/digit_0"
+                            },
+                            "intents": [
+                              {
+                                "on": "click",
+                                "do": "navigate"
+                              }
+                            ]
+                          },
+                          {
+                            "id": "n25",
+                            "role": "button",
+                            "box": {
+                              "w": 92.6,
+                              "h": 96.8,
+                              "pad": [
+                                20.9,
+                                0,
+                                27.7,
+                                38.4
+                              ],
+                              "position": {
+                                "top": 302.5,
+                                "left": 196.9
+                              }
+                            },
+                            "text_ref": "ta9",
+                            "content": {
+                              "text": "=",
+                              "ref": "com.android.calculator2:id/eq"
+                            },
+                            "intents": [
+                              {
+                                "on": "click",
+                                "do": "navigate"
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "id": "n26",
+                        "role": "box",
+                        "layout": {
+                          "mode": "flex",
+                          "direction": "col",
+                          "align": "start"
+                        },
+                        "box": {
+                          "w": 109.7,
+                          "h": 419.4,
+                          "bg": "#636363",
+                          "pad": [
+                            0
+                          ],
+                          "margin": [
+                            0.0,
+                            0,
+                            0,
+                            0.0
+                          ]
+                        },
+                        "content": {
+                          "ref": "com.android.calculator2:id/pad_operator"
+                        },
+                        "children": [
+                          {
+                            "id": "n27",
+                            "role": "button",
+                            "box": {
+                              "w": 77.3,
+                              "h": 77.3,
+                              "pad": [
+                                25.6,
+                                0.0,
+                                26.7,
+                                0.0
+                              ],
+                              "overflow": "hidden",
+                              "margin": [
+                                8.0,
+                                0,
+                                0,
+                                4.2
+                              ]
+                            },
+                            "text_ref": "ta10",
+                            "content": {
+                              "text": "DEL",
+                              "ref": "com.android.calculator2:id/del"
+                            },
+                            "intents": [
+                              {
+                                "on": "click",
+                                "do": "navigate"
+                              }
+                            ]
+                          },
+                          {
+                            "id": "n28",
+                            "role": "button",
+                            "box": {
+                              "w": 77.3,
+                              "h": 77.7,
+                              "pad": [
+                                20.5,
+                                0,
+                                31.2,
+                                0.0
+                              ],
+                              "margin": [
+                                0.0,
+                                0,
+                                0,
+                                4.2
+                              ]
+                            },
+                            "text_ref": "ta11",
+                            "content": {
+                              "text": "÷",
+                              "ref": "com.android.calculator2:id/op_div"
+                            },
+                            "intents": [
+                              {
+                                "on": "click",
+                                "do": "navigate"
+                              }
+                            ]
+                          },
+                          {
+                            "id": "n29",
+                            "role": "button",
+                            "box": {
+                              "w": 77.3,
+                              "h": 77.3,
+                              "pad": [
+                                26.6,
+                                0,
+                                25.7,
+                                0.0
+                              ],
+                              "overflow": "hidden",
+                              "margin": [
+                                0.0,
+                                0,
+                                0,
+                                4.2
+                              ]
+                            },
+                            "text_ref": "ta12",
+                            "content": {
+                              "text": "×",
+                              "ref": "com.android.calculator2:id/op_mul"
+                            },
+                            "intents": [
+                              {
+                                "on": "click",
+                                "do": "navigate"
+                              }
+                            ]
+                          },
+                          {
+                            "id": "n30",
+                            "role": "button",
+                            "box": {
+                              "w": 77.3,
+                              "h": 77.7,
+                              "pad": [
+                                23.9,
+                                0,
+                                28.8,
+                                0.0
+                              ],
+                              "overflow": "hidden",
+                              "margin": [
+                                0.0,
+                                0,
+                                0,
+                                4.2
+                              ]
+                            },
+                            "text_ref": "ta13",
+                            "content": {
+                              "text": "−",
+                              "ref": "com.android.calculator2:id/op_sub"
+                            },
+                            "intents": [
+                              {
+                                "on": "click",
+                                "do": "navigate"
+                              }
+                            ]
+                          },
+                          {
+                            "id": "n31",
+                            "role": "button",
+                            "box": {
+                              "w": 77.3,
+                              "h": 77.3,
+                              "pad": [
+                                24.6,
+                                0,
+                                27.7,
+                                0.0
+                              ],
+                              "overflow": "hidden",
+                              "margin": [
+                                0.0,
+                                0,
+                                0,
+                                4.2
+                              ]
+                            },
+                            "text_ref": "ta12",
+                            "content": {
+                              "text": "+",
+                              "ref": "com.android.calculator2:id/op_add"
+                            },
+                            "intents": [
+                              {
+                                "on": "click",
+                                "do": "navigate"
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": "n32",
+                    "role": "box",
+                    "layout": {
+                      "mode": "flex",
+                      "direction": "col",
+                      "align": "start"
+                    },
+                    "box": {
+                      "w": 23.6,
+                      "h": 419.4,
+                      "bg": "#1de9b6",
+                      "pad": [
+                        0
+                      ],
+                      "position": {
+                        "top": 0.0,
+                        "left": 387.8
+                      }
+                    },
+                    "content": {
+                      "ref": "com.android.calculator2:id/pad_advanced"
+                    },
+                    "children": [
+                      {
+                        "id": "n33",
+                        "role": "box",
+                        "box": {
+                          "w": 3.4,
+                          "h": 77.3,
+                          "pad": [
+                            0
+                          ],
+                          "margin": [
+                            12.2,
+                            0,
+                            0,
+                            20.2
+                          ]
+                        },
+                        "content": {
+                          "ref": "com.android.calculator2:id/toggle_inv"
+                        },
+                        "intents": [
+                          {
+                            "on": "click",
+                            "do": "navigate"
+                          }
+                        ]
+                      },
+                      {
+                        "id": "n34",
+                        "role": "box",
+                        "box": {
+                          "w": 3.4,
+                          "h": 77.3,
+                          "pad": [
+                            0
+                          ],
+                          "margin": [
+                            0.0,
+                            0,
+                            0,
+                            20.2
+                          ]
+                        },
+                        "content": {
+                          "ref": "com.android.calculator2:id/fun_sin"
+                        },
+                        "intents": [
+                          {
+                            "on": "click",
+                            "do": "navigate"
+                          }
+                        ]
+                      },
+                      {
+                        "id": "n35",
+                        "role": "box",
+                        "box": {
+                          "w": 3.4,
+                          "h": 77.3,
+                          "pad": [
+                            0
+                          ],
+                          "margin": [
+                            0.0,
+                            0,
+                            0,
+                            20.2
+                          ]
+                        },
+                        "content": {
+                          "ref": "com.android.calculator2:id/fun_ln"
+                        },
+                        "intents": [
+                          {
+                            "on": "click",
+                            "do": "navigate"
+                          }
+                        ]
+                      },
+                      {
+                        "id": "n36",
+                        "role": "box",
+                        "box": {
+                          "w": 3.4,
+                          "h": 77.3,
+                          "pad": [
+                            0
+                          ],
+                          "margin": [
+                            0.0,
+                            0,
+                            0,
+                            20.2
+                          ]
+                        },
+                        "content": {
+                          "ref": "com.android.calculator2:id/const_pi"
+                        },
+                        "intents": [
+                          {
+                            "on": "click",
+                            "do": "navigate"
+                          }
+                        ]
+                      },
+                      {
+                        "id": "n37",
+                        "role": "box",
+                        "box": {
+                          "w": 3.4,
+                          "h": 77.7,
+                          "pad": [
+                            0
+                          ],
+                          "margin": [
+                            0.0,
+                            0,
+                            0,
+                            20.2
+                          ]
+                        },
+                        "content": {
+                          "ref": "com.android.calculator2:id/lparen"
+                        },
+                        "intents": [
+                          {
+                            "on": "click",
+                            "do": "navigate"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "n38",
+        "role": "image",
+        "box": {
+          "w": 411.4,
+          "h": 24.0,
+          "pad": [
+            0
+          ],
+          "position": {
+            "top": 0.0,
+            "left": 0.0
+          }
+        },
+        "content": {
+          "alt": "图片",
+          "src": "data:image/png;base64,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",
+          "ref": "android:id/statusBarBackground"
+        }
+      }
+    ]
+  }
+}

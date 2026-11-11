@@ -532,6 +532,13 @@ class _Sampler:
         # 去掉贯穿整框的横/竖线(分割线、边框), 它们不是字形
         mask[mask.mean(axis=1) > 0.85, :] = False
         mask[:, mask.mean(axis=0) > 0.85] = False
+        # 框边一圈(2 个截图像素)不算墨迹: 控件框贴着卡片/对话框边缘时, 那里是圆角/阴影/描边的抗锯齿像素,
+        # 断断续续不构成"贯穿线", 却把墨迹左/上边界拉到框边(文字内边距被算成 0)
+        if min(mask.shape) > 12:
+            mask[:2, :] = False
+            mask[-2:, :] = False
+            mask[:, :2] = False
+            mask[:, -2:] = False
         rows, cols = np.where(mask.any(axis=1))[0], np.where(mask.any(axis=0))[0]
         if rows.size == 0 or mask.sum() < 4:
             return None
@@ -562,9 +569,26 @@ class _Sampler:
         starts = int((np.diff(sub, axis=1, prepend=0) == 1).sum())
         stroke = (float(sub.sum()) / starts / k) if starts else 0.0
         top, bottom = (merged[0][0]) / k, (merged[-1][1] + 1) / k
+        # 各行墨迹左缘的离散度: 多行文本左缘对齐(≈0)= 左对齐段落, 参差 = 居中/右对齐
+        lefts = []
+        for s0, e0 in merged:
+            cc = np.where(mask[s0:e0 + 1].any(axis=0))[0]
+            if cc.size:
+                lefts.append(float(cc[0]) / k)
+        spread = (max(lefts) - min(lefts)) if len(lefts) > 1 else 0.0
         return {"top": y + top, "bottom": y + bottom, "left": x + cols[0] / k,
                 "right": x + (cols[-1] + 1) / k, "lines": len(merged), "line_h": line_h, "pitch": pitch,
-                "stroke": stroke}
+                "stroke": stroke, "left_spread": spread}
+
+    def detail(self, x, y, w, h, bg_hex=None) -> float:
+        """框内与背景色明显不同的像素占比(0~1): 判断一个没有文字/子节点的叶子框里是否画了东西。"""
+        a = self._crop(x, y, w, h)
+        if a is None or a.size == 0 or min(a.shape[:2]) < 3:
+            return 0.0
+        np = self.np
+        px = a.reshape(-1, 3).astype(np.int32)
+        bgc = self._bg_vec(bg_hex, px)
+        return float((np.abs(px - bgc).sum(axis=1) >= 60).mean())
 
     def embed(self, x, y, w, h):
         a = self._crop(x, y, w, h)
@@ -636,6 +660,41 @@ def _prepare(tree: dict) -> dict:
     if root is None:
         raise ValueError("可访问性树在窗口内无可见节点")
     return {"platform": platform, "app": tree.get("app", ""), "window": win, "root": root}
+
+
+def _mark_graphic_leaves(root: dict, win=None) -> int:
+    """给"独占一块屏幕区域的无文字叶子"打 _excl 标记(自绘视图/系统栏/图形控件的候选)。
+
+    独占 = 没有任何其他叶子节点与它的框重叠超过自身面积的 5%。透明触摸层、拖放目标、遮罩这类叶子
+    盖在别的内容上面, 不独占 —— 它们框内的像素是别的节点画的, 不能当成它自己的图形。"""
+    nodes = []
+
+    def walk(n, path):
+        nodes.append((n, path))
+        for i, c in enumerate(n.get("children") or []):
+            walk(c, path + (i,))
+
+    walk(root, ())
+    marked = 0
+    for n, path in nodes:
+        if n.get("children") or _visible_text(n):
+            continue
+        b = n["bounds"]
+        area = b[2] * b[3]
+        if area < 256:
+            continue
+        excl = True
+        for m, mp in nodes:
+            if m is n or m.get("children"):     # 只与其他叶子比: 容器本身不画内容(它的背景由采色还原)
+                continue
+            it = _intersect(b, m["bounds"])
+            if it[2] * it[3] > 0.05 * area:
+                excl = False
+                break
+        if excl:
+            n["_excl"] = True
+            marked += 1
+    return marked
 
 
 def _infer_axis(kids: list) -> str:
@@ -763,6 +822,15 @@ class _Builder:
             # 滑块/进度/开关/复选框是图形控件: 有截图时按图裁剪重建外观, 意图保留
             intents = [{"on": "click", "do": "toggle"}] if n.get("checked") is not None else [{"on": "change", "do": "input"}]
             role = "image"
+        if (role in ("box", "list_item") and not kids and not text and n.get("_excl") and self.sampler
+                and self.sampler.budget > 0 and w >= 16 and h >= 16
+                and self.sampler.detail(x, y, w, h, eff_bg) >= 0.01):
+            # 没有文字、没有子节点、独占一块区域, 截图上却画了东西: 自绘视图(日历网格/图表/画布)、系统栏、
+            # 无障碍树没展开的图形控件 —— 树里没有可重建的结构, 有截图时与图片同样按图裁剪内嵌
+            if n.get("clickable"):
+                intents = [{"on": "click", "do": "navigate"}]
+            role = "image"
+            box.pop("bg", None)
         ink = None
         if role in ("text", "button", "link", "badge") and self.sampler:
             ink = self.sampler.ink(x, y, w, h, eff_bg)
@@ -791,14 +859,20 @@ class _Builder:
                 else:
                     top = ink["top"] - y - (lh - ink["line_h"]) / 2
                 lgap, rgap = ink["left"] - x, x + w - ink["right"]
-                if lgap > 4 and abs(lgap - rgap) <= max(3.0, 0.08 * w):
+                right = 0.0
+                if n_lines > 1 and lgap > 4 and ink.get("left_spread", 9.0) <= 2.0:
+                    # 多行且各行左缘对齐 = 左对齐段落(左右留白相近只是第二行恰好排满): 左内边距照墨迹, 右内边距取
+                    # 不超过左边的那部分留白 —— 折行宽度与原文一致, 不会因为占满整框而少折一行
+                    align, left = "", max(0.0, lgap - 0.5)
+                    right = max(0.0, min(rgap, lgap) - 0.5)
+                elif lgap > 4 and abs(lgap - rgap) <= max(3.0, 0.08 * w):
                     align, left = "center", 0.0
                 else:
                     align, left = "", max(0.0, lgap - 0.5)
                 top = max(0.0, top)
                 # 下内边距补齐到框高: 行框恰好占满内容区, 按钮等默认垂直居中的元素不再二次居中
                 bottom = max(0.0, h - top - lh * n_lines)
-                pad = [round(float(top), 1), 0, round(float(bottom), 1), round(float(left), 1)]
+                pad = [round(float(top), 1), round(float(right), 1), round(float(bottom), 1), round(float(left), 1)]
                 if symbolic:
                     box["_symbolic"] = True
             text_ref = self.text_style(size, fg or "c1", h, weight=weight, align=align, line=line)
@@ -939,6 +1013,8 @@ def tree_to_uir(tree: dict, screenshot=None, embed_images: bool = True) -> UIR:
             sampler = _Sampler(shot, px, origin=origin, embed_budget=4_000_000 if embed_images else 0)
         except Exception:
             sampler = None
+    if sampler is not None and sampler.budget > 0:
+        _mark_graphic_leaves(prep["root"])
     b = _Builder(sampler, prep["platform"])
     wx, wy, ww, wh = prep["window"]
     root_bg = sampler.bg(wx, wy, ww, wh) if sampler else "c0"

@@ -1,0 +1,197 @@
+{
+ "summary": {
+  "holdout": {
+   "tree_only": 18.8,
+   "no_embed": 59.7,
+   "with_shot": 79.1,
+   "min_with_shot": 61.4,
+   "n": 8
+  }
+ },
+ "cases": {
+  "holdout/android_calendar": {
+   "tree_only": {
+    "score": 10.1,
+    "structure": 0.056,
+    "edge": 0.169,
+    "nodes": 10,
+    "map_s": 0.001
+   },
+   "no_embed": {
+    "score": 19.1,
+    "structure": 0.144,
+    "edge": 0.26,
+    "nodes": 10,
+    "map_s": 0.037
+   },
+   "with_shot": {
+    "score": 82.6,
+    "structure": 0.895,
+    "edge": 0.724,
+    "nodes": 10,
+    "map_s": 0.281
+   }
+  },
+  "holdout/android_clock": {
+   "tree_only": {
+    "score": 9.3,
+    "structure": 0.01,
+    "edge": 0.217,
+    "nodes": 41,
+    "map_s": 0.002
+   },
+   "no_embed": {
+    "score": 50.0,
+    "structure": 0.577,
+    "edge": 0.383,
+    "nodes": 44,
+    "map_s": 0.099
+   },
+   "with_shot": {
+    "score": 61.4,
+    "structure": 0.699,
+    "edge": 0.485,
+    "nodes": 44,
+    "map_s": 0.106
+   }
+  },
+  "holdout/android_gallery": {
+   "tree_only": {
+    "score": 13.6,
+    "structure": 0.012,
+    "edge": 0.323,
+    "nodes": 16,
+    "map_s": 0.001
+   },
+   "no_embed": {
+    "score": 72.2,
+    "structure": 0.823,
+    "edge": 0.571,
+    "nodes": 17,
+    "map_s": 0.03
+   },
+   "with_shot": {
+    "score": 85.0,
+    "structure": 0.917,
+    "edge": 0.749,
+    "nodes": 17,
+    "map_s": 0.149
+   }
+  },
+  "holdout/android_settings_apps": {
+   "tree_only": {
+    "score": 21.3,
+    "structure": 0.144,
+    "edge": 0.316,
+    "nodes": 60,
+    "map_s": 0.002
+   },
+   "no_embed": {
+    "score": 59.0,
+    "structure": 0.619,
+    "edge": 0.547,
+    "nodes": 68,
+    "map_s": 0.088
+   },
+   "with_shot": {
+    "score": 83.4,
+    "structure": 0.842,
+    "edge": 0.822,
+    "nodes": 68,
+    "map_s": 0.085
+   }
+  },
+  "holdout/android_settings_date": {
+   "tree_only": {
+    "score": 27.2,
+    "structure": 0.112,
+    "edge": 0.512,
+    "nodes": 37,
+    "map_s": 0.002
+   },
+   "no_embed": {
+    "score": 72.9,
+    "structure": 0.726,
+    "edge": 0.733,
+    "nodes": 43,
+    "map_s": 0.09
+   },
+   "with_shot": {
+    "score": 78.7,
+    "structure": 0.782,
+    "edge": 0.795,
+    "nodes": 43,
+    "map_s": 0.085
+   }
+  },
+  "holdout/android_settings_location": {
+   "tree_only": {
+    "score": 20.4,
+    "structure": 0.087,
+    "edge": 0.38,
+    "nodes": 39,
+    "map_s": 0.002
+   },
+   "no_embed": {
+    "score": 69.5,
+    "structure": 0.715,
+    "edge": 0.665,
+    "nodes": 43,
+    "map_s": 0.092
+   },
+   "with_shot": {
+    "score": 80.5,
+    "structure": 0.818,
+    "edge": 0.785,
+    "nodes": 43,
+    "map_s": 0.096
+   }
+  },
+  "holdout/android_settings_security": {
+   "tree_only": {
+    "score": 20.6,
+    "structure": 0.08,
+    "edge": 0.394,
+    "nodes": 36,
+    "map_s": 0.002
+   },
+   "no_embed": {
+    "score": 74.0,
+    "structure": 0.738,
+    "edge": 0.743,
+    "nodes": 38,
+    "map_s": 0.107
+   },
+   "with_shot": {
+    "score": 79.2,
+    "structure": 0.79,
+    "edge": 0.794,
+    "nodes": 38,
+    "map_s": 0.095
+   }
+  },
+  "holdout/android_settings_storage": {
+   "tree_only": {
+    "score": 27.6,
+    "structure": 0.231,
+    "edge": 0.343,
+    "nodes": 40,
+    "map_s": 0.002
+   },
+   "no_embed": {
+    "score": 60.6,
+    "structure": 0.662,
+    "edge": 0.523,
+    "nodes": 46,
+    "map_s": 0.09
+   },
+   "with_shot": {
+    "score": 82.0,
+    "structure": 0.853,
+    "edge": 0.77,
+    "nodes": 46,
+    "map_s": 0.122
+   }
+  }
+ }
+}

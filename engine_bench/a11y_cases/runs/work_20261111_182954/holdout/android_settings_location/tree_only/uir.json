@@ -1,0 +1,979 @@
+{
+  "uir_version": "1",
+  "meta": {
+    "source_kind": "a11y",
+    "title": "com.android.settings",
+    "lang": "zh",
+    "viewport": {
+      "w": 411,
+      "h": 683
+    },
+    "report": {
+      "platform": "android",
+      "nodes_in": 50,
+      "nodes_kept": 39,
+      "layout": {
+        "col": 13,
+        "row": 5,
+        "stack": 1
+      },
+      "images_embedded": 0,
+      "dividers": 0,
+      "sampled_colors": false,
+      "scale": 2.625
+    },
+    "edge_to_edge": true
+  },
+  "tokens": {
+    "color": {
+      "c0": "#ffffff",
+      "c1": "#1f2937",
+      "c2": "#2563eb",
+      "c3": "#6b7280"
+    },
+    "font": {
+      "f0": {
+        "family": "Roboto",
+        "fallback": "'Noto Sans SC','PingFang SC',system-ui,sans-serif"
+      }
+    },
+    "text_style": {
+      "t0": {
+        "size": 14,
+        "weight": 400,
+        "line": 1.35,
+        "color": "c1"
+      },
+      "ta0": {
+        "size": 20,
+        "weight": 400,
+        "line": 1.353,
+        "color": "c1"
+      },
+      "ta1": {
+        "size": 20,
+        "weight": 400,
+        "line": 1.353,
+        "color": "c1",
+        "align": "center"
+      },
+      "ta2": {
+        "size": 16,
+        "weight": 400,
+        "line": 1.357,
+        "color": "c1"
+      },
+      "ta3": {
+        "size": 14,
+        "weight": 400,
+        "line": 1.388,
+        "color": "c1"
+      },
+      "ta4": {
+        "size": 20,
+        "weight": 400,
+        "line": 1.772,
+        "color": "c1"
+      }
+    },
+    "space": {
+      "s0": 0,
+      "s1": 4,
+      "s2": 8,
+      "s3": 12,
+      "s4": 16,
+      "s5": 24
+    }
+  },
+  "root": {
+    "id": "n1",
+    "role": "box",
+    "layout": {
+      "mode": "stack"
+    },
+    "box": {
+      "w": 411.4,
+      "h": 683.4,
+      "pad": [
+        0
+      ],
+      "bg": "c0"
+    },
+    "children": [
+      {
+        "id": "n2",
+        "role": "box",
+        "layout": {
+          "mode": "flex",
+          "direction": "col",
+          "align": "start"
+        },
+        "box": {
+          "w": 411.4,
+          "h": 683.4,
+          "pad": [
+            0
+          ],
+          "position": {
+            "top": 0.0,
+            "left": 0.0
+          }
+        },
+        "content": {
+          "ref": "com.android.settings:id/content_parent"
+        },
+        "children": [
+          {
+            "id": "n3",
+            "role": "box",
+            "layout": {
+              "mode": "flex",
+              "direction": "row",
+              "align": "start"
+            },
+            "box": {
+              "w": 411.4,
+              "h": 56.0,
+              "pad": [
+                0
+              ],
+              "margin": [
+                24.0,
+                0,
+                0,
+                0.0
+              ]
+            },
+            "content": {
+              "ref": "com.android.settings:id/action_bar"
+            },
+            "children": [
+              {
+                "id": "n4",
+                "role": "image",
+                "box": {
+                  "w": 56.0,
+                  "h": 56.0,
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    0.0,
+                    0,
+                    0,
+                    0.0
+                  ]
+                },
+                "content": {
+                  "alt": "Menu"
+                },
+                "intents": [
+                  {
+                    "on": "click",
+                    "do": "navigate"
+                  }
+                ]
+              },
+              {
+                "id": "n5",
+                "role": "text",
+                "box": {
+                  "w": 94.7,
+                  "h": 27.1,
+                  "overflow": "hidden",
+                  "margin": [
+                    14.5,
+                    -15.8,
+                    0,
+                    16.0
+                  ]
+                },
+                "text_ref": "ta0",
+                "content": {
+                  "text": "Location"
+                }
+              },
+              {
+                "id": "n6",
+                "role": "box",
+                "layout": {
+                  "mode": "flex",
+                  "direction": "col",
+                  "align": "start"
+                },
+                "box": {
+                  "w": 40.0,
+                  "h": 56.0,
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    0.0,
+                    0,
+                    0,
+                    220.6
+                  ]
+                },
+                "children": [
+                  {
+                    "id": "n7",
+                    "role": "image",
+                    "box": {
+                      "w": 40.0,
+                      "h": 48.0,
+                      "pad": [
+                        0
+                      ],
+                      "margin": [
+                        3.8,
+                        0,
+                        0,
+                        0.0
+                      ]
+                    },
+                    "content": {
+                      "alt": "More options"
+                    },
+                    "intents": [
+                      {
+                        "on": "click",
+                        "do": "navigate"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "n8",
+            "role": "box",
+            "layout": {
+              "mode": "flex",
+              "direction": "col",
+              "align": "start"
+            },
+            "box": {
+              "w": 411.4,
+              "h": 603.4,
+              "pad": [
+                0
+              ],
+              "margin": [
+                0.0,
+                0,
+                0,
+                0.0
+              ]
+            },
+            "children": [
+              {
+                "id": "n9",
+                "role": "box",
+                "layout": {
+                  "mode": "flex",
+                  "direction": "row",
+                  "align": "start"
+                },
+                "box": {
+                  "w": 411.4,
+                  "h": 56.0,
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    0.0,
+                    0,
+                    0,
+                    0.0
+                  ]
+                },
+                "content": {
+                  "ref": "com.android.settings:id/switch_bar"
+                },
+                "intents": [
+                  {
+                    "on": "click",
+                    "do": "navigate"
+                  }
+                ],
+                "children": [
+                  {
+                    "id": "n10",
+                    "role": "text",
+                    "box": {
+                      "w": 322.4,
+                      "h": 27.1,
+                      "overflow": "hidden",
+                      "margin": [
+                        14.5,
+                        -45.5,
+                        0,
+                        72.0
+                      ]
+                    },
+                    "text_ref": "ta0",
+                    "content": {
+                      "text": "On",
+                      "ref": "com.android.settings:id/switch_text"
+                    }
+                  },
+                  {
+                    "id": "n11",
+                    "role": "button",
+                    "box": {
+                      "w": 46.5,
+                      "h": 27.1,
+                      "overflow": "hidden",
+                      "margin": [
+                        14.5,
+                        0,
+                        0,
+                        0.0
+                      ]
+                    },
+                    "text_ref": "ta1",
+                    "content": {
+                      "text": "ON",
+                      "checked": true,
+                      "ref": "com.android.settings:id/switch_widget"
+                    },
+                    "intents": [
+                      {
+                        "on": "click",
+                        "do": "toggle"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "n12",
+                "role": "list",
+                "layout": {
+                  "mode": "flex",
+                  "direction": "col",
+                  "align": "start"
+                },
+                "box": {
+                  "w": 411.4,
+                  "h": 547.4,
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    0.0,
+                    0,
+                    0,
+                    0.0
+                  ]
+                },
+                "content": {
+                  "ref": "com.android.settings:id/list"
+                },
+                "children": [
+                  {
+                    "id": "n13",
+                    "role": "box",
+                    "layout": {
+                      "mode": "flex",
+                      "direction": "col",
+                      "align": "start"
+                    },
+                    "box": {
+                      "w": 411.4,
+                      "h": 73.1,
+                      "pad": [
+                        0
+                      ],
+                      "margin": [
+                        0.0,
+                        0,
+                        0,
+                        0.0
+                      ]
+                    },
+                    "children": [
+                      {
+                        "id": "n14",
+                        "role": "box",
+                        "layout": {
+                          "mode": "flex",
+                          "direction": "col",
+                          "align": "start"
+                        },
+                        "box": {
+                          "w": 379.4,
+                          "h": 73.1,
+                          "pad": [
+                            0
+                          ],
+                          "margin": [
+                            0.0,
+                            0,
+                            0,
+                            16.0
+                          ]
+                        },
+                        "children": [
+                          {
+                            "id": "n15",
+                            "role": "text",
+                            "box": {
+                              "w": 50.9,
+                              "h": 21.7,
+                              "overflow": "hidden",
+                              "margin": [
+                                16.0,
+                                -10.1,
+                                0,
+                                0.0
+                              ]
+                            },
+                            "text_ref": "ta2",
+                            "content": {
+                              "text": "Mode",
+                              "ref": "android:id/title"
+                            }
+                          },
+                          {
+                            "id": "n16",
+                            "role": "text",
+                            "box": {
+                              "w": 85.9,
+                              "h": 19.4,
+                              "overflow": "hidden",
+                              "margin": [
+                                0.0,
+                                -14.7,
+                                0,
+                                0.0
+                              ]
+                            },
+                            "text_ref": "ta3",
+                            "content": {
+                              "text": "Device only",
+                              "ref": "android:id/summary"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": "n17",
+                    "role": "text",
+                    "box": {
+                      "w": 477.1,
+                      "h": 35.4,
+                      "overflow": "hidden",
+                      "margin": [
+                        1.2,
+                        -65.7,
+                        0,
+                        0.0
+                      ]
+                    },
+                    "text_ref": "ta4",
+                    "content": {
+                      "text": "Recent location requests"
+                    }
+                  },
+                  {
+                    "id": "n18",
+                    "role": "box",
+                    "layout": {
+                      "mode": "flex",
+                      "direction": "col",
+                      "align": "start"
+                    },
+                    "box": {
+                      "w": 411.4,
+                      "h": 64.0,
+                      "pad": [
+                        0
+                      ],
+                      "margin": [
+                        16.0,
+                        0,
+                        0,
+                        0.0
+                      ]
+                    },
+                    "children": [
+                      {
+                        "id": "n19",
+                        "role": "text",
+                        "box": {
+                          "w": 441.7,
+                          "h": 19.4,
+                          "overflow": "hidden",
+                          "margin": [
+                            22.1,
+                            -61.1,
+                            0,
+                            14.9
+                          ]
+                        },
+                        "text_ref": "ta3",
+                        "content": {
+                          "text": "No apps have requested location recently",
+                          "ref": "android:id/title"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "n20",
+                    "role": "text",
+                    "box": {
+                      "w": 477.1,
+                      "h": 35.4,
+                      "overflow": "hidden",
+                      "margin": [
+                        0.0,
+                        -65.7,
+                        0,
+                        0.0
+                      ]
+                    },
+                    "text_ref": "ta4",
+                    "content": {
+                      "text": "Location services"
+                    }
+                  },
+                  {
+                    "id": "n21",
+                    "role": "box",
+                    "layout": {
+                      "mode": "flex",
+                      "direction": "row",
+                      "align": "start"
+                    },
+                    "box": {
+                      "w": 411.4,
+                      "h": 56.4,
+                      "pad": [
+                        0
+                      ],
+                      "margin": [
+                        16.0,
+                        0,
+                        0,
+                        0.0
+                      ]
+                    },
+                    "children": [
+                      {
+                        "id": "n22",
+                        "role": "box",
+                        "layout": {
+                          "mode": "flex",
+                          "direction": "col",
+                          "align": "start"
+                        },
+                        "box": {
+                          "w": 60.2,
+                          "h": 56.4,
+                          "pad": [
+                            0
+                          ],
+                          "margin": [
+                            0.0,
+                            0,
+                            0,
+                            12.2
+                          ]
+                        },
+                        "content": {
+                          "ref": "android:id/icon_frame"
+                        },
+                        "children": [
+                          {
+                            "id": "n23",
+                            "role": "image",
+                            "box": {
+                              "w": 48.0,
+                              "h": 48.0,
+                              "pad": [
+                                0
+                              ],
+                              "margin": [
+                                4.2,
+                                0,
+                                0,
+                                0.0
+                              ]
+                            },
+                            "content": {
+                              "alt": "图片",
+                              "ref": "android:id/icon"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "id": "n24",
+                        "role": "box",
+                        "layout": {
+                          "mode": "flex",
+                          "direction": "col",
+                          "align": "start"
+                        },
+                        "box": {
+                          "w": 307.1,
+                          "h": 53.7,
+                          "pad": [
+                            0
+                          ],
+                          "margin": [
+                            1.2,
+                            0,
+                            0,
+                            0.0
+                          ]
+                        },
+                        "children": [
+                          {
+                            "id": "n25",
+                            "role": "text",
+                            "box": {
+                              "w": 234.5,
+                              "h": 21.7,
+                              "overflow": "hidden",
+                              "margin": [
+                                16.0,
+                                -34.1,
+                                0,
+                                0.0
+                              ]
+                            },
+                            "text_ref": "ta2",
+                            "content": {
+                              "text": "Emergency Location Service",
+                              "ref": "android:id/title"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "id": "n26",
+                        "role": "box",
+                        "box": {
+                          "w": 16.0,
+                          "h": 56.4,
+                          "pad": [
+                            0
+                          ],
+                          "margin": [
+                            0.0,
+                            0,
+                            0,
+                            0.0
+                          ]
+                        },
+                        "content": {
+                          "ref": "android:id/widget_frame"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "n27",
+                    "role": "box",
+                    "layout": {
+                      "mode": "flex",
+                      "direction": "row",
+                      "align": "start"
+                    },
+                    "box": {
+                      "w": 411.4,
+                      "h": 56.4,
+                      "pad": [
+                        0
+                      ],
+                      "margin": [
+                        1.2,
+                        0,
+                        0,
+                        0.0
+                      ]
+                    },
+                    "children": [
+                      {
+                        "id": "n28",
+                        "role": "box",
+                        "layout": {
+                          "mode": "flex",
+                          "direction": "col",
+                          "align": "start"
+                        },
+                        "box": {
+                          "w": 60.2,
+                          "h": 56.4,
+                          "pad": [
+                            0
+                          ],
+                          "margin": [
+                            0.0,
+                            0,
+                            0,
+                            12.2
+                          ]
+                        },
+                        "content": {
+                          "ref": "android:id/icon_frame"
+                        },
+                        "children": [
+                          {
+                            "id": "n29",
+                            "role": "image",
+                            "box": {
+                              "w": 48.0,
+                              "h": 48.0,
+                              "pad": [
+                                0
+                              ],
+                              "margin": [
+                                4.2,
+                                0,
+                                0,
+                                0.0
+                              ]
+                            },
+                            "content": {
+                              "alt": "图片",
+                              "ref": "android:id/icon"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "id": "n30",
+                        "role": "box",
+                        "layout": {
+                          "mode": "flex",
+                          "direction": "col",
+                          "align": "start"
+                        },
+                        "box": {
+                          "w": 307.1,
+                          "h": 53.7,
+                          "pad": [
+                            0
+                          ],
+                          "margin": [
+                            1.1,
+                            0,
+                            0,
+                            0.0
+                          ]
+                        },
+                        "children": [
+                          {
+                            "id": "n31",
+                            "role": "text",
+                            "box": {
+                              "w": 200.8,
+                              "h": 21.7,
+                              "overflow": "hidden",
+                              "margin": [
+                                16.0,
+                                -29.7,
+                                0,
+                                0.0
+                              ]
+                            },
+                            "text_ref": "ta2",
+                            "content": {
+                              "text": "Google Location History",
+                              "ref": "android:id/title"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "id": "n32",
+                        "role": "box",
+                        "box": {
+                          "w": 16.0,
+                          "h": 56.4,
+                          "pad": [
+                            0
+                          ],
+                          "margin": [
+                            0.0,
+                            0,
+                            0,
+                            0.0
+                          ]
+                        },
+                        "content": {
+                          "ref": "android:id/widget_frame"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "n33",
+                    "role": "box",
+                    "layout": {
+                      "mode": "flex",
+                      "direction": "row",
+                      "align": "start"
+                    },
+                    "box": {
+                      "w": 411.4,
+                      "h": 56.4,
+                      "pad": [
+                        0
+                      ],
+                      "margin": [
+                        1.1,
+                        0,
+                        0,
+                        0.0
+                      ]
+                    },
+                    "children": [
+                      {
+                        "id": "n34",
+                        "role": "box",
+                        "layout": {
+                          "mode": "flex",
+                          "direction": "col",
+                          "align": "start"
+                        },
+                        "box": {
+                          "w": 60.2,
+                          "h": 56.4,
+                          "pad": [
+                            0
+                          ],
+                          "margin": [
+                            0.0,
+                            0,
+                            0,
+                            12.2
+                          ]
+                        },
+                        "content": {
+                          "ref": "android:id/icon_frame"
+                        },
+                        "children": [
+                          {
+                            "id": "n35",
+                            "role": "image",
+                            "box": {
+                              "w": 48.0,
+                              "h": 48.0,
+                              "pad": [
+                                0
+                              ],
+                              "margin": [
+                                4.2,
+                                0,
+                                0,
+                                0.0
+                              ]
+                            },
+                            "content": {
+                              "alt": "图片",
+                              "ref": "android:id/icon"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "id": "n36",
+                        "role": "box",
+                        "layout": {
+                          "mode": "flex",
+                          "direction": "col",
+                          "align": "start"
+                        },
+                        "box": {
+                          "w": 307.1,
+                          "h": 53.7,
+                          "pad": [
+                            0
+                          ],
+                          "margin": [
+                            1.1,
+                            0,
+                            0,
+                            0.0
+                          ]
+                        },
+                        "children": [
+                          {
+                            "id": "n37",
+                            "role": "text",
+                            "box": {
+                              "w": 204.7,
+                              "h": 21.7,
+                              "overflow": "hidden",
+                              "margin": [
+                                16.0,
+                                -30.2,
+                                0,
+                                0.0
+                              ]
+                            },
+                            "text_ref": "ta2",
+                            "content": {
+                              "text": "Google Location Sharing",
+                              "ref": "android:id/title"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "id": "n38",
+                        "role": "box",
+                        "box": {
+                          "w": 16.0,
+                          "h": 56.4,
+                          "pad": [
+                            0
+                          ],
+                          "margin": [
+                            0.0,
+                            0,
+                            0,
+                            0.0
+                          ]
+                        },
+                        "content": {
+                          "ref": "android:id/widget_frame"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "n39",
+        "role": "box",
+        "box": {
+          "w": 411.4,
+          "h": 24.0,
+          "pad": [
+            0
+          ],
+          "position": {
+            "top": 0.0,
+            "left": 0.0
+          }
+        },
+        "content": {
+          "ref": "android:id/statusBarBackground"
+        }
+      }
+    ]
+  }
+}

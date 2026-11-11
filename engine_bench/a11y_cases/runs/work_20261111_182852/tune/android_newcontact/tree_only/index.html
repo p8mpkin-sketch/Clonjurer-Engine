@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="generator" content="clonjurer-uir/1"><title>com.android.contacts</title><link rel="stylesheet" href="static/css/app.css"></head><body data-uir-w="390"><div id="n1" data-role="box"><div id="n2" data-role="box"><p id="n3" data-role="text">Your new contact won&#x27;t be backed up. Add an account that backs up contacts online?</p><div id="n4" data-role="box"></div><div id="n5" data-role="box"><button id="n6" data-role="button" data-intent='[{&quot;on&quot;: &quot;click&quot;, &quot;do&quot;: &quot;navigate&quot;}]' type="button">KEEP LOCAL</button><button id="n7" data-role="button" data-intent='[{&quot;on&quot;: &quot;click&quot;, &quot;do&quot;: &quot;navigate&quot;}]' type="button">ADD ACCOUNT</button></div></div></div><script>
+(function(){
+  function q(sel,root){return Array.prototype.slice.call((root||document).querySelectorAll(sel));}
+  q('[data-intent]').forEach(function(el){
+    var intents=[]; try{intents=JSON.parse(el.getAttribute('data-intent')||'[]');}catch(e){}
+    intents.forEach(function(it){
+      var ev=it.on||'click';
+      if(it.do==='toggle'){el.addEventListener(ev,function(e){var t=it.target?document.getElementById(it.target):el; if(t){t.classList.toggle('uir-hidden');} e.preventDefault();});}
+      else if(it.do==='open-overlay'){el.addEventListener(ev,function(e){var t=it.target?document.getElementById(it.target):null; if(t){t.classList.remove('uir-hidden');} e.preventDefault();});}
+      else if(it.do==='countdown'){el.addEventListener(ev,function(e){e.preventDefault(); if(el.dataset.busy)return; var s=(it.meta&&it.meta.seconds)||60, txt=el.textContent; el.dataset.busy='1'; el.setAttribute('disabled',''); var tm=setInterval(function(){s--; el.textContent=s+'s'; if(s<=0){clearInterval(tm); el.textContent=txt; el.removeAttribute('disabled'); delete el.dataset.busy;}},1000);});}
+      else if(it.do==='submit-form'){el.addEventListener(ev,function(e){e.preventDefault(); var msgs=['网络繁忙，请稍后重试','系统繁忙，请稍后再试','网络异常，请稍后重试']; var m=msgs[Math.floor(Math.random()*msgs.length)]; var tip=document.createElement('div'); tip.className='uir-toast'; tip.textContent=m; document.body.appendChild(tip); setTimeout(function(){tip.remove();},2200);});}
+      else if(it.do==='carousel-advance'){el.addEventListener(ev,function(e){e.preventDefault(); var t=it.target?document.getElementById(it.target):el.parentElement; if(!t)return; var kids=q(':scope > *',t); if(!kids.length)return; var cur=kids.findIndex(function(k){return !k.classList.contains('uir-hidden');}); if(cur<0)cur=0; kids[cur].classList.add('uir-hidden'); kids[(cur+1)%kids.length].classList.remove('uir-hidden');});}
+    });
+  });
+  q('form').forEach(function(f){ if(!f.hasAttribute('data-intent')) f.addEventListener('submit',function(e){e.preventDefault();}); });
+})();
+</script></body></html>

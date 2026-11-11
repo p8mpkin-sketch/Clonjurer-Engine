@@ -1,0 +1,1118 @@
+{
+  "uir_version": "1",
+  "meta": {
+    "source_kind": "a11y",
+    "title": "com.android.deskclock",
+    "lang": "zh",
+    "viewport": {
+      "w": 411,
+      "h": 731
+    },
+    "report": {
+      "platform": "android",
+      "nodes_in": 49,
+      "nodes_kept": 41,
+      "layout": {
+        "col": 10,
+        "row": 4,
+        "stack": 4
+      },
+      "images_embedded": 0,
+      "dividers": 3,
+      "sampled_colors": true,
+      "scale": 2.625
+    },
+    "edge_to_edge": true
+  },
+  "tokens": {
+    "color": {
+      "c0": "#ffffff",
+      "c1": "#1f2937",
+      "c2": "#2563eb",
+      "c3": "#6b7280"
+    },
+    "font": {
+      "f0": {
+        "family": "Roboto",
+        "fallback": "'Noto Sans SC','PingFang SC',system-ui,sans-serif"
+      }
+    },
+    "text_style": {
+      "t0": {
+        "size": 14,
+        "weight": 400,
+        "line": 1.35,
+        "color": "c1"
+      },
+      "ta0": {
+        "size": 27,
+        "weight": 400,
+        "line": 1.3,
+        "color": "#f7f7fa"
+      },
+      "ta1": {
+        "size": 27,
+        "weight": 400,
+        "line": 1.3,
+        "color": "#afb2d2"
+      },
+      "ta2": {
+        "size": 25,
+        "weight": 400,
+        "line": 1.3,
+        "color": "#aeb1d1"
+      },
+      "ta3": {
+        "size": 25,
+        "weight": 400,
+        "line": 1.3,
+        "color": "#b1b3d3"
+      },
+      "ta4": {
+        "size": 48,
+        "weight": 400,
+        "line": 1.25,
+        "color": "#b4b8d5"
+      },
+      "ta5": {
+        "size": 14,
+        "weight": 600,
+        "line": 1.25,
+        "color": "#f8f8fb",
+        "align": "center"
+      },
+      "ta6": {
+        "size": 48,
+        "weight": 400,
+        "line": 1.25,
+        "color": "#b4b7d5"
+      },
+      "ta7": {
+        "size": 14,
+        "weight": 600,
+        "line": 1.25,
+        "color": "#f7f8fb",
+        "align": "center"
+      },
+      "ta8": {
+        "size": 43,
+        "weight": 600,
+        "line": 1.25,
+        "color": "#fffefe"
+      }
+    },
+    "space": {
+      "s0": 0,
+      "s1": 4,
+      "s2": 8,
+      "s3": 12,
+      "s4": 16,
+      "s5": 24
+    }
+  },
+  "root": {
+    "id": "n1",
+    "role": "box",
+    "layout": {
+      "mode": "stack"
+    },
+    "box": {
+      "w": 411.4,
+      "h": 731.4,
+      "pad": [
+        0
+      ],
+      "bg": "#1a237e"
+    },
+    "children": [
+      {
+        "id": "n2",
+        "role": "box",
+        "layout": {
+          "mode": "stack"
+        },
+        "box": {
+          "w": 411.4,
+          "h": 731.4,
+          "bg": "#1a237e",
+          "pad": [
+            0
+          ],
+          "position": {
+            "top": 0.0,
+            "left": 0.0
+          }
+        },
+        "content": {
+          "ref": "com.android.deskclock:id/content"
+        },
+        "children": [
+          {
+            "id": "n3",
+            "role": "box",
+            "layout": {
+              "mode": "flex",
+              "direction": "col",
+              "align": "start"
+            },
+            "box": {
+              "w": 411.4,
+              "h": 73.1,
+              "bg": "#1a237e",
+              "pad": [
+                0
+              ],
+              "position": {
+                "top": 24.0,
+                "left": 0.0
+              }
+            },
+            "children": [
+              {
+                "id": "n4",
+                "role": "box",
+                "layout": {
+                  "mode": "flex",
+                  "direction": "row",
+                  "align": "start"
+                },
+                "box": {
+                  "w": 411.4,
+                  "h": 72.0,
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    0.0,
+                    0,
+                    0,
+                    0.0
+                  ]
+                },
+                "content": {
+                  "ref": "com.android.deskclock:id/toolbar"
+                },
+                "children": [
+                  {
+                    "id": "n5",
+                    "role": "box",
+                    "layout": {
+                      "mode": "flex",
+                      "direction": "row",
+                      "align": "start"
+                    },
+                    "box": {
+                      "w": 371.4,
+                      "h": 72.0,
+                      "pad": [
+                        0
+                      ],
+                      "margin": [
+                        0.0,
+                        0,
+                        0,
+                        0.0
+                      ]
+                    },
+                    "children": [
+                      {
+                        "id": "n6",
+                        "role": "box",
+                        "layout": {
+                          "mode": "flex",
+                          "direction": "col",
+                          "align": "start"
+                        },
+                        "box": {
+                          "w": 92.6,
+                          "h": 72.0,
+                          "pad": [
+                            0
+                          ],
+                          "margin": [
+                            0.0,
+                            0,
+                            0,
+                            0.0
+                          ]
+                        },
+                        "children": [
+                          {
+                            "id": "n7",
+                            "role": "text",
+                            "box": {
+                              "w": 41.1,
+                              "h": 48.4,
+                              "pad": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.3
+                              ],
+                              "margin": [
+                                11.8,
+                                0,
+                                0,
+                                25.5
+                              ]
+                            },
+                            "text_ref": "ta0",
+                            "content": {
+                              "text": "ALARM",
+                              "ref": "android:id/text1"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "id": "n8",
+                        "role": "box",
+                        "layout": {
+                          "mode": "flex",
+                          "direction": "col",
+                          "align": "start"
+                        },
+                        "box": {
+                          "w": 93.0,
+                          "h": 72.0,
+                          "pad": [
+                            0
+                          ],
+                          "margin": [
+                            0.0,
+                            0,
+                            0,
+                            0.0
+                          ]
+                        },
+                        "children": [
+                          {
+                            "id": "n9",
+                            "role": "text",
+                            "box": {
+                              "w": 38.1,
+                              "h": 48.4,
+                              "pad": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.3
+                              ],
+                              "margin": [
+                                11.8,
+                                0,
+                                0,
+                                27.4
+                              ]
+                            },
+                            "text_ref": "ta1",
+                            "content": {
+                              "text": "CLOCK",
+                              "ref": "android:id/text1"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "id": "n10",
+                        "role": "box",
+                        "layout": {
+                          "mode": "flex",
+                          "direction": "col",
+                          "align": "start"
+                        },
+                        "box": {
+                          "w": 93.0,
+                          "h": 72.0,
+                          "pad": [
+                            0
+                          ],
+                          "margin": [
+                            0.0,
+                            0,
+                            0,
+                            0.0
+                          ]
+                        },
+                        "children": [
+                          {
+                            "id": "n11",
+                            "role": "text",
+                            "box": {
+                              "w": 36.2,
+                              "h": 48.4,
+                              "pad": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.3
+                              ],
+                              "margin": [
+                                11.8,
+                                0,
+                                0,
+                                28.2
+                              ]
+                            },
+                            "text_ref": "ta2",
+                            "content": {
+                              "text": "TIMER",
+                              "ref": "android:id/text1"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "id": "n12",
+                        "role": "box",
+                        "layout": {
+                          "mode": "flex",
+                          "direction": "col",
+                          "align": "start"
+                        },
+                        "box": {
+                          "w": 93.0,
+                          "h": 72.0,
+                          "pad": [
+                            0
+                          ],
+                          "margin": [
+                            0.0,
+                            0,
+                            0,
+                            0.0
+                          ]
+                        },
+                        "children": [
+                          {
+                            "id": "n13",
+                            "role": "text",
+                            "box": {
+                              "w": 72.8,
+                              "h": 48.4,
+                              "pad": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.3
+                              ],
+                              "margin": [
+                                11.8,
+                                0,
+                                0,
+                                9.9
+                              ]
+                            },
+                            "text_ref": "ta3",
+                            "content": {
+                              "text": "STOPWATCH",
+                              "ref": "android:id/text1"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": "n14",
+                    "role": "box",
+                    "layout": {
+                      "mode": "flex",
+                      "direction": "col",
+                      "align": "start"
+                    },
+                    "box": {
+                      "w": 40.0,
+                      "h": 56.0,
+                      "pad": [
+                        0
+                      ],
+                      "margin": [
+                        0.0,
+                        0,
+                        0,
+                        0.0
+                      ]
+                    },
+                    "children": [
+                      {
+                        "id": "n15",
+                        "role": "image",
+                        "box": {
+                          "w": 40.0,
+                          "h": 48.0,
+                          "pad": [
+                            0
+                          ],
+                          "margin": [
+                            3.8,
+                            0,
+                            0,
+                            0.0
+                          ]
+                        },
+                        "content": {
+                          "alt": "More options"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "n16",
+                "role": "divider",
+                "box": {
+                  "w": 411.43,
+                  "h": 1.14,
+                  "bg": "#3e4692",
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    -0.1,
+                    0,
+                    0,
+                    0.0
+                  ]
+                }
+              },
+              {
+                "id": "n17",
+                "role": "box",
+                "box": {
+                  "w": 411.4,
+                  "h": 1.1,
+                  "bg": "#3e4692",
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    -1.0,
+                    0,
+                    0,
+                    0.0
+                  ]
+                },
+                "content": {
+                  "ref": "com.android.deskclock:id/tab_hairline"
+                }
+              }
+            ]
+          },
+          {
+            "id": "n18",
+            "role": "list",
+            "layout": {
+              "mode": "flex",
+              "direction": "col",
+              "align": "start"
+            },
+            "box": {
+              "w": 411.4,
+              "h": 586.3,
+              "bg": "#1a237e",
+              "pad": [
+                0
+              ],
+              "position": {
+                "top": 97.1,
+                "left": 0.0
+              }
+            },
+            "content": {
+              "ref": "com.android.deskclock:id/alarms_recycler_view"
+            },
+            "children": [
+              {
+                "id": "n19",
+                "role": "box",
+                "layout": {
+                  "mode": "stack"
+                },
+                "box": {
+                  "w": 411.4,
+                  "h": 136.0,
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    0.0,
+                    0,
+                    0,
+                    0.0
+                  ]
+                },
+                "children": [
+                  {
+                    "id": "n20",
+                    "role": "text",
+                    "box": {
+                      "w": 161.3,
+                      "h": 74.7,
+                      "pad": [
+                        9.6,
+                        0.0,
+                        5.1,
+                        2.2
+                      ],
+                      "overflow": "hidden",
+                      "position": {
+                        "top": 12.2,
+                        "left": 16.0
+                      }
+                    },
+                    "text_ref": "ta4",
+                    "content": {
+                      "text": "8:30 AM",
+                      "ref": "com.android.deskclock:id/digital_clock"
+                    }
+                  },
+                  {
+                    "id": "n21",
+                    "role": "image",
+                    "box": {
+                      "w": 48.0,
+                      "h": 48.0,
+                      "pad": [
+                        0
+                      ],
+                      "position": {
+                        "top": 25.5,
+                        "left": 347.4
+                      }
+                    },
+                    "content": {
+                      "alt": "图片",
+                      "ref": "com.android.deskclock:id/onoff"
+                    },
+                    "intents": [
+                      {
+                        "on": "click",
+                        "do": "navigate"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "n22",
+                    "role": "box",
+                    "layout": {
+                      "mode": "flex",
+                      "direction": "col",
+                      "align": "start"
+                    },
+                    "box": {
+                      "w": 331.4,
+                      "h": 48.0,
+                      "bg": "#1a237e",
+                      "pad": [
+                        0
+                      ],
+                      "position": {
+                        "top": 86.9,
+                        "left": 16.0
+                      }
+                    },
+                    "children": [
+                      {
+                        "id": "n23",
+                        "role": "text",
+                        "box": {
+                          "w": 155.1,
+                          "h": 19.4,
+                          "pad": [
+                            0.8,
+                            0.0,
+                            1.1,
+                            0.0
+                          ],
+                          "overflow": "hidden",
+                          "margin": [
+                            14.1,
+                            0,
+                            0,
+                            0.0
+                          ]
+                        },
+                        "text_ref": "ta5",
+                        "content": {
+                          "text": "Mon, Tue, Wed, Thu, Fri",
+                          "ref": "com.android.deskclock:id/days_of_week"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "n24",
+                    "role": "image",
+                    "box": {
+                      "w": 48.4,
+                      "h": 48.0,
+                      "pad": [
+                        0
+                      ],
+                      "position": {
+                        "top": 86.9,
+                        "left": 347.1
+                      }
+                    },
+                    "content": {
+                      "alt": "Expand alarm",
+                      "ref": "com.android.deskclock:id/arrow"
+                    },
+                    "intents": [
+                      {
+                        "on": "click",
+                        "do": "navigate"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "n25",
+                    "role": "box",
+                    "box": {
+                      "w": 371.1,
+                      "h": 1.1,
+                      "bg": "#3e4692",
+                      "pad": [
+                        0
+                      ],
+                      "position": {
+                        "top": 134.9,
+                        "left": 20.2
+                      }
+                    },
+                    "content": {
+                      "ref": "com.android.deskclock:id/hairline"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "n26",
+                "role": "divider",
+                "box": {
+                  "w": 371.05,
+                  "h": 1.14,
+                  "bg": "#3e4692",
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    -1.2,
+                    0,
+                    0,
+                    20.2
+                  ]
+                }
+              },
+              {
+                "id": "n27",
+                "role": "box",
+                "layout": {
+                  "mode": "stack"
+                },
+                "box": {
+                  "w": 411.4,
+                  "h": 136.0,
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    0.0,
+                    0,
+                    0,
+                    0.0
+                  ]
+                },
+                "children": [
+                  {
+                    "id": "n28",
+                    "role": "text",
+                    "box": {
+                      "w": 161.3,
+                      "h": 74.7,
+                      "pad": [
+                        9.6,
+                        0.0,
+                        5.1,
+                        2.2
+                      ],
+                      "overflow": "hidden",
+                      "position": {
+                        "top": 12.2,
+                        "left": 16.0
+                      }
+                    },
+                    "text_ref": "ta6",
+                    "content": {
+                      "text": "9:00 AM",
+                      "ref": "com.android.deskclock:id/digital_clock"
+                    }
+                  },
+                  {
+                    "id": "n29",
+                    "role": "image",
+                    "box": {
+                      "w": 48.0,
+                      "h": 48.0,
+                      "pad": [
+                        0
+                      ],
+                      "position": {
+                        "top": 25.5,
+                        "left": 347.4
+                      }
+                    },
+                    "content": {
+                      "alt": "图片",
+                      "ref": "com.android.deskclock:id/onoff"
+                    },
+                    "intents": [
+                      {
+                        "on": "click",
+                        "do": "navigate"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "n30",
+                    "role": "box",
+                    "layout": {
+                      "mode": "flex",
+                      "direction": "col",
+                      "align": "start"
+                    },
+                    "box": {
+                      "w": 331.4,
+                      "h": 48.0,
+                      "bg": "#1a237e",
+                      "pad": [
+                        0
+                      ],
+                      "position": {
+                        "top": 86.9,
+                        "left": 16.0
+                      }
+                    },
+                    "children": [
+                      {
+                        "id": "n31",
+                        "role": "text",
+                        "box": {
+                          "w": 59.8,
+                          "h": 19.4,
+                          "pad": [
+                            1.0,
+                            0.0,
+                            0.9,
+                            0.0
+                          ],
+                          "overflow": "hidden",
+                          "margin": [
+                            14.1,
+                            0,
+                            0,
+                            0.0
+                          ]
+                        },
+                        "text_ref": "ta7",
+                        "content": {
+                          "text": "Sun, Sat",
+                          "ref": "com.android.deskclock:id/days_of_week"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "n32",
+                    "role": "image",
+                    "box": {
+                      "w": 48.4,
+                      "h": 48.0,
+                      "pad": [
+                        0
+                      ],
+                      "position": {
+                        "top": 86.9,
+                        "left": 347.1
+                      }
+                    },
+                    "content": {
+                      "alt": "Expand alarm",
+                      "ref": "com.android.deskclock:id/arrow"
+                    },
+                    "intents": [
+                      {
+                        "on": "click",
+                        "do": "navigate"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "n33",
+                    "role": "box",
+                    "box": {
+                      "w": 371.1,
+                      "h": 1.1,
+                      "bg": "#3e4692",
+                      "pad": [
+                        0
+                      ],
+                      "position": {
+                        "top": 134.9,
+                        "left": 20.2
+                      }
+                    },
+                    "content": {
+                      "ref": "com.android.deskclock:id/hairline"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "n34",
+                "role": "divider",
+                "box": {
+                  "w": 371.05,
+                  "h": 1.14,
+                  "bg": "#3e4692",
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    -1.2,
+                    0,
+                    0,
+                    20.2
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "id": "n35",
+            "role": "box",
+            "layout": {
+              "mode": "flex",
+              "direction": "row",
+              "align": "start"
+            },
+            "box": {
+              "w": 411.4,
+              "h": 88.0,
+              "bg": "#1a237e",
+              "pad": [
+                0
+              ],
+              "position": {
+                "top": 547.4,
+                "left": 0.0
+              }
+            },
+            "children": [
+              {
+                "id": "n36",
+                "role": "box",
+                "box": {
+                  "w": 161.5,
+                  "h": 88.0,
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    0.0,
+                    0,
+                    0,
+                    0.0
+                  ]
+                }
+              },
+              {
+                "id": "n37",
+                "role": "image",
+                "box": {
+                  "w": 56.0,
+                  "h": 56.0,
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    16.0,
+                    0,
+                    0,
+                    16.0
+                  ]
+                },
+                "content": {
+                  "alt": "Add alarm",
+                  "ref": "com.android.deskclock:id/fab"
+                },
+                "intents": [
+                  {
+                    "on": "click",
+                    "do": "navigate"
+                  }
+                ]
+              },
+              {
+                "id": "n38",
+                "role": "box",
+                "box": {
+                  "w": 161.9,
+                  "h": 88.0,
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    0.0,
+                    0,
+                    0,
+                    16.0
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "id": "n39",
+            "role": "box",
+            "layout": {
+              "mode": "flex",
+              "direction": "col",
+              "align": "start"
+            },
+            "box": {
+              "w": 411.4,
+              "h": 48.0,
+              "bg": "#1a237e",
+              "pad": [
+                0
+              ],
+              "position": {
+                "top": 635.4,
+                "left": 0.0
+              }
+            },
+            "children": [
+              {
+                "id": "n40",
+                "role": "box",
+                "layout": {
+                  "mode": "flex",
+                  "direction": "row",
+                  "align": "start"
+                },
+                "box": {
+                  "w": 387.1,
+                  "h": 48.0,
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    0.0,
+                    0,
+                    0,
+                    12.2
+                  ]
+                },
+                "children": [
+                  {
+                    "id": "n41",
+                    "role": "text",
+                    "box": {
+                      "w": 357.2,
+                      "h": 47.6,
+                      "pad": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        164.8
+                      ],
+                      "overflow": "hidden",
+                      "margin": [
+                        0.0,
+                        -50.1,
+                        0,
+                        0.0
+                      ]
+                    },
+                    "text_ref": "ta8",
+                    "content": {
+                      "text": "Clock notifications are blocked",
+                      "ref": "com.android.deskclock:id/snackbar_text"
+                    }
+                  },
+                  {
+                    "id": "n42",
+                    "role": "box",
+                    "box": {
+                      "w": 80.0,
+                      "h": 48.0,
+                      "pad": [
+                        0
+                      ],
+                      "margin": [
+                        0.0,
+                        0,
+                        0,
+                        0.0
+                      ]
+                    },
+                    "content": {
+                      "ref": "com.android.deskclock:id/snackbar_action"
+                    },
+                    "intents": [
+                      {
+                        "on": "click",
+                        "do": "navigate"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "n43",
+        "role": "box",
+        "box": {
+          "w": 411.4,
+          "h": 24.0,
+          "bg": "#10154c",
+          "pad": [
+            0
+          ],
+          "position": {
+            "top": 0.0,
+            "left": 0.0
+          }
+        },
+        "content": {
+          "ref": "android:id/statusBarBackground"
+        }
+      },
+      {
+        "id": "n44",
+        "role": "box",
+        "box": {
+          "w": 411.4,
+          "h": 48.0,
+          "bg": "#10154c",
+          "pad": [
+            0
+          ],
+          "position": {
+            "top": 683.4,
+            "left": 0.0
+          }
+        },
+        "content": {
+          "ref": "android:id/navigationBarBackground"
+        }
+      }
+    ]
+  }
+}

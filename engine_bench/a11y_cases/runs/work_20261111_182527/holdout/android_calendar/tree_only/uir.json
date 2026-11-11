@@ -1,0 +1,289 @@
+{
+  "uir_version": "1",
+  "meta": {
+    "source_kind": "a11y",
+    "title": "com.android.calendar",
+    "lang": "zh",
+    "viewport": {
+      "w": 411,
+      "h": 731
+    },
+    "report": {
+      "platform": "android",
+      "nodes_in": 19,
+      "nodes_kept": 10,
+      "layout": {
+        "col": 3,
+        "row": 1,
+        "stack": 1
+      },
+      "images_embedded": 0,
+      "dividers": 0,
+      "sampled_colors": false,
+      "scale": 2.625
+    },
+    "edge_to_edge": true
+  },
+  "tokens": {
+    "color": {
+      "c0": "#ffffff",
+      "c1": "#1f2937",
+      "c2": "#2563eb",
+      "c3": "#6b7280"
+    },
+    "font": {
+      "f0": {
+        "family": "Roboto",
+        "fallback": "'Noto Sans SC','PingFang SC',system-ui,sans-serif"
+      }
+    },
+    "text_style": {
+      "t0": {
+        "size": 14,
+        "weight": 400,
+        "line": 1.35,
+        "color": "c1"
+      },
+      "ta0": {
+        "size": 22,
+        "weight": 400,
+        "line": 1.35,
+        "color": "c1"
+      }
+    },
+    "space": {
+      "s0": 0,
+      "s1": 4,
+      "s2": 8,
+      "s3": 12,
+      "s4": 16,
+      "s5": 24
+    }
+  },
+  "root": {
+    "id": "n1",
+    "role": "box",
+    "layout": {
+      "mode": "stack"
+    },
+    "box": {
+      "w": 411.4,
+      "h": 731.4,
+      "pad": [
+        0
+      ],
+      "bg": "c0"
+    },
+    "children": [
+      {
+        "id": "n2",
+        "role": "box",
+        "layout": {
+          "mode": "flex",
+          "direction": "col",
+          "align": "start"
+        },
+        "box": {
+          "w": 411.4,
+          "h": 683.4,
+          "pad": [
+            0
+          ],
+          "position": {
+            "top": 0.0,
+            "left": 0.0
+          }
+        },
+        "content": {
+          "ref": "android:id/decor_content_parent"
+        },
+        "children": [
+          {
+            "id": "n3",
+            "role": "box",
+            "layout": {
+              "mode": "flex",
+              "direction": "row",
+              "align": "start"
+            },
+            "box": {
+              "w": 411.4,
+              "h": 48.0,
+              "pad": [
+                0
+              ],
+              "margin": [
+                24.0,
+                0,
+                0,
+                0.0
+              ]
+            },
+            "content": {
+              "ref": "android:id/action_bar"
+            },
+            "children": [
+              {
+                "id": "n4",
+                "role": "box",
+                "layout": {
+                  "mode": "flex",
+                  "direction": "col",
+                  "align": "start"
+                },
+                "box": {
+                  "w": 198.1,
+                  "h": 48.0,
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    0.0,
+                    0,
+                    0,
+                    0.0
+                  ]
+                },
+                "content": {
+                  "ref": "android:id/action_bar_spinner"
+                },
+                "intents": [
+                  {
+                    "on": "click",
+                    "do": "navigate"
+                  }
+                ],
+                "children": [
+                  {
+                    "id": "n5",
+                    "role": "box",
+                    "layout": {
+                      "mode": "flex",
+                      "direction": "col",
+                      "align": "start"
+                    },
+                    "box": {
+                      "w": 177.9,
+                      "h": 48.0,
+                      "pad": [
+                        0
+                      ],
+                      "margin": [
+                        0.0,
+                        0,
+                        0,
+                        4.2
+                      ]
+                    },
+                    "children": [
+                      {
+                        "id": "n6",
+                        "role": "text",
+                        "box": {
+                          "w": 185.4,
+                          "h": 29.7,
+                          "overflow": "hidden",
+                          "margin": [
+                            9.1,
+                            -27.7,
+                            0,
+                            12.2
+                          ]
+                        },
+                        "text_ref": "ta0",
+                        "content": {
+                          "text": "November 2026",
+                          "ref": "com.android.calendar:id/top_button_date"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "n7",
+                "role": "image",
+                "box": {
+                  "w": 56.0,
+                  "h": 48.0,
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    0.0,
+                    0,
+                    0,
+                    157.3
+                  ]
+                },
+                "content": {
+                  "alt": "Today",
+                  "ref": "com.android.calendar:id/action_today"
+                },
+                "intents": [
+                  {
+                    "on": "click",
+                    "do": "navigate"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "n8",
+            "role": "box",
+            "box": {
+              "w": 411.4,
+              "h": 610.3,
+              "pad": [
+                0
+              ],
+              "margin": [
+                1.1,
+                0,
+                0,
+                0.0
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "n9",
+        "role": "box",
+        "box": {
+          "w": 411.4,
+          "h": 24.0,
+          "pad": [
+            0
+          ],
+          "position": {
+            "top": 0.0,
+            "left": 0.0
+          }
+        },
+        "content": {
+          "ref": "android:id/statusBarBackground"
+        }
+      },
+      {
+        "id": "n10",
+        "role": "box",
+        "box": {
+          "w": 411.4,
+          "h": 48.0,
+          "pad": [
+            0
+          ],
+          "position": {
+            "top": 683.4,
+            "left": 0.0
+          }
+        },
+        "content": {
+          "ref": "android:id/navigationBarBackground"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,479 @@
+{
+  "uir_version": "1",
+  "meta": {
+    "source_kind": "a11y",
+    "title": "com.android.gallery3d",
+    "lang": "zh",
+    "viewport": {
+      "w": 411,
+      "h": 731
+    },
+    "report": {
+      "platform": "android",
+      "nodes_in": 19,
+      "nodes_kept": 17,
+      "layout": {
+        "col": 4,
+        "row": 2,
+        "stack": 3
+      },
+      "images_embedded": 3,
+      "dividers": 0,
+      "sampled_colors": true,
+      "scale": 2.625
+    },
+    "edge_to_edge": true
+  },
+  "tokens": {
+    "color": {
+      "c0": "#ffffff",
+      "c1": "#1f2937",
+      "c2": "#2563eb",
+      "c3": "#6b7280"
+    },
+    "font": {
+      "f0": {
+        "family": "Roboto",
+        "fallback": "'Noto Sans SC','PingFang SC',system-ui,sans-serif"
+      }
+    },
+    "text_style": {
+      "t0": {
+        "size": 14,
+        "weight": 400,
+        "line": 1.35,
+        "color": "c1"
+      },
+      "ta0": {
+        "size": 19,
+        "weight": 600,
+        "line": 1.3,
+        "color": "#f1f1f1",
+        "align": "center"
+      },
+      "ta1": {
+        "size": 20,
+        "weight": 400,
+        "line": 1.25,
+        "color": "#ebebeb",
+        "align": "center"
+      }
+    },
+    "space": {
+      "s0": 0,
+      "s1": 4,
+      "s2": 8,
+      "s3": 12,
+      "s4": 16,
+      "s5": 24
+    }
+  },
+  "root": {
+    "id": "n1",
+    "role": "box",
+    "layout": {
+      "mode": "stack"
+    },
+    "box": {
+      "w": 411.4,
+      "h": 731.4,
+      "pad": [
+        0
+      ],
+      "bg": "#1a1a1a"
+    },
+    "children": [
+      {
+        "id": "n2",
+        "role": "box",
+        "layout": {
+          "mode": "stack"
+        },
+        "box": {
+          "w": 411.4,
+          "h": 683.4,
+          "bg": "#1a1a1a",
+          "pad": [
+            0
+          ],
+          "position": {
+            "top": 0.0,
+            "left": 0.0
+          }
+        },
+        "content": {
+          "ref": "android:id/decor_content_parent"
+        },
+        "children": [
+          {
+            "id": "n3",
+            "role": "box",
+            "layout": {
+              "mode": "stack"
+            },
+            "box": {
+              "w": 411.4,
+              "h": 659.4,
+              "bg": "#1a1a1a",
+              "pad": [
+                0
+              ],
+              "position": {
+                "top": 24.0,
+                "left": 0.0
+              }
+            },
+            "content": {
+              "ref": "com.android.gallery3d:id/gallery_root"
+            },
+            "children": [
+              {
+                "id": "n4",
+                "role": "box",
+                "box": {
+                  "w": 411.4,
+                  "h": 659.4,
+                  "pad": [
+                    0
+                  ],
+                  "position": {
+                    "top": 0.0,
+                    "left": 0.0
+                  }
+                },
+                "content": {
+                  "ref": "com.android.gallery3d:id/gl_root_view"
+                }
+              },
+              {
+                "id": "n5",
+                "role": "box",
+                "layout": {
+                  "mode": "flex",
+                  "direction": "col",
+                  "align": "start"
+                },
+                "box": {
+                  "w": 87.2,
+                  "h": 65.5,
+                  "pad": [
+                    0
+                  ],
+                  "position": {
+                    "top": 296.8,
+                    "left": 161.9
+                  }
+                },
+                "children": [
+                  {
+                    "id": "n6",
+                    "role": "button",
+                    "box": {
+                      "w": 79.6,
+                      "h": 56.8,
+                      "bg": "#25292d",
+                      "pad": [
+                        3.5,
+                        0,
+                        3.9,
+                        0.0
+                      ],
+                      "margin": [
+                        5.3,
+                        0,
+                        0,
+                        3.8
+                      ]
+                    },
+                    "text_ref": "ta0",
+                    "content": {
+                      "text": "Camera"
+                    },
+                    "intents": [
+                      {
+                        "on": "click",
+                        "do": "navigate"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "n7",
+            "role": "box",
+            "layout": {
+              "mode": "flex",
+              "direction": "row",
+              "align": "start"
+            },
+            "box": {
+              "w": 411.4,
+              "h": 48.0,
+              "bg": "#080808",
+              "pad": [
+                0
+              ],
+              "position": {
+                "top": 24.0,
+                "left": 0.0
+              }
+            },
+            "content": {
+              "ref": "android:id/action_bar"
+            },
+            "children": [
+              {
+                "id": "n8",
+                "role": "box",
+                "layout": {
+                  "mode": "flex",
+                  "direction": "col",
+                  "align": "start"
+                },
+                "box": {
+                  "w": 40.0,
+                  "h": 48.0,
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    0.0,
+                    0,
+                    0,
+                    8.0
+                  ]
+                },
+                "children": [
+                  {
+                    "id": "n9",
+                    "role": "box",
+                    "layout": {
+                      "mode": "flex",
+                      "direction": "col",
+                      "align": "start"
+                    },
+                    "box": {
+                      "w": 40.0,
+                      "h": 48.0,
+                      "pad": [
+                        0
+                      ],
+                      "margin": [
+                        0.0,
+                        0,
+                        0,
+                        0.0
+                      ]
+                    },
+                    "children": [
+                      {
+                        "id": "n10",
+                        "role": "image",
+                        "box": {
+                          "w": 32.0,
+                          "h": 32.0,
+                          "pad": [
+                            0
+                          ],
+                          "margin": [
+                            8.0,
+                            0,
+                            0,
+                            3.8
+                          ]
+                        },
+                        "content": {
+                          "alt": "图片",
+                          "src": "data:image/png;base64,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",
+                          "ref": "android:id/home"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "n11",
+                "role": "box",
+                "layout": {
+                  "mode": "flex",
+                  "direction": "col",
+                  "align": "start"
+                },
+                "box": {
+                  "w": 134.5,
+                  "h": 48.0,
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    0.0,
+                    0,
+                    0,
+                    0.0
+                  ]
+                },
+                "content": {
+                  "ref": "android:id/action_bar_spinner"
+                },
+                "intents": [
+                  {
+                    "on": "click",
+                    "do": "navigate"
+                  }
+                ],
+                "children": [
+                  {
+                    "id": "n12",
+                    "role": "text",
+                    "box": {
+                      "w": 96.4,
+                      "h": 39.6,
+                      "pad": [
+                        7.5,
+                        0,
+                        7.1,
+                        0.0
+                      ],
+                      "overflow": "hidden",
+                      "margin": [
+                        4.2,
+                        0,
+                        0,
+                        4.2
+                      ]
+                    },
+                    "text_ref": "ta1",
+                    "content": {
+                      "text": "Albums",
+                      "ref": "android:id/text1"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "n13",
+                "role": "box",
+                "layout": {
+                  "mode": "flex",
+                  "direction": "row",
+                  "align": "start"
+                },
+                "box": {
+                  "w": 112.4,
+                  "h": 48.0,
+                  "pad": [
+                    0
+                  ],
+                  "margin": [
+                    0.0,
+                    0,
+                    0,
+                    116.6
+                  ]
+                },
+                "children": [
+                  {
+                    "id": "n14",
+                    "role": "image",
+                    "box": {
+                      "w": 56.0,
+                      "h": 48.0,
+                      "pad": [
+                        0
+                      ],
+                      "margin": [
+                        0.0,
+                        0,
+                        0,
+                        0.0
+                      ]
+                    },
+                    "content": {
+                      "alt": "Switch to Camera",
+                      "src": "data:image/png;base64,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",
+                      "ref": "com.android.gallery3d:id/action_camera"
+                    },
+                    "intents": [
+                      {
+                        "on": "click",
+                        "do": "navigate"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "n15",
+                    "role": "image",
+                    "box": {
+                      "w": 56.4,
+                      "h": 48.0,
+                      "pad": [
+                        0
+                      ],
+                      "margin": [
+                        0.0,
+                        0,
+                        0,
+                        0.0
+                      ]
+                    },
+                    "content": {
+                      "alt": "More options",
+                      "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAJQAAAB+CAIAAABNga9nAAABwklEQVR4nO3cMaoiURBA0XnywY7EyMzluQOX4BLcoKGhmZmzhWaYbrn9z4krKLhQoDx6TNP0h6bdtxfg34kXJl6YeGHihYkXJl6YeGHihYkXJl6YeGHihYkXJl6YeGHihYkXJl6YeGHihYkXJl6YeGHihYkXJl6YeGHihYkXJl6YeGHihYkXJl7Yz7cX+G/GGKfTac7k8/lcepl1bCfefr+/XC5zJm+329LLrMPZDBMvTLww8cLECxMvTLww8cLECxMvTLyw7fy3+fl83u/3t7dY1fCl2y5nM0y8MPHCxAsTL2w7PxWmabper3MmPYPg+8QLEy9MvDDxwsQLEy9MvDDxwsQLEy9MvLDtPIMYYxwOhzmTr9dr6WXWsZ14v5CzGSZemHhh4oWJF7adNyzzP+Vxv9+XXmYd24k3xjgej9/eYlXOZph4YeKFiRcmXph4YeKFiRcmXph4YeKFbecZxG63O5/PcyYfj8fSy6xjO/F+IWczTLww8cLECxMvTLww8cLECxMvTLww8cLECxMvTLww8cLECxMvTLww8cLECxMvTLww8cLECxMvTLww8cLECxMvTLww8cLECxMvTLww8cL+Ar0cGXtsVvnuAAAAAElFTkSuQmCC"
+                    },
+                    "intents": [
+                      {
+                        "on": "click",
+                        "do": "navigate"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "n16",
+        "role": "box",
+        "box": {
+          "w": 411.4,
+          "h": 24.0,
+          "bg": "#000000",
+          "pad": [
+            0
+          ],
+          "position": {
+            "top": 0.0,
+            "left": 0.0
+          }
+        },
+        "content": {
+          "ref": "android:id/statusBarBackground"
+        }
+      },
+      {
+        "id": "n17",
+        "role": "box",
+        "box": {
+          "w": 411.4,
+          "h": 48.0,
+          "bg": "#000000",
+          "pad": [
+            0
+          ],
+          "position": {
+            "top": 683.4,
+            "left": 0.0
+          }
+        },
+        "content": {
+          "ref": "android:id/navigationBarBackground"
+        }
+      }
+    ]
+  }
+}

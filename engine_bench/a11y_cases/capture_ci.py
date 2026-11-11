@@ -117,7 +117,8 @@ def android(serial: str = "emulator-5554"):
             time.sleep(6.0)
             tree = a11y.capture_android(serial, out_dir=tmp)
             app = str(tree.get("app") or "")
-            if not app or app == "android" or any(k in app for k in _NOT_APP[:5]):
+            # 前台必须是应用自己的界面: 包名形如 a.b.c; 系统弹窗(兼容性提示/权限框)、桌面、选择器都不算
+            if "." not in app or app == "android" or any(k in app for k in _NOT_APP[:5]):
                 print(f"跳过 {name}: 前台不是应用界面({app!r})")
                 continue
             shot = Path(tree.get("screenshot") or "")
@@ -132,6 +133,8 @@ def android(serial: str = "emulator-5554"):
 
 
 if __name__ == "__main__":
+    for _s in (sys.stdout, sys.stderr):   # Windows runner 的控制台是 cp1252, 中文日志会抛 UnicodeEncodeError
+        with_suppress(lambda: _s.reconfigure(encoding="utf-8", errors="replace"))
     which = sys.argv[1] if len(sys.argv) > 1 else ""
     n = {"windows": windows, "android": android}[which]()
     print(f"共采集 {n} 例")
