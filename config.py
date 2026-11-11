@@ -264,6 +264,12 @@ NARROW_SAME_DOC = True
 VARIANT_DOM_SWAP = True
 # 交互轨克隆页打不开时: 修复循环立即收敛, 静态版按交互轨 0 分参与比较(预览/导出不给打不开的页)
 CLONE_FAIL_FAST = True
+# 评分整页截图前剥掉弹层写回 html/body 的锁滚动声明(两侧同口径; 交付 HTML 本来就剥)
+SCORE_UNLOCK_SHOT = True
+# 窄屏阶段提速: 0.92 倍宽对照页在收回时读完即关; 每张窄屏页抽完变体即关; 不稳定页的随宽采样不再等稳定
+NARROW_PAIR_EARLY_CLOSE = True
+NARROW_PAGE_EARLY_CLOSE = True
+FLUID_SKIP_UNSTABLE_WAIT = True
 
 # ---------------------------------------------------------------------------
 # 常量环境覆盖(A/B 用): CLONER_CFG_<常量名>=值 覆盖本模块同名的 bool/int/float/str 常量。

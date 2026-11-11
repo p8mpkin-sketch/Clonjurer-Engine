@@ -289,6 +289,14 @@ class CaptureMixin:
                 hidden = page.evaluate(INTERSTITIAL_HIDE_JS) or 0
                 if hidden and label == "原站":
                     self.log("RENDER", f"评分截图: 插屏广告层 {hidden} 个两侧隐藏(不计分, 交付物保留)")
+            if getattr(config, "SCORE_UNLOCK_SHOT", True):
+                # 弹层打开时给 html/body 写的锁滚动声明(overflow:hidden; position:fixed; inset:0)在截图时仍在: 弹层藏了,
+                # 页面却只渲染一屏, 整页截图首屏以下全空白 —— 基准与克隆(交付 HTML 已剥离锁)口径不一, 引擎自评被压到 55
+                # (探针桌面 81~93)。滚动前已剥过一次, 弹层脚本之后又写回; 截图前再剥(交付 HTML 本来也要剥)
+                with suppress(Exception):
+                    n_lock = page.evaluate(SCROLL_LOCK_STRIP_JS) or 0
+                    if n_lock and label == "原站":
+                        self.log("RENDER", f"评分截图: 弹层写回的 {n_lock} 条锁滚动声明截图前剥离(否则整页截图首屏以下空白)")
         if label == "原站" and config.SCORE_MASK_ADS:
             self._ad_rects = []
             with suppress(Exception):
@@ -602,6 +610,7 @@ class CaptureMixin:
         self._cv_mdesk = None
         self._cv_extra_ctx = []
         self._cv_pair = {}
+        self._cv_pair_read = {}
         self._cv_main_page = page
         for tag, w in (("t", 768), ("m", 390)):
             p2 = None
@@ -738,6 +747,17 @@ class CaptureMixin:
                 # 对照页的内联样式按路径交给 CV_EMIT_JS: 手机段 px 与之同比(值比≈宽比)的写 vw
                 if tag in loads:
                     loads.setdefault("__pair", {})[tag] = {"w": w3, "paths": p3.evaluate(CV_PATHS_JS) or {}}
+                if getattr(config, "NARROW_PAIR_EARLY_CLOSE", True):
+                    # 随宽对照要的读数现在就取, 然后关页: 这张页之后只剩这一次读, 留着它会在整个变体阶段
+                    # 一直跑动画/定时器抢 CPU(4 核 runner 上同时开着 4 张窄屏页, remix 变体阶段 60s+)
+                    with suppress(Exception):
+                        p3.evaluate(NARROW_STABLE_JS, 1500)
+                    fp = p3.evaluate(FLUID_READ_JS) or {}
+                    self._cv_pair_read = dict(getattr(self, "_cv_pair_read", {}) or {})
+                    self._cv_pair_read[tag] = (fp, w3)
+                    with suppress(Exception):
+                        p3.close()
+                    self._cv_pair.pop(tag, None)
             except Exception:   # noqa: BLE001
                 with suppress(Exception):
                     p3.close()
@@ -862,13 +882,16 @@ class CaptureMixin:
                     p2.evaluate(ROUNDTRIP_PIN_JS, "save")
             samples = {}
             # 窄一档(0.92×)与宽一档(1.128×: 390→440 正好是最宽的主流手机)各读一次, 三点判直线/封顶/垫底
+            # 到位等待已判定「到时限仍在变化」的页(常驻动画/轮播): 每次改宽后的稳定等待也必然等满, 三次白等 4.5s
+            unstable = getattr(config, "FLUID_SKIP_UNSTABLE_WAIT", True) and getattr(self, "_cv_unstable", {}).get(tag)
             for w in (int(round(w1 * 0.92)), int(round(w1 * 1.128)), w1):
                 p2.set_viewport_size({"width": w, "height": h})
                 p2.wait_for_timeout(250)
                 with suppress(Exception):
                     p2.evaluate(CV_QUIET_JS, 300)
-                with suppress(Exception):
-                    p2.evaluate(NARROW_STABLE_JS, 1500)
+                if not unstable:
+                    with suppress(Exception):
+                        p2.evaluate(NARROW_STABLE_JS, 1500)
                 if w != w1:
                     samples[w] = p2.evaluate(FLUID_READ_JS) or {}
             # 先复原内联态, 再钉 canvas 显示盒(反过来会把刚钉上的 aspect-ratio 一并抹掉, vite 平板 98→64)
@@ -886,14 +909,20 @@ class CaptureMixin:
             # 另一张不同宽度的首载页对照: 只在加载时按宽度写一次的内联尺寸(缩放不重写, 上面三点看不出)
             pair_n = 0
             pair = (getattr(self, "_cv_pair", {}) or {}).get(tag)
+            pread = (getattr(self, "_cv_pair_read", {}) or {}).get(tag)
+            if pread:
+                pair = (None, pread[1])
             if pair:
                 p3, wp = pair
                 try:
-                    with suppress(Exception):
-                        p3.evaluate(CV_QUIET_JS, 300)
-                    with suppress(Exception):
-                        p3.evaluate(NARROW_STABLE_JS, 1500)
-                    fp = p3.evaluate(FLUID_READ_JS) or {}
+                    if pread:
+                        fp = pread[0]
+                    else:
+                        with suppress(Exception):
+                            p3.evaluate(CV_QUIET_JS, 300)
+                        with suppress(Exception):
+                            p3.evaluate(NARROW_STABLE_JS, 1500)
+                        fp = p3.evaluate(FLUID_READ_JS) or {}
                     fl2 = _fluid_elements(fa, fp, w1, wp)
                     for path, props in fl2["inline"].items():
                         # canvas 位图尺寸由图表库在改宽时重设(不是"只在首载写一次"), 同页三点采样已覆盖; 两张首载页对照
@@ -967,6 +996,7 @@ class CaptureMixin:
         pages = dict(getattr(self, "_cv_pages", []) or [])
         variants = {}                      # path -> {tag: html}
         hidden_all = set()
+        style_pre = {}                     # tag -> STYLE_TEXTS_JS 结果(窄屏页提前关闭前取)
         for tag, other in loads.items():
             if tag.startswith("__"):
                 continue
@@ -1000,6 +1030,8 @@ class CaptureMixin:
             if not top or len(top) > config.VIEWPORT_VARIANT_MAX:
                 continue
             stable, counts = CaptureMixin._settle_narrow_page(pages[tag])
+            self._cv_unstable = dict(getattr(self, "_cv_unstable", {}) or {})
+            self._cv_unstable[tag] = not stable
             tk.append(time.monotonic())
             # 随宽对照只做手机段: 手机机型宽度 360~440 一档内连续变化, 平板段(768/820)两档之间断点换布局, 来回改宽
             # 反而让图表/轮播停在错态(vite 平板 98→64、iPad Air 87→77)
@@ -1069,6 +1101,14 @@ class CaptureMixin:
                     if alt_ctrl > main_ctrl:
                         self.log("RENDER", f"窄屏 DOM 变体: {p[:60]} 的 {tag} 版表单控件 {alt_ctrl} > 主页 {main_ctrl}(主页该组件可能未水合), 采用窄屏版")
                     variants.setdefault(p, {})[tag] = h
+            if getattr(config, "NARROW_PAGE_EARLY_CLOSE", True):
+                # 这张窄屏页用完了: 它的运行时样式现在取(后面只用这一次), 然后关页, 别让它在下一张页的到位/随宽
+                # 等待期间继续跑动画抢 CPU
+                if any(tag in v for v in variants.values()):
+                    with suppress(Exception):
+                        style_pre[tag] = pages[tag].evaluate(STYLE_TEXTS_JS) or []
+                with suppress(Exception):
+                    pages[tag].close()
         if not variants:
             return 0
         total = sum(len(h) for v in variants.values() for h in v.values())
@@ -1098,7 +1138,8 @@ class CaptureMixin:
         extra, by_sheet, hidden_skipped, reset_skipped = [], {}, 0, 0
         for tag in {t for v in variants.values() for t in v}:
             with suppress(Exception):
-                for g, t, *rest in (pages[tag].evaluate(STYLE_TEXTS_JS) or []):
+                rows = style_pre[tag] if tag in style_pre else (pages[tag].evaluate(STYLE_TEXTS_JS) or [])
+                for g, t, *rest in rows:
                     if (g, t) not in css_main:
                         if _is_transient_hide_rule(t):
                             hidden_skipped += 1
