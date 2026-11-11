@@ -394,12 +394,21 @@ def capture_windows(pid: int = None, title: str = None, max_depth: int = 40, max
         return d
 
     scale = 1.0
+    top = rec(win, 0)  # pragma: no cover
     try:  # pragma: no cover
         import ctypes
+        from ctypes import wintypes
         scale = ctypes.windll.user32.GetDpiForWindow(win.NativeWindowHandle) / 96.0
+        # 窗口矩形含左右下各约 7px 的不可见缩放边(截图上是窗口后面的桌面): 窗口范围取 DWM 的可见边框矩形
+        vis = wintypes.RECT()
+        if ctypes.windll.dwmapi.DwmGetWindowAttribute(wintypes.HWND(win.NativeWindowHandle), 9,
+                                                      ctypes.byref(vis), ctypes.sizeof(vis)) == 0:
+            l, t, r, b = top["BoundingRectangle"]
+            if l <= vis.left < vis.right <= r and t <= vis.top < vis.bottom <= b:
+                top["BoundingRectangle"] = [vis.left, vis.top, vis.right, vis.bottom]
     except Exception:
         pass
-    return parse_uia(rec(win, 0), scale=scale)  # pragma: no cover
+    return parse_uia(top, scale=scale)  # pragma: no cover
 
 
 # ---------------------------------------------------------------------------

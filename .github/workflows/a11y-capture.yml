@@ -9,6 +9,11 @@ on:
       - "engine_bench/a11y_cases/capture_ci.py"
       - "engine_bench/a11y_cases/apps/**"
   workflow_dispatch:
+    inputs:
+      refresh_windows:
+        description: "重采已入库的 Windows 样本(采集口径修正后才用)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -39,7 +44,7 @@ jobs:
           choco install notepadplusplus -y --no-progress
       - name: 采集
         shell: pwsh
-        run: python engine_bench/a11y_cases/capture_ci.py windows
+        run: python engine_bench/a11y_cases/capture_ci.py windows ${{ inputs.refresh_windows && '--refresh' || '' }}
       - name: 提交样本
         shell: bash
         run: |
