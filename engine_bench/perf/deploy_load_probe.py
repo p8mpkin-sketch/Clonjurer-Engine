@@ -146,15 +146,35 @@ def _measure(url: str, throttle: str = "none", timeout_s: float = 90.0) -> dict:
             "biggest": [{"url": r["url"][-70:], "kb": round(r["bytes"] / 1024, 1)} for r in slow]}
 
 
+_DATA_URI_RE = re.compile(r"data:[\w/+.-]+(?:;[\w=-]+)*;base64,[A-Za-z0-9+/=]+")
+
+
+def html_breakdown(html: str) -> dict:
+    """交付首页 HTML 的体量构成(KB): 解析阻塞首屏的是 HTML 本身, 先看大头是什么。"""
+    kb = lambda n: round(n / 1024, 1)  # noqa: E731
+    data = sum(len(m.group(0)) for m in _DATA_URI_RE.finditer(html))
+    style = sum(len(m.group(0)) for m in re.finditer(r"<style\b[^>]*>.*?</style>", html, re.S | re.I))
+    script = sum(len(m.group(0)) for m in re.finditer(r"<script\b[^>]*>.*?</script>", html, re.S | re.I))
+    svg = sum(len(m.group(0)) for m in re.finditer(r"<svg\b.*?</svg>", html, re.S | re.I))
+    attr_style = sum(len(m.group(0)) for m in re.finditer(r'\sstyle="[^"]*"', html))
+    return {"total_kb": kb(len(html)), "data_uri_kb": kb(data), "style_kb": kb(style), "script_kb": kb(script),
+            "svg_kb": kb(svg), "style_attr_kb": kb(attr_style)}
+
+
 def probe(target: Path, blackhole: bool = False, throttle: str = "none", timeout_s: float = 90.0) -> dict:
     """起交付工程 → 量首屏 → 收摊。返回 _measure 结果(加 mode)。"""
     venv_py = Path(sys.executable)
     work = Path(tempfile.mkdtemp(prefix="deploy_probe_"))
     proc = None
+    html_parts = None
     try:
         app_dir = _app_dir(Path(target), work)
         if blackhole:
             _blackhole(app_dir / "app.py")
+        with __import__("contextlib").suppress(Exception):
+            idx = next(iter(sorted((app_dir / "templates").glob("index*.html"))), None)
+            if idx is not None:
+                html_parts = html_breakdown(idx.read_text(encoding="utf-8", errors="replace"))
         port = _free_port()
         env = {"PORT": str(port), "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"}
         proc = subprocess.Popen([str(venv_py), "app.py"], cwd=app_dir, env=env,
@@ -169,6 +189,7 @@ def probe(target: Path, blackhole: bool = False, throttle: str = "none", timeout
                 time.sleep(0.25)
         res = _measure(base, throttle=throttle, timeout_s=timeout_s)
         res["mode"] = "blackhole(上游不可达)" if blackhole else "上游可达"
+        res["html_parts"] = html_parts
         return res
     finally:
         if proc:
@@ -211,6 +232,9 @@ def main():
                 res.get("total_mb"), res.get("mb_before_load"), res.get("requests"),
                 res.get("requests_before_load"), nav.get("html_kb"), res.get("proxied_to_upstream"),
                 res.get("failed"), (res.get("load_err") or res.get("error") or "")[:60]), flush=True)
+            hp = res.get("html_parts") or {}
+            if (hp.get("total_kb") or 0) >= 200:
+                print("COMPACTDL-HTML|{}|{}".format(Path(t).stem, json.dumps(hp, separators=(",", ":"))), flush=True)
             big = res.get("biggest") or []
             if big and (res.get("total_mb") or 0) >= 2:
                 print("COMPACTDL-BIG|{}|{}".format(Path(t).stem, " ; ".join(
