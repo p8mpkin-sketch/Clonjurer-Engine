@@ -3319,3 +3319,66 @@ def _same_document(u1: str, u2: str) -> bool:
     host = lambda u: (u.hostname or "").lower()   # noqa: E731
     path = lambda u: (u.path or "/").rstrip("/") or "/"   # noqa: E731
     return host(a) == host(b) and path(a) == path(b)
+
+
+# ---------------------------------------------------------------------------
+# 交付首屏: 大体量 data: URI 外置为静态文件
+# 采集期 canvas 位图/blob 资源/内联字体都被写成 data: 进 HTML(单页数百 KB~数 MB, 压缩不动的 base64),
+# 浏览器必须整段下载并解析完 HTML 才能首绘; 外置成 /static/ 文件后 HTML 变小、图片可并行/按需加载、
+# 可被长缓存。只动 <script> 之外的引用(属性 / 样式块 / 内联 style), 文件名按内容 sha256 前 16 位(与 CAS 同源)。
+# ---------------------------------------------------------------------------
+_DATA_URI_EXT = {
+    "image/png": (".png", "img"), "image/jpeg": (".jpg", "img"), "image/jpg": (".jpg", "img"),
+    "image/gif": (".gif", "img"), "image/webp": (".webp", "img"), "image/avif": (".avif", "img"),
+    "image/svg+xml": (".svg", "img"), "image/x-icon": (".ico", "img"), "image/vnd.microsoft.icon": (".ico", "img"),
+    "font/woff2": (".woff2", "fonts"), "font/woff": (".woff", "fonts"), "font/ttf": (".ttf", "fonts"),
+    "font/otf": (".otf", "fonts"), "application/font-woff2": (".woff2", "fonts"),
+    "application/font-woff": (".woff", "fonts"), "application/x-font-woff": (".woff", "fonts"),
+    "application/x-font-ttf": (".ttf", "fonts"), "application/x-font-truetype": (".ttf", "fonts"),
+    "application/x-font-opentype": (".otf", "fonts"), "application/vnd.ms-fontobject": (".eot", "fonts"),
+}
+_BIG_DATA_URI_RE = re.compile(
+    r"data:([a-z0-9.+/-]+)((?:;[a-z0-9-]+=[^;,\"')\s]+)*);base64,([A-Za-z0-9+/]{%d,}={0,2})" % 2048, re.I)
+_SCRIPT_SPLIT_RE = re.compile(r"(<script\b[^>]*>.*?</script>)", re.S | re.I)
+
+
+def externalize_data_uris(html: str, ws: Path, min_bytes: int = 8192):
+    """把 <script> 之外、解码后 ≥ min_bytes 的图片/字体 data: URI 写成 ws/static/<img|fonts>/<sha16>.<ext>,
+    引用改为 /static/...。返回 (html, 外置个数, 外置字节数)。解码失败/未知类型原样保留。"""
+    if "base64," not in html:
+        return html, 0, 0
+    done = {}
+    stats = [0, 0]
+
+    def repl(m):
+        mime = m.group(1).lower()
+        spec = _DATA_URI_EXT.get(mime)
+        b64 = m.group(3)
+        if spec is None or len(b64) * 3 // 4 < min_bytes:
+            return m.group(0)
+        if b64 in done:
+            return done[b64]
+        try:
+            raw = base64.b64decode(b64, validate=True)
+        except (ValueError, TypeError):
+            return m.group(0)
+        ext, sub = spec
+        name = hashlib.sha256(raw).hexdigest()[:16] + ext
+        dst = ws / "static" / sub / name
+        try:
+            if not dst.is_file():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                dst.write_bytes(raw)
+        except OSError:
+            return m.group(0)
+        ref = f"/static/{sub}/{name}"
+        done[b64] = ref
+        stats[0] += 1
+        stats[1] += len(raw)
+        return ref
+
+    parts = _SCRIPT_SPLIT_RE.split(html)
+    for i in range(0, len(parts), 2):   # 偶数下标 = 脚本块之外
+        if "base64," in parts[i]:
+            parts[i] = _BIG_DATA_URI_RE.sub(repl, parts[i])
+    return "".join(parts), stats[0], stats[1]
