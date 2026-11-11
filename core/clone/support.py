@@ -3465,3 +3465,55 @@ def shrink_oversized_images(ws: Path, min_width: int = 1600, min_bytes: int = 30
         except Exception:   # noqa: BLE001 单张失败不影响交付
             continue
     return n, saved
+
+
+# ---------------------------------------------------------------------------
+# 交付首屏: 退化 srcset 收回 src
+# 按宽度出图的 CDN(?w=150 / ?w=668 ...)本地化后各候选常落到同一个 CAS 文件(去掉查询串后同名, 只下到原尺寸原图),
+# srcset 变成「同一张 8~16MB 原图标 20 种宽度」: 浏览器按 sizes 选哪个候选都是原图, 首屏前白下几十 MB。
+# 这种 srcset 不再提供任何选择, 而 <img src> 往往是站点按显示尺寸给的那张(采集时已本地化): 去掉 srcset/sizes,
+# 让浏览器用 src。只动 src 为本地 /static/ 且文件在盘上、srcset ≥2 个候选全指向同一 URL 且与 src 不同的 <img>。
+# ---------------------------------------------------------------------------
+_IMG_TAG_RE = re.compile(r"<img\b[^>]*>", re.I)
+_ATTR_RE_CACHE: dict = {}
+
+
+def _tag_attr(tag: str, name: str):
+    rx = _ATTR_RE_CACHE.get(name)
+    if rx is None:
+        rx = _ATTR_RE_CACHE[name] = re.compile(r"""\s%s\s*=\s*(?:"([^"]*)"|'([^']*)')""" % re.escape(name), re.I)
+    m = rx.search(tag)
+    if not m:
+        return None, None
+    return (m.group(1) if m.group(1) is not None else m.group(2)), m
+
+
+def collapse_degenerate_srcset(html: str, ws: Path):
+    """返回 (html, 收回个数)。"""
+    if "srcset" not in html:
+        return html, 0
+    n = [0]
+
+    def fix(m):
+        tag = m.group(0)
+        srcset, sm = _tag_attr(tag, "srcset")
+        src, _ = _tag_attr(tag, "src")
+        if not srcset or not src or not src.startswith("/static/"):
+            return tag
+        urls = [c.strip().split()[0] for c in srcset.split(",") if c.strip()]
+        if len(urls) < 2 or len(set(urls)) != 1 or urls[0] == src:
+            return tag
+        if not (ws / src.lstrip("/").split("?")[0]).is_file():
+            return tag
+        out = tag[:sm.start()] + tag[sm.end():]
+        _, zm = _tag_attr(out, "sizes")
+        if zm:
+            out = out[:zm.start()] + out[zm.end():]
+        n[0] += 1
+        return out
+
+    parts = _SCRIPT_SPLIT_RE.split(html)
+    for i in range(0, len(parts), 2):
+        if "srcset" in parts[i]:
+            parts[i] = _IMG_TAG_RE.sub(fix, parts[i])
+    return "".join(parts), n[0]

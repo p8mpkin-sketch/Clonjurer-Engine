@@ -101,6 +101,7 @@ from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部
     beacon_like,
     neutralize_deploy_hazards,
     externalize_data_uris,
+    collapse_degenerate_srcset,
     ASSET_RESOURCE_TYPES,
     ASSET_SKIP_PREFIXES,
     BLOB_INLINE_MAX,
@@ -466,6 +467,10 @@ class LocalizeMixin:
                 if n_ext:
                     self._ext_data_uri = (getattr(self, "_ext_data_uri", (0, 0))[0] + n_ext,
                                           getattr(self, "_ext_data_uri", (0, 0))[1] + b_ext)
+            if getattr(config, "DEPLOY_SRCSET_DEDUP", True):
+                localized, n_ss = collapse_degenerate_srcset(localized, self.ws)
+                if n_ss:
+                    self._srcset_dedup = getattr(self, "_srcset_dedup", 0) + n_ss
             if xhost_script:
                 localized = self._inject_after_head(localized, xhost_script)
             if shard_script:
@@ -490,6 +495,9 @@ class LocalizeMixin:
                 self.log("DEPLOY", f"内联 data: 外置: {ext[0]} 个图片/字体({ext[1] // 1024} KB)改为 /static 文件,"
                                    f" 首页 HTML 变小、可并行/按需加载")
                 self._ext_data_uri = (0, 0)
+            if getattr(self, "_srcset_dedup", 0) and route == "/":
+                self.log("DEPLOY", f"退化 srcset 收回: {self._srcset_dedup} 张图的候选全指向同一张原图, 改用 src")
+                self._srcset_dedup = 0
             if shard_total and route == "/":
                 self.log("SMART-DL", f"图片分片/变体就近: HTML 里 {shard_total} 处外域图片指向资源池同底图本地文件")
             # 目录型目标页: 在原路径落一份副本(index.html), 使页面相对路径
