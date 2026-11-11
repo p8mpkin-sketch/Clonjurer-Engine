@@ -348,6 +348,9 @@ def parse_uia(elem: dict, scale: float = 1.0, app: str = "") -> dict:
             "window": list(root["bounds"]), "root": root}
 
 
+_WIN_CONSOLE_CLASSES = ("ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS", "PseudoConsoleWindow")
+
+
 def capture_windows(pid: int = None, title: str = None, max_depth: int = 40, max_nodes: int = 4000) -> dict:
     """Windows 实时采集(需 Windows + `uiautomation` 包)。在非 Windows 上抛 OSError。"""
     import sys
@@ -355,8 +358,17 @@ def capture_windows(pid: int = None, title: str = None, max_depth: int = 40, max
         raise OSError("Windows UIA 后端只能在 Windows 上运行; 其他平台请用 parse_uia 处理导出的树 JSON")
     import uiautomation as auto  # pragma: no cover  (Windows only)
 
-    win = (auto.WindowControl(searchDepth=1, ProcessId=pid) if pid else
-           auto.WindowControl(searchDepth=1, Name=title))  # pragma: no cover
+    win = None
+    if pid:  # pragma: no cover
+        # uiautomation 的查找条件里没有进程号, 自己在顶层窗口里按 ProcessId 找; 控制台宿主窗口不算应用窗口
+        for c in auto.GetRootControl().GetChildren():
+            if c.ProcessId == pid and c.ClassName not in _WIN_CONSOLE_CLASSES and c.BoundingRectangle.width() > 0:
+                win = c
+                break
+    if win is None:  # pragma: no cover
+        if not title:
+            raise LookupError(f"进程 {pid} 没有顶层应用窗口")
+        win = auto.WindowControl(searchDepth=1, Name=title)
     budget = [max_nodes]
 
     def rec(c, depth):  # pragma: no cover

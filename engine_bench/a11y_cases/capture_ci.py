@@ -39,7 +39,7 @@ def _save(group: str, name: str, tree: dict, png_bytes: bytes = None, image=None
 def windows():
     import ctypes
     import uiautomation as auto
-    from PIL import ImageGrab
+    from PIL import Image, ImageGrab
 
     pf = Path(r"C:\Program Files")
     ps = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]
@@ -52,6 +52,17 @@ def windows():
     ]
     user32 = ctypes.windll.user32
     ok = 0
+
+    def app_window(pid):
+        for c in auto.GetRootControl().GetChildren():
+            if c.ProcessId == pid and c.ClassName not in a11y._WIN_CONSOLE_CLASSES and c.BoundingRectangle.width() > 100:
+                return c
+        return None
+
+    # runner 自己的控制台/终端窗口盖在桌面最上层: 先最小化, 免得挡住被采应用、也不让它进截图
+    for c in auto.GetRootControl().GetChildren():
+        if c.ClassName in a11y._WIN_CONSOLE_CLASSES:
+            with_suppress(lambda c=c: user32.ShowWindow(c.NativeWindowHandle, 6))
     for group, name, cmd, rect in apps:
         if not Path(cmd[0]).exists() and cmd[0] != "powershell":
             print(f"跳过 {name}: 未安装 {cmd[0]}")
@@ -61,9 +72,8 @@ def windows():
             win = None
             for _ in range(40):
                 time.sleep(0.5)
-                w = auto.WindowControl(searchDepth=1, ProcessId=proc.pid)
-                if w.Exists(0, 0) and w.BoundingRectangle.width() > 100:
-                    win = w
+                win = app_window(proc.pid)
+                if win is not None:
                     break
             if win is None:
                 print(f"跳过 {name}: 20s 内没有出现顶层窗口")
@@ -72,10 +82,16 @@ def windows():
             if rect:
                 user32.MoveWindow(hwnd, rect[0], rect[1], rect[2], rect[3], True)
             with_suppress(lambda: win.SetActive())
+            with_suppress(lambda: user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0003))   # 置顶, 不动位置大小
             with_suppress(lambda: user32.SetForegroundWindow(hwnd))
             time.sleep(2.0)
             tree = a11y.capture_windows(pid=proc.pid)
-            _save(group, name, tree, image=ImageGrab.grab())
+            # 截图只留窗口矩形内的像素(窗口外的桌面与其他窗口涂黑, 不入库)
+            x, y, w, h = [int(v) for v in tree["window"]]
+            full = ImageGrab.grab()
+            shot = Image.new("RGB", full.size, (0, 0, 0))
+            shot.paste(full.crop((x, y, x + w, y + h)), (x, y))
+            _save(group, name, tree, image=shot)
             ok += 1
         except Exception as exc:   # noqa: BLE001 单个应用采不到不影响其余
             print(f"失败 {name}: {type(exc).__name__}: {str(exc)[:300]}")
