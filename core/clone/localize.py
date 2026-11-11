@@ -30,6 +30,7 @@ except ImportError:  # pragma: no cover
     _np = None
 
 import config
+from core.clone.js import seed_random_hash, seed_random_js
 from core import ai_mock_generator, ai_vision_repair, flask_generator, smart_downloader
 from core import pattern_detector, strategy_packs
 from core import pixel_calibrator
@@ -383,6 +384,16 @@ class LocalizeMixin:
                   pairs: list, pages_map: dict):
         """HTML 本地化重写 + 状态恢复/仿真交互注入 + 导航护栏 + SPA 伪装 + 子页落盘。"""
         sim_script = self._build_interaction_sim()
+        seed_script = ""
+        if getattr(config, "REPLAY_SEED_RANDOM", True):
+            # 外链脚本的流键 = 原始地址哈希: 克隆里地址已改成本地文件名, 带一张 {本地文件名: 原始地址哈希} 的表
+            src_map = {}
+            for orig, local in pairs:
+                if isinstance(orig, str) and isinstance(local, str) and orig.startswith(("http://", "https://")) \
+                        and local.split("?")[0].endswith((".js", ".mjs")):
+                    src_map.setdefault(local.split("?")[0].rsplit("/", 1)[-1], seed_random_hash(orig))
+            seed_script = ('<script data-clone-preview="seed-random">'
+                           + seed_random_js(getattr(config, "REPLAY_SEED", 0), src_map) + "</script>")
         if self.db.get_tracker_config(self.task_id) and \
                 (self.db.get_tracker_config(self.task_id) or {}).get("enabled"):
             # 启用埋点的任务: 附加观察器胶水(交互层拦截前回调 __ft_observe 触发上报)
@@ -457,6 +468,8 @@ class LocalizeMixin:
             if not getattr(config, "CONTENT_KEEP_EARLY_ADD", True):
                 keep_js = keep_js.replace(",EARLY=1;", ",EARLY=0;")
             localized = self._inject_after_head(localized, keep_js)
+            if seed_script:
+                localized = self._inject_after_head(localized, seed_script)   # 最后注入 = 排在 head 最前, 先于站点脚本
             localized = relax_font_display(localized)
             # 部署性能守卫: 未本地化的阻塞外链脚本(采集期已 404/跳过的计数/埋点、跨域图标)
             # 不得在本地部署时走反代兜底阻塞首屏 —— 删信标 / 其余转 async。

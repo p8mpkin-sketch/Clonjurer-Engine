@@ -32,6 +32,7 @@ import config
 from core import ai_mock_generator, ai_vision_repair, flask_generator, smart_downloader
 from core import pattern_detector, strategy_packs
 from core import pixel_calibrator
+from core.clone.api_match import pick_entry
 
 from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 import 路径不变
     AD_RECTS_JS,
@@ -1654,16 +1655,34 @@ class _SandboxHandler(SimpleHTTPRequestHandler):
                 best, best_len = entry, len(segs)
         return best
 
+    def _req_body(self) -> bytes:
+        """当前请求体(只读一次, 供按请求指纹挑录制用)。"""
+        cached = getattr(self, "_req_body_cache", None)
+        if cached is None or cached[0] is not self.headers:   # 长连接上一个实例会处理多个请求
+            data = b""
+            with suppress(Exception):
+                n = int(self.headers.get("Content-Length") or 0)
+                if 0 < n <= 262144:
+                    data = self.rfile.read(n)
+            cached = self._req_body_cache = (self.headers, data)
+        return cached[1]
+
+    def _pick(self, cands: list):
+        """同方法同路径有多条录制时按请求指纹挑最像的(见 core/clone/api_match.py)。"""
+        if len(cands) <= 1:
+            return cands[0] if cands else None
+        return pick_entry(cands, urlsplit(self.path or "/").query, self._req_body())
+
     def _match_mock_path(self, target: str, method: str):
-        loose = None
+        loose, same = None, []
         for entry in self._mocks:
             if "/" + str(entry.get("path") or "").strip("/") != target:
                 continue
             if str(entry.get("method", "GET")).upper() == method:
-                return entry
-            if loose is None:
+                same.append(entry)
+            elif loose is None:
                 loose = entry
-        return loose
+        return self._pick(same) if same else loose
 
     def _serve_mock(self, method: str) -> bool:
         # 文档导航(Accept 以 text/html 开头)永不走 Mock —— 与磁带同一条边界。
@@ -1711,24 +1730,17 @@ class _SandboxHandler(SimpleHTTPRequestHandler):
         if accept.startswith("text/html"):
             return None
         accept_rsc = "text/x-component" in accept
+        exact, loose = [], []
         for e in self._tape:
-            if e.get("method", "GET").upper() == method \
-                    and e.get("path") == path and (e.get("query") or "") == query:
-                ect = e.get("content_type") or ""
-                if "x-component" in ect:
-                    if accept_rsc:
-                        return e
-                    continue   # RSC 载荷只供给明确索要它的路由 fetch
-                return e
-        for e in self._tape:
-            if e.get("method", "GET").upper() == method and e.get("path") == path:
-                ect = e.get("content_type") or ""
-                if "x-component" in ect:
-                    if accept_rsc:
-                        return e
-                    continue
-                return e
-        return None
+            if e.get("method", "GET").upper() != method or e.get("path") != path:
+                continue
+            if "x-component" in (e.get("content_type") or "") and not accept_rsc:
+                continue   # RSC 载荷只供给明确索要它的路由 fetch
+            loose.append(e)
+            if (e.get("query") or "") == query:
+                exact.append(e)
+        # 查询串精确的优先; 同一层有多条(同接口不同请求体/不同参数)时按请求指纹挑最像的
+        return self._pick(exact) if exact else self._pick(loose)
 
     def _serve_tape(self, method: str) -> bool:
         entry = self._tape_for(method)

@@ -51,6 +51,7 @@ from flask import (Flask, Response, abort, jsonify, render_template, request,
 import config
 from core import flask_generator, security
 from core import ai_mock_generator
+from core.clone.api_match import pick_entry
 from core.browser_pool import SyncBrowserPool
 from core.logger import LogBus
 from core.scheduler import Scheduler
@@ -345,10 +346,17 @@ def _serve_from_task(task: dict, path: str):
             resp.headers["X-Clone-Referer"] = "workspace"
             return resp
     method = request.method.upper()
-    for entry in _read_mock_entries(ws):
-        if "/" + (entry.get("path") or "").strip("/") == normalized:
-            if str(entry.get("method", "GET")).upper() not in (method, "GET"):
-                continue
+    same_path = [e for e in _read_mock_entries(ws) if "/" + (e.get("path") or "").strip("/") == normalized]
+    # 同接口多条录制(靠请求体/参数区分内容)时按请求指纹挑最像的; 没有同方法的才退到 GET 录制
+    cands = [e for e in same_path if str(e.get("method", "GET")).upper() == method] \
+        or [e for e in same_path if str(e.get("method", "GET")).upper() == "GET"]
+    if cands:
+        body_bytes = b""
+        if method != "GET" and len(cands) > 1:
+            with suppress(Exception):
+                body_bytes = request.get_data(cache=True)[:262144]
+        entry = pick_entry(cands, request.query_string.decode("latin-1"), body_bytes)
+        if entry is not None:
             raw = entry.get("response_body", "")
             try:
                 body = json.loads(raw) if raw else None

@@ -2833,3 +2833,38 @@ if getattr(_config, "CV_PATH_MEMO", True):
     HIDDEN_ROOTS_JS = HIDDEN_ROOTS_JS.replace("pathOf = " + CV_PATH_FN, "pathOf = " + CV_PATH_MEMO_FN, 1)
     CV_RECORD_JS = CV_RECORD_JS.replace("m.paths = m.els.map(" + CV_PATH_FN + ");",
                                         "m.paths = m.els.map(" + CV_PATH_MEMO_FN + ");", 1)
+
+
+# ---------------------------------------------------------------------------
+# 随机数确定性重放: 采集页与克隆页用同一套"按脚本分流"的种子随机数发生器替换 Math.random。
+# 随机推荐位/随机起始相位这类内容, 克隆里脚本重跑会抽到另一版(交互轨与采集时的基准对不上,
+# 原站每次打开本来就不同, 所以哪一版都算忠实, 但克隆应当稳定地还原采集时那一版)。
+# - 每个 <script> 元素一条独立的流(键: 外链 = 原始地址的哈希; 内联 = 去掉字符串字面量后的代码哈希),
+#   某个脚本在克隆里被剥离(埋点/广告)不会带偏别的脚本抽到的数;
+# - 没有 currentScript 的异步回调共用一条流(顺序相关, 尽力而为);
+# - 用 Proxy 包原生函数: toString 仍是 native code, 不改 crypto.getRandomValues。
+# __SEED__ 整数; __MAP__ 采集侧为 null, 克隆侧为 {本地文件名: 原始地址哈希}。
+SEED_RANDOM_JS = r"""(function(){try{if(window.__cloneRnd)return;window.__cloneRnd=1;var SEED=__SEED__,MAP=__MAP__,ST={},WM=new WeakMap(),R=Math.random;
+function h(s){var x=2166136261;for(var i=0;i<s.length;i++){x^=s.charCodeAt(i);x=Math.imul(x,16777619);}return x>>>0;}
+function mk(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function key(){var c=document.currentScript;if(!c)return 0;var k=WM.get(c);if(k!==undefined)return k;
+if(c.src){if(MAP){var b=c.src.split(/[?#]/)[0].split('/').pop();k=MAP[b]!==undefined?MAP[b]:h('x:'+b);}else k=h(c.src);}
+else{var t=(c.textContent||'').replace(/(["'`])(?:\\[\s\S]|(?!\1)[^\\])*\1/g,'').replace(/\s+/g,'');k=h(t.slice(0,800)+'#'+t.length);}
+WM.set(c,k);return k;}
+var f=new Proxy(R,{apply:function(){var k=key();return(ST[k]||(ST[k]=mk((k^SEED)>>>0)))();}});
+try{Object.defineProperty(Math,'random',{value:f,writable:true,configurable:true});}catch(e){Math.random=f;}
+}catch(e){}})();"""
+
+
+def seed_random_hash(text: str) -> int:
+    """与 SEED_RANDOM_JS 里 h() 逐值一致的 FNV-1a(按 UTF-16 码元)。"""
+    raw = text.encode("utf-16-le", "surrogatepass")
+    x = 2166136261
+    for i in range(0, len(raw), 2):
+        x = ((x ^ int.from_bytes(raw[i:i + 2], "little")) * 16777619) & 0xFFFFFFFF
+    return x
+
+
+def seed_random_js(seed: int, src_map=None) -> str:
+    return (SEED_RANDOM_JS.replace("__SEED__", str(int(seed) & 0xFFFFFFFF))
+            .replace("__MAP__", "null" if src_map is None else json.dumps(src_map, separators=(",", ":"))))

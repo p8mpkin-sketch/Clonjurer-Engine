@@ -20,7 +20,7 @@ ROOT = HERE.parents[1]
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "engine_bench" / "real_sites"))
-from case_site import CASES, CATEGORY_LABEL, KNOWN_GAPS, serve   # noqa: E402
+from case_site import CASES, CATEGORY_LABEL, ENGINE_GATED, INTERACTIVE_ALSO, KNOWN_GAPS, serve   # noqa: E402
 
 DEFAULT_VPS = "desktop,tablet,mobile,iphone-air,galaxy-s24,ipad-air"
 RUNS = ROOT / "engine_bench" / "real_sites" / "runs"
@@ -53,8 +53,15 @@ def summarize(doc, names, vps, base_site):
     rows = []
     for n in names:
         r = by_url.get(f"{base_site}/{n}") or {}
-        rows.append({"case": n, "category": CASES[n][0], "status": r.get("status"), "task_id": r.get("task_id"),
-                     "engine": r.get("score"), "vp": {v: (r.get("vp") or {}).get(v) for v in vps}})
+        row = {"case": n, "category": CASES[n][0], "status": r.get("status"), "task_id": r.get("task_id"),
+               "engine": r.get("score"), "interactive": r.get("interactive"),
+               "vp": {v: (r.get("vp") or {}).get(v) for v in vps}}
+        if CASES[n][0] in ENGINE_GATED:
+            # 原页每次加载都不同的类别: 只看引擎交互轨分(对冻结基准), 探针分留档不计
+            row["vp_probe"], row["vp"] = row["vp"], {"interactive": r.get("interactive")}
+        elif CASES[n][0] in INTERACTIVE_ALSO:
+            row["vp"]["interactive"] = r.get("interactive")
+        rows.append(row)
     return rows
 
 
@@ -62,13 +69,18 @@ def render(rows, vps, gate):
     out = ["| 类别 | 用例 | 引擎分 | " + " | ".join(vps) + " | 最低 |", "|---|---|---|" + "---|" * (len(vps) + 1)]
     cats = {}
     for r in rows:
-        vals = [r["vp"].get(v) for v in vps]
-        nums = [x for x in vals if isinstance(x, (int, float))]
+        gated = r["category"] in ENGINE_GATED
+        vals = [(r.get("vp_probe") or r["vp"]).get(v) for v in vps]
+        also = r["category"] in INTERACTIVE_ALSO
+        nums = [x for x in (list(r["vp"].values()) if (gated or also) else vals) if isinstance(x, (int, float))]
+        if also and not isinstance(r["vp"].get("interactive"), (int, float)):
+            nums = []   # 交互轨没出分 = 不达标
         low = min(nums) if nums else None
         r["min"] = low
         cats.setdefault(r["category"], []).append(low)
         mark = "" if (low is not None and low >= gate) else (" ✗(已知缺口)" if r["case"] in KNOWN_GAPS else " ✗")
-        out.append(f"| {CATEGORY_LABEL[r['category']]} | {r['case']} | {r['engine'] if r['engine'] is not None else '-'} | "
+        eng = "-" if r["engine"] is None else (f"{r['engine']}/交互 {r.get('interactive')}" if (gated or also) else r["engine"])
+        out.append(f"| {CATEGORY_LABEL[r['category']]} | {r['case']} | {eng} | "
                    + " | ".join("-" if v is None else f"{v:.1f}" for v in vals)
                    + f" | {'-' if low is None else f'{low:.1f}'}{mark} |")
     out += ["", "| 类别 | 用例数 | 达标数(每格 ≥ %g) | 类内最低 |" % gate, "|---|---|---|---|"]

@@ -16,6 +16,10 @@
   measured    脚本量宽写内联尺寸、rem 基准随屏宽、canvas
   legacy      无 viewport meta 的定宽老页
   media       picture/srcset 按宽换图
+  state       采集期被脚本改过的状态冻进了 DOM(滚动监听移动的当前项、已转过去的轮播帧), 新开的原页是初始态
+  api         接口回放: 同一接口按请求体里的键 / 查询参数返回不同内容(带每次变化的请求号), 回放要挑对那一份
+  drift       交互漂移: 脚本在克隆里重跑时按 Math.random / 时钟 / 轮换相位选了另一版内容(门槛看引擎交互轨分)
+  scrollfx    滚动驱动动画: 钉住舞台按滚动进度变形、视差、CSS animation-timeline
 
 接口 /api/items 带时效签名(页面内嵌的时间戳 12s 后失效 → 403): 模拟真实站点"克隆里数据接口拿不到"。
 """
@@ -428,6 +432,201 @@ s.innerHTML='<div class="app"><b>Get the app</b><ul><li>Faster</li><li>Offline</
     return _shell("Structure nth", f'<div id="secs">{secs}</div>{js}', head=f"<style>{css}</style>")
 
 
+# --------------------------------------------------------------------------- 交互漂移 / 滚动驱动
+# 这两类看"克隆里脚本再跑一遍后还是不是采集时那一版"。原页每次加载本来就不同, 探针(活体原页对克隆)
+# 没有意义, 所以门槛改看引擎交互轨分(克隆对采集时冻结的基准), 见 ENGINE_GATED。
+_PICKS = [("Mountain trail guide", 1), ("Coastal weekend plan with ferry timetable and tide notes", 3), ("City food walk", 2),
+          ("Desert night sky", 1), ("River kayak beginner notes and safety checklist", 4), ("Forest cabin list", 2),
+          ("Island hopping budget", 3), ("Winter rail journeys across the northern line", 1)]
+
+
+def _picks_js():
+    return "var POOL=" + json.dumps([{"t": t, "n": n} for t, n in _PICKS]) + ";var LOREM=" + json.dumps(LOREM) + ";"
+
+
+def case_drift_random(ctx):
+    """随机推荐位: 加载时用 Math.random 洗牌, 取前 4 条渲染(每条段落数不同, 换一批整页高度就变)。"""
+    js = "<script>(function(){" + _picks_js() + """var a=POOL.slice();for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1)),t=a[i];a[i]=a[j];a[j]=t;}
+var h='';for(var k=0;k<4;k++){h+='<div class="card" style="margin-bottom:12px"><h2>'+a[k].t+'</h2>';for(var m=0;m<a[k].n;m++)h+='<p>'+LOREM+'</p>';h+='</div>';}
+document.getElementById('rec').innerHTML=h;})();</script>"""
+    mid = f'<div class="band"><div class="wrap"><h2>Recommended for you</h2><div id="rec"></div></div></div>{js}'
+    return _shell("Drift random", mid)
+
+
+def case_drift_random_late(ctx):
+    """随机广告/推荐位延后渲染: load 后 600ms 才用 Math.random 选一条横幅(高度各不同), 之前有别的脚本也消耗随机数。"""
+    js = "<script>var __ids=[];for(var q=0;q<5;q++)__ids.push(Math.random().toString(36).slice(2));</script><script>(function(){" + _picks_js() + """
+addEventListener('load',function(){setTimeout(function(){var p=POOL[Math.floor(Math.random()*POOL.length)],b=document.getElementById('promo');
+var h='<h2>'+p.t+'</h2>';for(var m=0;m<p.n;m++)h+='<p>'+LOREM+'</p>';b.innerHTML=h;b.style.background=['#fde8c8','#d8ecf8','#e3f3d9','#f5dbe6'][Math.floor(Math.random()*4)];},600);});})();</script>"""
+    mid = (f'<div class="band"><div class="wrap"><div id="promo" class="card" style="min-height:40px"></div></div></div>'
+           f'<div class="band alt"><div class="wrap"><div class="grid">{_cards(3)}</div></div></div>{js}')
+    return _shell("Drift random late", mid)
+
+
+def case_drift_clock(ctx):
+    """按时钟选内容: 用当前"分钟"选今日专题(段落数不同), 并显示"更新于 hh:mm" —— 克隆回放时钟不同就换了一条。"""
+    js = "<script>(function(){" + _picks_js() + """var d=new Date(),p=POOL[(d.getHours()*60+d.getMinutes())%POOL.length],h='<h2>Feature of the minute: '+p.t+'</h2>';
+for(var m=0;m<p.n;m++)h+='<p>'+LOREM+'</p>';h+='<p><small>Updated at '+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+'</small></p>';
+document.getElementById('feat').innerHTML=h;})();</script>"""
+    mid = f'<div class="band"><div class="wrap"><div id="feat" class="card"></div></div></div><div class="band alt"><div class="wrap"><div class="grid">{_cards(3)}</div></div></div>{js}'
+    return _shell("Drift clock", mid)
+
+
+def case_drift_rotator(ctx):
+    """自轮播横幅起始相位随机 + 每 3s 换一张(各张高度不同): 评分时相位与采集时不同。"""
+    css = ".rot>div{display:none;padding:24px;border-radius:10px;color:#fff}.rot>div.on{display:block}"
+    js = """<script>(function(){var s=document.querySelectorAll('.rot>div'),k=Math.floor(Math.random()*s.length);s[k].classList.add('on');
+setInterval(function(){s[k].classList.remove('on');k=(k+1)%s.length;s[k].classList.add('on');},3000);})();</script>"""
+    slides = "".join(f'<div style="background:#{c}"><h2>Banner {i + 1}</h2>' + f"<p>{LOREM}</p>" * (i + 1) + "</div>"
+                     for i, c in enumerate(("1f5f8b", "7b3f8c", "2e7d32", "8c5a1f")))
+    mid = f'<div class="band"><div class="wrap"><div class="rot">{slides}</div></div></div><div class="band alt"><div class="wrap"><div class="grid">{_cards(3)}</div></div></div>{js}'
+    return _shell("Drift rotator", mid, head=f"<style>{css}</style>")
+
+
+def case_scrollfx_progress(ctx):
+    """滚动驱动的钉住舞台(产品页常见): 300vh 轨道里 sticky 舞台, 脚本按滚动进度改标题透明度/位移与色块缩放。"""
+    css = """.track{height:300vh;position:relative;background:#0f1722}.stage{position:sticky;top:0;height:100vh;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff}
+.stage .blob{width:40vw;height:40vw;max-width:420px;max-height:420px;border-radius:24px;background:#f0a500;will-change:transform}.stage h2{font-size:40px;margin-top:24px}"""
+    js = """<script>(function(){var tr=document.getElementById('track'),bl=document.getElementById('blob'),tt=document.getElementById('stt'),cap=document.getElementById('cap');
+function up(){var r=tr.getBoundingClientRect(),p=Math.min(1,Math.max(0,-r.top/(r.height-innerHeight)));bl.style.transform='scale('+(0.5+p)+') rotate('+(p*90)+'deg)';bl.style.background=p>0.5?'#2e7d32':'#f0a500';
+tt.style.opacity=String(1-p);tt.style.transform='translateY('+(-80*p)+'px)';cap.textContent=p<0.33?'Stage one':p<0.66?'Stage two':'Stage three';}
+addEventListener('scroll',up,{passive:true});addEventListener('resize',up);up();})();</script>"""
+    mid = (f'<div class="track" id="track"><div class="stage"><div class="blob" id="blob"></div><h2 id="stt">Pinned story</h2><p id="cap">Stage one</p></div></div>'
+           f'<div class="band"><div class="wrap"><div class="grid">{_cards(3)}</div></div></div>{js}')
+    return _shell("Scrollfx progress", mid, head=f"<style>{css}</style>")
+
+
+def case_scrollfx_parallax(ctx):
+    """视差与随滚动淡入(不可回退地写内联样式): 背景层按 scrollY*0.4 位移, 卡片按进入比例设 opacity。"""
+    css = ".px{position:relative;height:520px;overflow:hidden;background:#263b50;color:#fff}.px .bg{position:absolute;left:0;right:0;top:-120px;height:760px;background:linear-gradient(#7b3f8c,#1f5f8b 50%,#2e7d32)}.px .fg{position:relative;padding:160px 24px}"
+    js = """<script>(function(){var bg=document.getElementById('pbg'),cs=document.querySelectorAll('.fade');
+function up(){bg.style.transform='translateY('+(scrollY*0.4)+'px)';for(var i=0;i<cs.length;i++){var r=cs[i].getBoundingClientRect(),v=Math.min(1,Math.max(0,(innerHeight-r.top)/260));cs[i].style.opacity=String(0.15+0.85*v);cs[i].style.transform='translateY('+(30*(1-v))+'px)';}}
+addEventListener('scroll',up,{passive:true});up();})();</script>"""
+    cards = "".join(f'<div class="card fade"><h2>Fade {i + 1}</h2><p>{LOREM}</p></div>' for i in range(6))
+    mid = (f'<div class="px"><div class="bg" id="pbg"></div><div class="fg"><h2>Parallax band</h2><p>{LOREM}</p></div></div>'
+           f'<div class="band"><div class="wrap"><div class="grid">{cards}</div></div></div>{js}')
+    return _shell("Scrollfx parallax", mid, head=f"<style>{css}</style>")
+
+
+def case_scrollfx_timeline(ctx):
+    """纯 CSS 滚动驱动动画(animation-timeline: view()/scroll()): 进度条与区块进场。"""
+    css = """@keyframes grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}@keyframes rise{from{opacity:.1;transform:translateY(60px) scale(.9)}to{opacity:1;transform:none}}
+.prog{position:fixed;left:0;top:0;height:6px;width:100%;background:#f0a500;transform-origin:0 50%;animation:grow linear both;animation-timeline:scroll(root);z-index:30}
+.vt{animation:rise linear both;animation-timeline:view();animation-range:entry 0% cover 35%}"""
+    secs = "".join(f'<div class="band{" alt" if i % 2 else ""}"><div class="wrap vt"><h2>Timeline section {i + 1}</h2><div class="grid">{_cards(3, i * 3)}</div></div></div>' for i in range(3))
+    return _shell("Scrollfx timeline", f'<div class="prog"></div>{secs}', head=f"<style>{css}</style>")
+
+
+# --------------------------------------------------------------------------- 接口回放
+_BLOCKS = {"news": 9, "sports": 4, "local": 12, "finance": 6}
+
+
+def case_api_post_keyed(ctx):
+    """一个 POST 接口靠请求体区分区块(门户站常见: 全页区块都打同一个 blockdata 接口, body 里带区块键和每次随机的请求号)。
+    克隆回放若只按 方法+路径 匹配, 所有区块拿到同一份响应, 按键取不到数据就成了空块。"""
+    js = """<script>(function(){document.querySelectorAll('[data-block]').forEach(function(el){var k=el.getAttribute('data-block');
+fetch('/api/block',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requestId:Math.random().toString(36).slice(2),pv:Date.now(),resourceList:[{tplCompKey:k,size:20}]})})
+.then(function(r){return r.json();}).then(function(d){var b=(d.data||{})[k];if(!b){el.innerHTML='';return;}
+var h='<h2>'+b.title+'</h2><ul>';b.list.forEach(function(t){h+='<li style="padding:6px 0;border-bottom:1px solid #d9dee5">'+t+'</li>';});el.innerHTML=h+'</ul>';}).catch(function(){el.innerHTML='';});});})();</script>"""
+    blocks = "".join(f'<div class="card" data-block="{k}" style="margin-bottom:16px;min-height:20px"></div>' for k in _BLOCKS)
+    return _shell("Api post keyed", f'<div class="band"><div class="wrap">{blocks}</div></div>{js}')
+
+
+def case_api_get_variants(ctx):
+    """同一 GET 接口按查询参数分页/分栏(?tab=&page=), 另带每次变化的时间戳参数: 回放要按参数挑对那一份。"""
+    js = """<script>(function(){var tabs=['hot','new','top'];tabs.forEach(function(t,i){fetch('/api/list?tab='+t+'&page=1&_='+Date.now()+i).then(function(r){return r.json();}).then(function(d){
+var el=document.getElementById('tab-'+t),h='<h2>'+d.title+'</h2>';d.list.forEach(function(x){h+='<p style="margin:0;padding:6px 0;border-bottom:1px solid #d9dee5">'+x+'</p>';});el.innerHTML=h;}).catch(function(){});});})();</script>"""
+    cols = "".join(f'<div class="card" id="tab-{t}" style="min-height:20px"></div>' for t in ("hot", "new", "top"))
+    return _shell("Api get variants", f'<div class="band"><div class="wrap"><div class="grid">{cols}</div></div></div>{js}')
+
+
+def case_api_post_rerender(ctx):
+    """同上, 但页面是"应用壳"写法: 启动时清空根节点重建骨架, 每个区块等自己的数据到了才挂上去(拿不到就不挂)。"""
+    js = """<script>(function(){var root=document.getElementById('app'),keys=""" + json.dumps(list(_BLOCKS)) + """;root.textContent='';
+var col=document.createElement('div');col.className='wrap';root.appendChild(col);var slots={};keys.forEach(function(k){var s=document.createElement('section');s.setAttribute('data-slot',k);col.appendChild(s);slots[k]=s;});
+keys.forEach(function(k){fetch('/api/block',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requestId:Math.random().toString(36).slice(2),pv:Date.now(),resourceList:[{tplCompKey:k,size:20}]})})
+.then(function(r){return r.json();}).then(function(d){var b=(d.data||{})[k];if(!b)return;var c=document.createElement('div');c.className='card';c.style.marginBottom='16px';
+var h='<h2>'+b.title+'</h2><ul>';b.list.forEach(function(t){h+='<li style="padding:6px 0;border-bottom:1px solid #d9dee5">'+t+'</li>';});c.innerHTML=h+'</ul>';slots[k].appendChild(c);});});})();</script>"""
+    return _shell("Api post rerender", f'<div class="band" id="app"></div>{js}')
+
+
+def case_lazy_infinite_cols(ctx):
+    """无限加载, 列数随屏宽: 底部哨兵进视口就按 列数/页码 去取下一页追加(共 4 页), 每页条数 = 列数 × 2。"""
+    css = ".inf{display:grid;gap:12px}.inf .card{min-height:150px}#sentinel{height:1px}"
+    js = """<script>(function(){var g=document.getElementById('inf'),s=document.getElementById('sentinel'),page=0,busy=false,cols=Math.max(1,Math.floor(g.clientWidth/260));
+g.style.gridTemplateColumns='repeat('+cols+',1fr)';function more(){if(busy||page>=4)return;busy=true;page++;
+fetch('/api/feed?cols='+cols+'&page='+page).then(function(r){return r.json();}).then(function(d){d.items.forEach(function(t){var c=document.createElement('div');c.className='card';c.innerHTML='<h2>'+t+'</h2><p>Loaded on demand.</p>';g.appendChild(c);});busy=false;
+if(s.getBoundingClientRect().top<innerHeight+200)more();}).catch(function(){busy=false;});}
+new IntersectionObserver(function(es){if(es[0].isIntersecting)more();},{rootMargin:'200px'}).observe(s);})();</script>"""
+    mid = f'<div class="band"><div class="wrap"><h2>Endless feed</h2><div class="inf" id="inf"></div><div id="sentinel"></div></div></div>{js}'
+    return _shell("Lazy infinite cols", mid, head=f"<style>{css}</style>")
+
+
+def case_scrollfx_sticky_measured(ctx):
+    """脚本按视口高度定钉住段的高度(产品故事页常见): 轨道高 = 2.5 × innerHeight(load/resize 时写内联),
+    里面 sticky 舞台高 100vh, 起始帧/结束帧两张图按滚动进度交叉淡入淡出。"""
+    css = """.strack{position:relative;background:#0f1722}.sstage{position:sticky;top:0;height:100vh;overflow:hidden;color:#fff;display:flex;align-items:center;justify-content:center}
+.sstage img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.sstage h2{position:relative;font-size:40px;text-shadow:0 2px 8px #000}"""
+    js = """<script>(function(){var tr=document.getElementById('strack'),a=document.getElementById('fa'),b=document.getElementById('fb'),tt=document.getElementById('stitle');
+function size(){tr.style.height=Math.round(innerHeight*2.5)+'px';up();}
+function up(){var r=tr.getBoundingClientRect(),p=Math.min(1,Math.max(0,-r.top/Math.max(1,r.height-innerHeight)));a.style.opacity=String(1-p);b.style.opacity=String(p);tt.textContent=p<0.5?'Start frame':'End frame';}
+addEventListener('scroll',up,{passive:true});addEventListener('resize',size);size();})();</script>"""
+    mid = (f'<div class="band"><div class="wrap"><div class="grid">{_cards(3)}</div></div></div>'
+           f'<div class="strack" id="strack"><div class="sstage"><img id="fa" src="/img/1200x800/1f5f8b.png" alt="start"><img id="fb" src="/img/1200x800/7b3f8c.png" alt="end" style="opacity:0"><h2 id="stitle">Start frame</h2></div></div>'
+           f'<div class="band"><div class="wrap"><div class="grid">{_cards(6, 3)}</div></div></div>{js}')
+    return _shell("Scrollfx sticky measured", mid, head=f"<style>{css}</style>")
+
+
+def _index_groups_js(trigger):
+    return ("<script>(function(){function render(){var n=document.getElementById('idx');for(var g=0;g<3;g++){var h='<div class=\"idx-group\"><h3>Group '+(g+1)+'</h3><ul>';"
+            "for(var i=0;i<4+g;i++)h+='<li>Index link '+(g+1)+'.'+(i+1)+'</li>';n.insertAdjacentHTML('beforeend',h+'</ul></div>');}}" + trigger + "})();</script>")
+
+
+_IDX_CSS = "#idx{display:flex;flex-wrap:wrap;gap:24px;padding:24px;background:#e9eef4}.idx-group{flex:1 1 220px}.idx-group h3{margin:0 0 8px}.idx-group ul{margin:0;padding-left:18px}"
+
+
+def case_rerun_append_dcl(ctx):
+    """非幂等的客户端渲染: 源码里页底索引导航是空容器, DOMContentLoaded 时脚本往里追加 3 组(不先清空)。
+    克隆里冻结了 3 组, 脚本重跑又追加 3 组 → 页底翻倍。"""
+    mid = f'<div class="band"><div class="wrap"><div class="grid">{_cards(3)}</div></div></div><nav id="idx"></nav>'
+    return _shell("Rerun append dcl", mid + _index_groups_js("document.addEventListener('DOMContentLoaded',render);"), head=f"<style>{_IDX_CSS}</style>")
+
+
+def case_rerun_append_async(ctx):
+    """同上, 但等数据接口回来才追加(接口在克隆里回放得到, 所以一定会再追加一遍)。"""
+    mid = f'<div class="band"><div class="wrap"><div class="grid">{_cards(3)}</div></div></div><nav id="idx"></nav>'
+    return _shell("Rerun append async", mid + _index_groups_js("fetch('/api/list?tab=hot&page=1').then(function(r){return r.json();}).then(render);"),
+                  head=f"<style>{_IDX_CSS}</style>")
+
+
+def case_state_tab_spy(ctx):
+    """采集期被脚本改过的"当前项": 桌面宽全部面板都显示, 滚动监听把 .active 移到视口里的那一项;
+    ≤768 宽变成选项卡只显示 .active 面板(各面板高度不同)。采集时滚过全页, active 停在后面的项;
+    新开的原页在窄屏默认显示第 1 项。"""
+    css = """.tabs{display:flex;gap:8px;margin-bottom:12px}.tabs b{padding:8px 12px;border:1px solid #b9c2cc;border-radius:6px}.tabs b.active{background:#14324d;color:#fff}
+.pn{background:#fff;border:1px solid #d9dee5;border-radius:10px;padding:16px;margin-bottom:16px}
+@media (max-width:768px){.pn{display:none}.pn.active{display:block}}"""
+    js = """<script>(function(){var ps=document.querySelectorAll('.pn'),ts=document.querySelectorAll('.tabs b');function set(i){for(var k=0;k<ps.length;k++){ps[k].classList.toggle('active',k===i);ts[k].classList.toggle('active',k===i);}}
+function spy(){if(innerWidth<=768)return;var best=0;for(var k=0;k<ps.length;k++){if(ps[k].getBoundingClientRect().top<innerHeight*0.5)best=k;}set(best);}
+ts.forEach(function(t,i){t.addEventListener('click',function(){set(i);});});addEventListener('scroll',spy,{passive:true});set(0);})();</script>"""
+    panes = "".join(f'<div class="pn" id="pn-{i}"><h2>Module {c}</h2>' + f"<p>{LOREM}</p>" * (i + 2) + "</div>" for i, c in enumerate("ABCD"))
+    tabs = '<div class="tabs">' + "".join(f"<b>Tab {c}</b>" for c in "ABCD") + "</div>"
+    mid = f'<div class="band"><div class="wrap">{tabs}{panes}</div></div><div class="band alt"><div class="wrap"><div class="grid">{_cards(6)}</div></div></div>{js}'
+    return _shell("State tab spy", mid, head=f"<style>{css}</style>")
+
+
+def case_state_carousel_frame(ctx):
+    """采集期已经转过去的轮播帧: 3 个卡片轮播各 4 帧(颜色/文字不同, 高度相同), 每 3s 换帧并更新进度条。
+    新开的原页都在第 1 帧; 克隆应从第 1 帧起播, 而不是冻结在采集时转到的那一帧。"""
+    css = ".sw{position:relative;height:220px;border-radius:10px;overflow:hidden;margin-bottom:16px}.sw>div{position:absolute;inset:0;display:none;padding:24px;color:#fff}.sw>div.cur{display:block}.sw i{position:absolute;left:0;bottom:0;height:6px;background:#f0a500}"
+    js = """<script>(function(){document.querySelectorAll('.sw').forEach(function(sw){var fs=sw.querySelectorAll('div'),bar=sw.querySelector('i'),k=0;function show(){for(var j=0;j<fs.length;j++)fs[j].classList.toggle('cur',j===k);bar.style.width=((k+1)*25)+'%';}
+show();setInterval(function(){k=(k+1)%fs.length;show();},3000);});})();</script>"""
+    cols = ("1f5f8b", "7b3f8c", "2e7d32", "8c5a1f")
+    sws = "".join('<div class="sw">' + "".join(f'<div style="background:#{cols[(j + n) % 4]}"><h2>Product {n + 1} frame {j + 1}</h2><p>Frame text {j + 1} of carousel {n + 1}.</p></div>' for j in range(4)) + "<i></i></div>" for n in range(3))
+    mid = f'<div class="band"><div class="wrap">{sws}</div></div>{js}'
+    return _shell("State carousel frame", mid, head=f"<style>{css}</style>")
+
+
 CASES = {
     "responsive_grid": ("responsive", case_responsive_grid),
     "responsive_nav": ("responsive", case_responsive_nav),
@@ -462,7 +661,27 @@ CASES = {
     "device_vhfix": ("device", case_device_vhfix),
     "device_container": ("device", case_device_container),
     "device_hscroll": ("device", case_device_hscroll),
+    "rerun_append_dcl": ("rerun", case_rerun_append_dcl),
+    "rerun_append_async": ("rerun", case_rerun_append_async),
+    "state_tab_spy": ("state", case_state_tab_spy),
+    "state_carousel_frame": ("state", case_state_carousel_frame),
+    "api_post_keyed": ("api", case_api_post_keyed),
+    "api_get_variants": ("api", case_api_get_variants),
+    "api_post_rerender": ("api", case_api_post_rerender),
+    "lazy_infinite_cols": ("lazy", case_lazy_infinite_cols),
+    "scrollfx_sticky_measured": ("scrollfx", case_scrollfx_sticky_measured),
+    "drift_random": ("drift", case_drift_random),
+    "drift_random_late": ("drift", case_drift_random_late),
+    "drift_clock": ("drift", case_drift_clock),
+    "drift_rotator": ("drift", case_drift_rotator),
+    "scrollfx_progress": ("scrollfx", case_scrollfx_progress),
+    "scrollfx_parallax": ("scrollfx", case_scrollfx_parallax),
+    "scrollfx_timeline": ("scrollfx", case_scrollfx_timeline),
 }
+# 这些类别原页每次加载都不同(随机/时钟), 活体探针没有意义: 门槛看引擎交互轨分(克隆对采集时冻结的基准)
+ENGINE_GATED = {"drift"}
+# 这些类别探针照常算, 另加一格引擎交互轨分: 交互轨塌了时引擎会改交付静态版, 探针看不出来(sohu 类: 头条 99 / 交互 66)
+INTERACTIVE_ALSO = {"api"}
 # 已知缺口: 用例保留、照常出分, 但不计入 --gate 门槛(修好后从这里删掉)
 KNOWN_GAPS = {
     "measured_canvas": "iPad 820 宽 ~94: canvas 固化成位图后按宽缩放, 图里按固定 px 画的边距/间隙不会像原站那样重画",
@@ -472,6 +691,7 @@ CATEGORY_LABEL = {
     "responsive": "响应式(对照)", "ua": "按 UA 分发", "structure": "手机专有组件", "rerun": "脚本重跑",
     "lazy": "懒渲染/滚动进场", "timed": "定时状态", "overlay": "弹层/滚动锁", "pinned": "吸顶/固定",
     "measured": "脚本量宽/rem/canvas", "legacy": "无 viewport 老页", "media": "按宽换图",
+    "state": "采集期被改的状态(当前项/轮播帧)", "api": "接口回放(按请求体/参数区分)", "drift": "交互漂移(随机/时钟/轮换相位)", "scrollfx": "滚动驱动动画",
     "jslayout": "脚本排版(瀑布流/量宽轮播/截断)", "device": "设备探测(DPR/触屏/matchMedia/vh/容器查询)",
 }
 
@@ -523,6 +743,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(403, json.dumps({"error": "expired"}), "application/json")
             n = int(q.get("n", ["3"])[0])
             return self._send(200, json.dumps({"items": [f"Item {i + 1}" for i in range(n)]}), "application/json")
+        if path == "/api/feed":
+            cols, page = int(q.get("cols", ["3"])[0]), int(q.get("page", ["1"])[0])
+            items = [f"Feed p{page} #{i + 1} ({cols} cols)" for i in range(cols * 2)] if 1 <= page <= 4 else []
+            return self._send(200, json.dumps({"items": items}), "application/json")
+        if path == "/api/list":
+            tab = q.get("tab", ["hot"])[0]
+            n = {"hot": 5, "new": 9, "top": 3}.get(tab, 2)
+            return self._send(200, json.dumps({"title": f"Tab {tab}", "list": [f"{tab} entry {i + 1} of {n}" for i in range(n)]}), "application/json")
         name = path.strip("/")
         if name.startswith("m/"):
             name = name[2:]
@@ -537,6 +765,23 @@ class Handler(BaseHTTPRequestHandler):
         if isinstance(out, tuple) and out[0] == "redirect":
             return self._send(302, "", headers={"Location": out[1]})
         return self._send(200, out, headers={"Vary": "User-Agent"})
+
+
+    def do_POST(self):   # noqa: N802
+        u = urlsplit(self.path)
+        try:
+            raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            req = json.loads(raw.decode("utf-8") or "{}")
+        except (ValueError, UnicodeDecodeError):
+            req = {}
+        if u.path == "/api/block":
+            data = {}
+            for item in req.get("resourceList") or []:
+                k = str(item.get("tplCompKey"))
+                if k in _BLOCKS:
+                    data[k] = {"title": f"Block {k}", "list": [f"{k} headline {i + 1} of {_BLOCKS[k]}" for i in range(_BLOCKS[k])]}
+            return self._send(200, json.dumps({"code": 0, "data": data}), "application/json")
+        return self._send(404, "not found", "text/plain")
 
 
 def serve(port=0, host="127.0.0.1"):
