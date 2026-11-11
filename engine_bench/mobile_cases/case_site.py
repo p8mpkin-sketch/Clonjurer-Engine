@@ -318,6 +318,106 @@ def case_media_picture(ctx):
     return _shell("Media picture", f'{src}<div class="band"><div class="wrap">{pics}</div></div>')
 
 
+
+# ---- 第二批(2026-11-11): 脚本排版/设备探测类机制, 按通用前端写法构造, 不复刻任何站 ----
+def case_jslayout_masonry(ctx):
+    """瀑布流: 脚本按容器宽算列数, 卡片 position:absolute + top/left px, 容器高 px; 监听 resize 重排。"""
+    css = ".mas{position:relative}.mas .card{position:absolute;margin:0}"
+    hs = [120, 200, 160, 260, 140, 220, 180, 240, 130, 210, 170, 250]
+    items = "".join(f'<div class="card"><div style="height:{h}px;background:#{(i * 41 + 60) % 256:02x}8fa{i % 10}"></div><b>Tile {i + 1}</b></div>' for i, h in enumerate(hs))
+    js = """<script>(function(){var m=document.getElementById('mas');function lay(){var cw=m.clientWidth,cols=cw>=900?4:cw>=560?3:2,g=12,w=Math.floor((cw-g*(cols-1))/cols),hh=[];
+for(var c=0;c<cols;c++)hh.push(0);for(var i=0;i<m.children.length;i++){var k=m.children[i];k.style.width=w+'px';var c2=hh.indexOf(Math.min.apply(null,hh));
+k.style.left=(c2*(w+g))+'px';k.style.top=hh[c2]+'px';hh[c2]+=k.offsetHeight+g;}m.style.height=Math.max.apply(null,hh)+'px';}lay();addEventListener('resize',lay);})();</script>"""
+    mid = f'<div class="band"><div class="wrap"><h2>Feed</h2><div class="mas" id="mas">{items}</div></div></div>{js}'
+    return _shell("JS masonry", mid, head=f"<style>{css}</style>")
+
+
+def case_jslayout_masonry_once(ctx):
+    """瀑布流(加载时排一次, 不监听 resize): 列数/位置只在首载宽度下算。"""
+    html = case_jslayout_masonry(ctx)
+    return html.replace("lay();addEventListener('resize',lay);", "lay();").replace("JS masonry", "JS masonry once")
+
+
+def case_jslayout_slider(ctx):
+    """量宽轮播(常见轮播库写法): 每张 slide 宽 = 容器宽 px, 轨道 translate3d(-n*宽px), resize 重算; 4s 自动翻页。"""
+    css = ".sv{overflow:hidden;border-radius:10px}.st{display:flex;transition:transform .3s}.ss{flex:none;height:220px;color:#fff;font-size:28px;padding:24px}"
+    sl = "".join(f'<div class="ss" style="background:#{c}">Slide {i + 1}</div>' for i, c in enumerate(("2e7d32", "1565c0", "6a1b9a", "ef6c00")))
+    js = """<script>(function(){var v=document.getElementById('sv'),t=v.firstElementChild,n=1;function lay(){var w=v.clientWidth;for(var i=0;i<t.children.length;i++)t.children[i].style.width=w+'px';
+t.style.width=(w*t.children.length)+'px';t.style.transform='translate3d('+(-n*w)+'px,0,0)';}lay();addEventListener('resize',lay);setInterval(function(){n=(n+1)%t.children.length;lay();},4000);})();</script>"""
+    mid = f'<div class="band"><div class="wrap"><div class="sv" id="sv"><div class="st">{sl}</div></div><p>{LOREM}</p><div class="grid">{_cards(3)}</div></div></div>{js}'
+    return _shell("JS slider", mid, head=f"<style>{css}</style>")
+
+
+def case_jslayout_clamp(ctx):
+    """脚本按宽截断文字: 逐字缩短到两行高度以内并补省略号(加载时 + resize 时按原文重算)。"""
+    css = ".cl{font-size:16px;line-height:24px;margin:0 0 14px;background:#fff;padding:10px;border-radius:8px}"
+    paras = "".join(f'<p class="cl" data-full="{LOREM} {LOREM}">{LOREM} {LOREM}</p>' for _ in range(6))
+    js = """<script>(function(){function fit(){document.querySelectorAll('.cl').forEach(function(p){var t=p.getAttribute('data-full');p.textContent=t;
+if(p.clientHeight<=68)return;var lo=0,hi=t.length;while(lo<hi){var mid=(lo+hi+1)>>1;p.textContent=t.slice(0,mid)+'…';if(p.clientHeight<=68)lo=mid;else hi=mid-1;}p.textContent=t.slice(0,lo)+'…';});}
+fit();addEventListener('resize',fit);})();</script>"""
+    mid = f'<div class="band"><div class="wrap"><h2>Summaries</h2>{paras}</div></div>{js}'
+    return _shell("JS clamp", mid, head=f"<style>{css}</style>")
+
+
+def case_device_flexible(ctx):
+    """flexible 方案: 脚本按 DPR 改写 viewport(initial-scale=1/dpr) + html 字号 = 布局宽/10 + data-dpr 属性, 样式用 rem 与 [data-dpr] 选择器。"""
+    css = """body{margin:0;font-family:Arial;background:#f4f4f4;font-size:.4rem}.fh{background:#283593;color:#fff;padding:.4rem;font-size:.5rem}
+.fl{display:flex;flex-wrap:wrap;padding:.2rem}.fc{width:4.4rem;margin:.15rem;background:#fff;border-radius:.15rem;padding:.25rem}.fc i{display:block;height:2.6rem;background:#7986cb;margin-bottom:.2rem}
+[data-dpr="2"] .fc b{font-size:28px}[data-dpr="3"] .fc b{font-size:42px}[data-dpr="1"] .fc b{font-size:14px}.ff{padding:.5rem .3rem;color:#666}"""
+    js = """<script>(function(){var d=document.documentElement,dpr=Math.min(3,Math.floor(window.devicePixelRatio||1)),isM=/iPhone|Android/.test(navigator.userAgent);if(!isM)dpr=1;
+var sc=1/dpr,m=document.querySelector('meta[name=viewport]');if(!m){m=document.createElement('meta');m.name='viewport';document.head.appendChild(m);}
+m.content='width=device-width,initial-scale='+sc+',maximum-scale='+sc+',minimum-scale='+sc+',user-scalable=no';d.setAttribute('data-dpr',dpr);
+function rf(){var w=d.getBoundingClientRect().width;if(w/dpr>540)w=540*dpr;d.style.fontSize=(w/10)+'px';}rf();addEventListener('resize',rf);})();</script>"""
+    cells = "".join(f'<div class="fc"><i></i><b>Flex card {i + 1}</b><p>Rem sized card under a device pixel ratio scaled viewport.</p></div>' for i in range(8))
+    return _page("Device flexible", f'<div class="fh">Flexible layout</div><div class="fl">{cells}</div><div class="ff">footer</div>', head=js, css=css, viewport=False)
+
+
+def case_device_touch(ctx):
+    """触屏探测: 脚本按 ontouchstart / pointer:coarse 给 <html> 加 touch 类, 样式据此放大点按区、换成横滑列表。"""
+    css = """.tl{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.touch .tl{display:flex;overflow-x:auto;gap:10px}.touch .tl .card{flex:0 0 72%}
+.touch .btn{display:block;text-align:center;padding:16px}.tip{background:#fff3cd;padding:10px;border-radius:6px;margin-bottom:12px}.touch .tip{display:none}"""
+    js = "<script>(function(){var t=('ontouchstart' in window)||(window.matchMedia&&matchMedia('(pointer:coarse)').matches);if(t)document.documentElement.className+=' touch';})();</script>"
+    mid = f'<div class="band"><div class="wrap"><div class="tip">Hover cards for details</div><div class="tl">{_cards(4)}</div><p><a class="btn" href="#x">Tap target</a></p></div></div>'
+    return _shell("Device touch", mid, head=f"<style>{css}</style>{js}")
+
+
+def case_device_matchmedia(ctx):
+    """matchMedia 分支: 脚本按 (max-width:767px) 渲染不同导航(抽屉按钮 + 底部栏 / 顶部横排), 并监听 change 切换。"""
+    css = ".tn{display:flex;gap:16px;padding:12px 24px;background:#fff}.dr{padding:12px 16px;background:#fff;font-weight:bold}.bt{position:sticky;bottom:0;display:flex;justify-content:space-around;background:#263238;color:#fff;padding:12px}"
+    js = """<script>(function(){var q=matchMedia('(max-width:767px)'),h=document.getElementById('navhost'),f=document.getElementById('bothost');
+function r(){if(q.matches){h.innerHTML='<div class="dr">&#9776; Sections</div>';f.innerHTML='<div class="bt"><span>Home</span><span>Find</span><span>Cart</span><span>Me</span></div>';}
+else{h.innerHTML='<div class="tn"><span>Home</span><span>Products</span><span>Solutions</span><span>Pricing</span><span>Support</span></div>';f.innerHTML='';}}
+r();q.addEventListener?q.addEventListener('change',r):q.addListener(r);})();</script>"""
+    mid = (f'<div id="navhost"></div><div class="band"><div class="wrap"><h2>Main</h2><div class="grid">{_cards(6)}</div></div></div><div id="bothost"></div>{js}')
+    return _shell("Device matchMedia", mid, head=f"<style>{css}</style>")
+
+
+def case_device_vhfix(ctx):
+    """首屏高度修正: 脚本把首屏设为 window.innerHeight px(规避移动端 100vh 地址栏问题), resize 时重设。"""
+    css = ".vf{display:flex;align-items:center;justify-content:center;background:#004d40;color:#fff;font-size:30px}"
+    js = "<script>(function(){var e=document.getElementById('vf');function s(){e.style.height=window.innerHeight+'px';}s();addEventListener('resize',s);})();</script>"
+    mid = f'<div class="vf" id="vf">Full height intro</div><div class="band"><div class="wrap"><div class="grid">{_cards(3)}</div></div></div>{js}'
+    return _shell("Device vh fix", mid, head=f"<style>{css}</style>")
+
+
+def case_device_container(ctx):
+    """容器查询(纯 CSS 对照): @container 按卡片容器宽换排版。"""
+    css = """.cq{container-type:inline-size}.cqi{display:grid;grid-template-columns:1fr;gap:10px;background:#fff;border-radius:10px;padding:14px}
+@container (min-width:420px){.cqi{grid-template-columns:160px 1fr}}.cqi i{display:block;height:110px;background:#8d6e63;border-radius:6px}
+.cqg{display:grid;grid-template-columns:2fr 1fr;gap:16px}@media (max-width:700px){.cqg{grid-template-columns:1fr}}"""
+    box = "".join(f'<div class="cq"><div class="cqi"><i></i><div><b>Container card {i + 1}</b><p>{LOREM}</p></div></div></div>' for i in range(4))
+    return _shell("Device container", f'<div class="band"><div class="wrap"><div class="cqg">{box}</div></div></div>', head=f"<style>{css}</style>")
+
+
+def case_device_hscroll(ctx):
+    """横滑标签条: 加载时脚本把当前项滚到可视区(scrollLeft 只在窄屏下非 0)。"""
+    css = ".hs{display:flex;overflow-x:auto;gap:8px;padding:10px 0;scrollbar-width:none}.hs span{flex:none;padding:8px 16px;background:#fff;border-radius:16px;border:1px solid #ccd}.hs .on{background:#1f5f8b;color:#fff}"
+    tabs = "".join(f'<span class="{"on" if i == 9 else ""}">Topic {i + 1}</span>' for i in range(14))
+    js = "<script>(function(){var h=document.getElementById('hs'),o=h.querySelector('.on');h.scrollLeft=Math.max(0,o.offsetLeft-h.clientWidth/2+o.offsetWidth/2);})();</script>"
+    mid = f'<div class="band"><div class="wrap"><div class="hs" id="hs">{tabs}</div><div class="grid">{_cards(3)}</div></div></div>{js}'
+    return _shell("Device hscroll", mid, head=f"<style>{css}</style>")
+
+
 CASES = {
     "responsive_grid": ("responsive", case_responsive_grid),
     "responsive_nav": ("responsive", case_responsive_nav),
@@ -341,10 +441,19 @@ CASES = {
     "measured_canvas": ("measured", case_measured_canvas),
     "legacy_fixed": ("legacy", case_legacy_fixed),
     "media_picture": ("media", case_media_picture),
+    "jslayout_masonry": ("jslayout", case_jslayout_masonry),
+    "jslayout_masonry_once": ("jslayout", case_jslayout_masonry_once),
+    "jslayout_slider": ("jslayout", case_jslayout_slider),
+    "jslayout_clamp": ("jslayout", case_jslayout_clamp),
+    "device_flexible": ("device", case_device_flexible),
+    "device_touch": ("device", case_device_touch),
+    "device_matchmedia": ("device", case_device_matchmedia),
+    "device_vhfix": ("device", case_device_vhfix),
+    "device_container": ("device", case_device_container),
+    "device_hscroll": ("device", case_device_hscroll),
 }
 # 已知缺口: 用例保留、照常出分, 但不计入 --gate 门槛(修好后从这里删掉)
 KNOWN_GAPS = {
-    "rerun_state": "平板段: 引擎的窄屏首载页与主页同一浏览器上下文, 共用 localStorage, 拿到的是「第二次访问」的状态",
     "measured_canvas": "iPad 820 宽 ~94: canvas 固化成位图后按宽缩放, 图里按固定 px 画的边距/间隙不会像原站那样重画",
     "measured_inline": "420 宽: 脚本按文字折行算的等高卡片高度, 手机段只有 390/359 两个采样, 高度随宽不单调, 仍钉 390 的 px",
 }
@@ -352,6 +461,7 @@ CATEGORY_LABEL = {
     "responsive": "响应式(对照)", "ua": "按 UA 分发", "structure": "手机专有组件", "rerun": "脚本重跑",
     "lazy": "懒渲染/滚动进场", "timed": "定时状态", "overlay": "弹层/滚动锁", "pinned": "吸顶/固定",
     "measured": "脚本量宽/rem/canvas", "legacy": "无 viewport 老页", "media": "按宽换图",
+    "jslayout": "脚本排版(瀑布流/量宽轮播/截断)", "device": "设备探测(DPR/触屏/matchMedia/vh/容器查询)",
 }
 
 

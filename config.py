@@ -251,6 +251,14 @@ THIN_STATIC_NO_RETRY = os.environ.get("CLONER_THIN_STATIC_NO_RETRY", "1") != "0"
 # 布局校准就地预评: 尺寸覆盖先注入活页重截图评分, 不升即不做整页重渲染(与 CALIB_INPLACE_GATE 同口径)
 LAYOUT_CALIB_INPLACE_GATE = os.environ.get("CLONER_LAYOUT_CALIB_INPLACE_GATE", "1") != "0"
 
+# 第二批合成用例的通用修法(2026-11-11 合并线)
+# 排在脚本之后的 viewport meta(脚本运行时写的)序列化后挪到第一个脚本前, 克隆里脚本照常改写它
+VIEWPORT_META_HOIST = True
+# <html>/<body> 的分视口 class 也按 UA 拆分: 手机 UA 首载页变了、桌面 UA 同宽页没变 → 只给触屏手机段
+ROOT_CLS_UA_SPLIT = True
+# 桌面 UA 的窄屏首载页(平板段/手机桌面 UA 对照)开在全新上下文: 不继承主页的 cookie/localStorage(首访状态)
+NARROW_FRESH_CTX = True
+
 # ---------------------------------------------------------------------------
 # 常量环境覆盖(A/B 用): CLONER_CFG_<常量名>=值 覆盖本模块同名的 bool/int/float/str 常量。
 # 例 CLONER_CFG_NARROW_PHONE_UA=0 CLONER_CFG_MAIN_SETTLE_MS=0。CI 的 engine_env 输入就是一串这样的赋值,

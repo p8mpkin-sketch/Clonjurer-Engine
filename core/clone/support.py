@@ -457,11 +457,38 @@ RESPONSIVE_META = ('<meta name="viewport" '
 _VIEWPORT_META_RE = re.compile(r"<meta\b[^>]*\bname\s*=\s*[\"']?viewport\b", re.I)
 
 
+_VIEWPORT_META_TAG_RE = re.compile(r"<meta\b[^>]*\bname\s*=\s*[\"']?viewport\b[^>]*>", re.I)
+
+
+def _hoist_viewport_meta(html: str) -> str:
+    """<head> 里排在脚本之后的 viewport meta 挪到第一个脚本之前(只留最后一条生效的)。
+    这类 meta 多半是脚本运行时写的(flexible 方案按 DPR 写 initial-scale=1/dpr): 序列化后它成了静态标签,
+    排在写它的脚本后面 —— 克隆里脚本先跑、找不到 meta 就新建一条, 解析器随后又读到静态那条(采集时桌面口径
+    scale=1)并以它为准, 高 DPR 手机上整页按 1 倍缩放布局(合成用例 device_flexible iPhone 45)。
+    挪到脚本前: 脚本照常找到并改写它; 脚本不跑时它仍是原来的值。"""
+    hm = re.search(r"<head\b[^>]*>", html, re.I)
+    he = re.search(r"</head\s*>", html, re.I)
+    if not hm or not he or he.start() < hm.end():
+        return html
+    head = html[hm.end():he.start()]
+    sm = re.search(r"<script\b", head, re.I)
+    metas = list(_VIEWPORT_META_TAG_RE.finditer(head))
+    if not sm or not metas or metas[-1].start() < sm.start():
+        return html
+    keep = metas[-1].group(0)
+    stripped = _VIEWPORT_META_TAG_RE.sub("", head)
+    at = re.search(r"<script\b", stripped, re.I).start()
+    head = stripped[:at] + keep + stripped[at:]
+    return html[:hm.end()] + head + html[he.start():]
+
+
 def _inject_responsive(html: str, enhance: bool = False) -> str:
     """原站已有 viewport meta → 原样返回(它自己的媒体查询就是权威)。
     没有 meta 的老式定宽站: 默认也原样返回 —— 触屏浏览器对它按 980 布局视口缩小显示, 补上
     device-width meta 会让克隆在真机上换成另一种版式(douban/baidu iPad 真机口径 66/45, 原站自比 ~100)。
     enhance=True(任务配置 responsive_enhance, 主动要"响应式增强")时才补 meta + 兜底 CSS。"""
+    if getattr(config, "VIEWPORT_META_HOIST", True):
+        html = _hoist_viewport_meta(html)
     if not enhance or _VIEWPORT_META_RE.search(html):
         return html
     match = re.search(r"<head[^>]*>", html, re.I)

@@ -579,6 +579,21 @@ class CaptureMixin:
                                f" {sum(len(v) for v in self._fluid['inline'].values())} 个内联 px 改写为 vw"
                                f"(0.92 倍宽对照, 同比 ±1.5%)")
 
+    def _narrow_desktop_page(self, page, w, height):
+        """桌面 UA 的窄屏首载页。NARROW_FRESH_CTX: 开在全新上下文里(与手机页一样不带主页的 cookie/localStorage)。
+        与主页同上下文时它拿到的是「第二次访问」的状态(按存储计数换标签页/关掉过的提示条/已同意的弹层),
+        而原站对新访客(评分探针与真实首访都是全新上下文)显示的是首访状态 —— 平板段变体烘进了回访态(合成用例 rerun_state)。"""
+        if not getattr(config, "NARROW_FRESH_CTX", True):
+            return page.context.new_page()
+        ua = None
+        with suppress(Exception):
+            ua = page.evaluate("navigator.userAgent")
+        hdrs = dict(getattr(self, "_ctx_headers", {}) or {})
+        ctx = page.context.browser.new_context(viewport={"width": w, "height": height}, user_agent=ua or None,
+                                               extra_http_headers=hdrs, ignore_https_errors=True)
+        self._cv_extra_ctx.append(ctx)
+        return ctx.new_page()
+
     def _start_narrow_loads(self, page, height):
         """同上下文另开平板/手机宽的页面重新加载目标页(只等到响应提交, 与主页后续采集并行):
         只在加载时按宽度写一次的内联样式, 缩放采不到, 要靠窄屏首载对照(见 CV_EMIT_JS)。"""
@@ -603,14 +618,14 @@ class CaptureMixin:
                     # 不是按宽度; 这类变体只给触屏设备显示, 桌面浏览器窄窗口仍显示主页版(wix 手机 390 89→43)
                     if getattr(config, "NARROW_UA_SPLIT", True):
                         try:
-                            p4 = page.context.new_page()
+                            p4 = self._narrow_desktop_page(page, w, height)
                             p4.set_viewport_size({"width": w, "height": height})
                             p4.goto(page.url, wait_until="commit", timeout=10000)
                             self._cv_mdesk = p4
                         except Exception as exc:   # noqa: BLE001 可有可无
                             self.log("WARN", f"桌面 UA 窄屏对照页启动失败: {str(exc)[:120]}")
                 else:
-                    p2 = page.context.new_page()
+                    p2 = self._narrow_desktop_page(page, w, height)
                 # 窄屏才显示/才加载的图(手机版首屏图、按断点换的 picture 源)桌面活体从没请求过, 不登记就
                 # 进不了活体回补, 克隆在手机宽度下整块裂图(wix 手机首屏 ~40 分)
                 p2.on("response", lambda r: self._on_asset_response(r, bodies=False))

@@ -1383,6 +1383,7 @@ CV_EMIT_JS = r"""
   // 分视口 class: 缩放快照里该视口 class 与桌面不同且还原后回到桌面值 → 该视口用缩放快照的 class;
   // 缩放没变而窄屏首载页同路径同标签元素 class 不同 → 只在加载时按宽度决定 class, 用首载值
   const C = m.cls || {}, swaps = [];
+  const ROOTUA = 1;
   const STATE = /(^|[-_])(active|current|cur|hover|focus|open|opened|show|shown|visible|selected|prev|next|in-view|inview|exposure|loaded|scrolled|playing|dismissed|skipped|expanded|collapsed)([-_]|$)/i;
   if (C.d && C.b) m.els.forEach((el, i) => {
     if (!el.isConnected || el.closest('svg')) return;
@@ -1413,6 +1414,10 @@ CV_EMIT_JS = r"""
       const a = new Set(cd.split(/\s+/)), b = new Set(L[1].split(/\s+/));
       const delta = [...a].filter(x => !b.has(x)).concat([...b].filter(x => !a.has(x)));
       if (delta.some(x => STATE.test(x))) return;
+      // 手机 UA 首载页变了、桌面 UA 同宽首载页(__mdesk)与主页相同: 是按 UA/触屏写的设备类(touch / is-mobile),
+      // 不是按宽度 —— 只给触屏手机段(mt), 桌面浏览器窄窗口不带(合成用例 device_touch 手机 390 38.7)
+      const MDk = ROOTUA && t === 'm' && loads.__mdesk && loads.__mdesk[k];
+      if (MDk && MDk[0] === L[0] && MDk[1] === cd) { alt.mt = L[1]; return; }
       alt[t] = L[1];
     });
     if (Object.keys(alt).length) swaps.push([el, alt]);
@@ -1682,11 +1687,14 @@ CV_EMIT_JS = r"""
 CV_CLS_RUNTIME = r"""(function(){var cur=null;
 function band(){try{return (getComputedStyle(document.documentElement).getPropertyValue('--cv-band')||'').trim();}catch(x){return '';}}
 function one(e,b){try{
-if(e.hasAttribute('data-cv-cls-d')){var v=e.getAttribute('data-cv-cls-'+b);if(v===null&&b==='mt')v=e.getAttribute('data-cv-cls-m');if(v===null)v=e.getAttribute('data-cv-cls-d');if(e.getAttribute('class')!==v)e.setAttribute('class',v);}
+if(e.hasAttribute('data-cv-cls-d')){var v=e.getAttribute('data-cv-cls-'+b);if(v===null&&b==='mt')v=e.getAttribute('data-cv-cls-m');if(v===null)v=e.getAttribute('data-cv-cls-d');v=keepTouch(e,b,v);if(e.getAttribute('class')!==v)e.setAttribute('class',v);}
 if(e.hasAttribute('data-cv-xa-d')){var o=JSON.parse(e.getAttribute('data-cv-xa-d')),bv=e.getAttribute('data-cv-xa-'+(b==='mt'?'m':b));if(bv!==null){var q=JSON.parse(bv);for(var k in q)o[k]=q[k];}for(k in o){if(o[k]===null)e.removeAttribute(k);else if(e.getAttribute(k)!==o[k])e.setAttribute(k,o[k]);}}
 }catch(x){}}
 function all(b){var es=document.querySelectorAll('[data-cv-cls-d],[data-cv-xa-d]');for(var i=0;i<es.length;i++)one(es[i],b);}
 function touch(){try{return matchMedia('(pointer: coarse)').matches;}catch(x){return false;}}
+var mtSeen=typeof WeakSet==='function'?new WeakSet():null;
+function keepTouch(e,b,v){if(b==='mt'){if(mtSeen)mtSeen.add(e);return v;}if(!mtSeen||mtSeen.has(e)||!e.hasAttribute('data-cv-cls-mt')||!touch())return v;var mt=(e.getAttribute('data-cv-cls-mt')||'').split(/\s+/),d=' '+(e.getAttribute('data-cv-cls-d')||'')+' ',cur=' '+(e.getAttribute('class')||'')+' ',vv=' '+v+' ';
+for(var i=0;i<mt.length;i++){var x=mt[i];if(x&&d.indexOf(' '+x+' ')<0&&cur.indexOf(' '+x+' ')>=0&&vv.indexOf(' '+x+' ')<0)v=(v?v+' ':'')+x;}return v;}
 function bt(){var b=band();if(b==='m'&&touch())b='mt';return b;}
 var gest=false;try{['click','keydown'].forEach(function(n){addEventListener(n,function(ev){if(ev.isTrusted)gest=true;},true);});}catch(x){}
 function off(e){if(gest||(cur||bt())!=='mt')return;var w=(e.getAttribute('data-cv-touch-off')||'').split(' ');for(var i=0;i<w.length;i++)if(w[i]&&e.classList.contains(w[i]))e.classList.remove(w[i]);}
@@ -2710,3 +2718,5 @@ if not getattr(_config, "VARIANT_CANVAS_CANON", False):
     CV_PATHS_JS = CV_PATHS_JS.replace("const CANON = 1;", "const CANON = 0;")
 if not getattr(_config, "VARIANT_CANVAS_FILL", True):
     ALT_EXTRACT_JS = ALT_EXTRACT_JS.replace("const VFILL = 1;", "const VFILL = 0;")
+if not getattr(_config, "ROOT_CLS_UA_SPLIT", True):
+    CV_EMIT_JS = CV_EMIT_JS.replace("const ROOTUA = 1;", "const ROOTUA = 0;")

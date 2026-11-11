@@ -22,6 +22,8 @@ python engine_bench/mobile_cases/run.py --gate 95          # 低于门槛退出�
 | 脚本量宽/rem/canvas | measured_inline / measured_rem / measured_canvas | 加载时量宽写内联 px、rem 基准随屏宽、按容器宽画的 canvas |
 | 无 viewport 老页 | legacy_fixed | 980 定宽表格布局 |
 | 按宽换图 | media_picture | picture/srcset |
+| 脚本排版 | jslayout_masonry / jslayout_masonry_once / jslayout_slider / jslayout_clamp | 瀑布流绝对定位(监听/不监听 resize)、量宽轮播(slide 宽=容器 px)、按宽截断文字 |
+| 设备探测 | device_flexible / device_touch / device_matchmedia / device_vhfix / device_container / device_hscroll | 脚本按 DPR 写 viewport + rem、触屏探测加类、matchMedia 分支、innerHeight 首屏、容器查询、横滑条滚到当前项 |
 
 加用例: 在 `case_site.py` 写一个 `case_xxx(ctx)` 返回 HTML, 登记进 `CASES`。用例必须是一种**机制**, 不是某个站的复刻。
 暂时修不了的登记进 `KNOWN_GAPS`(照常出分, 不计门槛), 修好后删掉。
