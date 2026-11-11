@@ -67,6 +67,7 @@ ul,ol{margin:0;padding:0;list-style:none}
 button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer;border:0;background:none;padding:0}
 input{border:1px solid rgba(0,0,0,.14);border-radius:6px;padding:10px 12px;background:#fff;width:100%;outline:none}
+textarea{border:1px solid rgba(0,0,0,.14);background:#fff;width:100%;outline:none;resize:none;overflow:hidden;display:block;white-space:pre}
 input:focus{border-color:var(--color-c2,#2563eb);box-shadow:0 0 0 3px rgba(37,99,235,.15)}
 .uir-hidden{display:none!important}
 .uir-toast{position:fixed;left:50%;top:14%;transform:translateX(-50%);background:rgba(17,24,39,.92);color:#fff;
@@ -230,7 +231,7 @@ class _Emitter:
         role = node.role
         inner = "".join(self.emit(ch) for ch in node.children)
         if role == "text":
-            return f"<p{attrs}>{_esc(c.get('text', ''))}</p>"
+            return f"<p{attrs}>{_esc(c.get('text', ''))}</p>".replace("\n", "<br>")   # 硬换行保留
         if role == "image":
             src = c.get("src") or ""
             if src and not re.match(r"^\s*(https?:)?//", src):
@@ -248,6 +249,9 @@ class _Emitter:
             itype = c.get("type") or "text"
             if itype not in ("text", "password", "email", "search", "tel", "number", "url"):
                 itype = "text"
+            if c.get("multiline"):
+                return (f"<textarea{attrs} placeholder=\"{_esc(c.get('placeholder', ''))}\">"
+                        f"{_esc(c.get('text', ''))}</textarea>")
             return (f"<input{attrs} type=\"{itype}\" placeholder=\"{_esc(c.get('placeholder', ''))}\""
                     f" value=\"{_esc(c.get('text', ''))}\">")
         if role == "divider":
@@ -288,7 +292,23 @@ def _root_vars(tokens: Tokens) -> str:
             lines.append(f"--font-{k}:'{v.get('family', 'system-ui')}',{v.get('fallback', 'sans-serif')}")
     for k, v in tokens.space.items():
         lines.append(f"--space-{k}:{v}px")
-    return ":root{" + ";".join(lines) + "}" if lines else ""
+    return (":root{" + ";".join(lines) + "}" if lines else "") + _metric_faces(tokens)
+
+
+def _metric_faces(tokens: Tokens) -> str:
+    """字体令牌带 metric_local(字宽相近的本机字体名列表)时, 给该字族补一组 @font-face: 本机装着原字体就用原字体,
+    没装则按列表顺序取第一个本机有的字宽相近字体 —— 否则浏览器落到通用默认字体, 字宽差一成, 单行文本被截断/折行。"""
+    out = []
+    for v in tokens.font.values():
+        names = v.get("metric_local") if isinstance(v, dict) else None
+        fam = str(v.get("family") or "") if isinstance(v, dict) else ""
+        if not names or not re.match(r"^[A-Za-z0-9 _-]+$", fam):
+            continue
+        names = [str(n) for n in names if re.match(r"^[A-Za-z0-9 _-]+$", str(n))]
+        for weight, suffix in (("100 500", ""), ("600 900", " Bold")):
+            src = ",".join(f'local("{n}{suffix}")' for n in [fam] + names)
+            out.append(f'@font-face{{font-family:"{fam}";font-weight:{weight};src:{src}}}')
+    return "".join(out)
 
 
 def render_html(uir: UIR) -> tuple:

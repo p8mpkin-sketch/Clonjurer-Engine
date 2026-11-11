@@ -430,6 +430,7 @@ class _Sampler:
         self.s = float(px_scale or 1.0)
         self.ox, self.oy = origin
         self.budget = embed_budget
+        self.core_stroke = False   # 子像素渲染(ClearType)平台: 笔画粗细只数"更接近字色"的核心像素, 见 ink()
 
     def _crop(self, x, y, w, h):
         s = self.s
@@ -472,6 +473,30 @@ class _Sampler:
         if ring_hex is None or a is None or min(a.shape[:2]) < 10:
             return ring_hex, None
         np = self.np
+        rc = np.array([int(ring_hex[i:i + 2], 16) for i in (1, 3, 5)])
+        ring = np.concatenate([a[0], a[-1], a[:, 0], a[:, -1]]).astype(np.int32)
+        share = float((np.abs(ring - rc).sum(axis=1) <= 24).mean())
+        if thin_only:
+            # 容器: 只认"细线框"(分组框/面板/编辑区的边线) —— 往里 3 个截图像素的那一圈换了主色, 且边线颜色在那一圈里
+            # 几乎不出现; 底色取里面那一圈的主色。顶部色带、侧栏这类成片的异色区域不是描边, 底色照旧按边缘取
+            k = 3
+            if min(a.shape[:2]) < 6 * k + 4:
+                # 矮条容器(表头行/工具条): 边缘一圈大半是上下两条边线, 底色按整块面积的主色取
+                vals, counts, order, keys = self._mode(a[::1, ::2].reshape(-1, 3))
+                dom = a[::1, ::2].reshape(-1, 3)[keys == vals[order[0]]].mean(axis=0)
+                if counts[order[0]] >= 0.5 * len(keys) and np.abs(dom - rc).sum() > 40:
+                    return self._hex(dom.round()), None
+                return ring_hex, None
+            if share < 0.4:
+                return ring_hex, None
+            r2 = np.concatenate([a[k, k:-k], a[-1 - k, k:-k], a[k:-k, k], a[k:-k, -1 - k]])
+            vals, counts, order, keys = self._mode(r2)
+            c2 = r2[keys == vals[order[0]]].mean(axis=0)
+            if np.abs(c2 - rc).sum() <= 40 or counts[order[0]] < 0.5 * len(r2):
+                return ring_hex, None
+            if float((np.abs(r2.astype(np.int32) - rc).sum(axis=1) <= 24).mean()) > 0.12:
+                return ring_hex, None
+            return self._hex(c2.round()), (ring_hex if share >= 0.6 else None)
         m = max(2, int(min(a.shape[:2]) * 0.08))
         inner = a[m:-m, m:-m][::2, ::2].reshape(-1, 3)
         if inner.size == 0:
@@ -480,21 +505,16 @@ class _Sampler:
         if counts[order[0]] < 0.5 * len(inner):
             return ring_hex, None
         dom = inner[keys == vals[order[0]]].mean(axis=0)
-        rc = np.array([int(ring_hex[i:i + 2], 16) for i in (1, 3, 5)])
         if np.abs(dom - rc).sum() <= 40:
             return ring_hex, None
-        ring = np.concatenate([a[0], a[-1], a[:, 0], a[:, -1]]).astype(np.int32)
-        share = float((np.abs(ring - rc).sum(axis=1) <= 24).mean())
-        if thin_only:
-            # 容器: 只认"细描边"(分组框/面板的线框) —— 往里 3 个截图像素那一圈已经是内部主色; 顶部色带、
-            # 侧栏这类成片的异色区域不是描边, 容器底色照旧按边缘取
-            k = 3
-            if min(a.shape[:2]) < 6 * k + 4:
-                return ring_hex, None
-            r2 = np.concatenate([a[-1 - k, k:-k], a[k:-k, k], a[k:-k, -1 - k]]).astype(np.int32)   # 不看上边(标题常压在上边线上)
-            if float((np.abs(r2 - dom).sum(axis=1) <= 24).mean()) < 0.7 or share < 0.4:
-                return ring_hex, None
-        return self._hex(dom.round()), (ring_hex if share >= 0.6 else None)
+        if share < 0.6:
+            # 立体边(上/左亮、下/右暗, 两侧平均色明显不同): 一圈颜色不统一, 但整圈都不是内部底色 → 边框取这一圈的平均色
+            far = np.abs(ring - dom).sum(axis=1) >= 45
+            tl = np.concatenate([a[0], a[:, 0]]).astype(np.int32).mean(axis=0)
+            br = np.concatenate([a[-1], a[:, -1]]).astype(np.int32).mean(axis=0)
+            bevel = far.mean() >= 0.8 and float(np.abs(tl - br).sum()) >= 60
+            return self._hex(dom.round()), (self._hex(ring[far].mean(axis=0).round()) if bevel else None)
+        return self._hex(dom.round()), ring_hex
 
     def fg(self, x, y, w, h, bg_hex):
         """框内与背景色差最大的显著颜色(文字色)。"""
@@ -585,7 +605,8 @@ class _Sampler:
         np = self.np
         px = a.astype(np.int32)
         bgc = self._bg_vec(bg_hex, px.reshape(-1, 3))
-        mask = np.abs(px - bgc).sum(axis=2) >= 90
+        dist = np.abs(px - bgc).sum(axis=2)
+        mask = dist >= 90
         # 去掉贯穿整框的横/竖线(分割线、边框), 它们不是字形
         mask[mask.mean(axis=1) > 0.85, :] = False
         mask[:, mask.mean(axis=0) > 0.85] = False
@@ -622,7 +643,11 @@ class _Sampler:
                  if len(merged) > 1 else 0.0)
         # 笔画粗细: 墨迹横向游程的平均长度(像素 → 逻辑单位), 用于区分常规/加粗
         r0, r1 = merged[0][0], merged[-1][1] + 1
-        sub = mask[r0:r1].astype(np.int8)
+        sub = mask[r0:r1]
+        if self.core_stroke:
+            # 子像素渲染在字形两侧各带一列彩边, 小字号下彩边比笔画本身还宽: 只数色差过半的核心像素
+            sub = sub & (dist[r0:r1] >= 0.5 * float(dist[mask].max()))
+        sub = sub.astype(np.int8)
         starts = int((np.diff(sub, axis=1, prepend=0) == 1).sum())
         stroke = (float(sub.sum()) / starts / k) if starts else 0.0
         top, bottom = (merged[0][0]) / k, (merged[-1][1] + 1) / k
@@ -636,6 +661,97 @@ class _Sampler:
         return {"top": y + top, "bottom": y + bottom, "left": x + cols[0] / k,
                 "right": x + (cols[-1] + 1) / k, "lines": len(merged), "line_h": line_h, "pitch": pitch,
                 "stroke": stroke, "left_spread": spread}
+
+    def icon_split(self, x, y, w, h, bg_hex, units: float):
+        """带文字的控件框里是否还画着一个图标(工具栏按钮的"图标在上/字在下"、列表项的"图标在左/字在右")。
+        返回 (图标框, 文字框)(逻辑单位)或 None。units = 文字按字宽折算的 em 数(判断剩下的墨迹像不像这段字)。
+        判据: 墨迹分成两团, 一团近似方形且明显比另一团(文字行)高, 另一团的宽度与这段文字相称。"""
+        a = self._crop(x, y, w, h)
+        if a is None or min(a.shape[:2]) < 10 or units <= 0:
+            return None
+        np = self.np
+        px = a.astype(np.int32)
+        mask = np.abs(px - self._bg_vec(bg_hex, px.reshape(-1, 3))).sum(axis=2) >= 90
+        mask[mask.mean(axis=1) > 0.85, :] = False
+        mask[:, mask.mean(axis=0) > 0.85] = False
+        mask[:2, :] = mask[-2:, :] = False
+        mask[:, :2] = mask[:, -2:] = False
+        k = self.s
+
+        def runs(flags, min_gap):
+            idx = np.where(flags)[0]
+            if idx.size == 0:
+                return []
+            out, start, prev = [], idx[0], idx[0]
+            for i in idx[1:]:
+                if i - prev > min_gap:
+                    out.append((int(start), int(prev) + 1))
+                    start = i
+                prev = i
+            out.append((int(start), int(prev) + 1))
+            return out
+
+        def extent(sub, axis):
+            idx = np.where(sub.any(axis=axis))[0]
+            return (int(idx[0]), int(idx[-1]) + 1) if idx.size else None
+
+        def texty(tw, th):
+            # 这团墨迹像不像这段单行文字: 字号 ≈ 墨迹高/0.72, 宽度在估计值的 0.5~1.8 倍内
+            est = units * (th / 0.72)
+            return th >= 5 * k and 0.5 * est <= tw <= 1.8 * est
+
+        def other_color(m_icon, m_text):
+            # 图标与文字不是一种颜色(彩色图标 + 单色字): 两团墨迹的平均色相差明显
+            if not m_icon.any() or not m_text.any():
+                return False
+            return float(np.abs(px[m_icon].mean(axis=0) - px[m_text].mean(axis=0)).sum()) >= 90
+
+        def is_icon(ih, iw, th, m_icon, m_text):
+            if not (ih >= 8 * k and 0.55 * ih <= iw <= 1.7 * ih):
+                return False
+            return (ih >= 10 * k and ih >= 1.25 * th) or other_color(m_icon, m_text)
+
+        rows = runs(mask.any(axis=1), max(1, int(2 * k)))
+        if len(rows) >= 2:
+            (t0, t1), up = rows[-1], (rows[0][0], rows[-2][1])
+            ce, te = extent(mask[up[0]:up[1]], 0), extent(mask[t0:t1], 0)
+            if ce and te:
+                ih, iw, th, tw = up[1] - up[0], ce[1] - ce[0], t1 - t0, te[1] - te[0]
+                mi, mt = mask.copy(), mask.copy()
+                mi[up[1]:, :] = False
+                mt[:t0, :] = False
+                if is_icon(ih, iw, th, mi, mt) and texty(tw, th):
+                    cut = (up[1] + t0) / 2.0 / k
+                    return [x, y, w, cut], [x, y + cut, w, h - cut]
+        cols = runs(mask.any(axis=0), 0)
+        if len(cols) >= 2:
+            c0, c1 = cols[0]
+            re_, rest = extent(mask[:, c0:c1], 1), extent(mask[:, cols[1][0]:], 1)
+            if re_ and rest:
+                ih, iw, th, tw = re_[1] - re_[0], c1 - c0, rest[1] - rest[0], cols[-1][1] - cols[1][0]
+                gap = cols[1][0] - c1
+                mi, mt = mask.copy(), mask.copy()
+                mi[:, c1:] = False
+                mt[:, :cols[1][0]] = False
+                if is_icon(ih, iw, th, mi, mt) and gap >= max(2 * k, 0.15 * ih) and texty(tw, th):
+                    cut = (c1 + cols[1][0]) / 2.0 / k
+                    return [x, y, cut, h], [x + cut, y, w - cut, h]
+        return None
+
+    def frame_line(self, x, y, w, h, bg_hex):
+        """窗口最外一圈像素是不是一条边线(与窗口底色明显不同的像素占一圈 ≥70%): 返回边线的平均色, 否则 None。
+        桌面窗口的 1px 边线常是半透明的(混着后面的桌面), 颜色不均匀, 但整圈都比底色深/浅。"""
+        a = self._crop(x, y, w, h)
+        if a is None or min(a.shape[:2]) < 40 or not isinstance(bg_hex, str) or not bg_hex.startswith("#"):
+            return None
+        np = self.np
+        ring = np.concatenate([a[0], a[-1], a[:, 0], a[:, -1]]).astype(np.int32)
+        inner = np.concatenate([a[2], a[-3], a[:, 2], a[:, -3]]).astype(np.int32)
+        bgc = np.array([int(bg_hex[i:i + 2], 16) for i in (1, 3, 5)])
+        far = np.abs(ring - bgc).sum(axis=1) >= 45
+        if far.mean() < 0.7 or (np.abs(inner - bgc).sum(axis=1) >= 45).mean() > 0.4:
+            return None
+        return self._hex(ring[far].mean(axis=0).round())
 
     def dominant(self, x, y, w, h):
         """框内整块面积的众数色。顶层窗口用它定底色: 窗口矩形常含不可见的缩放边/阴影(边缘一圈是桌面像素),
@@ -771,6 +887,82 @@ def _mark_graphic_leaves(root: dict, win=None) -> int:
     return marked
 
 
+def _text_units(text: str) -> float:
+    cjk = sum(1 for ch in text if ord(ch) > 0x2E80)
+    return cjk + (len(text) - cjk) * 0.55
+
+
+_TEXTY_ROLES = ("text", "button", "link", "list_item", "box")
+
+
+def _refine_leaves(root: dict, sampler: "_Sampler") -> None:
+    """建树前的两步叶子修整(纯几何 + 截图证据, 不看应用):
+    1. 同级里框住了后面兄弟的文字叶子(表格行的首列文本框常报整行宽), 宽度收到最近的那个兄弟左缘 ——
+       否则量墨迹时把别的列的字也算进来, 版式也被判成叠放;
+    2. 文字控件框里另画着图标的(见 _Sampler.icon_split), 拆成 图标 + 文字 两个子节点。"""
+    def walk(n):
+        kids = n.get("children") or []
+        for a in kids:
+            if a.get("children") or not _visible_text(a):
+                continue
+            ax, ay, aw, ah = a["bounds"]
+            lim = None
+            for b in kids:
+                if b is a:
+                    continue
+                bx, by, bw, bh = b["bounds"]
+                if (bx >= ax + 8 and bx + bw <= ax + aw + _TOL and by >= ay - _TOL and by + bh <= ay + ah + _TOL):
+                    lim = bx if lim is None else min(lim, bx)
+            if lim is not None:
+                a["bounds"] = [ax, ay, round(lim - ax, 2), ah]
+        for i, a in enumerate(kids):
+            text = _visible_text(a)
+            if (sampler is None or a.get("children") or not text or "\n" in text or a.get("editable")
+                    or a.get("uir_role") not in _TEXTY_ROLES or a.get("checked") is not None
+                    or re.sub(r"Control$", "", str(a.get("role") or "")).rsplit(".", 1)[-1] in _TOGGLE_RAW):
+                continue
+            x, y, w, h = a["bounds"]
+            sp = sampler.icon_split(x, y, w, h, sampler.bg(x, y, w, h), _text_units(text))
+            if not sp:
+                continue
+            icon = {"role": "", "uir_role": "image", "name": "", "value": "", "desc": "", "bounds": [round(v, 2) for v in sp[0]],
+                    "children": [], "_excl": True}
+            label = dict(a, bounds=[round(v, 2) for v in sp[1]], children=[], id="", clickable=False, uir_role="text")
+            wrap = dict(a, name="", value="", children=[icon, label])
+            if wrap.get("uir_role") == "text":
+                wrap["uir_role"] = "box"
+            kids[i] = wrap
+        for c in n.get("children") or []:
+            if c.get("children") and not c.get("_split"):
+                walk(c)
+
+    walk(root)
+
+
+def _add_window_title(root: dict, platform: str) -> None:
+    """窗口标题: 桌面平台的标题文字只在窗口节点的名字里, 标题栏子树里没有对应的文本节点 —— 在标题栏空着的
+    那一段(左侧系统菜单与右侧窗口按钮之间)补一个文本叶子。截图上那里没有字时, 建树阶段会按"无墨迹"丢掉。"""
+    title = (root.get("name") or "").strip()
+    if platform not in ("windows", "macos") or not title:
+        return
+    for tb in root.get("children") or []:
+        raw = re.sub(r"Control$", "", str(tb.get("role") or ""))
+        if raw != "TitleBar":
+            continue
+        def has_text(n):
+            return any(_visible_text(c) and c.get("uir_role") == "text" or has_text(c) for c in n.get("children") or [])
+        if has_text(tb):
+            return
+        x, y, w, h = tb["bounds"]
+        mid = x + w / 2
+        left = max([c["bounds"][0] + c["bounds"][2] for c in tb["children"] if c["bounds"][0] + c["bounds"][2] <= mid] + [x])
+        right = min([c["bounds"][0] for c in tb["children"] if c["bounds"][0] >= mid] + [x + w])
+        if right - left >= 40:
+            tb["children"].append({"role": "Text", "uir_role": "text", "name": title, "value": "", "desc": "", "id": "",
+                                   "bounds": [round(left, 2), y, round(right - left, 2), h], "children": []})
+        return
+
+
 def _infer_axis(kids: list) -> str:
     """'col' / 'row' / 'stack'。纵向两两不重叠优先(界面主流是竖排)。"""
     if len(kids) <= 1:
@@ -832,13 +1024,16 @@ class _Builder:
     def __init__(self, sampler: "_Sampler" = None, platform: str = ""):
         self.sampler = sampler
         self.ratio = _BOX_FONT_RATIO.get(platform, 0.75)
-        # 横向笔画游程/字号 的加粗判定线: Windows 的 ClearType 子像素渲染在字形两侧各多出约半个像素的彩边
+        # 横向笔画游程/字号 的加粗判定线: Windows 的 ClearType 彩边不计入笔画(_Sampler.core_stroke), 常规体约 0.10~0.12em
         # 桌面控件的文本框比字形松(24 高的标签里是 12 号字), 框高与墨迹相差 15% 以上就信墨迹
-        self.tight_hi = 1.15 if platform in ("windows", "macos") else 1.3
-        self.bold_k = 0.24 if platform == "windows" else 0.175
+        self.tight_hi = 1.0 if platform == "windows" else (1.15 if platform == "macos" else 1.3)
+        self.bold_k = 0.17 if platform == "windows" else 0.175
+        # Windows 的同级子窗口按 Z 序枚举(最上面的排最前), 与绘制顺序相反; 其余平台树序 ≈ 绘制顺序
+        self.z_top_first = platform == "windows"
         font = {"android": {"family": "Roboto", "fallback": "'Noto Sans SC','PingFang SC',system-ui,sans-serif"},
                 "macos": {"family": "-apple-system", "fallback": "'SF Pro Text','PingFang SC',system-ui,sans-serif"},
-                "windows": {"family": "Segoe UI", "fallback": "'Microsoft YaHei',system-ui,sans-serif"}}
+                "windows": {"family": "Segoe UI", "fallback": "Tahoma,Arial,'Microsoft YaHei',system-ui,sans-serif",
+                            "metric_local": ["Arial", "Liberation Sans", "Helvetica"]}}
         self.tokens = Tokens(
             color={"c0": "#ffffff", "c1": "#1f2937", "c2": "#2563eb", "c3": "#6b7280"},
             text_style={"t0": {"size": 14, "weight": 400, "line": 1.35, "color": "c1"}},
@@ -867,7 +1062,8 @@ class _Builder:
         if (self.sampler and not kids and not n.get("_inner") and _visible_text(n)
                 and role in ("text", "button", "link", "badge", "box", "list_item")):
             fill = self.sampler.fill_rect(x, y, w, h, parent_bg)
-            if fill and not _same_box(fill[1], n["bounds"]):
+            # 实心块窄得放不下这段文字(最小可读字号下的宽度)= 它是图标的色块, 不是按钮的底
+            if fill and not _same_box(fill[1], n["bounds"]) and fill[1][2] >= _text_units(_visible_text(n)) * 8:
                 # 实心块比控件框小(Material 按钮的阴影内缩等): 外层透明框占位, 内层按实心块几何重建
                 inner = dict(n, bounds=fill[1], _inner=True)
                 return self.build({"role": "", "uir_role": "box", "bounds": n["bounds"], "children": [inner],
@@ -882,6 +1078,8 @@ class _Builder:
             border = None
             if n.get("_window"):
                 bg = self.sampler.dominant(x, y, w, h)
+                if n.get("_frame") and bg:
+                    border = self.sampler.frame_line(x, y, w, h, bg)
             else:
                 bg, border = self.sampler.bg_border(x, y, w, h, thin_only=bool(kids))
                 framed = bg is not None and bg != self.sampler.bg(x, y, w, h)
@@ -896,7 +1094,7 @@ class _Builder:
             # 带子节点的可点击容器: 渲染为容器 + 点击意图(按钮内嵌块级子节点不可靠)
             role = "list_item" if n.get("role") in ("AXRow", "AXCell", "ListItem") else "box"
             intents = [{"on": "click", "do": "navigate"}]
-        text = _visible_text(n)
+        text = re.sub(r"\r\n?", "\n", _visible_text(n))
         if role in ("box", "list_item") and not kids and text:
             role = "button" if n.get("clickable") else "text"
         if role in ("text", "button", "link", "badge") and not kids and not text:
@@ -942,7 +1140,7 @@ class _Builder:
                 cjk = sum(1 for ch in text if ord(ch) > 0x2E80)
                 units = cjk + (len(text) - cjk) * 0.55
                 s_ink = max(9.0, ink["line_h"] / _ink_em(text))
-                if (ink["right"] - ink["left"]) < 0.45 * units * s_ink:
+                if (ink["right"] - ink["left"]) < 0.62 * units * s_ink:
                     intents = [{"on": "click", "do": "navigate"}]
                     role, ink = "image", None
         if role in ("text", "button", "link", "badge"):
@@ -957,6 +1155,8 @@ class _Builder:
                 if size >= 12 and ink["stroke"] >= self.bold_k * size and not symbolic:
                     weight = 600
                 line = 1.3 if ink["lines"] > 1 else 1.25
+                if "\n" in text and ink["lines"] > 1 and ink["pitch"] and 1.05 <= ink["pitch"] / size <= 2.2:
+                    line = round(ink["pitch"] / size, 3)     # 硬换行的多行文本(代码/日志): 行距照实测行间距
                 lh = size * line
                 n_lines = max(1, ink["lines"])
                 if n_lines == 1:
@@ -1008,12 +1208,30 @@ class _Builder:
                        "text": n.get("value") or n.get("name") or "",
                        "type": "password" if n.get("password") else "text"}
             isize = _font_size(content["text"] or content["placeholder"] or "字", w, min(h, 30), self.ratio)
-            iink = self.sampler.ink(x, y, w, h, eff_bg) if (self.sampler and content["text"]) else None
+            iink = None
+            if self.sampler and content["text"]:
+                # 量墨迹的范围: 组合框取里面的编辑区子节点(不含下拉按钮), 否则内缩 3 个单位避开边框线
+                ek = next((k for k in kids if k.get("uir_role") == "input"), None)
+                ix, iy, iw, ih = ek["bounds"] if ek else ((x + 3, y + 3, w - 6, h - 6) if min(w, h) >= 14 else (x, y, w, h))
+                iink = self.sampler.ink(ix, iy, iw, ih, eff_bg)
+            content["text"] = re.sub(r"\r\n?", "\n", content["text"])
+            multi = "\n" in content["text"].strip() and h >= 3 * isize
+            box["pad"] = [0, 8, 0, 8]
+            iline = 0.0
             if iink and iink["lines"] == 1:
                 isize = _font_from_ink(iink, isize, content["text"], tight=False)
-            text_ref = self.text_style(isize, fg or "c1", 0)
+                box["pad"] = [0, 4, 0, round(max(0.0, min(16.0, iink["left"] - x - 1.5)), 1)]
+            elif iink and multi and iink["lines"] > 1 and iink["pitch"] > 0:
+                # 多行编辑区: 字号按行墨迹高、行距按行间距, 内边距照首行墨迹位置(文本从左上角起排, 不垂直居中)
+                isize = max(9, min(40, int(round(iink["pitch"] / 1.25))))
+                iline = round(iink["pitch"] / isize, 3)
+                lh = isize * (iline or 1.3)
+                box["pad"] = [round(max(0.0, iink["top"] - y - (lh - iink["line_h"]) / 2), 1), 4, 0,
+                              round(max(0.0, iink["left"] - x - 0.5), 1)]
+            if multi:
+                content["multiline"] = True  # type: ignore[assignment]
+            text_ref = self.text_style(isize, fg or "c1", 0, line=iline or None)
             intents = [{"on": "input", "do": "input"}]
-            box["pad"] = [0, 8, 0, 8]
         elif role == "image":
             content = {"alt": label or "图片"}
             box.setdefault("pad", [0])
@@ -1033,11 +1251,14 @@ class _Builder:
         if kids and role not in ("text", "image", "input", "divider", "badge"):
             axis = _infer_axis(kids)
             self.stats[axis] += 1
+            if box.get("border"):
+                # 带边线的容器: 子节点从边线内侧起排(边线占 1 个单位), 原点内移, 子节点位置不随边线偏移
+                x, y = x + 1, y + 1
             if axis == "stack":
                 node.layout = {"mode": "stack"}
                 # 叠放保持树序(≈ 绘制顺序, 后者在上); 有内容的叠放子树背景不透明(抽屉/弹层), 否则下层内容透出;
                 # 无内容的叶子框(拖放目标、触摸层)多为透明, 只在颜色确实不同于父级时才上色
-                for k in kids:
+                for k in (list(reversed(kids)) if self.z_top_first else kids):
                     c = self.build(k, eff_bg, opaque=bool(k["children"]))
                     c.box.pop("_slack", None)
                     c.box["position"] = {"top": round(k["bounds"][1] - y, 1), "left": round(k["bounds"][0] - x, 1)}
@@ -1123,7 +1344,10 @@ def tree_to_uir(tree: dict, screenshot=None, embed_images: bool = True) -> UIR:
             sampler = _Sampler(shot, px, origin=origin, embed_budget=4_000_000 if embed_images else 0)
         except Exception:
             sampler = None
+    _add_window_title(prep["root"], prep["platform"])
     if sampler is not None:
+        sampler.core_stroke = prep["platform"] == "windows"
+        _refine_leaves(prep["root"], sampler)
         _mark_graphic_leaves(prep["root"])
     b = _Builder(sampler, prep["platform"])
     wx, wy, ww, wh = prep["window"]
@@ -1134,6 +1358,7 @@ def tree_to_uir(tree: dict, screenshot=None, embed_images: bool = True) -> UIR:
         if not _same_box(cur["bounds"], rootn["bounds"]):
             break
         cur["_window"] = True
+        cur["_frame"] = cur is rootn
         cur = cur["children"][0] if len(cur["children"]) == 1 else None
     node = b.build(rootn, root_bg or "c0")
     node.box.pop("_slack", None)
