@@ -992,16 +992,20 @@ class CaptureMixin:
             if tag not in pages:
                 continue
             # 桌面不渲染、窄屏可见的子树: 类或内联样式与窄屏首载页不同就整棵换成窄屏版(状态只在窄屏页里可信)
+            tk = [time.monotonic()]   # 分步耗时(远程归因「窄屏收回与变体」慢在哪一步)
             hidden_tops = CaptureMixin._hidden_root_variants(self, page, pages[tag], main, other, top)
+            tk.append(time.monotonic())
             hidden_all.update(hidden_tops)
             top += hidden_tops
             if not top or len(top) > config.VIEWPORT_VARIANT_MAX:
                 continue
             stable, counts = CaptureMixin._settle_narrow_page(pages[tag])
+            tk.append(time.monotonic())
             # 随宽对照只做手机段: 手机机型宽度 360~440 一档内连续变化, 平板段(768/820)两档之间断点换布局, 来回改宽
             # 反而让图表/轮播停在错态(vite 平板 98→64、iPad Air 87→77)
             if tag == "m":
                 CaptureMixin._fluidize_narrow_page(self, pages[tag], tag)
+            tk.append(time.monotonic())
             mc = getattr(self, "_main_counts", {}) or {}
             self.log("RENDER", f"窄屏首载页 {tag}: {'到位' if stable else '到时限仍在变化'}, 控件 {counts.get('ctrl', '?')}"
                                f"(主页 {mc.get('ctrl', '?')}) / 按钮 {counts.get('btn', '?')}(主页 {mc.get('btn', '?')})"
@@ -1024,12 +1028,17 @@ class CaptureMixin:
                         if ph.get("els") or ph.get("cand"):
                             self.log("RENDER", f"窄屏首载页 {tag} 状态类相位复位: {ph.get('groups', 0)} 组 / {ph.get('els', 0)} 个实例复位成源码分配"
                                                f"({'本页源码' if src2 else '主页源码'}); 候选组 {ph.get('cand', 0)} {ph.get('dbg') or ''}"[:700])
+            tk.append(time.monotonic())
             with suppress(Exception):
                 fin = pages[tag].evaluate(TRANSITION_FINISH_JS) or 0
                 if fin:
                     self.log("RENDER", f"窄屏首载页 {tag}: 抽取前 {fin} 个进行中的 CSS 过渡跳到终点(轮播翻页半途两项同时可见)")
+            tk.append(time.monotonic())
             with suppress(Exception):
                 htmls = pages[tag].evaluate(ALT_EXTRACT_JS, top) or {}
+                tk.append(time.monotonic())
+                self.log("RENDER", f"窄屏首载页 {tag} 分步耗时: " + " / ".join(
+                    f"{k} {b - a:.1f}s" for k, a, b in zip(("隐藏子树", "到位", "随宽", "相位", "过渡", "抽取"), tk, tk[1:])))
                 sizes = page.evaluate(SUBTREE_SIZE_JS, list(htmls))
                 normed = sum((v[4] if len(v) > 4 else 0) for v in htmls.values())
                 if normed:
