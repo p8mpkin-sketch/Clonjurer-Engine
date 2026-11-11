@@ -2,6 +2,7 @@
 
   python engine_bench/a11y_cases/capture_ci.py windows   # GitHub windows runner(交互会话, 需 uiautomation + pillow)
   python engine_bench/a11y_cases/capture_ci.py android   # 模拟器已就绪(adb 在 PATH), AOSP 镜像
+  python engine_bench/a11y_cases/capture_ci.py macos     # GitHub macOS runner(需 pyobjc; 辅助功能/屏幕录制由 runner 镜像预授权)
 
 样本来源只有两类: 开源应用(AOSP 自带应用 / 7-Zip / Notepad++)与本仓库自建的合成应用(apps/)。
 留出(holdout)样本采下来只评分, 不据其改适配器; 调参只看 tune 与自建合成应用。
@@ -155,9 +156,70 @@ def android(serial: str = "emulator-5554"):
     return ok
 
 
+def macos():
+    """GitHub macOS runner: 自建合成应用(pyobjc)+ 开源应用(brew cask 装的), AX 树 + screencapture 窗口区域截图。"""
+    import ApplicationServices as AS
+    from AppKit import NSApplicationActivateIgnoringOtherApps, NSRunningApplication, NSWorkspace
+
+    print(f"辅助功能授权: {bool(AS.AXIsProcessTrusted())}")
+    apps = [
+        ("tune", "mac_form_prefs", [sys.executable, str(HERE / "apps" / "mac" / "form_prefs.py")], None),
+        ("holdout", "mac_platypus", ["open", "-a", "Platypus"], "Platypus"),
+        ("holdout", "mac_coteditor", ["open", "-a", "CotEditor"], "CotEditor"),
+    ]
+    ok = 0
+    tmp = HERE / "runs" / "capture_tmp"
+
+    def pid_of(name):
+        for ra in NSWorkspace.sharedWorkspace().runningApplications():
+            if str(ra.localizedName() or "") == name:
+                return int(ra.processIdentifier())
+        return None
+
+    for group, name, cmd, app_name in apps:
+        proc = None
+        try:
+            proc = subprocess.Popen(cmd)
+            tree, last = None, ""
+            for _ in range(30):
+                time.sleep(1.0)
+                pid = pid_of(app_name) if app_name else proc.pid
+                if not pid:
+                    continue
+                with_suppress(lambda: NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
+                              .activateWithOptions_(NSApplicationActivateIgnoringOtherApps))
+                try:
+                    t = a11y.capture_macos(pid, out_dir=tmp)
+                except Exception as exc:   # noqa: BLE001
+                    last = f"{type(exc).__name__}: {str(exc)[:160]}"
+                    continue
+                if t["window"][2] >= 200 and t["window"][3] >= 120 and a11y._count(t["root"]) >= 6:
+                    time.sleep(2.0)     # 窗口动画落定后重采一次
+                    tree = a11y.capture_macos(pid, out_dir=tmp)
+                    break
+            if tree is None:
+                print(f"跳过 {name}: 30s 内没采到应用窗口 {last}")
+                continue
+            shot = Path(tree.get("screenshot") or "")
+            if not shot.exists():
+                print(f"跳过 {name}: 没截到图(屏幕录制未授权?)")
+                continue
+            _save(group, name, tree, png_bytes=shot.read_bytes())
+            ok += 1
+        except Exception as exc:   # noqa: BLE001
+            print(f"失败 {name}: {type(exc).__name__}: {str(exc)[:300]}")
+        finally:
+            if app_name:
+                with_suppress(lambda: subprocess.run(["pkill", "-x", app_name], timeout=10))
+            elif proc is not None:
+                with_suppress(proc.kill)
+            time.sleep(1.0)
+    return ok
+
+
 if __name__ == "__main__":
     for _s in (sys.stdout, sys.stderr):   # Windows runner 的控制台是 cp1252, 中文日志会抛 UnicodeEncodeError
         with_suppress(lambda: _s.reconfigure(encoding="utf-8", errors="replace"))
     which = sys.argv[1] if len(sys.argv) > 1 else ""
-    n = {"windows": windows, "android": android}[which]()
+    n = {"windows": windows, "android": android, "macos": macos}[which]()
     print(f"共采集 {n} 例")
