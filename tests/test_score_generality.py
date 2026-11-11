@@ -52,9 +52,15 @@ class ScoreGenerality(unittest.TestCase):
         self.assertEqual(res["failing"], ["b", "c"])
 
     def test_l2l3_coverage_penalty(self):
-        res = sg.l2l3_part([{"summary": {"holdout": {"with_shot": 80}}}], [{"summary": {"holdout": {"flutter": 80}}}])
+        from unittest import mock
+        docs = [{"summary": {"holdout": {"with_shot": 80}}}], [{"summary": {"holdout": {"flutter": 80}}}]
+        # 覆盖度按参数给定(不随仓库里实际入库的留出样本变): 2 个应用 / 1 个平台 → 扣分; 4 个应用 / 3 个平台 → 不扣
+        with mock.patch.object(sg, "_holdout_cases", return_value=({"a", "b"}, {"android"})):
+            res = sg.l2l3_part(*docs)
         self.assertLess(res["score"], 80)
         self.assertGreater(res["coverage"], 0)
+        with mock.patch.object(sg, "_holdout_cases", return_value=({"a", "b", "c", "d"}, {"android", "macos", "windows"})):
+            self.assertEqual(sg.l2l3_part(*docs)["score"], 80)
 
 
 if __name__ == "__main__":
