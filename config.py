@@ -70,6 +70,10 @@ MAX_TAPE_BODY_BYTES = 512 * 1024       # VCR 磁带单条响应体上限(512KB)
 MAX_TAPE_TOTAL_BYTES = 16 * 1024 * 1024  # VCR 磁带总体积上限(16MB)
 TAPE_RECORD = True                      # 采集期磁带录制开关(A/B 实验用)
 PROXY_CACHE_MAX_BYTES = 8 * 1024 * 1024   # 反向代理兜底单响应缓存上限(8MB)
+# 交付产物反代兜底超时(秒): 部署机离原站远/原站慢时, 旧值 20s 会把阻塞请求拖成
+# 20s 首屏。兜底只为补未捕获的零星资源, 连不上就快速失败, 不该让访客陪等。
+PROXY_FALLBACK_CONNECT_TIMEOUT = 3.05
+PROXY_FALLBACK_READ_TIMEOUT = 6
 
 # ---------------------------------------------------------------------------
 # 设备视口预设
@@ -79,6 +83,16 @@ VIEWPORTS = {
     "laptop": {"width": 1440, "height": 900, "device_scale_factor": 1},
     "mobile": {"width": 390, "height": 844, "device_scale_factor": 2},
 }
+
+# 手机版(按 UA 分发的站): 采集时的真机仿真口径。iOS Safari UA + 触屏 + 视口 meta 生效
+PHONE_USER_AGENT = (
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 "
+    "(KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1"
+)
+PHONE_DEVICE = {"is_mobile": True, "has_touch": True}
+MOBILE_EDITION = True            # 探测原站是否按手机 UA 分发另一套页面, 是则另克隆一份手机版
+MOBILE_EDITION_SIM = 0.45        # 手机 UA 页与桌面页 class/标签集合 Jaccard 低于此值视为另一套页面
+MOBILE_EDITION_PROBE_S = 12.0    # 探测页加载上限(秒)
 
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -128,10 +142,39 @@ REPAIR_MIN_GAIN = 0.5          # 修复循环收敛判定: 缺失集合不变且
 FIDELITY_SKIP_ABOVE = 97.0    # 交互轨达到此分时不渲染保真轨(头条取优不受影响)
 VIEWPORT_VARIANT_MAX = 40      # 窄屏 DOM 变体: 结构不同的子树超过此数视为内容随机(推荐流), 不注入
 VIEWPORT_VARIANT_BYTES = 3_000_000   # 窄屏变体 HTML / 附带样式各自上限
+VARIANT_FLUID = True           # 窄屏首载页抽取变体前: 0.92 倍宽对照, 随宽同比的内联 px/img 尺寸属性改写为 vw
+VARIANT_FLUID_RESTORE = True   # 随宽对照(0.92/1.128 倍宽来回)后把内联 style/class 复原成首载态再抽变体
+NARROW_PHASE_RESET = True        # 窄屏首载页抽变体前也做状态类相位复位(滚动后才展开/轮换的同类组件回到源码 HTML 的首载分配)
+LATE_PHASE_RESET = True          # 序列化前复查一次状态类相位复位(首次复位后被页面脚本/重渲染写回的)
+VARIANT_ID_ALIGN = True          # 窄屏变体: 容器子项标签序列相同但带 id 的子项只在一侧存在 → 变体根提到容器
+VARIANT_ID_ALIGN_MAX = 12        # 上述容器数超过此值视为 id 不稳定(随机 id), 整体不用
+CONTENT_KEEP_GROUP = True        # 内容守卫: 同一父元素下成批同类兄弟(横向列表/轮播条目)被脚本重跑删掉、幸存不到 1/3 → 按原顺序放回
+VARIANT_PAIR_CONFIRM = True      # 窄屏变体比主页内容少/表单控件少时: 0.92 倍宽对照页(另一次加载)该子树结构相同 → 不算未水合, 采用
+BASELINE_PHASE_RESET = True      # 基准截图前也做状态类相位复位(基准与克隆同为源码相位, 布局校准不再把收起项撑回展开高度)
+PHASE_RESET_SIBLINGS = True      # 状态类相位复位也认没有 id 的同类兄弟组(按源码里父元素路径 + 子元素标签序列对上才用)
+CANVAS_FILL_BANDS = True         # 固化 canvas 撑满容器且宽高比各段恒定 → 平板/手机段写 width:100%+height:auto, 不钉首载宽度的 px
+VARIANT_CANVAS_CANON = False     # 结构对比时把已固化的 canvas 按 CANVAS 记(不再给 canvas 父元素出窄屏变体)。默认关: vite 手机 98→60, 窄屏变体里的 canvas 才是该宽度的真状态
+VARIANT_CANVAS_FILL = True       # 窄屏变体里脚本写了内联 px 宽高且撑满父元素的 canvas → width:100%+height:auto, 不钉首载宽度的 px
+ROOT_INLINE_VARIES_NOSIZE = True  # 根字号(html/body 内联 px)被脚本按屏宽改写时, 桌面宽采集的字体烘焙不烘字号/行高/字距(交回 rem 规则)
+NARROW_UA_SPLIT = True           # 手机 UA 首载页之外再开一张桌面 UA 390 页: 只在手机 UA 下才换结构的变体只给触屏显示
+NARROW_UA_CLS = True             # 手机 UA 首载页与桌面 UA 同宽页同路径 class 不同(桌面 UA 同宽与主页相同)→ 只给触屏手机段换 class(wix 手机卡片默认收起)
+NARROW_PHONE_UA = True           # 窄屏首载对照的手机宽(390)页用手机 UA + 触屏仿真单独上下文加载(与评分真机口径一致)
+NARROW_FLUID_PAIR = True         # 手机首载页旁再开一张 0.92 倍宽首载页, 认出只在加载时按宽度写一次的内联尺寸
+MAIN_SETTLE_MS = 4000          # 主页懒加载滚动后等 DOM「到位」(文字量/有源图片数/控件数连续不变)的上限(毫秒):
+                               # 晚水合的表单/标签页组件(wix 首屏邮箱表单)抽早了克隆整块缺失
 VIEWPORT_VARIANT_SETTLE = 4.0  # 窄屏首载页抽取变体前平滑滚动的时限(秒): 触发进视口才起播的入场动画
 STATIC_TRACK_MARGIN = 5.0     # 保真轨领先交互轨达此分差时, 试做"静态版"(剥离应用脚本)交付物
                               # 并实测; 静态版也领先交互轨此分差才设为默认预览/导出
+VIEWPORT_RELOAD_EARLY = True   # 窄屏首载对照页在主页导航提交后即发起(与主页采集并行), 而非多视口采集之后
+VIEWPORT_RELOAD_EARLY_MIN_CPUS = 8  # 核数低于此值不提前: CI(4 核)实测两页并行渲染抢 CPU, 主页懒加载/多视口采集反慢,
+                                    # 语料均值 46s -> 57s(固化 148 -> 198s, 多视口内联 56 -> 104s 合计)
+FIDELITY_PRESTART = False      # 保真轨 MHTML 在下载阶段后台页预加载。默认关: 预加载页常驻到评分结束(交互轨够高时根本用不上),
+                               # CI 4 核同时段对照: 开 均耗时 73s / 关 50.6s(基线 60.6s), 页内 CSS 动画/视频持续抢 CPU
+CALIB_INPLACE_GATE = True      # 像素校准先在活页就地注入预评, 不升即不做整页重渲染
+SESSION_FETCH_BUDGET = 12      # 下载阶段浏览器会话降级(批量并发直连 + 风控类串行重试)的总时限(秒)
 BACKFILL_BUDGET = 20          # 单轮渲染缺失回补的回源时限(秒)
+REPAIR_STRUCTURAL_ONLY = True  # 修复循环只为「结构性缺失」(样式表/字体)再渲染一轮: 真实任务日志 97 例多轮修复里
+                               # 涨分 >1 的只有 2 例(且随后被回退), 平均每例多花 15s; 图片/脚本/接口缺失补回后不再重渲染评分
 REPAIR_STOP_SCORE = 99.5      # 修复循环: 还原度达到此值即停(缺失的只剩不可见请求时不再回补)
 REPAIR_TIME_BUDGET = 300       # 修复循环时间预算(秒): 快站快修, 慢站限时收敛(P0-A 速度调度)
 AI_TIME_BUDGET = 900           # 含 AI 修复的任务时间预算(秒): 超预算跳过 AI 轮       # 渲染驱动回补循环轮数(本地渲染->收集404->回源补抓);
@@ -140,6 +183,8 @@ AI_TIME_BUDGET = 900           # 含 AI 修复的任务时间预算(秒): 超预
 LIVE_BODY_MAX = 1500          # 活体响应体复用: 单任务最多留存的浏览器已加载资源数
 LIVE_BODY_BYTES = 256 * 1024 * 1024  # 活体响应体复用: 单任务留存总字节上限
 LIVE_HARVEST_MAX = 60          # 活体会话请求差集回补的单轮最大补抓数
+LIVE_BODY_HARVEST_BUDGET = 8   # 页面关闭前取回已加载响应体的总时限(秒): 小的先取, 超时剩余交 CAS 并发下载
+LIVE_BODY_SINGLE_MAX = 512 * 1024  # 单个响应体超过此大小不经 CDP 取回(慢链路上一次 body() 可阻塞数秒), 交 CAS
 JS_REWRITE_MAX_BYTES = 8 * 1024 * 1024  # 参与本地化重写的单个 JS 文件体积上限
 
 # ---------------------------------------------------------------------------
@@ -186,3 +231,82 @@ PLATFORM_PUBLIC_URL = os.environ.get("CLONER_PUBLIC_URL", f"http://127.0.0.1:{PO
 # 审计日志保留天数(超过自动清理; 0 = 永久保留)
 AUDIT_RETENTION_DAYS = int(os.environ.get("CLONER_AUDIT_RETENTION_DAYS", "90"))
 
+# @font-face 下载计划: 只下浏览器会请求的字体(src 首个受支持格式 + 页面有对应字符的 unicode-range 切片)
+FONT_PLAN = os.environ.get("CLONER_FONT_PLAN", "1") != "0"
+# 回补预取: 活体差集回补 / Mock 资产收割的回源在 CAS 下载期间并发发起
+BACKFILL_PREFETCH = os.environ.get("CLONER_BACKFILL_PREFETCH", "1") != "0"
+# 首导航静置: 导航前挂请求追踪, load 只被挂起请求拖住时不再等满上限
+NAV_STALE_GATE = os.environ.get("CLONER_NAV_STALE_GATE", "1") != "0"
+# 修复循环: 结构性缺失(样式表/字体)与上一轮完全相同(回补补不上)即收敛
+REPAIR_STRUCT_SAME_STOP = os.environ.get("CLONER_REPAIR_STRUCT_SAME_STOP", "1") != "0"
+REPAIR_NEED_STRUCT_GAIN = os.environ.get("CLONER_REPAIR_NEED_STRUCT_GAIN", "1") != "0"  # 回补没补回样式表/字体就不再重渲染
+# 无超时的 CDP/关页调用设时限(页面渲染进程卡住时任务不再永久挂起)
+NARROW_CLOSE_TIMEOUT_S = float(os.environ.get("CLONER_NARROW_CLOSE_TIMEOUT_S", "15"))
+# 干净环境下 163/sohu(7.5MB/3.7MB)快照 0.1~0.2s; 引擎里偶发 90s 不返回。首次 45s 超时后
+# 先探测哪些 frame 卡住(进日志), 再 Page.stopLoading 取消挂起的导航/请求重试一次(MHTML_RETRY_TIMEOUT_S)
+MHTML_SNAPSHOT_TIMEOUT_S = float(os.environ.get("CLONER_MHTML_SNAPSHOT_TIMEOUT_S", "45"))
+MHTML_RETRY_TIMEOUT_S = float(os.environ.get("CLONER_MHTML_RETRY_TIMEOUT_S", "30"))
+# 序列化过薄的重导航重试: 就绪时无脚本/子框架/meta 刷新的纯静态小页不重试(没有东西能清空它)
+THIN_STATIC_NO_RETRY = os.environ.get("CLONER_THIN_STATIC_NO_RETRY", "1") != "0"
+# 布局校准就地预评: 尺寸覆盖先注入活页重截图评分, 不升即不做整页重渲染(与 CALIB_INPLACE_GATE 同口径)
+LAYOUT_CALIB_INPLACE_GATE = os.environ.get("CLONER_LAYOUT_CALIB_INPLACE_GATE", "1") != "0"
+
+# 第二批合成用例的通用修法(2026-11-11 合并线)
+# 排在脚本之后的 viewport meta(脚本运行时写的)序列化后挪到第一个脚本前, 克隆里脚本照常改写它
+VIEWPORT_META_HOIST = True
+# <html>/<body> 的分视口 class 也按 UA 拆分: 手机 UA 首载页变了、桌面 UA 同宽页没变 → 只给触屏手机段
+ROOT_CLS_UA_SPLIT = True
+# 桌面 UA 的窄屏首载页(平板段/手机桌面 UA 对照)开在全新上下文: 不继承主页的 cookie/localStorage(首访状态)
+NARROW_FRESH_CTX = True
+# 窄屏首载页(尤其手机 UA)跳到另一个文档(m. 子域/下载引导页)时不作变体来源、其资源不进活体登记; 手机段改用桌面 UA 同宽页
+NARROW_SAME_DOC = True
+# 窄屏变体运行时只把当前段生效的那份子树留在 DOM(隐藏的备选兄弟仍参与 :nth-child 计数, 奇偶样式整体错位)
+VARIANT_DOM_SWAP = True
+# 交互轨克隆页打不开时: 修复循环立即收敛, 静态版按交互轨 0 分参与比较(预览/导出不给打不开的页)
+CLONE_FAIL_FAST = True
+# 评分整页截图前剥掉弹层写回 html/body 的锁滚动声明(两侧同口径; 交付 HTML 本来就剥)
+SCORE_UNLOCK_SHOT = True
+# 窄屏阶段提速: 0.92 倍宽对照页在收回时读完即关; 每张窄屏页抽完变体即关; 不稳定页的随宽采样不再等稳定
+NARROW_PAIR_EARLY_CLOSE = True
+NARROW_PAGE_EARLY_CLOSE = True
+FLUID_SKIP_UNSTABLE_WAIT = True
+# 内容守卫: 被删块原位出现了删除后才插入的同标签同类新块(水合失配后客户端重渲染, 数据少所以更矮)= 换了一份, 不放回
+CONTENT_KEEP_NEW_TWIN = True
+# 手机 UA 窄屏首载页启动失败时, 同宽桌面 UA 页接管手机段
+NARROW_MDESK_FALLBACK = True
+# 克隆不写回「站点每次首访自己写」的存储键(主页自然首载就有, 另一全新上下文首访同值): 写回会让克隆脚本按回访者
+# 渲染(apple iphone 顶栏 ribbon=下次显示第几条, 平板/手机 81/99.8→42.7/49.8)
+STATE_SKIP_SELF_WRITTEN = True
+# 内容守卫的新插入观察器在守卫脚本执行时就挂上(只计解析完之后的插入): defer/module 脚本阶段的先插后删也认得出
+CONTENT_KEEP_EARLY_ADD = True
+# 拦截页识别看主页面标题(「验证码_xx」「安全验证」+ 正文很短): 风控页正文是登录框, 正文话术认不出
+BLOCK_TITLE_CHECK = True
+
+# ---------------------------------------------------------------------------
+# 常量环境覆盖(A/B 用): CLONER_CFG_<常量名>=值 覆盖本模块同名的 bool/int/float/str 常量。
+# 例 CLONER_CFG_NARROW_PHONE_UA=0 CLONER_CFG_MAIN_SETTLE_MS=0。CI 的 engine_env 输入就是一串这样的赋值,
+# 同一分支不改代码就能对照开关; 类型随原值, 解析失败忽略。
+# ---------------------------------------------------------------------------
+def _apply_env_overrides():
+    g = globals()
+    for k, v in os.environ.items():
+        if not k.startswith("CLONER_CFG_"):
+            continue
+        name = k[len("CLONER_CFG_"):]
+        if name not in g or name.startswith("_"):
+            continue
+        cur = g[name]
+        try:
+            if isinstance(cur, bool):
+                g[name] = v.strip().lower() in ("1", "true", "yes", "on")
+            elif isinstance(cur, int):
+                g[name] = int(v)
+            elif isinstance(cur, float):
+                g[name] = float(v)
+            elif isinstance(cur, str):
+                g[name] = v
+        except ValueError:
+            pass
+
+
+_apply_env_overrides()

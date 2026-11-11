@@ -157,7 +157,7 @@ def _scan(workspace: Path, html: str = None) -> tuple:
             except OSError:
                 html = ''
     html = _INJECT_RE.sub('', html or '')
-    lowered = None if any(ch in html for ch in _UNICODE_FOLD_TRAPS) else html.lower()
+    lowered = None if any(ch in html for ch in _UNICODE_FOLD_TRAPS) else html.lower()  # type: ignore[assignment]
     for name, entry in _DOM_TABLE.items():
         if _hit(entry, html, lowered):
             dom_hits.add(name)
@@ -291,5 +291,5 @@ def detect(workspace: Path, html: str = None, runtime=None) -> dict:
     out = {"pattern": pattern, "features": sorted(hits), "confidence": confidence,
            "evidence": {"js": sorted(js_hits), "dom": sorted(dom_hits)}}
     if rt:
-        out["evidence"]["runtime"] = sorted(rt)
+        out["evidence"]["runtime"] = sorted(rt)  # type: ignore[index]
     return out

@@ -23,6 +23,42 @@ on:
         description: "逗号分隔 URL, 覆盖语料(可选)"
         required: false
         default: ""
+      engine_env:
+        description: "实例环境变量(空格分隔 K=V, 同时段 A/B 用, 如 CLONER_FONT_PLAN=0)"
+        required: false
+        default: ""
+      viewports:
+        description: "探针视口(留空=desktop,tablet,mobile; 可填 phones / phones4 / iphone-air,galaxy-s24 等)"
+        required: false
+        default: ""
+      probe_noise:
+        description: "探针加原站自比上限与稳健口径(true/false)"
+        required: false
+        default: "false"
+      probe_each:
+        description: "每站克隆一完成立即探针(true/false)"
+        required: false
+        default: "false"
+      shots:
+        description: "低分站截图(base64)进日志(true/false; 远程只读日志尾部归因时填 false)"
+        required: false
+        default: "true"
+      dump_src:
+        description: "原站源码与克隆首页(各前 40KB)进日志(true/false; 配合 sites 做单站归因)"
+        required: false
+        default: "false"
+      probe_env:
+        description: "探针口径 A/B: 空格分隔(PROBE_CAPTURE=full 整页一次截图 / PROBE_TIMERS=live 不拦周期定时器 / PROBE_REPEAT=3 每格测 3 次取中位)"
+        required: false
+        default: ""
+      diag_keys:
+        description: "探针诊断: 逗号分隔的元素路径片段(如 #comp-abc), 两侧同路径元素的顶边/高/样式并排打印"
+        required: false
+        default: ""
+      html_grep:
+        description: "克隆 HTML 取证: 正则, 打印 index.html 里每处命中起 500 字符(最多 12 处), 另列出留在克隆里的脚本"
+        required: false
+        default: ""
   schedule:
     - cron: "30 18 * * *"   # 北京时间 02:30
 
@@ -44,6 +80,7 @@ jobs:
       - name: 启动平台实例(开放模式, 无用户)
         run: |
           mkdir -p logs
+          for kv in ${{ github.event.inputs.engine_env }}; do export "$kv"; echo "引擎常量覆盖: $kv"; done
           CLONER_PORT=8897 nohup python app.py > logs/app_ci.log 2>&1 &
           for i in $(seq 1 60); do
             curl -sf http://127.0.0.1:8897/api/auth/state && exit 0
@@ -52,9 +89,15 @@ jobs:
           echo "实例未就绪"; tail -50 logs/app_ci.log; exit 1
       - name: 跑语料
         run: |
+          extra=""
+          for kv in ${{ github.event.inputs.probe_env }}; do export "$kv"; echo "探针口径覆盖: $kv"; done
+          [ "${{ github.event.inputs.probe_noise }}" = "true" ] && extra="$extra --probe-noise"
+          [ "${{ github.event.inputs.probe_each }}" = "true" ] && extra="$extra --probe-each"
           python engine_bench/real_sites/run_corpus.py --base http://127.0.0.1:8897 \
             --timeout 3600 --tag "${{ github.event.inputs.tag || 'global' }}" \
-            --sites "${{ github.event.inputs.sites }}" || echo "有站点未完成(报告照常产出)"
+            --sites "${{ github.event.inputs.sites }}" \
+            --viewports "${{ github.event.inputs.viewports || 'desktop,tablet,mobile' }}" $extra \
+            || echo "有站点未完成(报告照常产出)"
       - name: 报告写入运行摘要
         if: always()
         run: |
@@ -65,17 +108,236 @@ jobs:
           if [ -n "$j" ]; then echo "::group::run json"; cat "$j"; echo "::endgroup::"; fi
           # 未出分/失败/低于 90 分站点的任务日志(engine.log)尾部进日志, 供远程归因
           if [ -n "$j" ]; then
-            python - "$j" <<'PY'
-          import json, sys, pathlib
+            export DIAG_KEYS="${{ github.event.inputs.diag_keys }}"
+            export HTML_GREP='${{ github.event.inputs.html_grep }}'
+            CORPUS_SHOTS="${{ github.event.inputs.shots || 'true' }}" python - "$j" <<'PY' | tee logs/diag_ci.txt
+          import json, os, sys, pathlib, re
           run = json.load(open(sys.argv[1], encoding="utf-8"))
+          SHOTS = os.environ.get("CORPUS_SHOTS", "true") != "false"
+          def _low_vps(r):
+              # 视口探针分(有稳健口径时看稳健分)低于 85 的视口: 这些宽度的原站/克隆截图进日志
+              vp = dict(r.get("vp") or {})
+              for k, v in (r.get("vp_robust") or {}).items():
+                  if v is not None:
+                      vp[k] = v
+              return [k for k, v in vp.items() if isinstance(v, (int, float)) and v < 85]
+          def _shot(path, tag, width=480, max_h=2400):
+              if not SHOTS:
+                  return
+              try:
+                  from PIL import Image
+                  import base64, io
+                  im = Image.open(path).convert("RGB")
+                  im = im.resize((width, max(1, round(im.height * width / im.width))))
+                  im = im.crop((0, 0, width, min(im.height, max_h)))
+                  buf = io.BytesIO(); im.save(buf, "JPEG", quality=60)
+                  print(f"::group::shot {tag}")
+                  b64 = base64.b64encode(buf.getvalue()).decode()
+                  for k in range(0, len(b64), 4000):
+                      print("SHOT64:" + b64[k:k + 4000])
+                  print("::endgroup::")
+              except Exception as exc:
+                  print(f"(缩略图失败 {path}: {exc})")
+          vp_dirs = sorted(pathlib.Path("engine_bench/real_sites/runs").glob("viewports_*"))
           for r in run.get("results", []):
-              if r.get("status") == "completed" and isinstance(r.get("score"), (int, float)) and r["score"] >= 90:
+              low = _low_vps(r)
+              for v, d in (r.get("vp_diag") or {}).items():
+                  print(f"::group::vp-diag {r.get('task_id')} {v} {r.get('url')}")
+                  m = d.get("metrics") or {}
+                  if m:
+                      print(f"  分项 score={m.get('score')} robust={m.get('robust')} ceiling={m.get('ceiling')} 结构={m.get('structure')} 边缘={m.get('edge')} 文本={m.get('text')} 高度比={m.get('height_ratio')} 原高={m.get('orig_h')} 克隆高={m.get('clone_h')}")
+                      segs = m.get("seg_detail") or []
+                      if segs:
+                          print("  逐段(512px: 结构/边缘) " + " ".join(f"{i}:{a:.2f}/{b:.2f}" for i, (a, b) in enumerate(segs)))
+                  for side in ("clone", "orig"):
+                      dd = d.get(side) or {}
+                      print(f"[{side}] 图 {dd.get('nimg')} 张, 裂图 {len(dd.get('broken') or [])}, 失败请求 {len(dd.get('failed') or [])}, 脚本错误 {len(dd.get('errors') or [])}")
+                      for b in (dd.get("broken") or [])[:20]: print("  裂图", b)
+                      for f in (dd.get("failed") or [])[:30]: print("  失败", f)
+                      for e in (dd.get("errors") or [])[:5]: print("  错误", e)
+                      for e in (dd.get("exceptions") or [])[:6]: print("  异常定位", e)
+                      for sh in (dd.get("sheets") or [])[:40]: print("  样式表", sh)
+                      for k, v in (dd.get("probe") or {}).items(): print(f"  探 {k}: {v}")
+                      for k, v in (dd.get("focus") or {}).items():
+                          parts = str(v).split(" CHILD ")
+                          print(f"  对照原站 0px 行容器 {k[-110:]}: {parts[0][:1500]}")
+                          for c in parts[1:12]: print(f"      CHILD {c[:1500]}")
+                      for ov in (dd.get("overlays") or [])[:12]: print("  盖屏层", ov)
+                      for hi in (dd.get("hiddenInputs") or [])[:12]: print("  隐藏控件", hi)
+                      for st in (dd.get("styles") or [])[:60]: print("  style块", st)
+                  # 可见文本行做差(忽略坐标): 原站有克隆没有 = 丢的表单/计数/文案; 反向 = 克隆多出的弹层/占位
+                  key = lambda l: l.rsplit(" @", 1)[0]
+                  co = {key(l): l for l in ((d.get("clone") or {}).get("lines") or [])}
+                  oo = {key(l): l for l in ((d.get("orig") or {}).get("lines") or [])}
+                  for l in [oo[k] for k in oo if k not in co][:14]: print("  原站独有文本", l)
+                  for l in [co[k] for k in co if k not in oo][:14]: print("  克隆独有文本", l)
+                  # 同一段文案两侧都有但纵向位置差 >40px: 从第一处位移看出哪一块高度/有无不同
+                  ypos = lambda l: int(l.rsplit(" @", 1)[1].split(",")[0]) if " @" in l else 0
+                  moved = [(ypos(oo[k]), ypos(co[k]), k) for k in oo if k in co and abs(ypos(oo[k]) - ypos(co[k])) > 40]
+                  for oy, cy, k in sorted(moved)[:12]: print(f"  位移文本 原 y={oy} 克隆 y={cy}: {k[:70]}")
+                  # 图片盒配对: 克隆改了资源名(哈希), 按 DOM 序以 (标签, 宽/8, 高/8) 做序列对齐, 对上的比位置/尺寸/原始尺寸;
+                  # 位置差 ≥3px 或尺寸差 ≥2px 的列出 —— 克隆用了写死 px 的图尺寸时整页从该图起位移, 位移文本(阈 40)看不出
+                  import difflib
+                  ob = (d.get("orig") or {}).get("boxes") or []; cb = (d.get("clone") or {}).get("boxes") or []
+                  ko = [(b[0], b[4] // 8, b[5] // 8) for b in ob]; kc = [(b[0], b[4] // 8, b[5] // 8) for b in cb]
+                  shown = 0
+                  for op in difflib.SequenceMatcher(a=ko, b=kc, autojunk=False).get_opcodes():
+                      tg, i1, i2, j1, j2 = op
+                      if tg == "equal":
+                          for a, b in zip(ob[i1:i2], cb[j1:j2]):
+                              if shown < 14 and (abs(a[2] - b[2]) >= 3 or abs(a[5] - b[5]) >= 2 or abs(a[4] - b[4]) >= 2 or (a[6], a[7]) != (b[6], b[7])):
+                                  print(f"  图盒差异 {a[0]} {a[1]}: 原 {a[4]}x{a[5]}@{a[2]} 原始{a[6]}x{a[7]} {a[8]} | 克隆 {b[4]}x{b[5]}@{b[2]} 原始{b[6]}x{b[7]} {b[8]} (Δy {b[2] - a[2]})"); shown += 1
+                      else:
+                          for a in ob[i1:i2][:4]: print(f"  原站侧图盒 {a[0]} {a[1]} {a[4]}x{a[5]}@{a[2]} 原始{a[6]}x{a[7]} [{a[9] if len(a) > 9 else ''}] 父[{a[10] if len(a) > 10 else ''}]")
+                          for b in cb[j1:j2][:4]: print(f"  克隆侧图盒 {b[0]} {b[1]} {b[4]}x{b[5]}@{b[2]} 原始{b[6]}x{b[7]} [{b[9] if len(b) > 9 else ''}] 父[{b[10] if len(b) > 10 else ''}]")
+                  # 大块显隐做差: 原站藏起(display:none)而克隆显示的块(多出的桌面横幅/手机版重复块), 及反向;
+                  # 原站侧带 inline= 的是脚本首载按宽/UA 写的内联样式(应由窄屏首载对照采到), 不带的是样式表/媒体查询没生效
+                  obk = {b[0]: b for b in ((d.get("orig") or {}).get("blocks") or [])}
+                  cbk = {b[0]: b for b in ((d.get("clone") or {}).get("blocks") or [])}
+                  vis = lambda bk, k: next((v for p, v in bk.items() if v[1] == "vis" and (p == k or p.startswith(k + ">"))), None)
+                  how = lambda b: (b[5] if len(b) > 5 else "")
+                  n = 0
+                  for k, v in obk.items():
+                      cv = cbk.get(k) if (cbk.get(k) or ["", ""])[1] == "vis" else (None if k in cbk else vis(cbk, k))
+                      if v[1] != "vis" and cv and n < 8:
+                          print(f"  原站隐藏/克隆显示 {k[-110:]}: 原 {v[1]} 图{v[4]} [{how(v)}] | 克隆 @{cv[2]} 高{cv[3]} 图{cv[4]} [{how(cv)}]"); n += 1
+                  n = 0
+                  for k, v in cbk.items():
+                      ov = obk.get(k) if (obk.get(k) or ["", ""])[1] == "vis" else (None if k in obk else vis(obk, k))
+                      if v[1] != "vis" and ov and n < 8:
+                          print(f"  克隆隐藏/原站显示 {k[-110:]}: 克隆 {v[1]} 图{v[4]} [{how(v)}] | 原 @{ov[2]} 高{ov[3]} 图{ov[4]} [{how(ov)}]"); n += 1
+                  for k in [k for k in obk if obk[k][1] == "vis" and k not in cbk][:6]: print(f"  原站独有大块 {k[-110:]} @{obk[k][2]} 高{obk[k][3]} 图{obk[k][4]} [{how(obk[k])}]")
+                  for k in [k for k in cbk if cbk[k][1] == "vis" and k not in obk][:6]: print(f"  克隆独有大块 {k[-110:]} @{cbk[k][2]} 高{cbk[k][3]} 图{cbk[k][4]} [{how(cbk[k])}]")
+                  drift = [(ypos(oo[k]), ypos(co[k]), k) for k in oo if k in co and 3 <= abs(ypos(oo[k]) - ypos(co[k])) <= 40]
+                  for oy, cy, k in sorted(drift)[:10]: print(f"  微位移文本 原 y={oy} 克隆 y={cy}: {k[:70]}")
+                  for side, dd in (("原站", d.get("orig") or {}), ("克隆", d.get("clone") or {})):
+                      for tg in (dd.get("src_tags") or []): print(f"  源码开标签[{side}] {tg[:260]}")
+                      for sc in (dd.get("state_cls") or []): print(f"  状态类与源码不同[{side}] #{sc[0]} 运行时多 {sc[1]} 源码多 {sc[2]}")
+                  # 位移源头: 两侧逐元素顶边按路径对齐, 相邻元素间 Δy 跳变 ≥4px 处 = 其前一个元素(或祖先)两侧高度不同
+                  ot = [(b[0], b) for b in ((d.get("orig") or {}).get("tops") or [])]
+                  ctm = {b[0]: b for b in ((d.get("clone") or {}).get("tops") or [])}
+                  # 指定路径片段的元素两侧并排(归因时逐层看是哪个后代的顶边/高/边距不同)
+                  import os
+                  for frag in [x.strip() for x in os.environ.get("DIAG_KEYS", "").split(",") if x.strip()]:
+                      seen = 0
+                      for k, ob in ot:
+                          if frag in k and seen < 40:
+                              seen += 1
+                              cb = ctm.get(k)
+                              print(f"  并排 {k[-90:]} 原 y={ob[1]} h={ob[2]} [{ob[3][:330]}] | 克隆 " + (f"y={cb[1]} h={cb[2]} [{cb[3][:330]}]" if cb else "无"))
+                      for k, cb in ctm.items():
+                          if frag in k and k not in dict(ot) and seen < 50:
+                              seen += 1
+                              print(f"  并排(克隆独有) {k[-90:]} y={cb[1]} h={cb[2]} [{cb[3][:330]}]")
+                  prev_dy, prev, n = 0, None, 0
+                  for k, ob in ot:
+                      cb = ctm.get(k)
+                      if not cb: continue
+                      dy = cb[1] - ob[1]
+                      if abs(dy - prev_dy) >= 4 and n < 8:
+                          n += 1
+                          print(f"  位移源头 Δy {prev_dy:+d}→{dy:+d} @原 y={ob[1]}: {k[-120:]} 高 原{ob[2]}/克隆{cb[2]} [{ob[3][:150]}]")
+                          if prev is not None:
+                              pk, pb = prev
+                              print(f"    其前元素 @原 y={pb[1]}: {pk[-120:]} 高 原{pb[2]}/克隆{ctm[pk][2]} [{pb[3][:150]}] | 克隆侧 [{ctm[pk][3][:150]}]")
+                          # 克隆独有(路径对不上原站)且落在跳变前的元素: 多插了一个兄弟时其后同级下标全错位, "其前元素"找不到它
+                          okeys = {kk for kk, _ in ot}
+                          lo = ctm[prev[0]][1] if prev is not None else -1
+                          extra = [c for kk, c in ctm.items() if kk not in okeys and lo <= c[1] <= cb[1] and c[2] >= 20]
+                          for c in sorted(extra, key=lambda c: (c[1], -c[2]))[:5]:
+                              print(f"    克隆独有元素 @克隆 y={c[1]} 高{c[2]}: {c[0][-120:]} [{c[3][:150]}]")
+                      prev_dy, prev = dy, (k, ob)
+                  # 高度不同元素只列"最深"的: 某后代已承担 ≥60% 的高度差就不重复列祖先(祖先只是跟着变高)。
+                  # 祖先/子孙关系用第 5 项(父下标)判断: 路径只留 12 层, 深处元素的路径不是祖先路径的前缀
+                  otl = [b for _, b in ot]
+                  pidx = lambda b: (b[4] if len(b) > 4 else -1)
+                  dhs = {k: ctm[k][2] - ob[2] for k, ob in ot if k in ctm and abs(ctm[k][2] - ob[2]) >= 4}
+                  carried = {}          # 原站下标 → 子孙中最大的 |Δh|
+                  for i, b in enumerate(otl):
+                      if b[0] not in dhs: continue
+                      j = pidx(b)
+                      while 0 <= j < len(otl):
+                          carried[j] = max(carried.get(j, 0), abs(dhs[b[0]])); j = pidx(otl[j])
+                  oidx = {b[0]: i for i, b in enumerate(otl)}
+                  leaf = [k for k in dhs if carried.get(oidx[k], 0) < abs(dhs[k]) * 0.6]
+                  obm = dict(ot)
+                  ctl = list(ctm.values()); cidx = {b[0]: i for i, b in enumerate(ctl)}
+                  for k in sorted(leaf, key=lambda q: -abs(dhs[q]))[:8]:
+                      ob = obm[k]
+                      print(f"  高度不同元素 Δh {dhs[k]:+d} @原 y={ob[1]}: {k[-120:]} 原{ob[2]}/克隆{ctm[k][2]} [{ob[3][:120]}] | 克隆侧 [{ctm[k][3][:120]}]")
+                      for side, x in (("原", ob[3]), ("克隆", ctm[k][3])):
+                          if "RULES[" in x:
+                              parts = x[x.index('RULES['):].split(" CHILD ")
+                              print(f"        {side}侧样式 {parts[0][:1500]}")
+                              for c in parts[1:12]: print(f"          CHILD {c[:1500]}")
+                      # 该块的直接子元素两侧高度: 看出是子项多了/少了(克隆独有/原站独有)还是某个子项变高
+                      kids = [b for b in otl if pidx(b) == oidx[k]]
+                      ck = [b for b in ctl if pidx(b) == cidx.get(k, -2)]
+                      for b in kids[:8]: print(f"      子 {b[0].split('>')[-1][:60]} 原 y={b[1]} 高{b[2]} / 克隆 {'高' + str(ctm[b[0]][2]) if b[0] in ctm else '无'} [{b[3][:80]}]")
+                      for b in [x for x in ck if x[0] not in obm][:4]: print(f"      子(克隆独有) {b[0].split('>')[-1][:60]} 克隆 y={b[1]} 高{b[2]} [{b[3][:80]}]")
+                      # 变高的常是撑满格子的背景/内盒, 真正的内容是它的兄弟, 高度由父格子的行模板决定: 列父元素及其全部子项
+                      pj = pidx(ob)
+                      if 0 <= pj < len(otl):
+                          pb = otl[pj]; pc = ctm.get(pb[0])
+                          print(f"      父 {pb[0].split('>')[-1][:60]} 原 y={pb[1]} 高{pb[2]} / 克隆 {'高' + str(pc[2]) if pc else '无'} [{pb[3][:160]}] | 克隆侧 [{pc[3][:160] if pc else ''}]")
+                          for side, x in (("原", pb[3]), ("克隆", pc[3] if pc else "")):
+                              if "RULES[" in x:
+                                  parts = x[x.index('RULES['):].split(" CHILD ")
+                                  print(f"        {side}侧样式 {parts[0][:1500]}")
+                                  for c in parts[1:12]: print(f"          CHILD {c[:1500]}")
+                          for b in [x for x in otl if pidx(x) == pj and x[0] != k][:8]:
+                              cb = ctm.get(b[0])
+                              print(f"      兄弟 {b[0].split('>')[-1][:60]} 原 y={b[1]} 高{b[2]} / 克隆 {'y=' + str(cb[1]) + ' 高' + str(cb[2]) if cb else '无'} [{b[3][:100]}]")
+                      # 直接子项都是薄包装时看不出谁变高: 再列该块内所有两侧高度差 ≥20 的后代(沿父链判定)
+                      def _under(b, root):
+                          j = pidx(b)
+                          while 0 <= j < len(otl):
+                              if j == root: return True
+                              j = pidx(otl[j])
+                          return False
+                      desc = [b for b in otl if b[0] in ctm and abs(ctm[b[0]][2] - b[2]) >= 20 and b[0] != k and _under(b, oidx[k])]
+                      for b in desc[:6]: print(f"      后代 Δh {ctm[b[0]][2] - b[2]:+d} {b[0].split('>')[-1][:60]} 原 y={b[1]} 高{b[2]}/克隆{ctm[b[0]][2]} [{b[3][:100]}] | 克隆侧 [{ctm[b[0]][3][:100]}]")
+                  print("::endgroup::")
+              # 低分视口的探针截图(原站/克隆/遮罩后)进日志: 产物存储域名在部分环境不可达
+              for v in low:
+                  for kind in ("orig", "clone", "orig_rb", "clone_rb"):
+                      for d in vp_dirs:
+                          f = d / f"{r.get('task_id')}_{v}_{kind}.png"
+                          if f.is_file():
+                              _shot(f, f"{r.get('task_id')} vp {v} {kind} {r.get('url')}", width=300, max_h=5200)
+                              break
+              # 慢站(>120s)也打日志: 远程做耗时归因
+              # 交互轨(可交互交付物)低于 90 的站同样打日志: 头条分被保真轨托住时交互轨塌陷也要能远程归因
+              # 手动派发的小规模运行(≤3 站)是在做归因, 高分站的日志也要(双峰站高分那次长什么样)
+              inter = r.get("interactive")
+              if len(run["results"]) > 3 and r.get("status") == "completed" and isinstance(r.get("score"), (int, float)) and r["score"] >= 90 and not low \
+                      and (r.get("elapsed_s") or 0) <= 120 and not (isinstance(inter, (int, float)) and inter < 90):
                   continue
+              import os
+              if os.environ.get("HTML_GREP"):
+                  hp = pathlib.Path("workspaces") / str(r.get("task_id")) / "index.html"
+                  print(f"::group::html-grep {r.get('url')}")
+                  try:
+                      doc = hp.read_text(encoding="utf-8", errors="replace")
+                      for i, m in enumerate(re.finditer(os.environ["HTML_GREP"], doc)):
+                          if i >= 12: break
+                          print(f"  HTML@{m.start()}: " + doc[m.start():m.start() + 500].replace("\n", " "))
+                      for i, m in enumerate(re.finditer(r"<script\b([^>]*)>", doc, re.I)):
+                          if i >= 80: break
+                          body = doc[m.end():m.end() + 140].replace("\n", " ")
+                          end = doc.find("</script", m.end())
+                          print(f"  SCRIPT[{i}] {m.group(1)[:200]} len={end - m.end()} :: {'' if 'src=' in m.group(1) else body}")
+                  except Exception as exc:
+                      print(f"(html-grep 失败: {exc})")
+                  print("::endgroup::")
               log = pathlib.Path("workspaces") / str(r.get("task_id")) / "engine.log"
               print(f"::group::engine.log {r.get('url')} ({r.get('status')})")
+              # 只留引擎决策行(RENDER/WARN/CSSOM/ERROR/SCORE): 下载/资源逐条日志成百上千行, 把 250 行尾部全占掉,
+              # 采集阶段的"解锁滚动/显形/变体"决策一条都看不到(allbirds 排查实证)
               keep = [l for l in (log.read_text(encoding="utf-8").splitlines() if log.is_file() else [])
-                      if not any(k in l for k in ("[CAS-", "跳过 http", "] 录制 "))]
-              print("\n".join(keep[-250:]) if keep else "(无 engine.log)")
+                      if re.search(r"\[(RENDER|WARN|CSSOM|ERROR|SCORE|FAIL)[^\]]*\]", l)
+                      and not any(k in l for k in ("[CAS-", "跳过 http", "] 录制 "))]
+              print("\n".join(keep[-300:]) if keep else "(无 engine.log)")
               print("::endgroup::")
               # 文本差: 原站有而克隆缺的行(文本召回低时定位缺什么)
               ot, ct = log.parent / "original_text.txt", log.parent / "cloned_text.txt"
@@ -90,7 +352,7 @@ jobs:
               try:
                   from PIL import Image
                   import base64, io
-                  for name in ("original_preview.png", "cloned_preview.png", "fidelity_preview.png"):
+                  for name in (("original_preview.png", "cloned_preview.png", "fidelity_preview.png") if SHOTS else ()):
                       f = log.parent / name
                       if not f.is_file():
                           continue
@@ -107,6 +369,45 @@ jobs:
                   print(f"(缩略图失败: {exc})")
           PY
           fi
+      - name: 原站源码与克隆首页进日志(单站归因)
+        if: always() && github.event.inputs.dump_src == 'true' && github.event.inputs.sites != ''
+        run: |
+          IFS=',' read -ra urls <<< "${{ github.event.inputs.sites }}"
+          for u in "${urls[@]}"; do
+            echo "::group::SRC $u"
+            curl -sL -m 20 -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36" "$u" | head -c 40000 || true
+            echo; echo "::endgroup::"
+          done
+          for d in workspaces/*/; do
+            for f in index.html index.interactive.html; do
+              [ -f "$d/$f" ] || continue
+              echo "::group::CLONE $d$f"
+              head -c 40000 "$d/$f"
+              echo; echo "::endgroup::"
+            done
+          done
+      - name: 日志尾部摘要(远程读日志只拿得到最后几千行)
+        if: always()
+        run: |
+          # 小规模归因运行(≤3 站): 诊断正文去掉截图/样式表清单后重放在尾部; 之后是逐站逐视口分数表与报告
+          j=$(ls -t engine_bench/real_sites/runs/run_*.json 2>/dev/null | head -1)
+          [ -n "$j" ] || exit 0
+          n=$(python -c "import json,sys; print(len(json.load(open(sys.argv[1], encoding='utf-8')).get('results', [])))" "$j")
+          if [ "$n" -le 3 ] && [ -f logs/diag_ci.txt ]; then
+            grep -v -e 'SHOT64:' -e '^  style块 ' -e '^  样式表 ' logs/diag_ci.txt | cut -c1-1800 | tail -n 3600 || true
+          fi
+          python - "$j" <<'PY'
+          import json, sys
+          run = json.load(open(sys.argv[1], encoding="utf-8"))
+          f = lambda v: "-" if v is None else f"{v:.1f}"
+          print("VPTABLE url | 引擎分 | 耗时 | 视口: 分/稳健/上限")
+          for r in run.get("results", []):
+              vp, rb, ce = r.get("vp") or {}, r.get("vp_robust") or {}, r.get("vp_ceiling") or {}
+              cells = "  ".join(f"{k} {f(vp.get(k))}/{f(rb.get(k))}/{f(ce.get(k))}" for k in vp)
+              print(f"VPROW {r.get('url')} | {r.get('score')} | {r.get('elapsed_s', r.get('elapsed'))} | {cells}")
+          PY
+          f=$(ls -t engine_bench/real_sites/runs/REPORT_*.md 2>/dev/null | head -1)
+          [ -n "$f" ] && cut -c1-600 "$f" | tail -n 120
       - name: 上传报告与实例日志
         if: always()
         uses: actions/upload-artifact@v4
@@ -116,3 +417,34 @@ jobs:
             engine_bench/real_sites/runs/
             logs/app_ci.log
           if-no-files-found: ignore
+      - name: 未完成任务的日志尾部(卡死归因)
+        if: always()
+        run: |
+          for d in workspaces/*/; do
+            [ -f "$d/engine.log" ] || continue
+            grep -q "完成, 耗时\|任务失败\|失败:" "$d/engine.log" && continue
+            echo "::group::UNFINISHED $d"
+            tail -30 "$d/engine.log"
+            [ -f "$d/engine.diag" ] && { echo "--- engine.diag"; tail -15 "$d/engine.diag"; }
+            echo "::endgroup::"
+          done
+      - name: 紧凑摘要(日志尾部, 远程归因只拉最后 150 行即可)
+        if: always()
+        run: |
+          j=$(ls -t engine_bench/real_sites/runs/run_*.json 2>/dev/null | head -1)
+          [ -n "$j" ] || exit 0
+          python - "$j" <<'PY'
+          import json, sys
+          run = json.load(open(sys.argv[1], encoding="utf-8"))
+          print("COMPACT env=" + "${{ github.event.inputs.engine_env }}".replace(" ", ","))
+          for r in run.get("results", []):
+              st = r.get("stage_times") or {}
+              ph = r.get("phase_times") or {}
+              print("COMPACT|{}|score={}|int={}|el={}|MB={}|n={}|nav={}|lazy={}|cas={}|bf={}|rw={}|dom={}".format(
+                  (r.get("url") or "")[8:48], r.get("score"), r.get("interactive"), r.get("elapsed_s"),
+                  round((r.get("bytes") or 0) / 1048576, 1), r.get("assets"),
+                  ph.get("采集-导航"), ph.get("采集-懒加载滚动"), st.get("CAS并发下载"),
+                  st.get("活体回补"), st.get("资源重写"), st.get("DOM渲染")))
+          s = run.get("summary") or {}
+          print("COMPACT summary " + json.dumps({k: s.get(k) for k in ("mean", "interactive_mean", "mean_elapsed", "p50_elapsed", "p90_elapsed")}, ensure_ascii=False))
+          PY

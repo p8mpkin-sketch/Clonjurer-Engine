@@ -167,20 +167,20 @@ def generate_scene_mocks(scene: str, count: int, path: str,
             if kind == "seq":
                 item[field] = seq + i
             elif kind == "名称":
-                item[field] = f"{scene or '示例'}项目-{seq + i}"
+                item[field] = f"{scene or '示例'}项目-{seq + i}"  # type: ignore[assignment]
             elif kind == "用户名":
-                item[field] = f"user_{seq + i}"
+                item[field] = f"user_{seq + i}"  # type: ignore[assignment]
             elif kind == "邮箱":
-                item[field] = f"user_{seq + i}@example.com"
+                item[field] = f"user_{seq + i}@example.com"  # type: ignore[assignment]
             elif kind == "金额":
-                item[field] = round(_random.uniform(9.9, 999.9), 2)
+                item[field] = round(_random.uniform(9.9, 999.9), 2)  # type: ignore[assignment]
             elif kind == "数量":
                 item[field] = _random.randint(0, 500)
             elif kind == "时间":
-                item[field] = _time.strftime(
+                item[field] = _time.strftime(  # type: ignore[assignment]
                     "%Y-%m-%d %H:%M:%S", _time.localtime(_time.time() - i * 3600))
             else:
-                item[field] = _random.choice(["active", "pending", "done"])
+                item[field] = _random.choice(["active", "pending", "done"])  # type: ignore[assignment]
         items.append(item)
 
     payload = {"code": 0, "message": "ok", "scene": scene or "通用",

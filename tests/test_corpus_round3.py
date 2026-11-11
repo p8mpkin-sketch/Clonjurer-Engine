@@ -29,6 +29,13 @@ def _detect(js_chunks, html=""):
         return pd.detect(ws, html=html)
 
 
+
+def _engine_src() -> str:
+    """引擎源码全文: cloner_engine.py 与按职责拆出的 core/clone/ mixin 模块(源码契约测试跨文件查)。"""
+    root = Path(ce.__file__).parent
+    names = ["cloner_engine.py"] + [f"clone/{n}.py" for n in ("capture", "download", "localize", "scoring")]
+    return "\n".join((root / n).read_text(encoding="utf-8") for n in names)
+
 class ThirdPartyStringsAreNotEvidence(unittest.TestCase):
     def test_selector_list_is_not_nuxt_or_angular(self):
         # 第三方监测脚本里的"框架挂载点"选择器清单(techcrunch 误判 Nuxt)
@@ -131,7 +138,7 @@ class UnreachableIsNotTransient(unittest.TestCase):
         self.assertIsInstance(exc, RuntimeError)
         # 文本里带 net::ERR_TIMED_OUT(瞬时标记之一), 但类型优先: run() 不整链重跑
         self.assertTrue(any(m in str(exc) for m in ce._TRANSIENT_ERROR_MARKS))
-        src = Path(ce.__file__).read_text(encoding="utf-8")
+        src = _engine_src()
         self.assertIn("not isinstance(exc, TargetUnreachable)", src)
 
 
@@ -147,7 +154,7 @@ class MediaShotContract(unittest.TestCase):
         self.assertIn("getImageData", ce.MEDIA_SHOT_JS)
         self.assertIn("data-clone-shot", ce.MEDIA_SHOT_JS)
         self.assertIn("poster", ce.MEDIA_SHOT_APPLY_JS)
-        src = Path(ce.__file__).read_text(encoding="utf-8")
+        src = _engine_src()
         # 必须在纯净基准截图之后、DEEP_FREEZE 之前
         i_shot = src.index('self._full_shot(page, self.ws / "original_preview.png"')
         i_media = src.index("self._freeze_media_from_baseline(page)")
@@ -161,7 +168,7 @@ class CloneLoadShared(unittest.TestCase):
     此前校准重渲染不滚动, vitejs 框架图标行/头像在重截图里缺失却仍"提分"。"""
 
     def test_all_renders_use_helper(self):
-        src = Path(ce.__file__).read_text(encoding="utf-8")
+        src = _engine_src()
         body = src[src.index("    def _load_clone("):]
         body = body[:body.index("\n    def ", 10)]
         self.assertIn("CLONE_SCROLL_JS", body)
@@ -243,7 +250,7 @@ class TimeFreezeOrder(unittest.TestCase):
     """时间冻结在基准截图之前、相位固化在其后且早于 DEEP_FREEZE; 评分加载序列做相位对齐。"""
 
     def test_order(self):
-        src = Path(ce.__file__).read_text(encoding="utf-8")
+        src = _engine_src()
         i_frz = src.index("frz = _safe_eval(TIME_FREEZE_JS)")
         i_shot = src.index('self._full_shot(page, self.ws / "original_preview.png"')
         i_ph = src.index("n_ph = _safe_eval(ANIM_PHASE_JS)")

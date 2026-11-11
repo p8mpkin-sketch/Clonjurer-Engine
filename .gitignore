@@ -18,3 +18,5 @@ engine_bench/perf/.fixtures/
 engine_bench/real_sites/runs/
 
 .DS_Store
+.mypy_cache/
+engine_bench/mobile_cases/runs/

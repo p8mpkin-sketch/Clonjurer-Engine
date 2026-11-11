@@ -640,7 +640,7 @@ class Database:
             where.append("(username LIKE ? OR detail LIKE ? OR ip LIKE ?)")
             params.extend([f"%{q}%", f"%{q}%", f"%{q}%"])
         clause = (" WHERE " + " AND ".join(where)) if where else ""
-        params.append(max(1, min(500, limit)))
+        params.append(max(1, min(500, limit)))  # type: ignore[arg-type]
         with self._lock:
             rows = self._conn.execute(
                 f"SELECT * FROM audit_logs{clause}"
@@ -753,7 +753,7 @@ class Database:
                  json.dumps(slots, ensure_ascii=False), int(mask), now))
             self._conn.commit()
 
-    def close(self):
+    def next_short_link_seq(self):
         with self._lock:
             row = self._conn.execute(
                 "SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM short_link_tasks").fetchone()
@@ -785,7 +785,7 @@ class Database:
             where.append("(name LIKE ? OR target_url LIKE ? OR note LIKE ?)")
             params.extend([f"%{q}%"] * 3)
         clause = (" WHERE " + " AND ".join(where)) if where else ""
-        params.append(limit)
+        params.append(limit)  # type: ignore[arg-type]
         with self._lock:
             rows = self._conn.execute(
                 f"SELECT t.*, (SELECT COUNT(*) FROM short_links s WHERE s.link_task_id = t.id) AS link_count,"
@@ -976,7 +976,7 @@ class Database:
             where.append("(name LIKE ? OR host LIKE ? OR note LIKE ?)")
             params.extend([f"%{q}%"] * 3)
         clause = (" WHERE " + " AND ".join(where)) if where else ""
-        params.append(limit)
+        params.append(limit)  # type: ignore[arg-type]
         with self._lock:
             rows = self._conn.execute(
                 f"SELECT * FROM remote_deploys{clause} ORDER BY id DESC LIMIT ?",

@@ -250,7 +250,7 @@ def view_to_node(el: ET.Element, ctx: _Ctx) -> Node:
     elif tag in ("FrameLayout", "ConstraintLayout", "RelativeLayout", "CoordinatorLayout", "MotionLayout"):
         layout = {"mode": "flex", "direction": "col"}
     elif tag in ("GridLayout", "GridView"):
-        layout = {"mode": "grid", "cols": int(a.get("columnCount") or a.get("numColumns") or 2)}
+        layout = {"mode": "grid", "cols": int(a.get("columnCount") or a.get("numColumns") or 2)}  # type: ignore[dict-item]
     elif role in ("list", "card", "header", "nav"):
         layout = {"mode": "flex", "direction": "row" if a.get("orientation") in ("horizontal", "0") or role == "nav" else "col"}
     w, h = _dim(a.get("layout_width")), _dim(a.get("layout_height"))
@@ -392,11 +392,11 @@ def from_apk(path, layout_name: str = "") -> UIR:
     src = ApkSource(path)
     layouts = src.layouts()
     report = dict(src.report)
-    report["layouts"] = len(layouts)
+    report["layouts"] = len(layouts)  # type: ignore[assignment]
     manifest = src.manifest()
-    report["manifest"] = manifest
+    report["manifest"] = manifest  # type: ignore[assignment]
     if not layouts:
-        report["static_unavailable"] = True
+        report["static_unavailable"] = True  # type: ignore[assignment]
         report["advice"] = ("未发现 res/layout*/ 布局资源(资源可能被加固/加密, 或界面由代码/Compose 构建)。"
                             "按边界不做任何绕过; 请改用授权设备上的运行期界面树采集(uiautomator dump → a11y 适配器)。")
         root = Node(role="box", layout={"mode": "flex", "direction": "col"}, box={"pad": [24]},
@@ -410,7 +410,7 @@ def from_apk(path, layout_name: str = "") -> UIR:
     try:
         tree = src.parse_layout(chosen)
     except (ValueError, ET.ParseError) as exc:
-        report["static_unavailable"] = True
+        report["static_unavailable"] = True  # type: ignore[assignment]
         report["advice"] = f"布局 {chosen} 不是合法 AXML/XML({exc}); 不做绕过, 建议运行期授权采集。"
         root = Node(role="box", children=[Node(role="text", text_ref="t0", content={"text": report["advice"]})])
         return UIR(root=root, tokens=ctx.tokens, meta={"source_kind": "apk_static", "report": report}).normalize()
@@ -418,7 +418,7 @@ def from_apk(path, layout_name: str = "") -> UIR:
     root.box.setdefault("w", "100%")
     root.box.setdefault("min_h", "100vh")
     root.box.setdefault("bg", "c0")
-    report.update({"layout": chosen, "strings": len(strings), "unresolved_refs": ctx.unresolved,
+    report.update({"layout": chosen, "strings": len(strings), "unresolved_refs": ctx.unresolved,  # type: ignore[dict-item]
                    "all_layouts": layouts[:200]})
     title = ctx.text(manifest.get("label")) or manifest.get("package", "") or src.path.stem
     return UIR(root=root, tokens=ctx.tokens,

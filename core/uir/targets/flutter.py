@@ -31,7 +31,7 @@ def _hex_color(v) -> str:
         return f"const Color(0xFF{m.group(1).upper()})"
     m = re.match(r"^#([0-9a-fA-F]{3})$", v)
     if m:
-        r, g, b = m.group(1)
+        r, g, b = m.group(1)  # type: ignore[str-unpack]
         return f"const Color(0xFF{(r*2+g*2+b*2).upper()})"
     m = re.match(r"^rgba?\((\d+),\s*(\d+),\s*(\d+)", v)
     if m:
@@ -43,6 +43,7 @@ class _Gen:
     def __init__(self, uir: UIR):
         self.uir, self.t = uir, uir.tokens
         self.colors = {}   # token key -> dart const name
+        self.images = []   # 内嵌图片(data URI, 如截图/a11y 采集时裁出的图标) → assets/img/i<N>.<ext>
 
     def color(self, v):
         if v is None:
@@ -113,9 +114,17 @@ class _Gen:
         elif role == "image":
             ph = ("Container(color: const Color(0xFFE5E7EB), alignment: Alignment.center, "
                   "child: const Icon(Icons.image_outlined, color: Color(0xFF9CA3AF)))")
+            src = str(c.get("src") or "")
+            m = re.match(r"^data:image/(png|jpe?g|webp|gif);base64,", src)
             if c.get("drawable"):
                 # 资源搬运是缺口(§9.11): 引用的 drawable 可能未随工程打包, 加载失败时回落占位而不是抛异常
                 w = f"Image.asset('assets/{c['drawable']}.png', fit: BoxFit.cover, errorBuilder: (c, e, s) => {ph})"
+            elif m:
+                # 内嵌图片(与 html_css 目标同一份像素): 落成工程资源, 按 box 尺寸铺满(与 <img> 默认拉伸一致)
+                ext = "jpg" if m.group(1).startswith("jp") else m.group(1)
+                name = f"assets/img/i{len(self.images)}.{ext}"
+                self.images.append((name, src[m.end():]))
+                w = f"Image.asset('{name}', fit: BoxFit.fill, errorBuilder: (c, e, s) => {ph})"
             else:
                 w = ph
         elif role == "icon":
@@ -144,12 +153,16 @@ class _Gen:
                 sty = []
                 if B.get("bg"):
                     sty.append(f"backgroundColor: {self.color(B['bg'])}")
+                else:
+                    # 无底色的按钮(键盘键/文字按钮)是平的: 不要 Material 默认的白底、阴影与胶囊形
+                    sty += ["backgroundColor: Colors.transparent", "shadowColor: Colors.transparent", "elevation: 0"]
                 r = self.px(B.get("radius"), "radius") if B.get("radius") is not None else None
-                if r is not None:
-                    sty.append(f"shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular({min(r, 999):g}))")
+                sty.append(f"shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular({min(r or 0, 999):g}))")
                 pad = self.sides(B.get("pad"))
-                if pad:
-                    sty.append(f"padding: {pad}")
+                sty.append(f"padding: {pad or 'EdgeInsets.zero'}")
+                if isinstance(B.get("w"), (int, float)) or isinstance(B.get("h"), (int, float)):
+                    # 尺寸由外层 Container 给定: 去掉按钮自带的最小尺寸与点击区外扩, 否则小按钮被撑大错位
+                    sty += ["minimumSize: Size.zero", "tapTargetSize: MaterialTapTargetSize.shrinkWrap"]
                 style = f", style: ElevatedButton.styleFrom({', '.join(sty)})" if sty else ""
                 w = f"ElevatedButton(onPressed: () {{ {body} }}{style}, child: {label})"
                 B = {k: v for k, v in B.items() if k not in ("bg", "radius", "pad")}
@@ -171,7 +184,20 @@ class _Gen:
                      f"return Wrap(spacing: {gap:g}, runSpacing: {gap:g}, children: [\n{ind}  "
                      + f",\n{ind}  ".join(cells) + f",\n{ind}]); }})")
             elif mode == "stack":
-                w = f"Stack(children: [\n{ind}  " + f",\n{ind}  ".join(kids) + f",\n{ind}])" if kids else "const SizedBox.shrink()"
+                # 叠放容器的子项按 box.position 绝对定位(与 html_css 的 position:absolute 同义); 此前直接塞进
+                # Stack 不加 Positioned, 全部叠在左上角(计算器键盘 12 个键挤成一摞)
+                placed = []
+                for ch, k in zip([ch for ch in node.children], kids[len(kids) - len(node.children):]):
+                    pos = (ch.box or {}).get("position")
+                    if isinstance(pos, dict):
+                        sides = ", ".join(f"{side}: {float(self.px(pos[side]) or 0):g}"
+                                          for side in ("left", "top", "right", "bottom") if pos.get(side) is not None)
+                        placed.append(f"Positioned({sides + ', ' if sides else ''}child: {k})")
+                    else:
+                        placed.append(k)
+                placed = kids[:len(kids) - len(node.children)] + placed
+                w = (f"Stack(clipBehavior: Clip.none, children: [\n{ind}  " + f",\n{ind}  ".join(placed) + f",\n{ind}])"
+                     if placed else "const SizedBox.shrink()")
             elif mode == "absolute":
                 w = kids[0] if kids else "const SizedBox.shrink()"
             elif kids and L.get("direction") == "row" and not any((ch.box or {}).get("grow") for ch in node.children):
@@ -238,12 +264,21 @@ class _Gen:
     def main_dart(self) -> str:
         body = self.widget(self.uir.root)
         title = self.uir.meta.get("title") or "Generated App"
+        e2e = bool(self.uir.meta.get("edge_to_edge"))
+        # 全面屏(UIR 坐标原点 = 屏幕顶边, 含状态栏): 状态栏透明叠在页面上, 页面不再被 SafeArea 下推一个状态栏高度
+        imp = "import 'package:flutter/services.dart';\n" if e2e else ""
+        main_fn = ("void main() {\n  WidgetsFlutterBinding.ensureInitialized();\n"
+                   "  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(statusBarColor: Colors.transparent));\n"
+                   "  runApp(const GeneratedApp());\n}" if e2e else "void main() => runApp(const GeneratedApp());")
+        scroll = f"SingleChildScrollView(\n          child: {body},\n        )"
+        page = (f"MediaQuery.removePadding(\n        context: context,\n        removeTop: true,\n        child: {scroll},\n      )"
+                if e2e else f"SafeArea(\n        child: {scroll},\n      )")
         return f"""// 由 Clonjurer 通用 UI 重建引擎从 UIR v1 生成(OutputTarget: flutter)。
 // 只含界面外观与交互意图桩, 不含业务逻辑。
 import 'package:flutter/material.dart';
-import 'theme.dart';
+{imp}import 'theme.dart';
 
-void main() => runApp(const GeneratedApp());
+{main_fn}
 
 class GeneratedApp extends StatelessWidget {{
   const GeneratedApp({{super.key}});
@@ -260,11 +295,7 @@ class GeneratedPage extends StatelessWidget {{
   @override
   Widget build(BuildContext context) {{
     return Scaffold(
-      body: SafeArea(
-        child: SingleChildScrollView(
-          child: {body},
-        ),
-      ),
+      body: {page},
     );
   }}
 }}
@@ -346,7 +377,14 @@ class FlutterTarget:
         main = g.main_dart()
         (out / "lib" / "main.dart").write_text(main, encoding="utf-8")
         (out / "lib" / "theme.dart").write_text(g.theme_dart(), encoding="utf-8")
-        (out / "pubspec.yaml").write_text(_PUBSPEC, encoding="utf-8")
+        pubspec = _PUBSPEC
+        if g.images:
+            import base64
+            (out / "assets" / "img").mkdir(parents=True, exist_ok=True)
+            for name, b64 in g.images:
+                (out / name).write_bytes(base64.b64decode(b64))
+            pubspec += "  assets:\n    - assets/img/\n"
+        (out / "pubspec.yaml").write_text(pubspec, encoding="utf-8")
         (out / "README.md").write_text(_README, encoding="utf-8")
         (out / "analysis_options.yaml").write_text(_ANALYSIS_OPTIONS, encoding="utf-8")
         (out / "test").mkdir(exist_ok=True)

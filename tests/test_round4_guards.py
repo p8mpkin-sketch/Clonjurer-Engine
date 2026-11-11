@@ -114,6 +114,19 @@ class BlockedPageDetect(unittest.TestCase):
         orig = "全部频道\n内容太火爆了，请稍后再试\n登录领限时福利\n当前页面异常\n刷新\n切换账号"
         self.assertIn("基准页即拦截页", ce.detect_blocked_page(orig, orig))
         self.assertIn("基准页即拦截页", ce.detect_blocked_page("Just a moment...\nChecking your browser", ""))
+        # Cloudflare Turnstile 新版挑战页(人机勾选框在 iframe 里, 主文档只有提示语)
+        cf = ("www.npmjs.com\nPerforming security verification\nThis website uses a security service to protect "
+              "against malicious bots.\nRay ID: a562\nPerformance and Security by Cloudflare\nPrivacy")
+        self.assertIn("基准页即拦截页", ce.detect_blocked_page(cf, cf))
+
+    def test_title_captcha_page(self):
+        # 风控验证码页: 正文是扫码/密码登录框, 只有标题直说是验证码页
+        risk = ("扫描二维码登录\n请使用 哔哩哔哩客户端\n扫码登录或扫码下载APP\n密码登录\n短信登录\n账号\n密码\n忘记密码？\n注册\n登录"
+                "\n其他方式登录\n微信登录\n微博登录\nQQ登录")
+        self.assertIn("基准页即拦截页", ce.detect_blocked_page(risk, risk, "验证码_哔哩哔哩"))
+        # 普通登录页标题不算; 正文很长的站标题里带「验证码」也不算
+        self.assertEqual(ce.detect_blocked_page(risk, risk, "登录 - 哔哩哔哩"), "")
+        self.assertEqual(ce.detect_blocked_page(self.REAL, self.REAL, "短信验证码平台"), "")
 
     def test_capture_replaced_midway(self):
         # 原站局部模块也带同样话术(基准里有), 但采集文本骤缩成拦截页: 仍判受阻
@@ -152,3 +165,40 @@ class BeaconLike(unittest.TestCase):
             self.assertTrue(beacon_like(u), u)
         for u in no:
             self.assertFalse(beacon_like(u), u)
+
+
+class ModuleImportLocalize(unittest.TestCase):
+    """ES 模块相对说明符按模块原地址解析并改成本地路径(allbirds: Vite chunk 相对 import 404 → 应用不起)。"""
+    URL = "https://cdn.shop.example/s/files/1/assets/theme.esm.js?v=123"
+    POOL = {
+        "https://cdn.shop.example/s/files/1/assets/chunk.window_CAbVMZox.esm.js": "/static/js/1a2b.js",
+        "https://cdn.shop.example/s/files/1/vendor/ScrollTrigger.js?v=9": "/static/js/3c4d.js",
+    }
+
+    def lookup(self, u):
+        stem = u.split("#", 1)[0].split("?", 1)[0]
+        for k, v in self.POOL.items():
+            if k.split("?", 1)[0] == stem:
+                return v
+        return None
+
+    def test_static_dynamic_and_reexport(self):
+        from core.clone.support import rewrite_module_imports
+        src = ('import{a as b,c}from"./chunk.window_CAbVMZox.esm.js";'
+               "import * as ST from '../vendor/ScrollTrigger.js';"
+               'export*from"./chunk.window_CAbVMZox.esm.js";'
+               "const m=()=>import('./missing.js');"
+               'import x from"https://other.cdn/abs.js";'
+               "const s='./not-an-import.js';")
+        out = rewrite_module_imports(src, self.URL, self.lookup)
+        self.assertIn('from"/static/js/1a2b.js"', out)
+        self.assertIn("from '/static/js/3c4d.js'", out)
+        self.assertIn('export*from"/static/js/1a2b.js"', out)
+        self.assertIn("import('./missing.js')", out, "未采到的 chunk 原样保留")
+        self.assertIn('"https://other.cdn/abs.js"', out)
+        self.assertIn("'./not-an-import.js'", out, "普通字符串不动")
+
+    def test_non_module_untouched(self):
+        from core.clone.support import rewrite_module_imports
+        src = "var a='./x.js'; function f(){return 1}"
+        self.assertEqual(rewrite_module_imports(src, self.URL, self.lookup), src)

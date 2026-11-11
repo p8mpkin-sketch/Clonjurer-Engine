@@ -50,6 +50,10 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     CV_ATTR_FN,
     CV_EMIT_JS,
     CV_PATHS_JS,
+    HIDDEN_ROOTS_JS,
+    TRANSITION_FINISH_JS,
+    SCROLL_LOCK_STRIP_JS,
+    VISIBLE_PATHS_JS,
     CV_PATH_FN,
     CV_QUIET_JS,
     CV_RECORD_JS,
@@ -453,9 +457,39 @@ RESPONSIVE_META = ('<meta name="viewport" '
 _VIEWPORT_META_RE = re.compile(r"<meta\b[^>]*\bname\s*=\s*[\"']?viewport\b", re.I)
 
 
-def _inject_responsive(html: str) -> str:
-    """原站已有 viewport meta → 原样返回(它自己的媒体查询就是权威); 否则补 meta + 兜底 CSS。"""
-    if _VIEWPORT_META_RE.search(html):
+_VIEWPORT_META_TAG_RE = re.compile(r"<meta\b[^>]*\bname\s*=\s*[\"']?viewport\b[^>]*>", re.I)
+
+
+def _hoist_viewport_meta(html: str) -> str:
+    """<head> 里排在脚本之后的 viewport meta 挪到第一个脚本之前(只留最后一条生效的)。
+    这类 meta 多半是脚本运行时写的(flexible 方案按 DPR 写 initial-scale=1/dpr): 序列化后它成了静态标签,
+    排在写它的脚本后面 —— 克隆里脚本先跑、找不到 meta 就新建一条, 解析器随后又读到静态那条(采集时桌面口径
+    scale=1)并以它为准, 高 DPR 手机上整页按 1 倍缩放布局(合成用例 device_flexible iPhone 45)。
+    挪到脚本前: 脚本照常找到并改写它; 脚本不跑时它仍是原来的值。"""
+    hm = re.search(r"<head\b[^>]*>", html, re.I)
+    he = re.search(r"</head\s*>", html, re.I)
+    if not hm or not he or he.start() < hm.end():
+        return html
+    head = html[hm.end():he.start()]
+    sm = re.search(r"<script\b", head, re.I)
+    metas = list(_VIEWPORT_META_TAG_RE.finditer(head))
+    if not sm or not metas or metas[-1].start() < sm.start():
+        return html
+    keep = metas[-1].group(0)
+    stripped = _VIEWPORT_META_TAG_RE.sub("", head)
+    at = re.search(r"<script\b", stripped, re.I).start()
+    head = stripped[:at] + keep + stripped[at:]
+    return html[:hm.end()] + head + html[he.start():]
+
+
+def _inject_responsive(html: str, enhance: bool = False) -> str:
+    """原站已有 viewport meta → 原样返回(它自己的媒体查询就是权威)。
+    没有 meta 的老式定宽站: 默认也原样返回 —— 触屏浏览器对它按 980 布局视口缩小显示, 补上
+    device-width meta 会让克隆在真机上换成另一种版式(douban/baidu iPad 真机口径 66/45, 原站自比 ~100)。
+    enhance=True(任务配置 responsive_enhance, 主动要"响应式增强")时才补 meta + 兜底 CSS。"""
+    if getattr(config, "VIEWPORT_META_HOIST", True):
+        html = _hoist_viewport_meta(html)
+    if not enhance or _VIEWPORT_META_RE.search(html):
         return html
     match = re.search(r"<head[^>]*>", html, re.I)
     at = match.end() if match else 0
@@ -618,6 +652,32 @@ def _anchored_sub(pattern, template: str, text: str, anchor: str, lead: str = "w
     return "".join(out)
 
 
+# ES 模块相对说明符: import x from './chunk.js' / export * from '../y.js' / import('./z.js')。
+# 模块被本地化到 /static/js/<名>.js 后, 相对说明符按本地目录解析, 原 CDN 目录里的兄弟模块全部 404
+# (allbirds: Vite/Vue 主题 40 个 chunk 404, 应用不起, 手机端整页黄块)。字面量替换表只有绝对 URL, 改不到它们。
+_MOD_SPEC_RE = re.compile(
+    r"""((?:\bimport|\bexport)\s*(?:[\w$*{}\s,]{0,400}?\s*from\s*)?|\bimport\s*\(\s*)(['"])(\.{1,2}/[^'"\n]{1,300})\2""")
+
+
+def rewrite_module_imports(text: str, module_url: str, lookup) -> str:
+    """把模块里的相对 import/export 说明符按模块原地址绝对化, 命中资源池(lookup 返回本地路径)的改成本地路径。
+
+    未命中(未采到的 chunk)原样保留; 非模块文件(没有 import/export 字样或没有 ./ ../)直接返回。"""
+    if not module_url or not text or ("./" not in text) or ("import" not in text and "export" not in text):
+        return text
+
+    def rep(m):
+        try:
+            absolute = urljoin(module_url, m.group(3))
+        except ValueError:
+            return m.group(0)
+        local = lookup(absolute)
+        if not local or not isinstance(local, str):
+            return m.group(0)
+        return m.group(1) + m.group(2) + local + m.group(2)
+    return _MOD_SPEC_RE.sub(rep, text)
+
+
 def rewrite_js_navigation(text: str) -> str:
     """JS/内联脚本导航逃逸改写(见上方注释; 幂等, 可重复应用)。"""
     if "window.open(" in text:   # 模式以字面量开头, sre 自带前缀快速扫描
@@ -691,10 +751,17 @@ _BLOCK_STRONG = re.compile(
     r"安全验证|人机验证|滑动验证|拖动(?:下方)?滑块|请完成(?:下方)?验证|"
     r"Just a moment\.\.\.|Checking (?:if the site connection is secure|your browser)|"
     r"Attention Required|unusual traffic|are you a robot|verify (?:that )?you are (?:a )?human|"
-    r"Access Denied|Too Many Requests|Request blocked|Pardon Our Interruption", re.I)
+    r"Access Denied|Too Many Requests|Request blocked|Pardon Our Interruption|"
+    # Cloudflare/Turnstile 新版挑战页: "Verify you are human" 在挑战 iframe 里, 主文档只有这几句
+    r"Performing security verification|Verifying you are human|Enable JavaScript and cookies to continue|"
+    # 网关/CDN 错误页(上游超时、源站宕机): 克隆它没有意义, 分数不反映引擎能力
+    r"Gateway time-?out|Bad gateway|Error code 5\d\d|Origin is unreachable|Web server is down|"
+    r"Service (?:Temporarily )?Unavailable", re.I)
 # 弱话术: 正常页面也常见(登录页本身就有"验证码"), 只在采集侧新出现、且整页文字很少时才算
 _BLOCK_WEAK = re.compile(r"请稍后(?:再试|重试)|系统繁忙|请(?:先)?登录后|登录后(?:查看|访问)|验证码|切换账号|captcha", re.I)
 _BLOCK_MAX_CHARS = 600
+# 标题级话术: 风控/验证码页正文常是登录框(扫码/密码登录, 不含拦截话术), 但标题直说「验证码_xx」「安全验证」
+_BLOCK_TITLE = re.compile(r"验证码|安全(?:验证|检查)|人机验证|风险验证|captcha|security check|just a moment|attention required|access denied", re.I)
 
 
 def _short_text(text: str) -> str:
@@ -706,13 +773,19 @@ def _text_len(text: str) -> int:
     return len(text.replace(" ", ""))
 
 
-def detect_blocked_page(original_text: str, captured_text: str = "") -> str:
+def detect_blocked_page(original_text: str, captured_text: str = "", title: str = "") -> str:
     """返回环境受阻原因(空串 = 未受阻)。
 
-    original_text: 基准截图时刻的可见文本; captured_text: 采集/回放出来的页面可见文本。
+    original_text: 基准截图时刻的可见文本; captured_text: 采集/回放出来的页面可见文本;
+    title: 采集时主页面的 <title>。
     """
     orig = _short_text(original_text)
     cap = _short_text(captured_text)
+    t = _short_text(title)
+    if t and orig and _text_len(orig) <= _BLOCK_MAX_CHARS and getattr(config, "BLOCK_TITLE_CHECK", True):
+        m = _BLOCK_TITLE.search(t)
+        if m:
+            return f"基准页即拦截页(标题「{t[:40]}」)"
     if orig and _text_len(orig) <= _BLOCK_MAX_CHARS:
         m = _BLOCK_STRONG.search(orig)
         if m:
@@ -829,7 +902,7 @@ def text_f_score(orig_text: str, clone_text: str, beta: float = 2.0) -> tuple:
 
     旧口径只算召回 —— 克隆页多出的错误/残留文案(兜底壳、报错提示、未隐藏
     的模板)不扣分; F2 让多余内容受罚, 同时缺失内容仍是主要失分项。"""
-    return _f_from_counts(*_token_counts(orig_text, clone_text), beta)
+    return _f_from_counts(*_token_counts(orig_text, clone_text), beta)  # type: ignore[call-arg]
 
 
 def _f_from_counts(n_a: int, n_b: int, inter: int, beta: float = 2.0) -> tuple:
@@ -911,6 +984,10 @@ _STATIC_ATTR_RE = re.compile(
     r'\s*=\s*(?:"([^"]*)"|\'([^\']*)\')', re.I)
 
 
+STATIC_LINK_REL_FILTER = os.environ.get("CLONER_STATIC_LINK_REL_FILTER", "1") != "0"
+_LINK_REL_RE = re.compile(r"""\srel\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""", re.I)
+
+
 def _static_refs(html: str, base: str) -> dict:
     """未经采集脚本的 HTML(活体 frame DOM 等)静态提取资源引用, 结构同 COLLECT_ASSETS_JS 结果。
 
@@ -931,8 +1008,21 @@ def _static_refs(html: str, base: str) -> dict:
             urls.append(absolute)
             raw_refs.append([raw, absolute])
 
+    page_self = (base or "").split("#", 1)[0]
     for m in _STATIC_ATTR_RE.finditer(html or ""):
         attr, val = m.group(1).lower(), m.group(2) if m.group(2) is not None else m.group(3)
+        if STATIC_LINK_REL_FILTER and m.group(0)[1:5].lower() == "link":
+            # <link> 只取样式/图标/预载(与 COLLECT_ASSETS_JS 同口径): rel=alternate/canonical/hreflang
+            # 指向的是其它语言/地区的整页 HTML(apple 一页 45 份 × ~450KB 当资产下载)
+            end = (html or "").find(">", m.end())
+            tag = (html or "")[m.start(): end if end > 0 else m.end()]
+            rel = _LINK_REL_RE.search(tag)
+            rel_v = (rel.group(1) or rel.group(2) or rel.group(3) or "").lower() if rel else ""
+            if not any(k in rel_v for k in ("stylesheet", "icon", "preload", "prefetch")):
+                continue
+        if attr != "srcset" and page_self and \
+                _urljoin(base, _html.unescape((val or "").strip())).split("#", 1)[0] == page_self:
+            continue   # 页面自身地址(canonical/自引用)不是资产
         if attr == "srcset":
             srcsets.append(_html.unescape(val))
         else:
@@ -950,10 +1040,10 @@ def _mask_rects(path, rects):
     draw = ImageDraw.Draw(out)
     w, h = out.size
     for x, y, rw, rh in rects:
-        if y >= h or x >= w:
+        x0, y0, x1, y1 = max(0, x), max(0, y), min(w, x + rw) - 1, min(h, y + rh) - 1
+        if x1 < x0 or y1 < y0:      # 越界/零面积(负尺寸、整块在截图上方或左侧)
             continue
-        draw.rectangle([max(0, x), max(0, y), min(w, x + rw) - 1, min(h, y + rh) - 1],
-                       fill=(128, 128, 128))
+        draw.rectangle([x0, y0, x1, y1], fill=(128, 128, 128))
     out.save(path)
 
 
@@ -1391,7 +1481,7 @@ _DIFF_DIM_LUT = [int(p * 0.45) for p in range(256)]
 
 def compute_visual_similarity(image_a: Path, image_b: Path, diff_path: Path = None,
                               orig_text: str = "", clone_text: str = "",
-                              prime_calibration: bool = False) -> dict:
+                              prime_calibration: bool = False, seg_detail: bool = False) -> dict:
     """诚实相似度 v3。返回 {score, structure, edge, text, ..., warnings[]}。
 
     v3 相对 v2 的口径修正:
@@ -1426,6 +1516,7 @@ def compute_visual_similarity(image_a: Path, image_b: Path, diff_path: Path = No
             diff_job = pool.submit(_write_diff, ra, rb, view_h, diff_path)
 
     s_sum = e_sum = w_sum = 0.0
+    segs = []
     if _np is not None:
         arr_b = _np.asarray(rb.convert("L"))
         # 参考图侧中间量(边缘掩码/NCC 去均值块)按内容缓存; 克隆图侧边缘 /
@@ -1442,6 +1533,7 @@ def compute_visual_similarity(image_a: Path, image_b: Path, diff_path: Path = No
             s_sum += w * nccs[k]
             e_sum += w * edges[k]
             w_sum += w
+            segs.append((round(float(nccs[k]), 3), round(float(edges[k]), 3)))
     else:  # pragma: no cover
         ga, gb = ra.convert("L"), rb.convert("L")
         for k in range(seg_count):
@@ -1485,7 +1577,7 @@ def compute_visual_similarity(image_a: Path, image_b: Path, diff_path: Path = No
     if structure < 0.5:
         warnings.append(f"块级结构相关性仅 {structure:.0%}: 存在大面积错位/缺失区域")
 
-    return {
+    out = {
         "score": round(max(0.0, min(100.0, score)), 1),
         "structure": round(structure, 3),
         "edge": round(edge, 3),
@@ -1497,6 +1589,9 @@ def compute_visual_similarity(image_a: Path, image_b: Path, diff_path: Path = No
         "scoring": "v3-segmented",
         "warnings": warnings,
     }
+    if seg_detail:   # 逐 512 段 (块级NCC, 边缘IoU): 定位失分落在整页哪一段(探针诊断用, 默认不加键, 基线等价闸门不变)
+        out["seg_detail"] = segs
+    return out
 
 
 def write_diff_preview(image_a: Path, image_b: Path, diff_path: Path) -> None:
@@ -1650,7 +1745,7 @@ class _SandboxHandler(SimpleHTTPRequestHandler):
             self.send_header("X-VCR-Tape", "1")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            with suppress((BrokenPipeError, ConnectionResetError)):
+            with suppress((BrokenPipeError, ConnectionResetError)):  # type: ignore[arg-type]
                 self.wfile.write(body)
         except (BrokenPipeError, ConnectionResetError):
             pass
@@ -2050,6 +2145,266 @@ def beacon_like(url: str) -> bool:
     return ext in ("gif", "jpg", "jpeg", "png", "bin", "") and len(parts.query) >= 120
 
 
+# 交付产物部署性能守卫: 落盘前把"未本地化的阻塞 <script src>"去阻塞化。 -----------
+# 根因(cgnpc 562 复盘): 采集时就 404/被跳过的外链计数脚本(cmsHitsCount.js)与跨域埋点图标
+# (govicon.js)仍留在交付 HTML 里作经典阻塞脚本。本地部署时它们本地无文件 → 走 Flask 反代兜底
+# 回源(timeout 20s)或直连一个远端慢主机, 经典脚本在解析期阻塞, 首屏被拖到 20s+。
+# 评分口径一直量不到: 离线渲染的 route guard 对非本地请求一律瞬时 abort, 而交付产物是等 20s。
+# 通用处置(不认具体站点, 只按形态): 已本地化(/static/、相对影子路径、data:)的保持不动;
+# 其余绝对/根相对未捕获的阻塞脚本 —— 埋点/计数/信标形态整条删除, 其余补 async, 使其永不阻塞首屏。
+_SCRIPT_SRC_TAG_RE = re.compile(
+    r"<script\b(?P<attrs>[^>]*?)\bsrc\s*=\s*(?P<q>[\"'])(?P<src>.*?)(?P=q)(?P<rest>[^>]*)>",
+    re.I | re.S)
+
+# 计数器/统计脚本的通用命名形态(不认具体站点): hitcount / viscount / pvcount / cmsHits 等。
+_HITCOUNT_HINT = re.compile(
+    r"(?:hit|visit|view|page)s?[-_]?count|count[-_]?(?:hit|visit|view|pv|uv)|cmshits", re.I)
+
+
+def _script_src_is_localized(src: str, local_root=None) -> bool:
+    """落盘后由静态服务器直接命中、不触发反代回源的引用形态。
+    local_root: 克隆工作区根目录; 给出时, 根相对路径在工作区里确有同路径文件(运行时原路径镜像 /
+    影子落盘)也算已本地化 —— 它由静态服务器直接命中, 不是部署隐患。"""
+    s = (src or "").strip()
+    if not s:
+        return True   # 空 src 不发请求
+    low = s.lower()
+    if low.startswith(("data:", "blob:", "about:", "javascript:", "#")):
+        return True
+    if low.startswith(("http://", "https://", "//")):
+        return False   # 绝对/协议相对: 未被本地化(本地化会改成 /static 根相对)
+    if s.startswith("/"):
+        # 根相对: /static/ 是内容寻址的已捕获资源; 其余根相对路径(/cgnhit/... 等)只有工作区里
+        # 确有同路径文件才是本地的, 否则落盘无文件, 必走反代兜底
+        if low.startswith("/static/"):
+            return True
+        return _local_file_exists(local_root, s)
+    return True        # 页面目录相对路径: 影子文件随包落盘, 静态直通
+
+
+def _local_file_exists(local_root, root_rel: str) -> bool:
+    """根相对引用(去掉查询串/片段)在工作区里是否有同路径文件。"""
+    if local_root is None or root_rel.startswith("//"):
+        return False
+    rel = re.split(r"[?#]", root_rel, maxsplit=1)[0].lstrip("/")
+    if not rel or rel.endswith("/") or ".." in rel.split("/"):
+        return False
+    try:
+        return (Path(local_root) / rel).is_file()
+    except (OSError, ValueError):
+        return False
+
+
+def neutralize_deploy_hazard_scripts(html: str, page_host: str = "", local_root=None) -> str:
+    """交付 HTML 去阻塞: 未本地化的阻塞 <script src> 不得挡首屏(删埋点 / 其余转 async)。
+    按原路径镜像落盘的同源脚本(工作区里有同路径文件)是本地的, 保持同步执行: 给它补 async 会改变
+    执行时机/次序 —— 解析期「插入型」脚本变成解析后才跑, 重放去重守卫(只管解析期)挡不住,
+    内容整段重复(example.com: /s.js 被补 async, 交互版正文出现两遍, 交互轨 70.8)。"""
+    if "<script" not in html.lower():
+        return html
+
+    def _repl(m):
+        src = m.group("src")
+        if _script_src_is_localized(src, local_root):
+            return m.group(0)
+        attrs = m.group("attrs") or ""
+        rest = m.group("rest") or ""
+        flags = (attrs + " " + rest).lower()
+        if "async" in flags or "defer" in flags:
+            return m.group(0)   # 本就非阻塞
+        abs_url = src if src.lower().startswith(("http://", "https://")) else (
+            "https:" + src if src.startswith("//") else "https://_rel_/" + src.lstrip("/"))
+        # 埋点/计数/信标形态: 部署后只会回源打点, 不改画面 → 整条移除
+        if beacon_like(abs_url) or _HITCOUNT_HINT.search(src):
+            return ""
+        # 其余未捕获阻塞脚本(可能是跨域库/未采到的应用脚本): 转 async, 保留 best-effort
+        # 执行但不再阻塞解析与首屏; 配合反代短超时+多线程, 后台 404 代价可控。
+        return f"<script{attrs} src={m.group('q')}{src}{m.group('q')}{rest} async>"
+
+    return _SCRIPT_SRC_TAG_RE.sub(_repl, html)
+
+
+# 渲染阻塞样式表(举一反三, 全语料 554 页复盘: 未本地化的阻塞 <link rel=stylesheet> 59 处/45 站,
+# 是脚本那一类的 4 倍; 44 处是根相对但原站也 404 的路径, 15 处跨域)。样式表阻塞的是**首次绘制**:
+# 部署后浏览器白屏等它加载/失败, 走反代兜底就是等满超时。未被捕获的样式表, 评分渲染时也没有它,
+# 克隆画面不依赖它 —— 改为异步加载(media=print + onload 还原), 到了就生效, 到不了不挡首屏。
+_LINK_TAG_RE = re.compile(r"<link\b(?P<attrs>[^>]*)>", re.I | re.S)
+_ATTR_RE_CACHE = {}
+
+
+def _attr(attrs: str, name: str):
+    rx = _ATTR_RE_CACHE.get(name)
+    if rx is None:
+        rx = _ATTR_RE_CACHE[name] = re.compile(
+            r"\b" + name + r"\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s>]+))", re.I)
+    m = rx.search(attrs)
+    if not m:
+        return None
+    return next((g for g in m.groups() if g is not None), "")
+
+
+def neutralize_deploy_hazard_styles(html: str, local_root=None) -> str:
+    """交付 HTML: 未本地化的渲染阻塞样式表改为异步加载(不挡首次绘制)。"""
+    if "stylesheet" not in html.lower():
+        return html
+
+    def _repl(m):
+        attrs = m.group("attrs") or ""
+        rel = (_attr(attrs, "rel") or "").lower()
+        if "stylesheet" not in rel.split() and rel != "stylesheet":
+            return m.group(0)
+        href = _attr(attrs, "href")
+        if href is None or _script_src_is_localized(href, local_root):
+            return m.group(0)
+        if "data-clone-async-css" in attrs.lower():
+            return m.group(0)
+        media = _attr(attrs, "media")
+        restore = (media or "all").replace("'", "\\'")
+        # 去掉原 media(若有), 换成 print + onload 还原
+        new_attrs = re.sub(r"\s*\bmedia\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s>]+)", "", attrs, flags=re.I)
+        return (f"<link{new_attrs} media=\"print\" "
+                f"onload=\"this.media='{restore}'\" data-clone-async-css>")
+
+    return _LINK_TAG_RE.sub(_repl, html)
+
+
+# 资源提示与外部 iframe(全语料: 未本地化 preload/prefetch 275 处/121 站, preconnect/dns-prefetch
+# 1010 处/239 站, 跨域 iframe 168 处/92 站)。提示类标签只是"预热", 指向未本地化地址时部署后只会
+# 多发一轮回源/外联请求(抢带宽、泄露访问), 删掉不影响任何渲染; 跨域 iframe(视频/地图/广告)无法
+# 本地化, 补 loading=lazy 让它不与首屏资源抢加载(评分渲染本就拦截外联, 画面不变)。
+_IFRAME_TAG_RE = re.compile(r"<iframe\b(?P<attrs>[^>]*)>", re.I | re.S)
+
+
+def neutralize_deploy_hints(html: str) -> str:
+    """删未本地化的 preload/prefetch/modulepreload 与所有 preconnect/dns-prefetch; 外部 iframe 懒加载。"""
+    low = html.lower()
+    if "<link" in low:
+        def _link(m):
+            attrs = m.group("attrs") or ""
+            rel = (_attr(attrs, "rel") or "").lower().split()
+            if not rel:
+                return m.group(0)
+            if "preconnect" in rel or "dns-prefetch" in rel:
+                return ""
+            if any(r in rel for r in ("preload", "prefetch", "modulepreload", "prerender")):
+                href = _attr(attrs, "href")
+                if href is not None and not _script_src_is_localized(href):
+                    return ""
+            return m.group(0)
+        html = _LINK_TAG_RE.sub(_link, html)
+    if "<iframe" in low:
+        def _iframe(m):
+            attrs = m.group("attrs") or ""
+            src = _attr(attrs, "src")
+            if src is None or _script_src_is_localized(src):
+                return m.group(0)
+            if re.search(r"\bloading\s*=", attrs, re.I):
+                return m.group(0)
+            return f"<iframe{attrs} loading=\"lazy\">"
+        html = _IFRAME_TAG_RE.sub(_iframe, html)
+    return html
+
+
+# 远程字体(全语料: 本地化后的 CSS 里仍有 10 万条 url(https://...) 字体切片引用, 99% 集中在采集时
+# ConnectTimeout 的字体 CDN)。浏览器按 unicode-range 懒请求切片, 每片默认 font-display:auto =
+# 文字先隐形(FOIT)最多 3s 等字体 —— 部署在连不上该 CDN 的环境里, 整页文字"闪白"数秒。
+# 通用处置: @font-face 的 src 含未本地化 url() 且未声明 font-display 时补 font-display:swap,
+# 文字立即以回退字体显示, 字体到了再换; 字体到不了画面与评分渲染(拦截外联)一致。
+_FONTFACE_RE = re.compile(r"@font-face\s*\{(?P<body>[^{}]*)\}", re.I | re.S)
+_CSS_REMOTE_URL_RE = re.compile(r"url\(\s*[\"']?(?P<u>[^\"')\s]+)", re.I)
+
+
+def fontface_swap_for_remote(css: str) -> str:
+    """CSS 文本: 含未本地化 src 的 @font-face 补 font-display:swap(已声明的不动)。返回新 CSS。"""
+    if "@font-face" not in css.lower():
+        return css
+
+    def _repl(m):
+        body = m.group("body")
+        if re.search(r"font-display\s*:", body, re.I):
+            return m.group(0)
+        urls = [u.strip() for u in _CSS_REMOTE_URL_RE.findall(body)]
+        if not any(not _script_src_is_localized(u) for u in urls):
+            return m.group(0)
+        # 浏览器实际取用的是最后一条 src 里首个受支持格式的 url(): 它已本地化时, 后面留着远程地址的
+        # 兜底格式(字体按需下载不取)永不请求, 不必改 font-display
+        srcs = list(_FF_SRC_RE.finditer(body))
+        if srcs:
+            for entry in _split_top_commas(srcs[-1].group(1)):
+                um = _FF_URL_RE.search(entry)
+                if not um:
+                    continue
+                u = (um.group(1) or um.group(2) or um.group(3) or "").strip()
+                if _font_entry_supported(entry, u):
+                    if _script_src_is_localized(u):
+                        return m.group(0)
+                    break
+        sep = "" if body.rstrip().endswith(";") or not body.strip() else ";"
+        return "@font-face{" + body.rstrip() + sep + "font-display:swap;}"
+
+    return _FONTFACE_RE.sub(_repl, css)
+
+
+_STYLE_BLOCK_RE = re.compile(r"(<style\b[^>]*>)(.*?)(</style>)", re.I | re.S)
+
+
+def neutralize_deploy_fonts(html: str) -> str:
+    """交付 HTML 内联 <style> 里的远程 @font-face 补 font-display:swap。"""
+    if "@font-face" not in html.lower():
+        return html
+    return _STYLE_BLOCK_RE.sub(lambda m: m.group(1) + fontface_swap_for_remote(m.group(2)) + m.group(3), html)
+
+
+def neutralize_deploy_hazards(html: str, page_host: str = "", local_root=None) -> str:
+    """交付 HTML 去阻塞总入口: 阻塞脚本 + 渲染阻塞样式表 + 资源提示/外部 iframe + 远程字体 swap。"""
+    if not DEPLOY_LOCAL_PATH_AWARE:
+        local_root = None
+    return neutralize_deploy_fonts(neutralize_deploy_hints(neutralize_deploy_hazard_styles(
+        neutralize_deploy_hazard_scripts(html, page_host, local_root), local_root)))
+
+
+# 交付去阻塞认工作区里按原路径落盘的文件(开关 CLONER_DEPLOY_LOCAL_PATH_AWARE=0 回到只认 /static/)
+DEPLOY_LOCAL_PATH_AWARE = os.environ.get("CLONER_DEPLOY_LOCAL_PATH_AWARE", "1") != "0"
+
+
+def deploy_hazard_audit(html: str, page_host: str = "", local_root=None) -> dict:
+    """部署隐患审计(评分口径之外的交付侧度量): 仍会阻塞首屏的未本地化脚本/样式数、
+    未本地化引用总数、涉及的外部主机。写入任务 stats, 语料跑分汇总, 让交付侧也被量到。"""
+    blocking_scripts, blocking_styles, uncaptured = 0, 0, 0
+    hosts = set()
+    if not DEPLOY_LOCAL_PATH_AWARE:
+        local_root = None
+    for m in _SCRIPT_SRC_TAG_RE.finditer(html):
+        src = m.group("src")
+        if _script_src_is_localized(src, local_root):
+            continue
+        uncaptured += 1
+        flags = ((m.group("attrs") or "") + " " + (m.group("rest") or "")).lower()
+        if "async" not in flags and "defer" not in flags:
+            blocking_scripts += 1
+        h = (urlsplit(src if "://" in src else "https:" + src).hostname or "") if src.lower().startswith(
+            ("http://", "https://", "//")) else ""
+        if h and h != (page_host or "").lower():
+            hosts.add(h)
+    for m in _LINK_TAG_RE.finditer(html):
+        attrs = m.group("attrs") or ""
+        rel = (_attr(attrs, "rel") or "").lower()
+        if "stylesheet" not in rel:
+            continue
+        href = _attr(attrs, "href")
+        if href is None or _script_src_is_localized(href, local_root):
+            continue
+        uncaptured += 1
+        if "data-clone-async-css" not in attrs.lower() and (_attr(attrs, "media") or "all") != "print":
+            blocking_styles += 1
+        if href.lower().startswith(("http://", "https://", "//")):
+            h = urlsplit(href if "://" in href else "https:" + href).hostname or ""
+            if h and h != (page_host or "").lower():
+                hosts.add(h)
+    return {"blocking_scripts": blocking_scripts, "blocking_styles": blocking_styles,
+            "uncaptured_refs": uncaptured, "external_hosts": sorted(hosts)}
+
+
 # 重放去重守卫(交互轨通用): 冻结 DOM 已含页面脚本运行后的结果, 交互版再执行一遍同步脚本时,
 # 「插入型」脚本(insertAdjacentHTML / appendChild 追加组件、轮播复制幻灯片等)会把同样的内容再插一次,
 # 页面出现成段重复(example.com 交互轨 70.4 / 保真轨 100 即此类)。守卫在所有页面脚本之前挂钩 DOM
@@ -2058,6 +2413,93 @@ def beacon_like(url: str) -> bool:
 # 移除旧节点, 提前去重会两边都丢, 实测 airpods-pro 交互轨 70.5→48); 若被标记元素在同一父节点
 # 下有相同(outerHTML, 忽略引擎自加的 data-cb/data-cv/data-cssom/data-clone-* 属性)且未被标记的兄弟——即冻结 DOM 里已有的同一份——则移除这份重放副本。
 # 框架水合/重渲染会先移除旧节点, 不会留下"旧的仍在"的孪生, 因而不受影响。
+# 克隆页运行时滚动锁守卫: 站点脚本在已序列化(脚本跑过)的 DOM 上重跑, 把弹层/抽屉当作"已打开"去水合,
+# 不等用户任何动作就给 html/body 写 overflow:hidden + position:fixed|absolute 的锁(allbirds 手机端 body 运行后
+# 多出 overflow:hidden;position:absolute;inset:0, 原站运行后 body 无内联样式)。页面加载后 12s 内、用户还没有
+# 任何激活手势时写上的锁, 一律撤掉; 用户点开菜单后的锁不管。「手势」= 守卫自己在捕获阶段听到的可信
+# pointerdown/keydown/touchstart/wheel(不用 navigator.userActivation: Playwright 的 evaluate 带 userGesture, 引擎评分/探针
+# 一调 evaluate 它就为真, 守卫在评分里形同虚设, 真机上却生效 —— 评分看不到的修复不可信)。
+SCROLL_UNLOCK_GUARD_JS = r"""<script data-clone-preview="scroll-unlock">(function(){try{if(window.__cloneUnlock)return;window.__cloneUnlock=1;var T0=Date.now(),LOCK=/^(overflow(?:-[xy])?|position|inset|top|right|bottom|left|height|width|padding-right|touch-action|overscroll-behavior(?:-[xy])?|scrollbar-gutter)$/i;function active(){return !!window.__cloneUserAct;}if(!window.__cloneActHook){window.__cloneActHook=1;['pointerdown','keydown','touchstart','wheel'].forEach(function(t){try{addEventListener(t,function(e){if(e.isTrusted)window.__cloneUserAct=1;},{capture:true,passive:true});}catch(e){}});}function strip(el){if(!el)return;var st=el.getAttribute('style')||'';if(!/(?:^|;)\s*overflow(?:-y)?\s*:\s*(?:hidden|clip)\b/i.test(st))return;var keep=[],parts=st.split(';'),n=0;for(var i=0;i<parts.length;i++){var d=parts[i],m=d.match(/^\s*([a-z-]+)\s*:\s*([\s\S]*)$/i);if(!m){if(d.trim())keep.push(d.trim());continue;}var k=m[1].toLowerCase(),v=m[2].trim();var lock=LOCK.test(k)&&!(k==='position'&&!/^(fixed|absolute)/i.test(v))&&!(k==='height'&&!/^(100%|100vh|100dvh|unset|auto|initial)$/i.test(v))&&!(k==='width'&&!/^(100%|100vw|unset|auto)$/i.test(v));if(lock)n++;else keep.push(k+': '+v);}if(!n)return;busy=1;try{if(keep.length)el.setAttribute('style',keep.join('; '));else el.removeAttribute('style');}finally{busy=0;}window.__cloneUnlocked=(window.__cloneUnlocked||0)+n;}var busy=0,mo=new MutationObserver(function(rs){if(busy||active()||Date.now()-T0>12000){try{mo.disconnect();}catch(e){}return;}for(var i=0;i<rs.length;i++){var t=rs[i].target;if(t===document.documentElement||t===document.body)strip(t);}});function arm(){try{mo.observe(document.documentElement,{attributes:true,attributeFilter:['style']});if(document.body)mo.observe(document.body,{attributes:true,attributeFilter:['style']});}catch(e){}strip(document.documentElement);strip(document.body);}if(document.body)arm();else document.addEventListener('DOMContentLoaded',arm);setTimeout(function(){try{mo.disconnect();}catch(e){}},12500);}catch(e){}})();</script>"""
+
+# 网页字体展示策略放宽(通用): @font-face{font-display:optional|fallback} 下, 字体没在首帧(optional 约 100ms /
+# fallback 3s)前到位, 浏览器就整页按后备字体排到底, 之后字体 loaded 也不再换(qwik 克隆手机端 41/100 双峰: 两张
+# Poppins 都 loaded, 却按后备字体行高排版; 原站有 CDN 预热/预加载, 首帧前到位)。克隆是离线交付, 字体从本地盘
+# 加载, 首帧前到不到位看运气; 真机看原站的稳态是网页字体, 所以改为 swap: 迟到也换上。
+_FONT_DISPLAY_RE = re.compile(r"(font-display\s*:\s*)(optional|fallback)\b", re.I)
+_FONT_DISPLAY_RE_B = re.compile(rb"(font-display\s*:\s*)(optional|fallback)\b", re.I)
+
+
+def relax_font_display(text):
+    """str 或 bytes 中的 font-display:optional|fallback → swap。"""
+    if isinstance(text, bytes):
+        return _FONT_DISPLAY_RE_B.sub(rb"\1swap", text)
+    return _FONT_DISPLAY_RE.sub(r"\1swap", text)
+
+
+# 克隆页运行时内容守卫(通用): 站点脚本在已序列化的 DOM 上重跑, 框架水合失配后按"客户端渲染"重建组件, 数据接口
+# 在克隆里拿不到就把已经渲染好的一整块拆掉(allbirds 手机端 Best Sellers 轮播 394px 整块被 Vue 移除, 页脚被
+# 换成空网格)。守卫在所有页面脚本之前挂钩 DOM 移除 API(removeChild/remove/replaceChild/replaceChildren/
+# innerHTML/textContent): 加载后 12s 内、用户没有任何激活手势时, 移除一块 ≥100px 高的已连接元素, 先量下它和
+# 父元素的高; 600ms 后若该块没有被放回文档、父元素又真的塌掉了被移除块 60% 以上的高度(即不是"拆了再换一份"),
+# 就把原块放回原位(先按原前一个兄弟定位, 它不在了才按原后一个: 站点脚本会把埋点/沙箱容器挪到 body 开头, 单按后兄弟定位曾把 739px 页脚放到 main 之前)(父元素下已有同签名、高度相近的孪生块 = 先插新再删旧的替换, 不放回)。放回后一直看着(不限时): 父元素后来又长回来(异步数据到了 / 滚到视口才挂载, 新内容补上), 再把放回的
+# 旧块撤掉, 避免双份(allbirds 轮播: Vue 先插入空壳、图片到了/swiper 初始化后才长高, 父元素 childList 不再变 —— 用
+# ResizeObserver 盯父元素尺寸 + 子树变动兜底; 曾与放回块并存 394px×2)。
+# 同类兄弟成批丢失(CONTENT_KEEP_GROUP): 横向列表/轮播的条目被拆时父元素不变矮, 上面的"塌高"判据看不见(allbirds
+# Best Sellers: 序列化 12 张卡, Vue 在克隆里按 1 条数据水合, 把其余 11 张当多余节点删掉)。同一父元素下 ≥3 个同签名
+# 兄弟在窗口内被删、幸存的同签名兄弟不到被删数的 1/3 → 按原顺序放回(与幸存者文案逐字相同的不放, 免重复);
+# 之后父元素里脚本自己又渲染出一半以上数量的同类条目(数据到了) → 撤掉放回的。
+CONTENT_KEEP_GUARD_JS = r"""<script data-clone-preview="content-keep">(function(){try{if(window.__cloneKeep)return;window.__cloneKeep=1;var T0=Date.now(),WIN=12000,MIN=100,REC=[],KEPT=[],measured=0,done=false,RST=new WeakSet(),GRP=1,TWN=1,EARLY=1;
+function active(){return !!window.__cloneUserAct;}if(!window.__cloneActHook){window.__cloneActHook=1;['pointerdown','keydown','touchstart','wheel'].forEach(function(t){try{addEventListener(t,function(e){if(e.isTrusted)window.__cloneUserAct=1;},{capture:true,passive:true});}catch(e){}});}
+function over(){return done||active()||Date.now()-T0>WIN;}
+function hOf(el){try{var r=el.getBoundingClientRect();return r.width>=60?r.height:0;}catch(e){return 0;}}
+var selfRm=0;function twin(r){try{var ch=r.p.children;for(var i=0;i<ch.length;i++){var c=ch[i];if(c!==r.n&&c.tagName===r.n.tagName&&sim(c,r.n)&&(hOf(c)>=r.h*0.75||(TWN&&((r.sib&&r.sib.indexOf(c)<0)||NEWS.has(c))&&hOf(c)>=MIN)))return true;}}catch(e){}return false;}
+function note(n,parent){if(selfRm||over()||measured>300||!n||n.nodeType!==1||!n.isConnected||!parent||parent.nodeType!==1)return;var t=n.tagName;if(/^(SCRIPT|STYLE|LINK|TEMPLATE|NOSCRIPT|META|HTML|HEAD|BODY)$/.test(t)||n.closest('svg'))return;measured++;var h=hOf(n);if(h<MIN)return;REC.push({n:n,p:parent,next:n.nextElementSibling,prev:n.previousElementSibling,h:h,ph:hOf(parent),t:Date.now(),sib:TWN?Array.prototype.slice.call(parent.children,0,200):null});sched();}
+function noteAll(parent){if(over()||!parent||parent.nodeType!==1||!parent.isConnected||!parent.children)return;var ch=parent.children;for(var i=0;i<ch.length;i++)note(ch[i],parent);}
+var tm=0;function sched(){if(tm)return;tm=setTimeout(check,600);}
+function grpMark(now){var by=new Map();for(var i=0;i<REC.length;i++){var r=REC[i];if(r.back||r.grp||now-r.t<550||r.n.isConnected||!r.p.isConnected)continue;var a=by.get(r.p);if(!a){a=[];by.set(r.p,a);}a.push(r);}
+by.forEach(function(a,p){if(a.length<3)return;var f=a[0].n,k=0;for(var i=0;i<a.length;i++)if(a[i].n.tagName===f.tagName&&sim(a[i].n,f))k++;if(k<3)return;var s=0,ch=p.children;for(var j=0;j<ch.length;j++){var c=ch[j];if(c.tagName===f.tagName&&sim(c,f)&&hOf(c)>=MIN)s++;}if(s*3>k)return;for(var i2=0;i2<a.length;i2++)if(a[i2].n.tagName===f.tagName&&sim(a[i2].n,f)){a[i2].grp=1;a[i2].gk=k;}});}
+function nt(e){return String(e.textContent||'').replace(/\s+/g,' ').trim();}
+function dupText(r){try{var ch=r.p.children;for(var i=0;i<ch.length;i++){var c=ch[i];if(c!==r.n&&c.tagName===r.n.tagName&&nt(c)===nt(r.n)&&nt(c).length>0)return true;}}catch(e){}return false;}
+function check(){tm=0;if(over()){return;}var now=Date.now(),rest=[];if(GRP)try{grpMark(now);}catch(e){}
+for(var i=REC.length-1;i>=0;i--){var r=REC[i];if(r.dead)continue;if(r.back){rest.push(r);continue;}if(now-r.t<550){rest.push(r);continue;}if(r.n.isConnected||!r.p.isConnected)continue;if(r.grp){if(dupText(r))continue;}else{var ph=hOf(r.p);if(ph>r.ph-r.h*0.6)continue;if(twin(r))continue;}try{var nx=r.prev&&r.prev.parentNode===r.p?r.prev.nextSibling:(r.next&&r.next.parentNode===r.p?r.next:null);r.p.insertBefore(r.n,nx);r.back=1;KEPT.push(r);RST.add(r.n);r.phBack=hOf(r.p);window.__cloneKept=(window.__cloneKept||0)+1;rest.push(r);try{mo.observe(r.p,{childList:true,subtree:true});if(ro)ro.observe(r.p);}catch(e){}}catch(e){}}
+rest.reverse();REC=rest;if(REC.length)sched();}
+function undo(){for(var i=0;i<KEPT.length;i++){var r=KEPT[i];if(!r.back||!r.n.isConnected)continue;if(r.grp){var c2=0,ch=r.p.children;for(var j=0;j<ch.length;j++){var c=ch[j];if(!RST.has(c)&&c.tagName===r.n.tagName&&hOf(c)>=MIN)c2++;}if(c2*2>=r.gk){try{selfRm=1;r.n.remove();selfRm=0;r.back=0;r.dead=1;window.__cloneKept=(window.__cloneKept||0)-1;}catch(e){selfRm=0;}}continue;}var ph=hOf(r.p);if(ph-r.h>=r.ph*0.7){try{r.n.remove();r.back=0;window.__cloneKept=(window.__cloneKept||0)-1;}catch(e){}}}}
+function wrap(P,k,pick){var d=Object.getOwnPropertyDescriptor(P,k);if(!d||typeof d.value!=='function')return;var f=d.value;P[k]=function(){try{pick(this,arguments);}catch(e){}return f.apply(this,arguments);};}
+function wrapSet(P,k){var d=Object.getOwnPropertyDescriptor(P,k);if(!d||!d.set)return;Object.defineProperty(P,k,{configurable:true,enumerable:d.enumerable,get:d.get,set:function(v){try{noteAll(this);}catch(e){}d.set.call(this,v);}});}
+wrap(Node.prototype,'removeChild',function(self,a){note(a[0],self);});
+wrap(Node.prototype,'replaceChild',function(self,a){note(a[1],self);});
+wrap(Element.prototype,'remove',function(self){note(self,self.parentNode);});
+wrap(Element.prototype,'replaceChildren',function(self){noteAll(self);});
+wrap(Element.prototype,'replaceWith',function(self){note(self,self.parentNode);});
+wrapSet(Element.prototype,'innerHTML');wrapSet(Node.prototype,'textContent');
+// 放回后的撤销不限时: 父元素里后来又长出新内容(懒挂载/滚到视口才渲染, 可能远在 12s 之后), 旧块必须撤, 否则双份
+var ud=0,bump=function(){clearTimeout(ud);ud=setTimeout(undo,400);},mo=new MutationObserver(bump),ro=window.ResizeObserver?new ResizeObserver(bump):null;
+setTimeout(function(){done=true;},WIN+500);
+// 水合"追加而非接管": 框架在克隆里重跑时把组件当作未渲染, 在已有 SSR 块旁边再插一份同签名(同标签、class 几乎相同且
+// 高度相近 ±25%; 或换了标签/class 但文案基本相同、高度差 ≤60%)的大块(allbirds 手机端 Best Sellers 轮播 394px×2)。加载后 12s 内、无手势、父元素下该签名块从 1 个变 2 个,
+// 1.5s 后两块仍都在且高度仍相近 → 移除序列化的旧块, 留脚本新渲染的那份(苹果类页面"先插新再删旧"会在 1.5s 内自己删旧, 不触发)
+var NEWS=new WeakSet(),PAIRS=[];
+function toks(e){return String(e.className&&e.className.baseVal!==undefined?e.className.baseVal:e.className||'').split(/\s+/).filter(Boolean);}
+function sim(a,b){var A=toks(a),B=toks(b);if(!A.length&&!B.length)return true;var S=new Set(A),n=0;for(var i=0;i<B.length;i++)if(S.has(B[i]))n++;return n/Math.max(A.length,B.length)>=0.6;}
+// 文本签名: 同一页脚/同一组件换了标签和 class 重渲染(allbirds 页脚 footer.bg-black 801px → div.grid 526px, 链接文案相同),
+// 用前 80 个词的 Jaccard 认亲
+function words(e){try{return new Set(String(e.innerText||'').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(function(w){return w.length>1;}).slice(0,80));}catch(e){return new Set();}}
+function tsim(a,b){var A=words(a),B=words(b);if(A.size<6||B.size<6)return false;var n=0;A.forEach(function(w){if(B.has(w))n++;});return n/Math.max(A.size,B.size)>=0.5;}
+function onAdded(n){if(over()||!n||n.nodeType!==1||RST.has(n)||!n.parentNode||n.parentNode.nodeType!==1)return;if(/^(SCRIPT|STYLE|LINK|TEMPLATE|NOSCRIPT|META|HTML|HEAD|BODY)$/.test(n.tagName))return;
+  NEWS.add(n);if(!DCL)return;
+  if(PAIRS.length<200){PAIRS.push({n:n,t:Date.now()});setTimeout(dedup,1600);}}
+function dedup(){if(over())return;var now=Date.now(),rest=[];for(var i=0;i<PAIRS.length;i++){var q=PAIRS[i];if(now-q.t<1500){rest.push(q);continue;}var n=q.n;if(!n.isConnected||!n.parentNode||n.parentNode.nodeType!==1)continue;var a=hOf(n);if(a<MIN)continue;
+  var old=null,cnt=0,ch=n.parentNode.children;for(var j=0;j<ch.length;j++){var c=ch[j];if(c===n||NEWS.has(c))continue;var b=hOf(c);if(b<MIN)continue;if(c.tagName===n.tagName&&sim(c,n)){cnt++;old=c;continue;}if(Math.abs(a-b)<=Math.max(a,b)*0.6&&tsim(c,n)){cnt++;old=c;}}
+  if(cnt!==1||!old)continue;var b2=hOf(old);if(old.tagName===n.tagName&&sim(old,n)&&Math.abs(a-b2)>Math.max(a,b2)*0.25)continue;
+  try{selfRm=1;old.remove();selfRm=0;window.__cloneHydrDedup=(window.__cloneHydrDedup||0)+1;}catch(e){}}PAIRS=rest;}
+var addMo=new MutationObserver(function(rs){if(over()){try{addMo.disconnect();}catch(e){}return;}if(!PARSED)return;for(var i=0;i<rs.length;i++){var a=rs[i].addedNodes;for(var j=0;j<a.length;j++)onAdded(a[j]);}});
+var DCL=document.readyState!=='loading',PARSED=DCL;
+// 解析期插入的是序列化内容本身, 不算新块(观察器回调可能晚到解析结束后才批量送达, 不能看回调时的 readyState):
+// 解析一结束(readyState→interactive, defer/module 脚本之前)把积压记录丢掉, 之后的插入才算 —— Vue 在这一段先插新块再删旧块
+if(!PARSED)document.addEventListener('readystatechange',function(){if(!PARSED&&document.readyState!=='loading'){try{addMo.takeRecords();}catch(e){}PARSED=true;}});function armAdd(){try{addMo.observe(document.documentElement,{childList:true,subtree:true});}catch(e){}}
+if(DCL||EARLY)armAdd();if(!DCL)document.addEventListener('DOMContentLoaded',function(){DCL=true;if(!EARLY)armAdd();});
+window.__cloneKeepDbg=function(){return KEPT.map(function(r){return [r.n.tagName+'.'+String(r.n.className).slice(0,30),r.h,r.ph,hOf(r.p),r.back?1:0,r.n.isConnected?1:0];});};}catch(e){}})();</script>"""
+
 REPLAY_DEDUPE_JS = r"""<script data-clone-preview="replay-dedupe">(function(){try{if(window.__cloneDedupe)return;window.__cloneDedupe=1;var M=[],mark=new WeakSet(),mo=new MutationObserver(function(){});mo.observe(document.documentElement,{childList:true,subtree:true});
 function take(was){var rs=mo.takeRecords();if(document.readyState!=='loading')return;for(var i=0;i<rs.length;i++){var a=rs[i].addedNodes;for(var j=0;j<a.length;j++){var n=a[j];if(n.nodeType===1&&!(was&&was.indexOf(n)>=0)&&!mark.has(n)){mark.add(n);if(M.length<4000)M.push(n);}}}}
 function wrap(P,k){var d=Object.getOwnPropertyDescriptor(P,k);if(!d||typeof d.value!=='function')return;var f=d.value;P[k]=function(){var was=[];for(var i=0;i<arguments.length;i++){var x=arguments[i];if(x&&x.nodeType===1&&x.isConnected)was.push(x);}mo.takeRecords();var r=f.apply(this,arguments);take(was);return r;};}
@@ -2067,3 +2509,813 @@ function wrapSet(P,k){var d=Object.getOwnPropertyDescriptor(P,k);if(!d||!d.set)r
 wrapSet(Element.prototype,'innerHTML');wrapSet(Element.prototype,'outerHTML');
 var R=/ data-(?:cb|cv[\w-]*|cssom|clone[\w-]*)="[^"]*"/g;function sweep(){try{take(null);var n=0;for(var i=0;i<M.length;i++){var m=M[i];if(!m||!m.isConnected||!m.parentNode)continue;var t=m.tagName;if(t==='SCRIPT'||t==='HTML'||t==='HEAD'||t==='BODY')continue;var h=m.outerHTML;if(h.length<24||h.length>400000)continue;h=h.replace(R,'');var tc=m.textContent,s=m.parentNode.children;for(var j=0;j<s.length;j++){var e=s[j];if(e===m||mark.has(e)||e.tagName!==t||e.textContent!==tc)continue;if(e.outerHTML.replace(R,'')===h){m.remove();M[i]=null;n++;break;}}}if(n)window.__cloneDedupeRemoved=(window.__cloneDedupeRemoved||0)+n;}catch(e){}}
 window.__cloneDedupeSweep=sweep;document.addEventListener('DOMContentLoaded',function(){sweep();try{mo.disconnect();}catch(e){}});window.addEventListener('load',function(){sweep();setTimeout(sweep,800);setTimeout(sweep,2500);});}catch(e){}})();</script>"""
+
+
+# ---------------------------------------------------------------------------
+# 手机版(按 UA 分发的站): 探测判定 + 克隆入口路由
+# ---------------------------------------------------------------------------
+# 很多站对手机 UA 返回另一套页面(跳 m./3g. 子域, 或同址下发移动模板), 真机打开原站看到的
+# 是手机版, 而桌面 UA 采集的克隆在手机上只能把桌面版挤窄。判定只看两个通用信号:
+# 落地地址不同, 或页面骨架(标签 + class 词集合)几乎不重合。响应式站(同一份 HTML 靠媒体
+# 查询切换)两侧骨架高度重合, 不会误判。
+_SIG_TAG_RE = re.compile(r"<([a-zA-Z][a-zA-Z0-9-]*)\b([^>]*)>")
+_SIG_CLASS_RE = re.compile(r"""\bclass\s*=\s*(?:"([^"]*)"|'([^']*)')""", re.I)
+_SIG_SKIP_TAGS = {"html", "head", "body", "meta", "link", "script", "style", "noscript", "br", "template"}
+
+
+def dom_signature(html: str, limit: int = 6000) -> set:
+    """页面骨架词集合: 标签名与 tag.class 词(前 limit 个元素), 文本与属性值不计。"""
+    out = set()
+    body = html or ""
+    m = re.search(r"<body\b", body, re.I)
+    if m:
+        body = body[m.start():]
+    for i, t in enumerate(_SIG_TAG_RE.finditer(body)):
+        if i >= limit:
+            break
+        tag = t.group(1).lower()
+        if tag in _SIG_SKIP_TAGS:
+            continue
+        out.add(tag)
+        c = _SIG_CLASS_RE.search(t.group(2) or "")
+        if c:
+            for w in (c.group(1) or c.group(2) or "").split():
+                if not re.search(r"\d{3,}|^(active|current|cur|on|show|hide|hover|selected)$", w):
+                    out.add(f"{tag}.{w}")
+    return out
+
+
+def _edition_url_key(url: str) -> tuple:
+    p = urlsplit(url or "")
+    host = (p.hostname or "").lower()
+    if host.startswith("www."):
+        host = host[4:]
+    return host, (p.path or "/").rstrip("/") or "/"
+
+
+def separate_phone_edition(desktop_url: str, desktop_html: str, phone_url: str, phone_html: str,
+                           threshold: float = 0.45):
+    """手机 UA 下是否是另一套页面。返回 (是否, 原因说明)。"""
+    if not phone_html or len(phone_html) < 200:
+        return False, "手机 UA 页为空"
+    if _edition_url_key(desktop_url) != _edition_url_key(phone_url):
+        return True, f"手机 UA 落地地址不同: {phone_url}"
+    a, b = dom_signature(desktop_html), dom_signature(phone_html)
+    if len(a) < 8 or len(b) < 8:
+        return False, "骨架过小, 不判定"
+    sim = len(a & b) / max(1, len(a | b))
+    if sim < threshold:
+        return True, f"同址下发不同模板(骨架重合 {sim:.2f} < {threshold})"
+    return False, f"同一套页面(骨架重合 {sim:.2f})"
+
+
+PHONE_EDITION_FILE = "index.m.html"
+# 克隆入口路由: 手机 UA 打开克隆时换到手机版(与原站按 UA 分发同口径); ?clone_edition=desktop 可强制看桌面版。
+# 平板(iPadOS 默认发桌面 UA、安卓平板不带 Mobile)与原站一样留在桌面版。
+EDITION_ROUTER_SCRIPT = (
+    '<script data-clone-preview="edition-router">(function(){try{var u=navigator.userAgent||"";'
+    'if(!/iPhone|iPod|Android.+Mobile|Windows Phone|Mobile.+Firefox|HarmonyOS.+Mobile|OpenHarmony.+Mobile/i.test(u))return;'
+    'if(/[?&]clone_edition=desktop/.test(location.search))return;'
+    'var p=location.pathname,i=p.lastIndexOf("/");'
+    'location.replace(p.slice(0,i+1)+"' + PHONE_EDITION_FILE + '"+location.search+location.hash);'
+    '}catch(e){}})();</script>'
+)
+
+
+def inject_edition_router(html: str) -> str:
+    """把入口路由插到 <head> 最前(早于时间冻结/SPA 伪装等注入, 先跳转再说); 已有则不重复。"""
+    if not html or 'data-clone-preview="edition-router"' in html:
+        return html
+    m = re.search(r"<head\b[^>]*>", html, re.I)
+    at = m.end() if m else 0
+    return html[:at] + EDITION_ROUTER_SCRIPT + html[at:]
+
+
+def merge_static_tree(src: Path, dst: Path) -> int:
+    """手机版资源并入主工作区(CAS 文件名, 同名即同内容): 只拷主工作区没有的文件。"""
+    import shutil
+    n = 0
+    if not src.is_dir():
+        return 0
+    for f in src.rglob("*"):
+        if not f.is_file():
+            continue
+        target = dst / f.relative_to(src)
+        if target.exists():
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(f, target)
+        n += 1
+    return n
+
+
+# ---------------------------------------------------------------------------
+# @font-face 下载计划: 只下浏览器确实会用到的那份字体文件
+# ---------------------------------------------------------------------------
+# 实测(cz 本机 250 任务): apple.com.cn 每次下 164 个字体文件 42.6MB(同一字重 woff2/woff/ttf/eot
+# 四份兜底, 占全部下载字节 83%), wordpress.org 156 个 17.9MB(unicode-range 切片: 西里尔/希腊/越南
+# 等页面根本没有的字符)。浏览器的取用规则是确定的:
+#   ① src 列表按序取第一个"格式受支持"的 url(), 之后的兜底格式永不请求(该份加载失败才会往后走);
+#   ② 带 unicode-range 的切片只在页面里出现落在范围内的字符时才请求。
+# 据此把"证明不会被请求"的字体 URL 从下载队列剔除: 交付产物里它们保持原远程地址(部署环境在线时
+# 浏览器照常可取, 离线时与评分渲染一致), 画面与浏览器实际行为逐字节相同。
+# 保守边界: 首选份下载失败时兜底份照常补下; 含私用区(图标字体)的切片不按字符剔除; 活体加载过的一律保留。
+_FONT_OK_FMT = ("woff2", "woff", "truetype", "opentype", "collection")
+_FONT_BAD_EXT = (".eot", ".svg", ".svgz")
+_FF_BLOCK_RE = re.compile(r"@font-face\s*\{([^{}]*)\}", re.I | re.S)
+_FF_SRC_RE = re.compile(r"(?:^|[;{\s])src\s*:\s*((?:[^;\"'()]|\"[^\"]*\"|'[^']*'|\([^()]*\))+)", re.I)
+_FF_URANGE_RE = re.compile(r"unicode-range\s*:\s*([^;}]+)", re.I)
+_FF_URL_RE = re.compile(r"""url\(\s*(?:"([^"]*)"|'([^']*)'|([^)'"\s]+))\s*\)""", re.I)
+_FF_FMT_RE = re.compile(r"""format\(\s*["']?([^"')]+)""", re.I)
+_CSS_ESC_RE = re.compile(r"\\([0-9a-fA-F]{1,6})")
+
+
+def _split_top_commas(text: str):
+    parts, depth, quote, cur = [], 0, "", []
+    for ch in text:
+        if quote:
+            cur.append(ch)
+            if ch == quote:
+                quote = ""
+            continue
+        if ch in "\"'":
+            quote = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+        elif ch == "," and depth == 0:
+            parts.append("".join(cur))
+            cur = []
+            continue
+        cur.append(ch)
+    if cur:
+        parts.append("".join(cur))
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _font_entry_supported(entry: str, url: str) -> bool:
+    m = _FF_FMT_RE.search(entry)
+    if m:
+        fmt = m.group(1).strip().lower()
+        return any(fmt.startswith(f) for f in _FONT_OK_FMT)
+    path = urlsplit(url).path.lower()
+    return not path.endswith(_FONT_BAD_EXT)
+
+
+def _parse_unicode_range(text: str):
+    out = []
+    for tok in text.split(","):
+        tok = tok.strip().upper()
+        if not tok.startswith("U+"):
+            continue
+        tok = tok[2:]
+        try:
+            if "?" in tok:
+                lo, hi = int(tok.replace("?", "0"), 16), int(tok.replace("?", "F"), 16)
+            elif "-" in tok:
+                a, b = tok.split("-", 1)
+                lo, hi = int(a, 16), int(b, 16)
+            else:
+                lo = hi = int(tok, 16)
+        except ValueError:
+            return None   # 解析不了: 当作全范围(保守)
+        out.append((lo, hi))
+    return out or None
+
+
+def _is_private_use(lo: int, hi: int) -> bool:
+    return (lo <= 0xF8FF and hi >= 0xE000) or hi >= 0xF0000
+
+
+def page_codepoints(texts) -> list:
+    """页面可能出现的字符全集(已排序码位): HTML 原文(含反转义) + CSS content 的 \\XXXX 转义。
+    原文含脚本/JSON/属性值, 是渲染文字的超集 —— 只会多留切片, 不会少留。"""
+    import html as _h
+    cps = set()
+    for t in texts:
+        if not t:
+            continue
+        cps.update(map(ord, t))
+        if "&" in t:
+            cps.update(map(ord, _h.unescape(t)))
+        if "\\" in t:
+            for m in _CSS_ESC_RE.finditer(t):
+                with suppress(ValueError):
+                    cps.add(int(m.group(1), 16))
+    return sorted(cps)
+
+
+def _range_hits(ranges, cps) -> bool:
+    import bisect
+    for lo, hi in ranges:
+        i = bisect.bisect_left(cps, lo)
+        if i < len(cps) and cps[i] <= hi:
+            return True
+    return False
+
+
+def fontface_plan(css_text: str, base_url: str, cps=None):
+    """返回 (needed, skippable, fallback_of): 浏览器会请求的字体 URL / 证明不会请求的 URL /
+    {兜底 URL: 它前面的首选 URL}(首选下载失败时据此补下兜底)。cps=None 时不按字符剔除。"""
+    needed, skippable, fallback_of = set(), set(), {}
+    if not css_text or "@font-face" not in css_text.lower():
+        return needed, skippable, fallback_of
+    for block in _FF_BLOCK_RE.finditer(css_text):
+        body = block.group(1)
+        srcs = list(_FF_SRC_RE.finditer(body))
+        if not srcs:
+            continue
+        entries = []   # (abs_url, supported)
+        for sm in srcs:
+            for entry in _split_top_commas(sm.group(1)):
+                um = _FF_URL_RE.search(entry)
+                if not um:
+                    continue
+                raw = (um.group(1) or um.group(2) or um.group(3) or "").strip()
+                if not raw or raw.startswith(("blob:", "#")):
+                    continue
+                if raw.startswith("data:"):
+                    entries.append(("data:", _font_entry_supported(entry, ""), sm is srcs[-1]))
+                    continue
+                absu = _urljoin(base_url, raw)
+                if not absu.startswith(("http://", "https://")):
+                    continue
+                entries.append((absu, _font_entry_supported(entry, absu), sm is srcs[-1]))
+        if not entries:
+            continue
+        # 同一规则里多条 src 声明: 只有最后一条生效
+        live_entries = [(u, ok) for u, ok, last in entries if last]
+        dead = {u for u, ok, last in entries if not last}
+        out_of_range = False
+        if cps is not None:
+            um = _FF_URANGE_RE.search(body)
+            ranges = _parse_unicode_range(um.group(1)) if um else None
+            if ranges and not any(_is_private_use(lo, hi) for lo, hi in ranges) \
+                    and not _range_hits(ranges, cps):
+                out_of_range = True
+        primary = None
+        for u, ok in live_entries:
+            if primary is None and ok and not out_of_range:
+                primary = u
+                if u != "data:":
+                    needed.add(u)
+            else:
+                dead.add(u)
+                if primary not in (None, "data:") and ok:
+                    fallback_of.setdefault(u, primary)
+        dead.discard("data:")
+        skippable |= dead
+    skippable -= needed
+    return needed, skippable, fallback_of
+
+
+# ---- 窄屏/流式字号辅助(来自移动端适配线) ----
+_FLUID_GEOM_RE = re.compile(r"(?:^|;)\s*(attr-width|attr-height|width|height|min-width|max-width|min-height|max-height|font-size|line-height|"
+                            r"letter-spacing|top|left|right|bottom|margin-[a-z]+|padding-[a-z]+|gap|column-gap|row-gap)\s*:\s*"
+                            r"(-?\d+(?:\.\d+)?)px\s*(!important)?(?=;|$)", re.I)
+
+
+def _root_inline_varies(reads) -> bool:
+    """reads: 各视口宽下 ROOT_FONT_READ_JS 的读数 [宽, html 内联px, html 计算px, body 内联px, body 计算px]。
+    <html> 或 <body> 的内联 px 字号在不同宽度下相差 >1.5% 即认定由脚本按屏宽改写。"""
+    for i in (1, 3):
+        vals = [r[i] for r in reads if r and len(r) > i and r[i] > 0]
+        if len(vals) >= 2 and max(vals) / min(vals) > 1.015:
+            return True
+    return False
+
+
+def _subtree_sig(paths, root):
+    """CV_PATHS_JS 结果里 root 及其后代的结构签名(路径 → 标签 + 子元素标签序列); root 不在则为 None。"""
+    if root not in paths:
+        return None
+    pre = root + ">"
+    return {k: (v[0], v[3]) for k, v in paths.items() if k == root or k.startswith(pre)}
+
+
+def _id_misaligned_parents(main, other):
+    """CV_PATHS_JS 两页结果里, 子元素标签序列相同而 id 序列错位的容器路径。
+    错位: 同一序号两侧 id 不同, 且其中带 id 的那个在另一页整页都不存在(不是换了位置, 是另一页没有这个组件)。"""
+    def _all_ids(tbl):
+        out = set()
+        for v in tbl.values():
+            if len(v) > 8 and v[8]:
+                out.update(x for x in v[8].split(",") if x)
+        return out
+    ids_m, ids_o = _all_ids(main), _all_ids(other)
+    if not ids_m or not ids_o:
+        return []
+    out = []
+    for p, v in main.items():
+        o = other.get(p)
+        if not p or not o or len(v) <= 8 or len(o) <= 8 or o[0] != v[0] or o[3] != v[3] or v[8] == o[8]:
+            continue
+        a, b = v[8].split(","), o[8].split(",")
+        if len(a) != len(b):
+            continue
+        if any(x != y and ((x and x not in ids_o) or (y and y not in ids_m)) for x, y in zip(a, b)):
+            out.append(p)
+    return out
+
+
+def _source_id_classes(html, limit=6000):
+    """源码 HTML 里带 id 的开标签的 class: {id: class}。只做状态类相位复位的对照, 解析失败返回空。"""
+    if not html or len(html) > 8_000_000:
+        return {}
+    from html.parser import HTMLParser
+
+    out = {}
+
+    class _P(HTMLParser):
+        def handle_starttag(self, tag, attrs):
+            if len(out) >= limit:
+                return
+            d = dict(attrs)
+            i, c = d.get("id"), d.get("class")
+            if i and c is not None and i not in out:
+                out[i] = c
+
+    try:
+        _P(convert_charrefs=True).feed(html)
+    except Exception:  # noqa: BLE001
+        return out
+    return out
+
+
+_VOID_TAGS = frozenset("area base br col embed hr img input link meta param source track wbr".split())
+
+
+def _source_sibling_groups(html, limit=4000, kid_limit=24000):
+    """源码 HTML 里 <body> 下「≥2 个子元素且有子元素带 class」的父元素: [{a: 最近的带 id 祖先(或 ""=body), i: 从它往下的子元素序号链,
+    k: [[子标签, class 或 None, id 或 ""], ...]}]。给状态类相位复位认没有 id 的同类兄弟组(轮播项/指示点/折叠卡)。
+    html.parser 不做隐式闭合, 路径可能与活体 DOM 对不上: 使用方必须再核对子元素个数与标签序列, 对不上就不用。"""
+    if not html or len(html) > 8_000_000:
+        return []
+    from html.parser import HTMLParser
+
+    root = {"tag": "body", "id": "", "cls": None, "kids": [], "up": None}
+    stack = []
+
+    class _P(HTMLParser):
+        def handle_starttag(self, tag, attrs):
+            if not stack:
+                if tag == "body":
+                    stack.append(root)
+                return
+            d = dict(attrs)
+            node = {"tag": tag, "id": d.get("id") or "", "cls": d.get("class"), "kids": [], "up": stack[-1]}
+            stack[-1]["kids"].append(node)
+            if tag not in _VOID_TAGS:
+                stack.append(node)
+
+        def handle_startendtag(self, tag, attrs):
+            if stack:
+                d = dict(attrs)
+                stack[-1]["kids"].append({"tag": tag, "id": d.get("id") or "", "cls": d.get("class"), "kids": [], "up": stack[-1]})
+
+        def handle_endtag(self, tag):
+            for j in range(len(stack) - 1, 0, -1):
+                if stack[j]["tag"] == tag:
+                    del stack[j:]
+                    return
+
+    try:
+        _P(convert_charrefs=True).feed(html)
+    except Exception:  # noqa: BLE001
+        return []
+    out, total = [], 0
+    todo = [root]
+    while todo and len(out) < limit and total < kid_limit:
+        node = todo.pop()
+        kids = node["kids"]
+        todo.extend(reversed(kids))
+        if len(kids) < 2 or not any(k["cls"] for k in kids) or len(kids) > 200:
+            continue
+        idx, cur = [], node
+        while cur is not root and not cur["id"]:
+            idx.append(cur["up"]["kids"].index(cur))
+            cur = cur["up"]
+        out.append({"a": cur["id"] if cur is not root else "", "i": idx[::-1],
+                    "k": [[k["tag"], k["cls"], k["id"]] for k in kids]})
+        total += len(kids)
+    return out
+
+
+def _fluid_elements(fa: dict, fb: dict, w1: float, w2: float, tol: float = 0.015, fc: dict = None, w3: float = None):
+    """两/三个宽度下的 FLUID_READ_JS 快照 → 字号随宽同比的元素路径 + 内联 px 同比的属性(改 vw)。
+    同比: 值比 ≈ 宽比(±tol), 且值不同(定值不算)。
+    第三个样本(更宽, fc/w3)用来认"同比但封顶/垫底"的分段函数: 窄侧同比、宽侧不再长 → min(Xvw, 封顶px);
+    窄侧不再缩、宽侧同比 → max(Xvw, 垫底px)。两个样本只能外推直线, 到更宽的机型(440)就偏一两行字的高度
+    (wix Pro Max 段落少换一行, 其后整页位移 38px)。三点都不成线性(断点换公式)就不改, 保留 px。"""
+    paths, inline = [], {}
+    if not fa or not fb or not w1 or not w2 or w1 == w2:
+        return {"paths": paths, "inline": inline}
+    ratio = w2 / w1
+    r3 = (w3 / w1) if (fc and w3 and w3 != w1) else None
+    for path, va in fa.items():
+        vb = fb.get(path)
+        if not vb or vb[0] != va[0]:
+            continue
+        # canvas 的位图/显示尺寸归 canvas 固化(aspect-ratio + 分视口盒高)管: 位图宽高属性写成 vw 后在 820 宽
+        # 把固化图撑大(vite iPad Air 87→77)
+        if va[0] == "CANVAS":
+            continue
+        f1, f2 = va[1] or 0, vb[1] or 0
+        if f1 >= 6 and f2 > 0 and f1 != f2 and abs((f2 / f1) / ratio - 1) <= tol:
+            paths.append(path)
+        if va[2] and vb[2] and va[2] != vb[2]:
+            pb = {m.group(1).lower(): float(m.group(2)) for m in _FLUID_GEOM_RE.finditer(vb[2])}
+            vc = fc.get(path) if r3 else None
+            pc = ({m.group(1).lower(): float(m.group(2)) for m in _FLUID_GEOM_RE.finditer(vc[2])}
+                  if vc and vc[0] == va[0] and vc[2] else None)
+            for m in _FLUID_GEOM_RE.finditer(va[2]):
+                k, v1 = m.group(1).lower(), float(m.group(2))
+                v2 = pb.get(k)
+                if v2 is None or v1 == 0:
+                    continue
+                v3 = pc.get(k) if pc is not None else None
+                if v1 == v2 and (v3 is None or v3 == v1):
+                    continue
+                lin12 = v1 != v2 and abs((v2 / v1) / ratio - 1) <= tol
+                vw = f"{v1 / w1 * 100:.4f}vw"
+                if v3 is None:
+                    if lin12:
+                        inline.setdefault(path, {})[k] = vw
+                    continue
+                lin13 = v3 != v1 and abs((v3 / v1) / r3 - 1) <= tol
+                if lin12 and lin13:
+                    inline.setdefault(path, {})[k] = vw
+                elif v1 > 0 and lin12 and v1 <= v3 < v1 * r3 * (1 - tol):
+                    inline.setdefault(path, {})[k] = f"min({vw}, {v3:g}px)"       # 宽侧封顶
+                elif v1 > 0 and lin13 and v1 * ratio * (1 + tol) < v2 <= v1:
+                    inline.setdefault(path, {})[k] = f"max({vw}, {v2:g}px)"       # 窄侧垫底
+    _drop_slider_tracks(inline)
+    return {"paths": paths, "inline": inline}
+
+
+def _vw_num(v):
+    m = re.match(r"^([\d.]+)vw$", v or "")
+    return float(m.group(1)) if m else None
+
+
+def _drop_slider_tracks(inline: dict) -> int:
+    """轮播轨道(父元素内联宽 = 各子项内联宽之和, 子项 ≥2 且等宽)不改 vw: 轨道/子项宽由轮播脚本按容器宽维护,
+    克隆里脚本照样会重算, 写死成 vw 反而和脚本的当前项/位移对不上(ant.design 手机 91→61, 两项叠成两倍高)。"""
+    kids = {}
+    for path, props in inline.items():
+        if ">" in path and _vw_num(props.get("width")) is not None:
+            kids.setdefault(path.rsplit(">", 1)[0], []).append(path)
+    n = 0
+    for parent, ch in kids.items():
+        pw = _vw_num((inline.get(parent) or {}).get("width"))
+        if pw is None or len(ch) < 2:
+            continue
+        ws = [_vw_num(inline[c]["width"]) for c in ch]
+        if max(ws) - min(ws) > max(ws) * 0.02 or abs(sum(ws) - pw) > pw * 0.02:
+            continue
+        for c in ch + [parent]:
+            inline[c].pop("width", None)
+            if not inline[c]:
+                inline.pop(c)
+            n += 1
+    return n
+
+
+_HIDE_DECL_RE = re.compile(
+    r"^(?:visibility\s*:\s*hidden|opacity\s*:\s*0(?:\.0+)?|display\s*:\s*none|pointer-events\s*:\s*none"
+    r"|transform\s*:[^;]*|animation(?:-[\w-]+)?\s*:[^;]*|transition(?:-[\w-]+)?\s*:[^;]*|will-change\s*:[^;]*)"
+    r"\s*(?:!important)?$", re.I)
+
+
+_TYPE_SEL_RE = re.compile(r"^[a-z][a-z0-9-]*(?:::?[a-z-]+(?:\([^)]*\))?)*$", re.I)
+
+
+def _is_global_reset_rule(rule_text: str) -> bool:
+    """窄屏页多出的"全局重置"规则: 选择器全是 * / html / body / :root / 纯标签名(含伪元素), 或 @font-face。
+    媒体查询里的规则在任何视口都在 CSSOM 里, 所以"窄屏页才有"的只能是脚本注入/条件加载的整张表;
+    其中的标签级重置(`*{margin:0}` `a{text-decoration:underline}` `body{font-family}` 同名 @font-face 指向
+    404 字体)注入手机段会改写整页层叠(solidjs 手机端链接全下划线、字体回落), 不属于响应式差异, 跳过。"""
+    m = re.match(r"^\s*([^{}]+)\{", rule_text)
+    if not m:
+        return False
+    sel = m.group(1).strip()
+    if sel.lower().startswith("@font-face"):
+        return True
+    if sel.startswith("@"):
+        return False
+    parts = [p.strip() for p in sel.split(",") if p.strip()]
+    return bool(parts) and all(p in ("*", ":root") or _TYPE_SEL_RE.match(p) for p in parts)
+
+
+def _is_transient_hide_rule(rule_text: str) -> bool:
+    """窄屏页采到的"只把元素藏起来"的规则: 声明块全是 visibility:hidden / opacity:0 / display:none /
+    transform / animation / transition。这是入场动画的初始态(wix 组件滚入视口前 `#comp-x{visibility:hidden!important}`),
+    窄屏首载页截取时动画还没跑, 若当成"窄屏专属样式"注入手机段, 克隆手机端整块表单/计数永远不显形。"""
+    m = re.match(r"^\s*([^{}]+)\{(.*)\}\s*$", rule_text, re.S)
+    if not m or "{" in m.group(2):
+        return False
+    decls = [d.strip() for d in m.group(2).split(";") if d.strip()]
+    return bool(decls) and all(_HIDE_DECL_RE.match(d) for d in decls)
+
+
+def _regroup_css_rules(pairs) -> str:
+    """[(分组前缀 'head\x00head', 规则文本)] → 按前缀重新包回 @media/@supports/@layer 块的 CSS 文本。"""
+    groups = {}
+    for g, t in pairs:
+        groups.setdefault(g, []).append(t)
+    out = []
+    for g, rules in groups.items():
+        heads = [h for h in g.split("\x00") if h]
+        body = "\n".join(rules)
+        for h in reversed(heads):
+            body = h + "{\n" + body + "\n}"
+        out.append(body)
+    return "\n".join(out)
+
+
+# ---- 有时限的 Playwright 同步调用 ----
+def bounded_call(sync_obj, coro, timeout_s: float):
+    """在 Playwright 同步对象的事件循环上带时限执行一个底层协程(如 cdp._impl_obj.send(...))。
+    同步 API 的 CDP send / page.close 没有超时参数, 页面渲染进程卡住时会让整个任务永久挂起
+    (163/wix 偶发); 超时抛 TimeoutError, 迟到的应答由连接层丢弃(回调 future 已取消)。
+    取不到内部接口(Playwright 内部结构变化)时退回无时限执行, 行为同旧实现。"""
+    import asyncio
+    runner = getattr(sync_obj, "_sync", None)
+    if runner is None:
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+    try:
+        return runner(asyncio.wait_for(coro, timeout_s))
+    except asyncio.TimeoutError as exc:
+        raise TimeoutError(f"超过 {timeout_s:.0f}s 未返回") from exc
+
+
+def bounded_api_call(sync_obj, method: str, args: tuple = (), timeout_s: float = 30.0):
+    """带时限调用 Playwright 同步对象的一个方法(cdp.send / page.close / frame.evaluate)。
+
+    时限靠内部协程 + wait_for 实现, 而内部接口的签名随 Playwright 版本变(1.65 起
+    CDPSession.send(method, params, timeout) / Page.close(run_before_unload, reason) /
+    Frame.evaluate(expression, arg) 的参数全部必填): 按实际签名把缺的必填位置参数补 None。
+    内部接口取不到或签名对不上时退回公开同步 API(无时限, 功能照常) —— 此前直接按旧签名调用,
+    新版本下 TypeError 被外层吞掉: MHTML 快照恒失败(保真轨整条消失)、窄屏首载页永不关闭
+    (两张活页一路空转到任务结束)。超时抛 TimeoutError。"""
+    import inspect
+    impl = getattr(sync_obj, "_impl_obj", None)
+    fn = getattr(impl, method, None) if impl is not None else None
+    if fn is None or getattr(sync_obj, "_sync", None) is None:
+        return getattr(sync_obj, method)(*args)
+    try:
+        need = [p for p in inspect.signature(fn).parameters.values()
+                if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD) and p.default is p.empty]
+        coro = fn(*(list(args) + [None] * max(0, len(need) - len(args))))
+    except (TypeError, ValueError):
+        return getattr(sync_obj, method)(*args)
+    return bounded_call(sync_obj, coro, timeout_s)
+
+
+# ---- 带边界的 URL 替换(本地化落盘用) ----
+# apply_replacements 是纯子串替换(与冻结基线逐值等价, 不改); 本地化时无协议键(根相对 /x/、原始相对写法)
+# 也会命中更长路径的中段: 页面自身路径 "/airpods-pro/" 被当资产落地后, 视频
+# "/105/media/us/airpods-pro/2025/…/large.mp4" 中段被换成 "/static/misc/x.bin", 交互版 13 个视频全 404。
+# 无协议键只在左侧不是路径字符时替换(引号/括号/=/空白/逗号等之后); http(s):// 与 // 键照旧。
+URL_REPL_BOUNDARY = os.environ.get("CLONER_URL_REPL_BOUNDARY", "1") != "0"
+_URL_MID_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.~%/-")
+# 归因: CLONER_URL_REPL_TRACE=1 时记录被左边界挡下的替换(上下文 => 本应换成), 引擎每轮本地化后写进日志
+URL_REPL_TRACE = os.environ.get("CLONER_URL_REPL_TRACE", "0") == "1"
+URL_REPL_BLOCKED: list = []
+
+
+def _rel_prefix_ok(text: str, s: int, k: str) -> bool:
+    """左侧是独立的相对前缀 ./ 或 ../(前面是引号/括号等非路径字符)时照旧替换, 与旧行为一致。
+
+    模块说明符 from"./chunk-x.js" 里根相对键 "/chunk-x.js" 紧跟在 "." 之后; 挡下它会让同一 chunk
+    经说明符改写与运行时原路径镜像两条路各加载一份(Angular 整页渲染两遍, 交互轨 100→42.6)。"""
+    j = s
+    if not k.startswith("/"):
+        if j < 1 or text[j - 1] != "/":
+            return False
+        j -= 1
+    dots = 0
+    while j > 0 and text[j - 1] == "." and dots < 3:
+        j -= 1
+        dots += 1
+    if dots not in (1, 2):
+        return False
+    return j == 0 or text[j - 1] not in _URL_MID_CHARS
+
+
+def apply_url_replacements(text: str, pairs) -> str:
+    """apply_replacements + 无协议键的左边界约束(见上)。"""
+    if not pairs or not URL_REPL_BOUNDARY:
+        return apply_replacements(text, pairs)
+    pattern, mapping = _replacement_matcher(pairs)
+    mid = _URL_MID_CHARS
+
+    def _sub(m):
+        k = m.group(0)
+        s = m.start()
+        if s and text[s - 1] in mid and not k.startswith(("http:", "https:", "//")) \
+                and not _rel_prefix_ok(text, s, k):
+            if URL_REPL_TRACE and len(URL_REPL_BLOCKED) < 60:
+                URL_REPL_BLOCKED.append(f"{text[max(0, s - 40):s]!r}+{k!r} => {mapping.get(k, k)!r}")
+            return k
+        return mapping.get(k, k)
+    return pattern.sub(_sub, text)
+
+
+# ---- 跨域接口回放垫片 ----
+# Mock 只按路径在本地(沙盒/交付 Flask)回放, 但 SPA 的数据接口常在另一个主机(api.x.com, 协议相对 //api.x.com
+# 在本地页里还会解析成 http:)。评分与交付里这些请求要么被外链守卫中止、要么跨域失败, 整页楼层停在骨架
+# (bilibili 交互轨 38 分: 录了 81 条接口, 本地命中 0)。录到过 JSON 响应的跨域主机, 其 fetch/XHR 改发同源
+# 同路径, 由本地 Mock 接住; 没录到的路径本地 404, 与外链被拦等价。
+XHOST_MOCK_SHIM = os.environ.get("CLONER_XHOST_MOCK", "1") != "0"
+XHOST_MOCK_TEMPLATE = r"""<script data-clone-preview="xhost-mock">(function(){try{var H=__HOSTS__;var map=function(u){try{var x=new URL(String(u),location.href);if(x.host===location.host||H.indexOf(x.host)<0)return null;var b=window.__CLONE_PREVIEW_BASE__||'/';return b+x.pathname.replace(/^\/+/,'')+x.search;}catch(e){return null;}};var of=window.fetch;if(of){window.fetch=function(i,o){try{var s=(typeof i==='string'||(typeof URL!=='undefined'&&i instanceof URL))?String(i):(i&&i.url);var m=s&&map(s);if(m){i=(typeof i==='string'||(typeof URL!=='undefined'&&i instanceof URL))?m:new Request(m,i);}}catch(e){}return of.call(this,i,o);};}var X=window.XMLHttpRequest;if(X&&X.prototype&&X.prototype.open){var oo=X.prototype.open;X.prototype.open=function(me,u){try{var m=map(u);if(m){arguments[1]=m;}}catch(e){}return oo.apply(this,arguments);};}}catch(e){}})();</script>"""
+
+
+def xhost_mock_script(mock_entries, page_netloc: str) -> str:
+    """录到 JSON 响应的跨域主机清单 → 回放垫片(无跨域主机时返回空串)。"""
+    if not XHOST_MOCK_SHIM:
+        return ""
+    hosts = sorted({str(e.get("host") or "") for e in mock_entries or ()
+                    if e.get("host") and e.get("host") != page_netloc})
+    if not hosts:
+        return ""
+    return XHOST_MOCK_TEMPLATE.replace("__HOSTS__", json.dumps(hosts[:200]).replace("</", "<\\/"))
+
+
+# ---------------------------------------------------------------------------
+# 图片分片主机 / 变体就近解析: 运行时拼出来的图片地址(接口 JSON 里的底图 + 客户端追加的
+# "@672w_378h_1c.avif" 之类变换后缀, 主机在 i0/i1/i2 分片间轮换)整串对不上替换表, 克隆页里
+# 照旧外链, 离线评分被中止、离线交付破图; 而同一张底图的某个变体其实已经在资源池里。
+# 垫片在 <img>/<source> 的 src/srcset 赋值与解析器插入时, 把"同注册域主机 + 同路径"(精确, 或
+# 去掉 @ 后缀的底图路径)的外链指向资源池里的本地文件。跨主机命中要求文件名带内容哈希,
+# 免得 a.x.com/logo.png 与 b.x.com/logo.png 这类同名不同图串号。开关 CLONER_IMG_SHARD_RESOLVE=0。
+IMG_SHARD_RESOLVE = os.environ.get("CLONER_IMG_SHARD_RESOLVE", "1") != "0"
+_SHARD_IMG_EXT_RE = re.compile(r"\.(?:png|jpe?g|gif|webp|avif|svg|bmp|ico)$", re.I)
+_SECOND_LEVEL = {"com", "net", "org", "gov", "edu", "co", "ac", "ne", "or"}
+
+
+def host_suffix(host: str) -> str:
+    """近似注册域(与垫片里的 JS 同口径): 末两段, 二级公共后缀(com.cn/co.uk 等)取末三段; IP 原样。"""
+    host = (host or "").lower()
+    labels = host.split(".")
+    if re.fullmatch(r"[\d.]+", host) or len(labels) <= 2:
+        return host
+    if len(labels) >= 3 and len(labels[-1]) == 2 and labels[-2] in _SECOND_LEVEL:
+        return ".".join(labels[-3:])
+    return ".".join(labels[-2:])
+
+
+IMG_SHARD_TEMPLATE = r"""<script data-clone-preview="img-shard">(function(){try{var G=__MAP__;var SL=['com','net','org','gov','edu','co','ac','ne','or'];var sfx=function(h){h=String(h).toLowerCase();var l=h.split('.');if(/^[\d.]+$/.test(h)||l.length<=2)return h;if(l.length>=3&&l[l.length-1].length===2&&SL.indexOf(l[l.length-2])>=0)return l.slice(-3).join('.');return l.slice(-2).join('.');};var ok=function(eh,h,p){if(eh===h)return true;var st=p.split('/').pop().replace(/\.[a-z0-9]+$/i,'');return /[0-9a-f]{16,}/i.test(st)||st.length>=24;};var loc=function(v){return (window.__CLONE_PREVIEW_BASE__||'/')+String(v).replace(/^\/+/,'');};var res=function(u){try{if(u==null)return null;var s=String(u);if(!s||/^(data|blob|about|javascript):/i.test(s))return null;var x=new URL(s,location.href);if(x.host===location.host||(x.protocol!=='http:'&&x.protocol!=='https:'))return null;var g=G[sfx(x.hostname)];if(!g)return null;var p=x.pathname;var e=g.e[p+x.search];if(e&&ok(e[0],x.host,p))return loc(e[1]);var bs=p.split('@')[0];var v=g.b[bs];if(v&&ok(v[0],x.host,bs))return loc(v[1]);}catch(err){}return null;};var rss=function(v){try{if(v==null)return null;var ch=false;var out=String(v).split(',').map(function(c){var t=c.trim();var i=t.search(/\s/);var u=i<0?t:t.slice(0,i);var r=u&&res(u);if(r){ch=true;return r+(i<0?'':t.slice(i));}return t;});return ch?out.join(', '):null;}catch(err){return null;}};var hook=function(P,n,f){try{var d=Object.getOwnPropertyDescriptor(P,n);if(!d||!d.set)return;Object.defineProperty(P,n,{configurable:true,enumerable:d.enumerable,get:d.get,set:function(v){var r=f(v);return d.set.call(this,r||v);}});}catch(err){}};var I=window.HTMLImageElement&&HTMLImageElement.prototype,S=window.HTMLSourceElement&&HTMLSourceElement.prototype;if(I){hook(I,'src',res);hook(I,'srcset',rss);}if(S){hook(S,'src',res);hook(S,'srcset',rss);}var sa=Element.prototype.setAttribute;Element.prototype.setAttribute=function(n,v){try{var t=this.tagName;if(t==='IMG'||t==='SOURCE'){var ln=String(n).toLowerCase();var r=ln==='src'?res(v):(ln==='srcset'?rss(v):null);if(r)return sa.call(this,n,r);}}catch(err){}return sa.apply(this,arguments);};var fix=function(el){try{var t=el.tagName;if(t!=='IMG'&&t!=='SOURCE')return;var s=el.getAttribute('src');var r=s&&res(s);if(r)sa.call(el,'src',r);var ss=el.getAttribute('srcset');var rs=ss&&rss(ss);if(rs)sa.call(el,'srcset',rs);}catch(err){}};var scan=function(n){if(!n||n.nodeType!==1)return;fix(n);if(n.firstElementChild&&n.querySelectorAll){var l=n.querySelectorAll('img,source');for(var i=0;i<l.length;i++)fix(l[i]);}};new MutationObserver(function(ms){for(var i=0;i<ms.length;i++){var m=ms[i];if(m.type==='attributes')fix(m.target);else for(var j=0;j<m.addedNodes.length;j++)scan(m.addedNodes[j]);}}).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['src','srcset']});}catch(e){}})();</script>"""
+
+
+def img_shard_map(items, page_netloc: str, limit: int = 2000) -> dict:
+    """资源池 [(原地址, 本地路径, 字节数)] → {注册域: {"e": {路径+查询: [主机, 本地]}, "b": {底图路径: [主机, 本地]}}}。
+
+    同一底图多个变体取字节数最大的(大图缩小显示失真最小)。关闭开关时返回空表。"""
+    if not IMG_SHARD_RESOLVE:
+        return {}
+    groups: dict = {}
+    n = 0
+    for url, local, size in items or ():
+        try:
+            parts = urlsplit(url)
+        except ValueError:
+            continue
+        if parts.scheme not in ("http", "https") or not parts.netloc or parts.netloc == page_netloc:
+            continue
+        if not str(local or "").startswith("/static/"):
+            continue
+        base = parts.path.split("@", 1)[0]
+        if not _SHARD_IMG_EXT_RE.search(base):
+            continue
+        g = groups.setdefault(host_suffix(parts.hostname or ""), {"e": {}, "b": {}})
+        key = parts.path + (("?" + parts.query) if parts.query else "")
+        g["e"].setdefault(key, [parts.netloc, local])
+        cur = g["b"].get(base)
+        if cur is None or int(size or 0) > cur[2]:
+            g["b"][base] = [parts.netloc, local, int(size or 0)]
+        n += 1
+        if n >= limit:
+            break
+    for g in groups.values():
+        g["b"] = {k: v[:2] for k, v in g["b"].items()}
+    return groups
+
+
+_HASHY_STEM_RE = re.compile(r"[0-9a-f]{16,}", re.I)
+
+
+def _shard_ok(entry_host: str, host: str, path: str) -> bool:
+    if entry_host == host:
+        return True
+    stem = re.sub(r"\.[a-z0-9]+$", "", path.rsplit("/", 1)[-1], flags=re.I)
+    return bool(_HASHY_STEM_RE.search(stem)) or len(stem) >= 24
+
+
+def shard_resolve(groups: dict, url: str):
+    """与垫片里 res() 同口径的 Python 版: 绝对/协议相对的外域图片地址 → 本地路径, 未命中 None。"""
+    if not groups or not url:
+        return None
+    u = url.strip()
+    if u.startswith("//"):
+        u = "http:" + u
+    if not u.startswith(("http://", "https://")):
+        return None
+    try:
+        parts = urlsplit(u)
+    except ValueError:
+        return None
+    g = groups.get(host_suffix(parts.hostname or ""))
+    if not g:
+        return None
+    path = parts.path
+    e = g["e"].get(path + (("?" + parts.query) if parts.query else ""))
+    if e and _shard_ok(e[0], parts.netloc, path):
+        return e[1]
+    base = path.split("@", 1)[0]
+    v = g["b"].get(base)
+    if v and _shard_ok(v[0], parts.netloc, base):
+        return v[1]
+    return None
+
+
+_IMG_TAG_RE = re.compile(r"<(?:img|source)\b[^>]*>", re.I)
+_IMG_SRC_ATTR_RE = re.compile(r"""(\s(src|srcset)\s*=\s*)(["'])([^"'<>]*)\3""", re.I)
+
+
+def rewrite_img_shards(html: str, groups: dict):
+    """固化 HTML 里 <img>/<source> 的 src/srcset 外链按资源池就近改成本地(预加载扫描器在垫片之前就发请求,
+    且保真轨/静态版不跑脚本)。返回 (新 HTML, 改写个数)。"""
+    if not groups or not html:
+        return html, 0
+    count = 0
+
+    def attr(m):
+        nonlocal count
+        name, val = m.group(2).lower(), m.group(4)
+        if name == "src":
+            r = shard_resolve(groups, val)
+            if not r:
+                return m.group(0)
+            count += 1
+            return m.group(1) + m.group(3) + r + m.group(3)
+        out, changed = [], False
+        for c in val.split(","):
+            sp = c.strip().split(None, 1)
+            r = shard_resolve(groups, sp[0]) if sp else None
+            if r:
+                changed = True
+                out.append(r + ((" " + sp[1]) if len(sp) > 1 else ""))
+            else:
+                out.append(c.strip())
+        if not changed:
+            return m.group(0)
+        count += 1
+        return m.group(1) + m.group(3) + ", ".join(out) + m.group(3)
+
+    def tag(m):
+        t = m.group(0)
+        if "//" not in t:
+            return t
+        return _IMG_SRC_ATTR_RE.sub(attr, t)
+
+    return _IMG_TAG_RE.sub(tag, html), count
+
+
+def img_shard_script(groups: dict) -> str:
+    """分片/变体解析表 → 运行时垫片; 空表返回空串。"""
+    if not groups:
+        return ""
+    return IMG_SHARD_TEMPLATE.replace(
+        "__MAP__", json.dumps(groups, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/"))
+
+
+# ---------------------------------------------------------------------------
+# 子资源完整性(SRI)放行: 采集时已删掉 DOM 里的 integrity 属性, 但运行时动态插入的脚本/样式
+# (webpack sriHashes、广告/同意管理加载器给 <script> 设 integrity)仍带原站哈希; 本地副本经过
+# 地址改写, 字节与哈希不再一致, 浏览器拒绝执行("Failed to find a valid digest in the
+# 'integrity' attribute"), 这段脚本的功能在克隆里整段丢失。克隆里本地文件就是权威副本,
+# 垫片让 <script>/<link> 的 integrity 赋值与 setAttribute 成为空操作, fetch 去掉 integrity 选项。
+# 开关 CLONER_SRI_RELAX=0。
+SRI_RELAX = os.environ.get("CLONER_SRI_RELAX", "1") != "0"
+SRI_RELAX_SCRIPT = r"""<script data-clone-preview="sri-relax">(function(){try{[window.HTMLScriptElement,window.HTMLLinkElement].forEach(function(C){if(!C)return;var p=C.prototype,d=Object.getOwnPropertyDescriptor(p,'integrity');if(d&&d.configurable){Object.defineProperty(p,'integrity',{configurable:true,enumerable:d.enumerable,get:function(){return '';},set:function(){}});}});var sa=Element.prototype.setAttribute;Element.prototype.setAttribute=function(n){if(typeof n==='string'&&n.toLowerCase()==='integrity'&&(this instanceof HTMLScriptElement||this instanceof HTMLLinkElement))return;return sa.apply(this,arguments);};var f=window.fetch;if(f){window.fetch=function(i,o){if(o&&typeof o==='object'&&o.integrity){o=Object.assign({},o);delete o.integrity;}return arguments.length>1?f.call(this,i,o):f.call(this,i);};}}catch(e){}})();</script>"""
+
+
+def sri_relax_script() -> str:
+    return SRI_RELAX_SCRIPT if SRI_RELAX else ""
+
+
+def _same_document(u1: str, u2: str) -> bool:
+    """两个地址是否同一文档: 主机(忽略大小写与端口默认值)与路径(忽略末尾斜杠)相同, 不计协议/查询串/锚点。
+    手机 UA 302 到 m. 子域、跳 /m/ 路径或下载引导页都算另一个文档。"""
+    a, b = urlsplit(u1 or ""), urlsplit(u2 or "")
+    if not a.netloc or not b.netloc:
+        return True
+    host = lambda u: (u.hostname or "").lower()   # noqa: E731
+    path = lambda u: (u.path or "/").rstrip("/") or "/"   # noqa: E731
+    return host(a) == host(b) and path(a) == path(b)

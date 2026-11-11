@@ -9,6 +9,9 @@ on:
       - "tests/**"
       - "engine_bench/perf/**"
       - "requirements.txt"
+      - "mypy.ini"
+      - "models.py"
+      - "app.py"
       - ".github/workflows/engine-gate.yml"
   push:
     branches: [main]
@@ -27,6 +30,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install "pillow~=13.0.0" "numpy~=2.5.0" "requests>=2.31.0"
+      - name: 类型检查(mypy.ini 基线, 须 0 错误)
+        run: |
+          python -m pip install "mypy==2.3.1" types-requests
+          python -m mypy
       - name: 逐值等价测试
         run: python -m unittest discover -s tests -t . -v
       - name: 基准正确性闸门(输出与冻结基线逐值一致)
