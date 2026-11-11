@@ -44,6 +44,7 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     STATE_PHASE_RESET_JS,
     TRANSITION_FINISH_JS,
     VISIBLE_PATHS_JS,
+    DEPLOY_DEFER_IMG_JS,
     AD_RECTS_JS,
     INTERSTITIAL_HIDE_JS,
     ROOT_FONT_APPLY_JS,
@@ -1761,6 +1762,12 @@ class CaptureMixin:
         hidden_frames = 0
         with suppress(Exception):
             hidden_frames = int(_safe_eval(MARK_HIDDEN_FRAMES_JS) or 0)
+        if screenshot and getattr(config, "DEPLOY_DEFER_IMG", True):
+            # MHTML 已快照、基准已截: 此后只影响交付 HTML(部署首屏), 评分截图前会转回 eager
+            with suppress(Exception):
+                n_def = int(_safe_eval(f"() => ({DEPLOY_DEFER_IMG_JS})({config.DEPLOY_DEFER_SCREENS})") or 0)
+                if n_def:
+                    self.log("DEPLOY", f"首屏外图片延后: {n_def} 张改原生懒加载(部署后首屏不等页尾图片)")
         html = None
         try:
             td = self._phase("细分·MHTML快照", td)

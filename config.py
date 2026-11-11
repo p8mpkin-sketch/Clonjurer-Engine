@@ -250,6 +250,11 @@ MHTML_RETRY_TIMEOUT_S = float(os.environ.get("CLONER_MHTML_RETRY_TIMEOUT_S", "30
 THIN_STATIC_NO_RETRY = os.environ.get("CLONER_THIN_STATIC_NO_RETRY", "1") != "0"
 # 布局校准就地预评: 尺寸覆盖先注入活页重截图评分, 不升即不做整页重渲染(与 CALIB_INPLACE_GATE 同口径)
 LAYOUT_CALIB_INPLACE_GATE = os.environ.get("CLONER_LAYOUT_CALIB_INPLACE_GATE", "1") != "0"
+# 第 8 轮(速度/部署首屏)总开关: CLONER_SPEED8=0 一次关掉本轮全部改动, 供 CI 同时段 A/B
+SPEED8 = os.environ.get("CLONER_SPEED8", "1") != "0"
+# 交付首屏: 前 N 屏以外、原站加载过的图改原生懒加载(部署后 load 不等页尾图片; 评分截图前转回 eager)
+DEPLOY_DEFER_IMG = SPEED8 and os.environ.get("CLONER_DEPLOY_DEFER_IMG", "1") != "0"
+DEPLOY_DEFER_SCREENS = float(os.environ.get("CLONER_DEPLOY_DEFER_SCREENS", "2"))
 
 # 第二批合成用例的通用修法(2026-11-11 合并线)
 # 排在脚本之后的 viewport meta(脚本运行时写的)序列化后挪到第一个脚本前, 克隆里脚本照常改写它

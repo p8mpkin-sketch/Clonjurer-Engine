@@ -2749,3 +2749,42 @@ if not getattr(_config, "ROOT_CLS_UA_SPLIT", True):
 ALT_INJECT_JS = ALT_INJECT_JS.replace("rs.textContent = CV_VP_SWAP_RUNTIME;", "rs.textContent = " + json.dumps(CV_VP_SWAP_RUNTIME) + ";")
 if not getattr(_config, "VARIANT_DOM_SWAP", True):
     ALT_INJECT_JS = ALT_INJECT_JS.replace("const VPSWAP = 1;", "const VPSWAP = 0;")
+# 交付首屏: 首屏(前 DEPLOY_DEFER_SCREENS 屏)以外、原站加载过的 <img> 改为原生懒加载 + 异步解码,
+# 部署后 load 事件与首屏带宽不再被页尾几十 MB 图片拖住; 首屏内最大的一张标 fetchpriority=high(LCP 候选)。
+# 只动没有 loading 属性的图(原站自己声明过的照旧), 并打 data-clone-defer 标记可追溯。
+# 评分侧 CLONE_IMG_EAGER_JS 在截图前把"懒加载 + 原站加载过"的图转回 eager, 截图口径不变;
+# 保真轨 MHTML 在此之前已快照, 不受影响。
+DEPLOY_DEFER_IMG_JS = r"""
+(screens) => {
+  const vh = innerHeight || 800, lim = vh * screens;
+  let n = 0, best = null, bestA = 0;
+  for (const im of document.images) {
+    try {
+      if (!im.hasAttribute('data-clone-loaded')) continue;
+      if (!im.getAttribute('src') && !im.getAttribute('srcset')) continue;
+      const r = im.getBoundingClientRect();
+      const top = r.top + (scrollY || 0);
+      if (r.width > 0 && r.height > 0 && top < vh && r.bottom > 0) {
+        const a = Math.min(r.width, innerWidth) * Math.min(r.height, vh);
+        if (a > bestA) { bestA = a; best = im; }
+      }
+      if (im.hasAttribute('loading')) continue;
+      // 不在文档流里(fixed/sticky 祖先)的图位置随滚动不变, 一律当首屏
+      let fixed = false;
+      for (let e = im; e && e !== document.body; e = e.parentElement) {
+        const p = getComputedStyle(e).position;
+        if (p === 'fixed' || p === 'sticky') { fixed = true; break; }
+      }
+      if (fixed || top < lim) continue;
+      im.setAttribute('loading', 'lazy');
+      if (!im.hasAttribute('decoding')) im.setAttribute('decoding', 'async');
+      im.setAttribute('data-clone-defer', '1');
+      n++;
+    } catch (e) {}
+  }
+  if (best && bestA >= 40000 && !best.hasAttribute('fetchpriority') && !best.hasAttribute('loading')) {
+    best.setAttribute('fetchpriority', 'high');
+  }
+  return n;
+}
+"""
