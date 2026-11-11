@@ -162,10 +162,15 @@ def macos():
     from AppKit import NSApplicationActivateIgnoringOtherApps, NSRunningApplication, NSWorkspace
 
     print(f"辅助功能授权: {bool(AS.AXIsProcessTrusted())}")
+    # 文档类应用不带文件启动时不开窗口: 给它一份示例文本
+    doc = HERE / "runs" / "capture_tmp" / "release-notes.txt"
+    doc.parent.mkdir(parents=True, exist_ok=True)
+    doc.write_text("Release notes\n=============\n\n- capture workflow covers three desktop platforms\n"
+                   "- samples are committed by the CI bot\n- scores are computed offline\n\nNext: review the open items.\n")
     apps = [
         ("tune", "mac_form_prefs", [sys.executable, str(HERE / "apps" / "mac" / "form_prefs.py")], None),
         ("holdout", "mac_sqlitebrowser", ["open", "/Applications/DB Browser for SQLite.app"], "DB Browser for SQLite"),
-        ("holdout", "mac_coteditor", ["open", "/Applications/CotEditor.app"], "CotEditor"),
+        ("holdout", "mac_coteditor", ["open", "-a", "/Applications/CotEditor.app", str(doc)], "CotEditor"),
     ]
     ok = 0
     tmp = HERE / "runs" / "capture_tmp"
