@@ -1621,7 +1621,8 @@ class CaptureMixin:
         if not getattr(config, "TIMER_JOURNAL", True):
             return
         with suppress(Exception):
-            tj = page.evaluate(TIMER_JOURNAL_REWIND_JS, where.startswith("序列化前")) or {}
+            no_style = where.startswith("序列化前") or not getattr(config, "TIMER_JOURNAL_STYLE", True)
+            tj = page.evaluate(TIMER_JOURNAL_REWIND_JS, no_style) or {}
             if tj.get("els"):
                 self.log("RENDER", f"定时器改动回退({where}): {tj.get('els')} 个元素(class 词 {tj.get('cls', 0)} / 样式属性 {tj.get('sty', 0)})"
                                    f"退回首次被定时器改动前的值, 定时器共触发 {tj.get('fires')} 次 {tj.get('dbg') or ''}"[:500])

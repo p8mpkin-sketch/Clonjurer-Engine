@@ -83,6 +83,7 @@ NARROW_PAIR_TAGS = ("m", "t")   # 哪些窄屏段再开一张 0.92 倍宽的独�
 # (国内语料 mi 首页, 探针 100/100/69.5 → 65.5/54.4/54.7)退回第 1 帧后与探针等待期间已自转一帧的原站错开 ——
 # 在探针对轮播区有相位无关的口径之前不能默认开。CLONER_CFG_TIMER_JOURNAL=1 可开来做 A/B
 TIMER_JOURNAL = False
+TIMER_JOURNAL_STYLE = True   # 0 = 回退时只退 class 词、不动内联样式(A/B: 引擎自己改写过位移的轮播不被回退盖掉)
 API_VARIANTS_PER_PATH = 48              # 同一 方法+路径 最多保留多少份不同请求体的录制
 PROXY_CACHE_MAX_BYTES = 8 * 1024 * 1024   # 反向代理兜底单响应缓存上限(8MB)
 # 交付产物反代兜底超时(秒): 部署机离原站远/原站慢时, 旧值 20s 会把阻塞请求拖成
