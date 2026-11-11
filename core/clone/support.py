@@ -2440,12 +2440,12 @@ def relax_font_display(text):
 # Best Sellers: 序列化 12 张卡, Vue 在克隆里按 1 条数据水合, 把其余 11 张当多余节点删掉)。同一父元素下 ≥3 个同签名
 # 兄弟在窗口内被删、幸存的同签名兄弟不到被删数的 1/3 → 按原顺序放回(与幸存者文案逐字相同的不放, 免重复);
 # 之后父元素里脚本自己又渲染出一半以上数量的同类条目(数据到了) → 撤掉放回的。
-CONTENT_KEEP_GUARD_JS = r"""<script data-clone-preview="content-keep">(function(){try{if(window.__cloneKeep)return;window.__cloneKeep=1;var T0=Date.now(),WIN=12000,MIN=100,REC=[],KEPT=[],measured=0,done=false,RST=new WeakSet(),GRP=1;
+CONTENT_KEEP_GUARD_JS = r"""<script data-clone-preview="content-keep">(function(){try{if(window.__cloneKeep)return;window.__cloneKeep=1;var T0=Date.now(),WIN=12000,MIN=100,REC=[],KEPT=[],measured=0,done=false,RST=new WeakSet(),GRP=1,TWN=1;
 function active(){return !!window.__cloneUserAct;}if(!window.__cloneActHook){window.__cloneActHook=1;['pointerdown','keydown','touchstart','wheel'].forEach(function(t){try{addEventListener(t,function(e){if(e.isTrusted)window.__cloneUserAct=1;},{capture:true,passive:true});}catch(e){}});}
 function over(){return done||active()||Date.now()-T0>WIN;}
 function hOf(el){try{var r=el.getBoundingClientRect();return r.width>=60?r.height:0;}catch(e){return 0;}}
-var selfRm=0;function twin(r){try{var ch=r.p.children;for(var i=0;i<ch.length;i++){var c=ch[i];if(c!==r.n&&c.tagName===r.n.tagName&&sim(c,r.n)&&hOf(c)>=r.h*0.75)return true;}}catch(e){}return false;}
-function note(n,parent){if(selfRm||over()||measured>300||!n||n.nodeType!==1||!n.isConnected||!parent||parent.nodeType!==1)return;var t=n.tagName;if(/^(SCRIPT|STYLE|LINK|TEMPLATE|NOSCRIPT|META|HTML|HEAD|BODY)$/.test(t)||n.closest('svg'))return;measured++;var h=hOf(n);if(h<MIN)return;REC.push({n:n,p:parent,next:n.nextElementSibling,prev:n.previousElementSibling,h:h,ph:hOf(parent),t:Date.now()});sched();}
+var selfRm=0;function twin(r){try{var ch=r.p.children;for(var i=0;i<ch.length;i++){var c=ch[i];if(c!==r.n&&c.tagName===r.n.tagName&&sim(c,r.n)&&(hOf(c)>=r.h*0.75||(TWN&&r.sib&&r.sib.indexOf(c)<0&&hOf(c)>=MIN)))return true;}}catch(e){}return false;}
+function note(n,parent){if(selfRm||over()||measured>300||!n||n.nodeType!==1||!n.isConnected||!parent||parent.nodeType!==1)return;var t=n.tagName;if(/^(SCRIPT|STYLE|LINK|TEMPLATE|NOSCRIPT|META|HTML|HEAD|BODY)$/.test(t)||n.closest('svg'))return;measured++;var h=hOf(n);if(h<MIN)return;REC.push({n:n,p:parent,next:n.nextElementSibling,prev:n.previousElementSibling,h:h,ph:hOf(parent),t:Date.now(),sib:TWN?Array.prototype.slice.call(parent.children,0,200):null});sched();}
 function noteAll(parent){if(over()||!parent||parent.nodeType!==1||!parent.isConnected||!parent.children)return;var ch=parent.children;for(var i=0;i<ch.length;i++)note(ch[i],parent);}
 var tm=0;function sched(){if(tm)return;tm=setTimeout(check,600);}
 function grpMark(now){var by=new Map();for(var i=0;i<REC.length;i++){var r=REC[i];if(r.back||r.grp||now-r.t<550||r.n.isConnected||!r.p.isConnected)continue;var a=by.get(r.p);if(!a){a=[];by.set(r.p,a);}a.push(r);}

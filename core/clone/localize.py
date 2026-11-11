@@ -448,8 +448,11 @@ class LocalizeMixin:
             localized = self._inject_after_head(localized, sim_script)
             localized = self._inject_after_head(localized, REPLAY_DEDUPE_JS)
             localized = self._inject_after_head(localized, SCROLL_UNLOCK_GUARD_JS)
-            localized = self._inject_after_head(localized, CONTENT_KEEP_GUARD_JS if getattr(config, "CONTENT_KEEP_GROUP", True)
-                                                else CONTENT_KEEP_GUARD_JS.replace(",GRP=1;", ",GRP=0;"))
+            keep_js = CONTENT_KEEP_GUARD_JS if getattr(config, "CONTENT_KEEP_GROUP", True) \
+                else CONTENT_KEEP_GUARD_JS.replace(",GRP=1,", ",GRP=0,")
+            if not getattr(config, "CONTENT_KEEP_NEW_TWIN", True):
+                keep_js = keep_js.replace(",TWN=1;", ",TWN=0;")
+            localized = self._inject_after_head(localized, keep_js)
             localized = relax_font_display(localized)
             # 部署性能守卫: 未本地化的阻塞外链脚本(采集期已 404/跳过的计数/埋点、跨域图标)
             # 不得在本地部署时走反代兜底阻塞首屏 —— 删信标 / 其余转 async。

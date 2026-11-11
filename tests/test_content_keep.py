@@ -118,7 +118,7 @@ class ContentKeepGroup(unittest.TestCase):
                 self.assertNotIn("Product 5", page.evaluate(texts % "w3"), "脚本自己渲染出列表后撤掉放回的")
                 self.assertIn("Fresh 7", page.evaluate(texts % "w3"))
                 self.assertEqual(page.evaluate(texts % "w"), want)
-                off = CONTENT_KEEP_GUARD_JS.replace(",GRP=1;", ",GRP=0;")
+                off = CONTENT_KEEP_GUARD_JS.replace(",GRP=1,", ",GRP=0,")
                 self.assertNotEqual(off, CONTENT_KEEP_GUARD_JS)
                 page = b.new_page(viewport={"width": 390, "height": 844})
                 page.set_content(LIST_PAGE.replace("GUARD", off).replace("CARDS", cards))

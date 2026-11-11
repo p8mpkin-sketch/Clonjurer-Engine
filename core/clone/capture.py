@@ -662,6 +662,13 @@ class CaptureMixin:
                     if p2 is not None:
                         p2.close()
                 self.log("WARN", f"窄屏首载对照({w}px)启动失败: {str(exc)[:120]}")
+                # 手机 UA 页没起来(冷启动上下文在高负载下 goto 等 commit 超时): 同宽桌面 UA 页已在加载, 接管手机段,
+                # 否则整个手机段没有变体/分视口样式, 手机端整块用桌面结构(偶发手机 100→29)
+                p4 = getattr(self, "_cv_mdesk", None) if tag == "m" else None
+                if p4 is not None and getattr(config, "NARROW_MDESK_FALLBACK", True):
+                    self._cv_mdesk = None
+                    self._cv_pages.append((tag, p4))
+                    self.log("RENDER", "手机段改用桌面 UA 同宽首载页")
 
 
     def _narrow_same_doc(self, p2):

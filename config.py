@@ -270,6 +270,10 @@ SCORE_UNLOCK_SHOT = True
 NARROW_PAIR_EARLY_CLOSE = True
 NARROW_PAGE_EARLY_CLOSE = True
 FLUID_SKIP_UNSTABLE_WAIT = True
+# 内容守卫: 被删块原位出现了删除后才插入的同标签同类新块(水合失配后客户端重渲染, 数据少所以更矮)= 换了一份, 不放回
+CONTENT_KEEP_NEW_TWIN = True
+# 手机 UA 窄屏首载页启动失败时, 同宽桌面 UA 页接管手机段
+NARROW_MDESK_FALLBACK = True
 
 # ---------------------------------------------------------------------------
 # 常量环境覆盖(A/B 用): CLONER_CFG_<常量名>=值 覆盖本模块同名的 bool/int/float/str 常量。
