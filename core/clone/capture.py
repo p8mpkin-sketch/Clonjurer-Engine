@@ -868,26 +868,37 @@ class CaptureMixin:
         负 animation-delay(ANIM_PHASE_JS, 与主页基准后同一步)。时限内做不完就按当前态抽取。
         滚动已由 _start_settle_narrow 提前发起时这里只等它结束。"""
         budget = max(1.0, float(getattr(config, "VIEWPORT_VARIANT_SETTLE", 4.0)))
+        st = [time.monotonic()]
         with suppress(Exception):
             started = p2.evaluate("() => !!window.__cvSettle")
             if started:
                 p2.evaluate("() => window.__cvSettle")
             else:
                 p2.evaluate(CaptureMixin.AUTO_SCROLL_JS, [int(budget * 1000), 54000])
+            st.append(time.monotonic())
             p2.wait_for_timeout(400)
             p2.evaluate(SCROLL_TOP_JS)
             p2.evaluate(CV_QUIET_JS, 300)
+        while len(st) < 2:
+            st.append(time.monotonic())
+        st.append(time.monotonic())
         # 滚完再等页面"到位": 网络静默 + 文字量/已出 src 的图片数连续两次不变(水合晚到的表单、计数动画、
         # 懒加载图片组件写 src 都在这之后才稳定; 抽早了变体里只剩 alt 文字与空计数, wix 手机首屏 ~40 分)
         with suppress(Exception):
             p2.wait_for_load_state("networkidle", timeout=3000)
+        st.append(time.monotonic())
         stable, counts = 1, {}
         with suppress(Exception):
             stable = p2.evaluate(NARROW_STABLE_JS, 2500)
+        st.append(time.monotonic())
         with suppress(Exception):
             counts = p2.evaluate(DOM_COUNTS_JS) or {}
         with suppress(Exception):
             p2.evaluate(ANIM_PHASE_JS)
+        st.append(time.monotonic())
+        counts = dict(counts or {})
+        counts["_steps"] = " / ".join(f"{k} {b - a:.1f}s" for k, a, b in zip(
+            ("滚动", "回顶静置", "网络静置", "稳定", "计数相位"), st, st[1:]))
         return bool(stable), counts
 
 
@@ -904,7 +915,9 @@ class CaptureMixin:
             w1, h = int(vp.get("width") or 0), int(vp.get("height") or 800)
             if not w1:
                 return
+            _t0 = time.monotonic()
             fa = p2.evaluate(FLUID_READ_JS) or {}
+            _t_read0 = time.monotonic() - _t0
             with suppress(Exception):
                 p2.evaluate(CANVAS_PIN_JS, "save")
                 p2.evaluate(IMG_SRC_PIN_JS, "save")
@@ -916,16 +929,22 @@ class CaptureMixin:
             # 窄一档(0.92×)与宽一档(1.128×: 390→440 正好是最宽的主流手机)各读一次, 三点判直线/封顶/垫底
             # 到位等待已判定「到时限仍在变化」的页(常驻动画/轮播): 每次改宽后的稳定等待也必然等满, 三次白等 4.5s
             unstable = getattr(config, "FLUID_SKIP_UNSTABLE_WAIT", True) and getattr(self, "_cv_unstable", {}).get(tag)
+            ft = {"读": 0.0, "改宽": 0.0, "静置": 0.0, "稳定": 0.0}
+            _t = time.monotonic()
             for w in (int(round(w1 * 0.92)), int(round(w1 * 1.128)), w1):
                 p2.set_viewport_size({"width": w, "height": h})
                 p2.wait_for_timeout(250)
+                _t, ft["改宽"] = time.monotonic(), ft["改宽"] + time.monotonic() - _t
                 with suppress(Exception):
                     p2.evaluate(CV_QUIET_JS, 300)
+                _t, ft["静置"] = time.monotonic(), ft["静置"] + time.monotonic() - _t
                 if not unstable:
                     with suppress(Exception):
                         p2.evaluate(NARROW_STABLE_JS, 1500)
+                _t, ft["稳定"] = time.monotonic(), ft["稳定"] + time.monotonic() - _t
                 if w != w1:
                     samples[w] = p2.evaluate(FLUID_READ_JS) or {}
+                _t, ft["读"] = time.monotonic(), ft["读"] + time.monotonic() - _t
             # 先复原内联态, 再钉 canvas 显示盒(反过来会把刚钉上的 aspect-ratio 一并抹掉, vite 平板 98→64)
             if rt_on:
                 with suppress(Exception):
@@ -935,6 +954,10 @@ class CaptureMixin:
             with suppress(Exception):
                 p2.evaluate(CANVAS_PIN_JS, "restore")
                 p2.evaluate(IMG_SRC_PIN_JS, "restore")
+            if sum(ft.values()) + _t_read0 >= 3:
+                self.log("RENDER", f"窄屏首载页 {tag} 随宽分步: 首读 {_t_read0:.1f}s / "
+                                   + " / ".join(f"{k} {v:.1f}s" for k, v in ft.items())
+                                   + f"; 元素 {len(fa)}" + ("; 不稳定页免等" if unstable else ""))
             w2, w3 = int(round(w1 * 0.92)), int(round(w1 * 1.128))
             fb = samples.get(w2) or {}
             fl = _fluid_elements(fa, fb, w1, w2, fc=samples.get(w3) or None, w3=w3)
@@ -1074,7 +1097,8 @@ class CaptureMixin:
             self.log("RENDER", f"窄屏首载页 {tag}: {'到位' if stable else '到时限仍在变化'}, 控件 {counts.get('ctrl', '?')}"
                                f"(主页 {mc.get('ctrl', '?')}) / 按钮 {counts.get('btn', '?')}(主页 {mc.get('btn', '?')})"
                                f" / 文字 {counts.get('text', '?')}(主页 {mc.get('text', '?')}); 结构不同子树 {len(top) - len(hidden_tops)}"
-                               + (f", 桌面不渲染而窄屏状态不同的子树 {len(hidden_tops)}" if hidden_tops else ""))
+                               + (f", 桌面不渲染而窄屏状态不同的子树 {len(hidden_tops)}" if hidden_tops else "")
+                               + (f"; 到位分步 {counts.get('_steps')}" if counts.get("_steps") else ""))
             # 窄屏首载页同样做状态类相位复位: 它滚到底再回顶后, 进视口才展开/自动轮换的同类组件(折叠卡、高亮卡)已不在
             # 源码 HTML 的首载分配上, 变体把那一刻的状态烘进交付页(主页做过复位, 变体没做: 手机端多展开一张卡, 其下整页错位)。
             # 源码用该页自己上下文再取一次(手机 UA 下发的 HTML 可能不同), 取不到退回主页源码

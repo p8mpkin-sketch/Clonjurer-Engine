@@ -2792,3 +2792,44 @@ DEPLOY_DEFER_IMG_JS = r"""
   return n;
 }
 """
+
+
+# 批量路径计算记忆化: CV_PATH_FN 对每个元素向上逐层走、每层再数前面的同名兄弟(O(元素×深度×兄弟数)),
+# 一次读全页 2 万个元素的脚本(CV_PATHS / FLUID_READ / 多视口内联记录 / 隐藏子树)在长列表页上占满窄屏页主线程。
+# 这里按父元素一次给全部子元素编号、父路径缓存复用, 结果与 CV_PATH_FN 逐字相同(只用于一次求值内不改 DOM 的只读批量读)。
+CV_PATH_MEMO_FN = r"""(() => {
+  const M = window.__cvSid || (window.__cvSid = new WeakMap());
+  const sid = x => { if (M.has(x)) return M.get(x); const v = x.id;
+    const r = v && /^[A-Za-z][\w-]{1,100}$/.test(v) && document.querySelectorAll('[id="' + v + '"]').length === 1 ? v : ''; M.set(x, r); return r; };
+  const segs = new Map(), paths = new Map();
+  const segOf = (e) => {
+    let s = segs.get(e);
+    if (s !== undefined) return s;
+    const par = e.parentElement, top = par === document.body, cnt = new Map();
+    for (const c of par.children) {
+      const id = top ? sid(c) : '';
+      if (id) { segs.set(c, c.tagName.toLowerCase() + '#' + id); continue; }
+      const n = (cnt.get(c.tagName) || 0) + 1;
+      cnt.set(c.tagName, n);
+      segs.set(c, c.tagName.toLowerCase() + ':' + n);
+    }
+    return segs.get(e);
+  };
+  const pathOf = (e) => {
+    if (!e || !e.parentElement || e === document.body) return '';
+    let p = paths.get(e);
+    if (p !== undefined) return p;
+    const up = pathOf(e.parentElement);
+    p = up ? up + '>' + segOf(e) : segOf(e);
+    paths.set(e, p);
+    return p;
+  };
+  return pathOf;
+})()"""
+if getattr(_config, "CV_PATH_MEMO", True):
+    CV_PATHS_JS_ORIG, FLUID_READ_JS_ORIG = CV_PATHS_JS, FLUID_READ_JS
+    CV_PATHS_JS = CV_PATHS_JS.replace("pathOf = " + CV_PATH_FN, "pathOf = " + CV_PATH_MEMO_FN, 1)
+    FLUID_READ_JS = FLUID_READ_JS.replace("pathOf = " + CV_PATH_FN, "pathOf = " + CV_PATH_MEMO_FN, 1)
+    HIDDEN_ROOTS_JS = HIDDEN_ROOTS_JS.replace("pathOf = " + CV_PATH_FN, "pathOf = " + CV_PATH_MEMO_FN, 1)
+    CV_RECORD_JS = CV_RECORD_JS.replace("m.paths = m.els.map(" + CV_PATH_FN + ");",
+                                        "m.paths = m.els.map(" + CV_PATH_MEMO_FN + ");", 1)
