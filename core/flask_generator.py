@@ -179,7 +179,7 @@ def gzip_text_responses(resp):
         body = resp.get_data()
         if len(body) < 1024:
             return resp
-        resp.set_data(_gzip.compress(body, compresslevel=6))
+        resp.set_data(_gzip_cached(body))
         resp.headers["Content-Encoding"] = "gzip"
         resp.headers["Content-Length"] = str(len(resp.get_data()))
         vary = resp.headers.get("Vary")
@@ -260,6 +260,28 @@ DEAD_PATHS = _load_dead_paths()
 import gzip as _gzip  # noqa: E402
 _GZIP_TYPES = ("text/html", "text/css", "text/plain", "application/javascript",
                "application/x-javascript", "text/javascript", "application/json", "image/svg+xml")
+
+
+# 压缩结果按内容记忆: 交付页/样式/脚本是静态文件, 每个访客都重压一遍数 MB 首页是纯 CPU 浪费
+# (2 核机上 3MB HTML 压一次约 60ms, 并发访客排队)。键 = 长度 + CRC32 + 头尾指纹, 总量封顶。
+import zlib as _zlib  # noqa: E402
+_GZ_MEMO = {}
+_GZ_MEMO_BYTES = [0]
+_GZ_MEMO_MAX = 96 * 1024 * 1024
+_gz_lock = threading.Lock()
+
+
+def _gzip_cached(body):
+    key = (len(body), _zlib.crc32(body), body[:64], body[-64:])
+    hit = _GZ_MEMO.get(key)
+    if hit is not None:
+        return hit
+    out = _gzip.compress(body, compresslevel=6, mtime=0)
+    with _gz_lock:
+        if _GZ_MEMO_BYTES[0] + len(out) <= _GZ_MEMO_MAX:
+            _GZ_MEMO[key] = out
+            _GZ_MEMO_BYTES[0] += len(out)
+    return out
 
 
 def _norm(path):
@@ -785,6 +807,9 @@ def generate_project(task_id: int, upstream_origin: str, workspace: Path,
         .replace("@@TRACKER_PLATFORM@@", json.dumps(config.PLATFORM_PUBLIC_URL if tracker_hook else ""))
         .replace("__ENDPOINT__", "/tracker/report")  # 内嵌引擎的端点占位(容器内同源)
     )
+    if not getattr(config, "SPEED8", True):   # A/B 对照: 关掉本轮交付侧改动
+        app_src = app_src.replace("resp.set_data(_gzip_cached(body))",
+                                  "resp.set_data(_gzip.compress(body, compresslevel=6))")
     _write(build_dir / "app.py", app_src)
     _write(build_dir / "requirements.txt", GENERATED_REQUIREMENTS)
     _write(build_dir / "Dockerfile", GENERATED_DOCKERFILE)

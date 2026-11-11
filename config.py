@@ -250,6 +250,33 @@ MHTML_RETRY_TIMEOUT_S = float(os.environ.get("CLONER_MHTML_RETRY_TIMEOUT_S", "30
 THIN_STATIC_NO_RETRY = os.environ.get("CLONER_THIN_STATIC_NO_RETRY", "1") != "0"
 # 布局校准就地预评: 尺寸覆盖先注入活页重截图评分, 不升即不做整页重渲染(与 CALIB_INPLACE_GATE 同口径)
 LAYOUT_CALIB_INPLACE_GATE = os.environ.get("CLONER_LAYOUT_CALIB_INPLACE_GATE", "1") != "0"
+# 第 8 轮(速度/部署首屏)总开关: CLONER_SPEED8=0 一次关掉本轮全部改动, 供 CI 同时段 A/B
+SPEED8 = os.environ.get("CLONER_SPEED8", "1") != "0"
+# 交付首屏: 前 N 屏以外、原站加载过的图改原生懒加载(部署后 load 不等页尾图片; 评分截图前转回 eager)
+DEPLOY_DEFER_IMG = SPEED8 and os.environ.get("CLONER_DEPLOY_DEFER_IMG", "1") != "0"
+DEPLOY_DEFER_SCREENS = float(os.environ.get("CLONER_DEPLOY_DEFER_SCREENS", "2"))
+# 交付首屏: HTML 里(脚本块以外)解码后 ≥8KB 的图片/字体 data: URI 外置为 /static/ 文件
+DEPLOY_EXTERNALIZE_DATA_URI = SPEED8 and os.environ.get("CLONER_DEPLOY_EXTERNALIZE_DATA_URI", "1") != "0"
+# 交付首屏: 原图宽 > 2.5 倍显示宽、只被 <img src> 引用的大图(≥300KB)缩到 max(2×显示宽, 1600px)
+DEPLOY_SHRINK_IMG = SPEED8 and os.environ.get("CLONER_DEPLOY_SHRINK_IMG", "1") != "0"
+# 一屏放得下的页面采集滚动不再固定等 1s(没有真的滚动, 没有进视口事件)
+SHORT_PAGE_NO_SCROLL_WAIT = SPEED8 and os.environ.get("CLONER_SHORT_PAGE_NO_SCROLL_WAIT", "1") != "0"
+# 按 CPU 定并发克隆数: 每个克隆同时开主页 + 窄屏对照页 + 保真轨页(3~5 个渲染进程), 4 核机上并发 4 个
+# 互相抢 CPU, 单站各阶段都被拉长(CI 4 核同批 20 站: 重页滚动/截图/评分加载 2~3 倍于单跑)。
+# 每个克隆至少留 2 个核; 8 核以上不变(上限仍是 MAX_CONCURRENT_CONTEXTS)。CLONER_CFG_MAX_CONCURRENT_CONTEXTS 可覆盖
+# 默认关(=1 开): CI 4 核同时段 A/B, 并发 2/3/4 的单站均耗时 61.5/80.1/90.3s, 但整批墙钟 635/576/478s,
+# 少并发让单站变快却拖慢整批吞吐; 单用户一次只克隆一个站时并发数不起作用。适合"交互式要单站快"的场景手动开。
+# 交付首屏: srcset 候选全落到同一本地文件(按宽出图 CDN 去查询串后同名)时去掉 srcset, 用 src
+DEPLOY_SRCSET_DEDUP = SPEED8 and os.environ.get("CLONER_DEPLOY_SRCSET_DEDUP", "1") != "0"
+# 窄屏首载页的静置/到位/随宽等待改为各页同时起、逐页取结果(原逐页串行等满)
+NARROW_PARALLEL_WAITS = SPEED8 and os.environ.get("CLONER_NARROW_PARALLEL_WAITS", "1") != "0"
+# 评分整页截图用 JPEG 编码(=1 开)。默认关: CI 同时段二分里像素级一致的克隆(angular.dev 原 100.0)
+# 在 JPEG 下稳定掉到 97.5(结构 0.984 / 边缘 0.942), q100 也一样; 而 CI 上整页截图省时每站不到 1s
+SHOT_JPEG = SPEED8 and os.environ.get("CLONER_SHOT_JPEG", "0") == "1"
+SHOT_JPEG_QUALITY = int(os.environ.get("CLONER_SHOT_JPEG_QUALITY", "92"))
+CPU_AWARE_CONCURRENCY = SPEED8 and os.environ.get("CLONER_CPU_AWARE_CONCURRENCY", "0") == "1"
+if CPU_AWARE_CONCURRENCY:
+    MAX_CONCURRENT_CONTEXTS = max(1, min(MAX_CONCURRENT_CONTEXTS, (os.cpu_count() or 4) // 2))
 
 # 第二批合成用例的通用修法(2026-11-11 合并线)
 # 排在脚本之后的 viewport meta(脚本运行时写的)序列化后挪到第一个脚本前, 克隆里脚本照常改写它

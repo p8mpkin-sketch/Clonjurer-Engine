@@ -3319,3 +3319,201 @@ def _same_document(u1: str, u2: str) -> bool:
     host = lambda u: (u.hostname or "").lower()   # noqa: E731
     path = lambda u: (u.path or "/").rstrip("/") or "/"   # noqa: E731
     return host(a) == host(b) and path(a) == path(b)
+
+
+# ---------------------------------------------------------------------------
+# 交付首屏: 大体量 data: URI 外置为静态文件
+# 采集期 canvas 位图/blob 资源/内联字体都被写成 data: 进 HTML(单页数百 KB~数 MB, 压缩不动的 base64),
+# 浏览器必须整段下载并解析完 HTML 才能首绘; 外置成 /static/ 文件后 HTML 变小、图片可并行/按需加载、
+# 可被长缓存。只动 <script> 之外的引用(属性 / 样式块 / 内联 style), 文件名按内容 sha256 前 16 位(与 CAS 同源)。
+# ---------------------------------------------------------------------------
+_DATA_URI_EXT = {
+    "image/png": (".png", "img"), "image/jpeg": (".jpg", "img"), "image/jpg": (".jpg", "img"),
+    "image/gif": (".gif", "img"), "image/webp": (".webp", "img"), "image/avif": (".avif", "img"),
+    "image/svg+xml": (".svg", "img"), "image/x-icon": (".ico", "img"), "image/vnd.microsoft.icon": (".ico", "img"),
+    "font/woff2": (".woff2", "fonts"), "font/woff": (".woff", "fonts"), "font/ttf": (".ttf", "fonts"),
+    "font/otf": (".otf", "fonts"), "application/font-woff2": (".woff2", "fonts"),
+    "application/font-woff": (".woff", "fonts"), "application/x-font-woff": (".woff", "fonts"),
+    "application/x-font-ttf": (".ttf", "fonts"), "application/x-font-truetype": (".ttf", "fonts"),
+    "application/x-font-opentype": (".otf", "fonts"), "application/vnd.ms-fontobject": (".eot", "fonts"),
+}
+_BIG_DATA_URI_RE = re.compile(
+    r"data:([a-z0-9.+/-]+)((?:;[a-z0-9-]+=[^;,\"')\s]+)*);base64,([A-Za-z0-9+/]{%d,}={0,2})" % 2048, re.I)
+_SCRIPT_SPLIT_RE = re.compile(r"(<script\b[^>]*>.*?</script>)", re.S | re.I)
+
+
+def externalize_data_uris(html: str, ws: Path, min_bytes: int = 8192):
+    """把 <script> 之外、解码后 ≥ min_bytes 的图片/字体 data: URI 写成 ws/static/<img|fonts>/<sha16>.<ext>,
+    引用改为 /static/...。返回 (html, 外置个数, 外置字节数)。解码失败/未知类型原样保留。"""
+    if "base64," not in html:
+        return html, 0, 0
+    done = {}
+    stats = [0, 0]
+
+    def repl(m):
+        mime = m.group(1).lower()
+        spec = _DATA_URI_EXT.get(mime)
+        b64 = m.group(3)
+        if spec is None or len(b64) * 3 // 4 < min_bytes:
+            return m.group(0)
+        if b64 in done:
+            return done[b64]
+        try:
+            raw = base64.b64decode(b64, validate=True)
+        except (ValueError, TypeError):
+            return m.group(0)
+        ext, sub = spec
+        name = hashlib.sha256(raw).hexdigest()[:16] + ext
+        dst = ws / "static" / sub / name
+        try:
+            if not dst.is_file():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                dst.write_bytes(raw)
+        except OSError:
+            return m.group(0)
+        ref = f"/static/{sub}/{name}"
+        done[b64] = ref
+        stats[0] += 1
+        stats[1] += len(raw)
+        return ref
+
+    parts = _SCRIPT_SPLIT_RE.split(html)
+    for i in range(0, len(parts), 2):   # 偶数下标 = 脚本块之外
+        if "base64," in parts[i]:
+            parts[i] = _BIG_DATA_URI_RE.sub(repl, parts[i])
+    return "".join(parts), stats[0], stats[1]
+
+
+# ---------------------------------------------------------------------------
+# 交付首屏: 远大于显示尺寸的原图按 2 倍显示宽缩小
+# 采集到的是原站原图(新闻/电商站常见 4000~6000px、8~16MB 的 JPEG 显示在 600px 宽的卡片里), 部署后首屏
+# 要把它们整张搬完。采集时 DEPLOY_DEFER_IMG_JS 给"原图宽 > 2.5 倍显示宽"且无 srcset/<picture> 的 <img>
+# 记 data-clone-dw(显示宽); 这里把只被这类 <img> 引用的文件缩到 max(2×显示宽, 下限) 并按原格式重编码。
+# 被样式表/脚本/别的 <img>(无 data-clone-dw)引用的文件不动 —— 不知道它在别处显示多大。
+# ---------------------------------------------------------------------------
+_IMG_DW_RE = re.compile(r"<img\b[^>]*>", re.I)
+_SRC_ATTR_RE = re.compile(r'\ssrc="(/static/img/[0-9a-f]{16}\.(?:jpe?g|png|webp))"', re.I)
+_DW_ATTR_RE = re.compile(r'\sdata-clone-dw="(\d+)"')
+
+
+def shrink_oversized_images(ws: Path, min_width: int = 1600, min_bytes: int = 300_000):
+    """返回 (缩小个数, 省下字节)。只处理 ws/static/img 下 CAS 命名的 jpg/png/webp。"""
+    pages = [p for p in ws.rglob("*.html") if "flask_app" not in p.parts]
+    want = {}        # 文件名 -> 最大显示宽
+    plain_refs = {}  # 文件名 -> 不带显示宽的引用次数
+    texts = []
+    for p in pages:
+        with suppress(OSError):
+            texts.append(p.read_text(encoding="utf-8", errors="replace"))
+    for t in texts:
+        for tag in _IMG_DW_RE.finditer(t):
+            m = _SRC_ATTR_RE.search(tag.group(0))
+            if not m:
+                continue
+            name = m.group(1).rsplit("/", 1)[-1]
+            dw = _DW_ATTR_RE.search(tag.group(0))
+            if dw:
+                want[name] = max(want.get(name, 0), int(dw.group(1)))
+            else:
+                plain_refs[name] = plain_refs.get(name, 0) + 1
+    if not want:
+        return 0, 0
+    # 文件在 HTML 的 <img src> 之外(样式表/脚本/srcset/内联 style)出现过 → 不动
+    others = []
+    for sub in ("css", "js"):
+        d = ws / "static" / sub
+        if d.is_dir():
+            for f in d.iterdir():
+                with suppress(OSError):
+                    others.append(f.read_text(encoding="utf-8", errors="replace"))
+    n, saved = 0, 0
+    for name, dw in want.items():
+        if plain_refs.get(name):
+            continue
+        img_refs = sum(t.count(f'src="/static/img/{name}"') for t in texts)
+        if sum(t.count(name) for t in texts) != img_refs or any(name in o for o in others):
+            continue
+        f = ws / "static" / "img" / name
+        try:
+            size = f.stat().st_size
+            if size < min_bytes:
+                continue
+            with Image.open(f) as im:
+                w, h = im.size
+                target = max(min_width, dw * 2)
+                if w <= target * 1.25 or getattr(im, "n_frames", 1) > 1:
+                    continue
+                fmt = (im.format or "").upper()
+                nh = max(1, round(h * target / w))
+                small = im.convert("RGBA" if im.mode in ("RGBA", "LA", "P") and fmt != "JPEG" else "RGB") \
+                    .resize((target, nh), Image.LANCZOS)
+                buf = io.BytesIO()
+                if fmt == "JPEG":
+                    small.save(buf, "JPEG", quality=88, optimize=True, progressive=True)
+                elif fmt == "PNG":
+                    small.save(buf, "PNG", optimize=True)
+                elif fmt == "WEBP":
+                    small.save(buf, "WEBP", quality=88)
+                else:
+                    continue
+            data = buf.getvalue()
+            if len(data) >= size * 0.8:
+                continue
+            f.write_bytes(data)
+            n += 1
+            saved += size - len(data)
+        except Exception:   # noqa: BLE001 单张失败不影响交付
+            continue
+    return n, saved
+
+
+# ---------------------------------------------------------------------------
+# 交付首屏: 退化 srcset 收回 src
+# 按宽度出图的 CDN(?w=150 / ?w=668 ...)本地化后各候选常落到同一个 CAS 文件(去掉查询串后同名, 只下到原尺寸原图),
+# srcset 变成「同一张 8~16MB 原图标 20 种宽度」: 浏览器按 sizes 选哪个候选都是原图, 首屏前白下几十 MB。
+# 这种 srcset 不再提供任何选择, 而 <img src> 往往是站点按显示尺寸给的那张(采集时已本地化): 去掉 srcset/sizes,
+# 让浏览器用 src。只动 src 为本地 /static/ 且文件在盘上、srcset ≥2 个候选全指向同一 URL 且与 src 不同的 <img>。
+# ---------------------------------------------------------------------------
+_IMG_TAG_RE = re.compile(r"<img\b[^>]*>", re.I)
+_SRCSET_ATTR_RE: dict = {}
+
+
+def _img_attr(tag: str, name: str):
+    rx = _SRCSET_ATTR_RE.get(name)
+    if rx is None:
+        rx = _SRCSET_ATTR_RE[name] = re.compile(r"""\s%s\s*=\s*(?:"([^"]*)"|'([^']*)')""" % re.escape(name), re.I)
+    m = rx.search(tag)
+    if not m:
+        return None, None
+    return (m.group(1) if m.group(1) is not None else m.group(2)), m
+
+
+def collapse_degenerate_srcset(html: str, ws: Path):
+    """返回 (html, 收回个数)。"""
+    if "srcset" not in html:
+        return html, 0
+    n = [0]
+
+    def fix(m):
+        tag = m.group(0)
+        srcset, sm = _img_attr(tag, "srcset")
+        src, _ = _img_attr(tag, "src")
+        if not srcset or not src or not src.startswith("/static/"):
+            return tag
+        urls = [c.strip().split()[0] for c in srcset.split(",") if c.strip()]
+        if len(urls) < 2 or len(set(urls)) != 1 or urls[0] == src:
+            return tag
+        if not (ws / src.lstrip("/").split("?")[0]).is_file():
+            return tag
+        out = tag[:sm.start()] + tag[sm.end():]
+        _, zm = _img_attr(out, "sizes")
+        if zm:
+            out = out[:zm.start()] + out[zm.end():]
+        n[0] += 1
+        return out
+
+    parts = _SCRIPT_SPLIT_RE.split(html)
+    for i in range(0, len(parts), 2):
+        if "srcset" in parts[i]:
+            parts[i] = _IMG_TAG_RE.sub(fix, parts[i])
+    return "".join(parts), n[0]

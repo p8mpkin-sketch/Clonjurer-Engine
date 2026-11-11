@@ -428,6 +428,24 @@ jobs:
             [ -f "$d/engine.diag" ] && { echo "--- engine.diag"; tail -15 "$d/engine.diag"; }
             echo "::endgroup::"
           done
+      - name: 交付产物部署首屏实测(宽带限速, 上游可达)
+        if: always()
+        timeout-minutes: 20
+        run: |
+          j=$(ls -t engine_bench/real_sites/runs/run_*.json 2>/dev/null | head -1)
+          [ -n "$j" ] || exit 0
+          zips=$(python - "$j" <<'PY'
+          import json, sys, pathlib
+          run = json.load(open(sys.argv[1], encoding="utf-8"))
+          for r in run.get("results", []):
+              z = pathlib.Path("exports") / f"{r.get('task_id')}.zip"
+              if r.get("status") == "completed" and z.is_file():
+                  print(z)
+          PY
+          )
+          [ -n "$zips" ] || { echo "无导出产物"; exit 0; }
+          python engine_bench/perf/deploy_load_probe.py $zips --throttle broadband --timeout 60 --compact \
+            --json engine_bench/real_sites/runs/deploy_probe.json | tee logs/deploy_probe.txt || true
       - name: 紧凑摘要(日志尾部, 远程归因只拉最后 150 行即可)
         if: always()
         run: |
@@ -440,11 +458,17 @@ jobs:
           for r in run.get("results", []):
               st = r.get("stage_times") or {}
               ph = r.get("phase_times") or {}
-              print("COMPACT|{}|score={}|int={}|el={}|MB={}|n={}|nav={}|lazy={}|cas={}|bf={}|rw={}|dom={}".format(
-                  (r.get("url") or "")[8:48], r.get("score"), r.get("interactive"), r.get("elapsed_s"),
+              print("COMPACT|{}|tid={}|score={}|int={}|el={}|MB={}|n={}|nav={}|lazy={}|cas={}|bf={}|rw={}|dom={}".format(
+                  (r.get("url") or "")[8:48], r.get("task_id"), r.get("score"), r.get("interactive"), r.get("elapsed_s"),
                   round((r.get("bytes") or 0) / 1048576, 1), r.get("assets"),
                   ph.get("采集-导航"), ph.get("采集-懒加载滚动"), st.get("CAS并发下载"),
                   st.get("活体回补"), st.get("资源重写"), st.get("DOM渲染")))
+          for r in run.get("results", []):
+              # 逐子阶段耗时(秒): 远程归因"时间去哪了", 只列 ≥0.5s 的
+              ph = {k: v for k, v in (r.get("phase_times") or {}).items() if isinstance(v, (int, float)) and v >= 0.5}
+              print("COMPACTPH|{}|{}".format((r.get("url") or "")[8:48], json.dumps(ph, ensure_ascii=False, separators=(",", ":"))))
           s = run.get("summary") or {}
-          print("COMPACT summary " + json.dumps({k: s.get(k) for k in ("mean", "interactive_mean", "mean_elapsed", "p50_elapsed", "p90_elapsed")}, ensure_ascii=False))
+          print("COMPACT summary " + json.dumps({k: s.get(k) for k in ("mean", "interactive_mean", "mean_elapsed", "p50_elapsed", "p90_elapsed", "batch_wall_s")}, ensure_ascii=False))
           PY
+          # 部署首屏逐站(task_id → 站点): 与 COMPACT 行同在日志尾部
+          [ -f logs/deploy_probe.txt ] && grep '^COMPACTDL' logs/deploy_probe.txt || true
