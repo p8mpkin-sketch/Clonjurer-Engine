@@ -272,10 +272,15 @@ def _ax_getter():
             return None
         if name in ("AXPosition", "AXSize"):
             typ = AS.kAXValueCGPointType if name == "AXPosition" else AS.kAXValueCGSizeType
-            ok, st = AS.AXValueGetValue(v, typ, None)
-            if not ok:
-                return None
-            return (st.x, st.y) if name == "AXPosition" else (st.width, st.height)
+            try:
+                ok, st = AS.AXValueGetValue(v, typ, None)
+                if ok:
+                    return (st.x, st.y) if name == "AXPosition" else (st.width, st.height)
+            except Exception:
+                pass
+            # 个别 pyobjc 版本解不出 AXValue 结构体: 退回解析它的描述串({value = x:60 y:160 ...} / w:640 h:420)
+            m = re.search(r"[xw]:\s*(-?[\d.]+)\s+[yh]:\s*(-?[\d.]+)", str(v))
+            return (float(m.group(1)), float(m.group(2))) if m else None
         if name == "AXChildren":
             return list(v)
         if isinstance(v, (str, bool, int, float)):

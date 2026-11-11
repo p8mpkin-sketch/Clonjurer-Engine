@@ -179,9 +179,10 @@ def macos():
     for group, name, cmd, app_name in apps:
         proc = None
         try:
-            proc = subprocess.Popen(cmd)
+            errf = open(tmp / f"{name}.err", "w+") if tmp.mkdir(parents=True, exist_ok=True) is None else None
+            proc = subprocess.Popen(cmd, stderr=errf)
             tree, last = None, ""
-            for _ in range(30):
+            for _ in range(20):
                 time.sleep(1.0)
                 pid = pid_of(app_name) if app_name else proc.pid
                 if not pid:
@@ -193,12 +194,14 @@ def macos():
                 except Exception as exc:   # noqa: BLE001
                     last = f"{type(exc).__name__}: {str(exc)[:160]}"
                     continue
+                last = f"窗口 {t['window']} 节点 {a11y._count(t['root'])} 根 {t['root'].get('role')}"
                 if t["window"][2] >= 200 and t["window"][3] >= 120 and a11y._count(t["root"]) >= 6:
                     time.sleep(2.0)     # 窗口动画落定后重采一次
                     tree = a11y.capture_macos(pid, out_dir=tmp)
                     break
             if tree is None:
-                print(f"跳过 {name}: 30s 内没采到应用窗口 {last}")
+                errf.seek(0)
+                print(f"跳过 {name}: 20s 内没采到应用窗口; {last}; 进程退出码 {proc.poll()}; stderr: {errf.read()[-600:]!r}")
                 continue
             shot = Path(tree.get("screenshot") or "")
             if not shot.exists():
