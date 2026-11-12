@@ -32,6 +32,7 @@
 import base64
 import io
 import json
+import itertools
 import math
 import re
 import shutil
@@ -714,15 +715,18 @@ class _Sampler:
         stroke = (float(sub.sum()) / starts / k) if starts else 0.0
         top, bottom = (merged[0][0]) / k, (merged[-1][1] + 1) / k
         # 各行墨迹左缘的离散度: 多行文本左缘对齐(≈0)= 左对齐段落, 参差 = 居中/右对齐
-        lefts = []
+        lefts, spans = [], []
         for s0, e0 in merged:
             cc = np.where(mask[s0:e0 + 1].any(axis=0))[0]
             if cc.size:
                 lefts.append(float(cc[0]) / k)
+                # 行内与前一簇隔开 2.5 个行高以上的墨迹不是这行字(滚动条箭头、行尾的图标): 每行只取首簇的右缘
+                gap = np.where(np.diff(cc) > 2.5 * (e0 - s0 + 1))[0]
+                spans.append((x + float(cc[0]) / k, x + float(cc[gap[0]] + 1 if gap.size else cc[-1] + 1) / k))
         spread = (max(lefts) - min(lefts)) if len(lefts) > 1 else 0.0
         return {"top": y + top, "bottom": y + bottom, "left": x + cols[0] / k,
                 "right": x + (cols[-1] + 1) / k, "lines": len(merged), "line_h": line_h, "pitch": pitch,
-                "stroke": stroke, "left_spread": spread}
+                "stroke": stroke, "left_spread": spread, "spans": spans}
 
     def icon_split(self, x, y, w, h, bg_hex, units: float):
         """带文字的控件框里是否还画着一个图标(工具栏按钮的"图标在上/字在下"、列表项的"图标在左/字在右")。
@@ -1371,6 +1375,68 @@ def _asc_desc(text: str):
     return asc, desc
 
 
+# 比例字体(Helvetica/Arial 度量, 千分之 em)的 ASCII 字宽; 只用来比较「各行墨迹宽与字数/比例字宽哪个更成正比」
+_PROP_W = dict(zip(
+    " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~",
+    [278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278] + [556] * 10
+    + [278, 278, 584, 584, 584, 556, 1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778,
+       667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556, 333, 556, 556, 500, 556, 556,
+       278, 556, 556, 222, 222, 500, 222, 833, 556, 556, 556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334,
+       260, 334, 584]))
+# 等宽字体: 字宽 0.6em 的一族(Liberation Mono/Cousine 与 Courier New 同度量, DejaVu Sans Mono/Menlo 0.602)
+_MONO_ADV = 0.6
+_MONO_FONT = {"family": "Liberation Mono",
+              "fallback": "Cousine,'Courier New','DejaVu Sans Mono',Menlo,monospace",
+              "metric_local": ["Cousine", "Courier New", "DejaVu Sans Mono", "Menlo"]}
+
+
+def _mono_advance(text: str, ink: dict):
+    """多行文本是否等宽字体排的: 各行墨迹宽与「字数」成正比(残差远小于与比例字宽之和成正比)→ 返回每字步进(逻辑单位)。
+    代码编辑器/日志/终端类控件用等宽字, 按比例字体排会每行长短都不对。少于 3 行、行数对不上、非 ASCII 为主时不判。"""
+    spans = (ink or {}).get("spans") or []
+    rows = [ln.strip() for ln in (text or "").split("\n") if ln.strip()]
+    if len(rows) < 3 or not 0 <= len(spans) - len(rows) <= 2:
+        return None
+    if len(spans) > len(rows):
+        # 控件框里多出的墨迹行(横向滚动条、只剩滚动箭头的行): 依次去掉 1~2 行, 取等宽拟合最好的那种对应
+        best = None
+        for drop in itertools.combinations(range(len(spans)), len(spans) - len(rows)):
+            sub = [sp for i, sp in enumerate(spans) if i not in drop]
+            got = _mono_fit(rows, sub)
+            if got and (best is None or got[1] < best[1]):
+                best = got
+        return best[0] if best else None
+    got = _mono_fit(rows, spans)
+    return got[0] if got else None
+
+
+def _mono_fit(rows, spans):
+    """(每字步进, 等宽拟合残差) 或 None: 等宽模型残差须远小于比例字宽模型且 < 平均行宽 3%。"""
+    if sum(1 for r in rows for ch in r if ch not in _PROP_W) > 0.1 * sum(len(r) for r in rows):
+        return None
+    ws = [r - l for l, r in spans]
+    n = [float(len(r)) for r in rows]
+    p = [sum(_PROP_W.get(ch, 556) for ch in r) / 1000.0 for r in rows]
+    if max(n) - min(n) < 4:
+        return None
+
+    def fit(xs):
+        mx, my = sum(xs) / len(xs), sum(ws) / len(ws)
+        vx = sum((v - mx) ** 2 for v in xs)
+        if vx <= 0:
+            return None, 1e9
+        a = sum((v - mx) * (w - my) for v, w in zip(xs, ws)) / vx
+        b = my - a * mx
+        return a, math.sqrt(sum((w - a * v - b) ** 2 for v, w in zip(xs, ws)) / len(xs))
+
+    a_m, r_m = fit(n)
+    _a_p, r_p = fit(p)
+    mean_w = sum(ws) / len(ws)
+    if a_m and a_m > 0 and r_m < 0.5 * r_p and r_m < 0.03 * mean_w:
+        return a_m, r_m
+    return None
+
+
 def _ink_em(text: str) -> float:
     asc, desc = _asc_desc(text)
     return asc + desc
@@ -1413,18 +1479,32 @@ class _Builder:
         self._ts_keys = {}
         self.stats = {"nodes_in": 0, "stack": 0, "row": 0, "col": 0, "embedded": 0, "dividers": 0}
 
-    def text_style(self, size: int, color: str, h: float, weight: int = 400, align: str = "", line=None) -> str:
+    def text_style(self, size: int, color: str, h: float, weight: int = 400, align: str = "", line=None,
+                   font: str = "") -> str:
         if line is None:
             line = round(h / size, 3) if size and h and h < size * 1.9 else 1.3
-        key = (size, color or "c1", line, weight, align)
+        key = (size, color or "c1", line, weight, align, font)
         if key not in self._ts_keys:
             name = f"ta{len(self._ts_keys)}"
             st = {"size": size, "weight": weight, "line": line, "color": color or "c1"}
             if align:
                 st["align"] = align
+            if font:
+                st["font"] = font
             self.tokens.text_style[name] = st
             self._ts_keys[key] = name
         return self._ts_keys[key]
+
+    def _mono(self, text: str, ink: dict, size: float, box: dict) -> str:
+        """等宽排的多行文本: 换等宽字体令牌, 字间距补齐到实测每字步进(本机等宽字体 0.6em 一族)。"""
+        adv = _mono_advance(text, ink) if (ink and size) else None
+        if not adv or not 0.45 * size <= adv <= 0.8 * size:
+            return ""
+        self.tokens.font.setdefault("mono", dict(_MONO_FONT))
+        ls = round(adv - _MONO_ADV * size, 2)
+        if abs(ls) >= 0.05:
+            box["letter_spacing"] = ls
+        return "mono"
 
     def build(self, n: dict, parent_bg: str, opaque: bool = False) -> Node:
         x, y, w, h = n["bounds"]
@@ -1574,7 +1654,8 @@ class _Builder:
                 pad = [round(float(top), 1), round(float(right), 1), round(float(bottom), 1), round(float(left), 1)]
                 if symbolic:
                     box["_symbolic"] = True
-            text_ref = self.text_style(size, fg or "c1", h, weight=weight, align=align, line=line)
+            tfont = self._mono(text, ink, size, box) if (ink and ink["lines"] >= 3) else ""
+            text_ref = self.text_style(size, fg or "c1", h, weight=weight, align=align, line=line, font=tfont)
             content = {"text": text}
             if pad and any(pad):
                 box["pad"] = pad
@@ -1632,6 +1713,7 @@ class _Builder:
                 lh = isize * (iline or 1.3)
                 box["pad"] = [round(max(0.0, iink["top"] - y - (lh - iink["line_h"]) / 2), 1), 4, 0,
                               round(max(0.0, iink["left"] - x - 0.5), 1)]
+            ifont = self._mono(content["text"], iink, isize, box) if multi else ""
             if multi:
                 content["multiline"] = True  # type: ignore[assignment]
             if (self.sampler and not box.get("border") and _near_hex(bg, parent_bg)
@@ -1640,7 +1722,7 @@ class _Builder:
                 box["bg"] = bg
                 box["border"] = {"w": 0, "color": bg}
                 box["radius"] = 0
-            text_ref = self.text_style(isize, fg or "c1", 0, line=iline or None)
+            text_ref = self.text_style(isize, fg or "c1", 0, line=iline or None, font=ifont)
             if box.get("border") and box["border"].get("w") and self.sampler.square_corners(x, y, w, h, box["border"]["color"]):
                 box["radius"] = 0
             intents = [{"on": "input", "do": "input"}]
