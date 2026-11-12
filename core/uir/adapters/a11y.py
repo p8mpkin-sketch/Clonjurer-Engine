@@ -853,6 +853,35 @@ class _Sampler:
         vals, counts, order, keys = self._mode(px)
         return self._hex(px[keys == vals[order[0]]].mean(axis=0).round())
 
+    def fill_window_corners(self, x, y, w, h, r: float = 11.0) -> int:
+        """窗口截图矩形四角、圆角弧线以外的像素不是窗口内容(桌面/阴影/透明底): 换成沿对角线往里一点的窗口内颜色。
+        否则贴着窗口角的文字(状态栏)量墨迹时被这些像素撑大。只在角点颜色与内侧颜色明显不同时处理。"""
+        np = self.np
+        s = self.s
+        x1, y1 = int(round((x - self.ox) * s)), int(round((y - self.oy) * s))
+        x2, y2 = int(round((x - self.ox + w) * s)), int(round((y - self.oy + h) * s))
+        H, W = self.arr.shape[:2]
+        rp = int(round(r * s))
+        if x1 < 0 or y1 < 0 or x2 > W or y2 > H or x2 - x1 < 4 * rp or y2 - y1 < 4 * rp:
+            return 0
+        arr = self.arr.copy()
+        yy, xx = np.mgrid[0:rp, 0:rp]
+        outside = (rp - xx - 0.5) ** 2 + (rp - yy - 0.5) ** 2 > (rp + 0.5) ** 2      # 左上角方块里弧线以外
+        done = 0
+        for cy, cx, fy, fx in ((y1, x1, 1, 1), (y1, x2 - rp, 1, -1), (y2 - rp, x1, -1, 1), (y2 - rp, x2 - rp, -1, -1)):
+            m = outside[::fy, ::fx]
+            blk = arr[cy:cy + rp, cx:cx + rp]
+            iy, ix = (rp + 1 if fy == 1 else -2), (rp + 1 if fx == 1 else -2)
+            inner = self.arr[cy + iy if fy == 1 else cy + rp + iy, cx + ix if fx == 1 else cx + rp + ix].astype(np.int32)
+            corner = self.arr[cy if fy == 1 else cy + rp - 1, cx if fx == 1 else cx + rp - 1].astype(np.int32)
+            if np.abs(inner - corner).sum() < 60:
+                continue
+            blk[m] = inner
+            done += 1
+        if done:
+            self.arr = arr
+        return done
+
     def open_bg(self, x, y, w, h, rects):
         """容器里没有被任何子节点盖住的那部分面积的主色(占框面积 ≥12% 且颜色集中才返回)。
         表格/列表只占了上半截时, 边缘一圈多半落在表头、行号栏、边线上, 取出来的不是容器真正露出来的底色。"""
@@ -1065,6 +1094,38 @@ def _add_residual_bands(root: dict, sampler: "_Sampler") -> int:
     for k in root.get("children") or []:
         walk(k)
     return added
+
+
+def _mark_open_bg(root: dict, sampler: "_Sampler") -> None:
+    """容器露出来的底色(_Sampler.open_bg): 扣掉自己的子节点, 也扣掉树里任何压在它框内、既不是它祖先也不是它后代的
+    节点(滑出来盖住一截的面板、浮层), 剩下的面积才是它自己的底。"""
+    nodes = []
+
+    def collect(n, path):
+        nodes.append((path, n["bounds"]))
+        for i, k in enumerate(n.get("children") or []):
+            collect(k, path + (i,))
+
+    collect(root, ())
+
+    def walk(n, path):
+        kids = n.get("children") or []
+        for i, k in enumerate(kids):
+            walk(k, path + (i,))
+        if len(kids) < 2 or not path or n.get("uir_role") in ("text", "image", "input", "divider", "badge"):
+            return
+        b = n["bounds"]
+        d = len(path)
+        rects = [k["bounds"] for k in kids]
+        for p, ob in nodes:
+            if p[:d] == path or path[:len(p)] == p:
+                continue
+            it = _intersect(b, ob)
+            if it[2] * it[3] > 0:
+                rects.append(ob)
+        n["_open_bg"] = sampler.open_bg(b[0], b[1], b[2], b[3], rects)
+
+    walk(root, ())
 
 
 def _add_gap_lines(root: dict, sampler: "_Sampler") -> int:
@@ -1368,10 +1429,9 @@ class _Builder:
                 # 输入框自己就是带框控件(里面的子节点只是图标按钮/编辑区), 边线不限细线
                 bg, border = self.sampler.bg_border(x, y, w, h, thin_only=bool(kids) and role != "input")
                 framed = bg is not None and bg != self.sampler.bg(x, y, w, h)
-                if len(kids) >= 2 and role in ("table", "list"):
-                    ob = self.sampler.open_bg(x, y, w, h, [k["bounds"] for k in kids])
-                    if ob and bg and not _near_hex(ob, bg):
-                        bg = ob
+                ob = n.get("_open_bg")
+                if ob and bg and not _near_hex(ob, bg):
+                    bg = ob
             if bg and (bg != parent_bg or opaque):
                 box["bg"] = bg
             if border:
@@ -1669,11 +1729,14 @@ def tree_to_uir(tree: dict, screenshot=None, embed_images: bool = True) -> UIR:
     _add_window_title(prep["root"], prep["platform"])
     if sampler is not None:
         sampler.core_stroke = prep["platform"] in ("windows", "macos")
+        if prep["platform"] == "macos":
+            sampler.fill_window_corners(*prep["window"])
         _add_title_band(prep["root"], sampler, prep["platform"])
         _refine_leaves(prep["root"], sampler)
         if embed_images:
             _add_residual_bands(prep["root"], sampler)
         _add_gap_lines(prep["root"], sampler)
+        _mark_open_bg(prep["root"], sampler)
         _mark_graphic_leaves(prep["root"])
     b = _Builder(sampler, prep["platform"])
     wx, wy, ww, wh = prep["window"]

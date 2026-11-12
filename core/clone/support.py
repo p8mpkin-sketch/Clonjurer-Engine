@@ -2511,7 +2511,10 @@ var xtm=0;function dedupX(){xtm=0;if(over())return;var now=Date.now(),more=0;for
   var ex=exact(n);if(ex){try{selfRm=1;ex.remove();selfRm=0;window.__cloneHydrDedup=(window.__cloneHydrDedup||0)+1;}catch(e){selfRm=0;}}}if(more)xtm=setTimeout(dedupX,200);}
 function onAdded(n){if(over()||!n||n.nodeType!==1||RST.has(n)||!n.parentNode||n.parentNode.nodeType!==1)return;if(/^(SCRIPT|STYLE|LINK|TEMPLATE|NOSCRIPT|META|HTML|HEAD|BODY)$/.test(n.tagName))return;
   NEWS.add(n);if(!DCL)return;
-  if(PAIRS.length<200){PAIRS.push({n:n,t:Date.now()});setTimeout(dedup,1600);if(XT&&!xtm)xtm=setTimeout(dedupX,360);}}
+  // 候选队列只收可能成块的元素: 解析结束后页面常批量回填上百个 <source>/<option>/弹层模板里的小件, 把队列占满,
+  // 晚到的整批追加(页底索引)就进不来了
+  if(/^(SOURCE|TRACK|OPTION|OPTGROUP|BR|WBR|COL|COLGROUP|PARAM|AREA|MAP|PATH|G|USE|DEFS|TITLE|BASE|INPUT)$/i.test(n.tagName))return;
+  if(PAIRS.length<1500){PAIRS.push({n:n,t:Date.now()});setTimeout(dedup,1600);if(XT&&!xtm)xtm=setTimeout(dedupX,360);}}
 function dedup(){if(over())return;var now=Date.now(),rest=[];for(var i=0;i<PAIRS.length;i++){var q=PAIRS[i];if(now-q.t<1500){rest.push(q);continue;}var n=q.n;if(!n.isConnected||!n.parentNode||n.parentNode.nodeType!==1)continue;
   var a=hOf(n);if(a<MIN)continue;
   var old=null,cnt=0,ch=n.parentNode.children;for(var j=0;j<ch.length;j++){var c=ch[j];if(c===n||NEWS.has(c))continue;var b=hOf(c);if(b<MIN)continue;if(c.tagName===n.tagName&&sim(c,n)){cnt++;old=c;continue;}if(Math.abs(a-b)<=Math.max(a,b)*0.6&&tsim(c,n)){cnt++;old=c;}}

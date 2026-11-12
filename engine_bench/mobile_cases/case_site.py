@@ -622,6 +622,19 @@ def case_rerun_append_async(ctx):
                   head=f"<style>{_IDX_CSS}</style>")
 
 
+def case_rerun_append_crowded(ctx):
+    """同 rerun_append_dcl, 但追加之前页面先批量插入几百个无关的小元素(图片的 <source> 回填、隐藏的弹层模板),
+    之后 600ms 才整批追加页底索引 —— 去重的候选队列若被前面那批占满, 晚到的追加就漏掉, 页底翻倍。"""
+    pre = ("document.addEventListener('DOMContentLoaded',function(){var t=document.getElementById('tpl');"
+           "for(var i=0;i<260;i++){var d=document.createElement('div');d.className='tpl-item';d.textContent='Template '+i;t.appendChild(d);}"
+           "var ps=document.querySelectorAll('picture');for(var k=0;k<240;k++){var so=document.createElement('source');so.media='(min-width:'+(k+1)+'px)';so.srcset='data:image/gif;base64,R0lGODlhAQABAAAAACw=';ps[k%ps.length].insertBefore(so,ps[k%ps.length].firstChild);}"
+           "setTimeout(render,600);});")
+    pics = "".join('<picture><img alt="" width="40" height="40" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></picture>' for _ in range(6))
+    mid = (f'<div class="band"><div class="wrap"><div class="grid">{_cards(3)}</div>{pics}</div></div>'
+           '<div id="tpl" style="display:none"></div><nav id="idx"></nav>')
+    return _shell("Rerun append crowded", mid + _index_groups_js(pre), head=f"<style>{_IDX_CSS}</style>")
+
+
 def case_rerun_append_animated(ctx):
     """同上, 但 load 之后才整批追加, 且条目带进场动画和紧凑写法的内联样式(自定义属性做动画延时)。
     采集侧会改写旧份的内联样式(动画相位固化追加 animation-delay、样式经 CSSOM 重排了空白), 新旧两份
@@ -663,6 +676,18 @@ show();setInterval(function(){k=(k+1)%fs.length;show();},3000);});})();</script>
     return _shell("State carousel frame", mid, head=f"<style>{css}</style>")
 
 
+def case_timed_oneshot_collapse(ctx):
+    """一次性的长延时收起(门户站常见: 顶部通栏展示几秒后自动收成窄条, 之后不再变): setTimeout 3.2s 触发一次。
+    采集时已收起, 克隆里冻的是收起后的状态; 探针若把长 setTimeout 一律拦掉, 原站侧停在未收起, 整页错位 —— 口径应只拦
+    周期性的定时器链, 一次性的放行并等它触发。"""
+    css = (".promo{height:220px;background:#7b3f8c;color:#fff;padding:24px;box-sizing:border-box;overflow:hidden}"
+           ".promo.min{height:48px;padding:10px 24px}.promo.min p{display:none}.promo h2{margin:0 0 8px}")
+    js = "<script>setTimeout(function(){document.getElementById('promo').classList.add('min');},3200);</script>"
+    mid = ('<div id="promo" class="promo"><h2>Seasonal promotion</h2><p>Shown in full for a few seconds, then folds into a slim bar.</p></div>'
+           f'<div class="band"><div class="wrap"><div class="grid">{_cards(6)}</div></div></div>{js}')
+    return _shell("Timed oneshot collapse", mid, head=f"<style>{css}</style>")
+
+
 def case_state_carousel_loop_once(ctx):
     """循环轮播(轮播库 loop 写法): 轨道 = 末张副本 + 4 张真实卡 + 首张副本, 初始位移 -1 张宽(px 内联);
     setTimeout 链每 3s 步进一次: 同一次回调里同步改轨道 transform 并把 active 类移到下一张。周期接近采集时长,
@@ -702,6 +727,7 @@ CASES = {
     "lazy_sections": ("lazy", case_lazy_sections),
     "timed_carousel": ("timed", case_timed_carousel),
     "timed_accordion": ("timed", case_timed_accordion),
+    "timed_oneshot_collapse": ("timed", case_timed_oneshot_collapse),
     "overlay_modal": ("overlay", case_overlay_modal),
     "pinned_layout": ("pinned", case_pinned_layout),
     "measured_inline": ("measured", case_measured_inline),
@@ -722,6 +748,7 @@ CASES = {
     "rerun_append_dcl": ("rerun", case_rerun_append_dcl),
     "rerun_append_async": ("rerun", case_rerun_append_async),
     "rerun_append_animated": ("rerun", case_rerun_append_animated),
+    "rerun_append_crowded": ("rerun", case_rerun_append_crowded),
     "state_tab_spy": ("state", case_state_tab_spy),
     "state_carousel_frame": ("state", case_state_carousel_frame),
     "state_carousel_loop_once": ("state", case_state_carousel_loop_once),

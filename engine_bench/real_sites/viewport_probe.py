@@ -463,11 +463,77 @@ HOLD_INTERVALS_JS = r"""(() => {
 })();""".replace("__LONG__", "3000" if _PROBE_TIMERS == "hold3" else "0")
 
 
-def _shoot(ctx, url, vp, out: Path, timeout_ms=45000, extra_wait_ms=0, focus_keys=None):
+# PROBE_TIMERS=holdc(提案口径): 只拦"周期性的"长 setTimeout 链, 一次性的长延时照常触发。hold3 把 ≥3s 的 setTimeout 一律
+# 拦掉, 一次性的揭示/收起(延时 3s 以上才把某块收起或换掉)在原站侧也被拦住, 而克隆里冻进去的是它触发之后的状态,
+# 两侧反而对不上。周期性无法在登记那一刻判断, 所以每个(原站, 视口)先开一张发现页: 定时器照常跑, 滚一遍让
+# "进视口才启动"的轮换也登记上, 等到首轮触发; 某个长定时器的回调期间(含结束后 250ms, 框架分片提交)又登记了同延时的
+# 长定时器 = 链。记下 延时|回调源码指纹, 正式页(原站与克隆两侧)只拦指纹命中的。
+TIMER_SIG_JS = r"""const __sig = (fn, ms) => { const t = String(fn).slice(0, 400); let x = 2166136261;
+  for (let i = 0; i < t.length; i++) { x ^= t.charCodeAt(i); x = Math.imul(x, 16777619); } return ms + '|' + (x >>> 0); };"""
+DISCOVER_CHAINS_JS = r"""(() => {
+  __SIG__
+  const D = window.__ptd = {chain: {}, cur: null, until: 0, maxDue: 0};
+  const real = window.setInterval; let fake = 1 << 30;
+  window.setInterval = function (fn, ms) { if (+ms >= 1000) return fake++; return real.apply(this, arguments); };
+  const st = window.setTimeout;
+  window.setTimeout = function (fn, ms) {
+    if (typeof fn !== 'function' || !(+ms >= 3000)) return st.apply(this, arguments);
+    const s = __sig(fn, +ms), now = performance.now();
+    if (D.cur && (D.cur.live || now <= D.until) && D.cur.ms === +ms) { D.chain[s] = 1; D.chain[D.cur.s] = 1; }
+    if (+ms <= 9000) D.maxDue = Math.max(D.maxDue, now + +ms);
+    const a = Array.prototype.slice.call(arguments);
+    a[0] = function () {
+      const me = D.cur = {s: s, ms: +ms, live: true};
+      try { return fn.apply(this, arguments); } finally { me.live = false; D.until = performance.now() + 250; }
+    };
+    return st.apply(window, a);
+  };
+})();""".replace("__SIG__", TIMER_SIG_JS)
+HOLD_CHAINS_JS = r"""(() => {
+  __SIG__
+  const CH = new Set(__CHAINS__), H = window.__pth = {maxDue: 0};
+  const real = window.setInterval; let fake = 1 << 30;
+  window.setInterval = function (fn, ms) { if (+ms >= 1000) return fake++; return real.apply(this, arguments); };
+  const st = window.setTimeout;
+  window.setTimeout = function (fn, ms) {
+    if (typeof fn === 'function' && +ms >= 3000) {
+      if (CH.has(__sig(fn, +ms))) return fake++;
+      if (+ms <= 9000) H.maxDue = Math.max(H.maxDue, performance.now() + +ms);
+    }
+    return st.apply(this, arguments);
+  };
+})();""".replace("__SIG__", TIMER_SIG_JS)
+
+
+def _discover_chains(ctx, url, vp, timeout_ms=45000):
+    """发现页: 返回周期性长 setTimeout 的指纹列表(失败返回空表 = 正式页只拦 setInterval)。"""
+    page = ctx.new_page()
+    try:
+        page.add_init_script(DISCOVER_CHAINS_JS)
+        page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+        with suppress(Exception):
+            page.wait_for_load_state("networkidle", timeout=8000)
+        with suppress(Exception):
+            page.evaluate(SCROLL_JS, vp["height"] * MAX_SCREENS)
+        for _ in range(24):          # 等到已登记的长定时器都触发过一轮(≤9s 的才等), 再留出回调后登记的余量
+            left = page.evaluate("window.__ptd ? window.__ptd.maxDue + 400 - performance.now() : 0")
+            if not left or left <= 0:
+                break
+            page.wait_for_timeout(min(500, max(50, left)))
+        return sorted((page.evaluate("window.__ptd ? Object.keys(window.__ptd.chain) : []") or []))[:400]
+    except Exception:   # noqa: BLE001
+        return []
+    finally:
+        with suppress(Exception):
+            page.close()
+
+
+def _shoot(ctx, url, vp, out: Path, timeout_ms=45000, extra_wait_ms=0, focus_keys=None, chains=None):
     page = ctx.new_page()
     if HOLD_INTERVALS:
         with suppress(Exception):
-            page.add_init_script(HOLD_INTERVALS_JS)
+            page.add_init_script(HOLD_CHAINS_JS.replace("__CHAINS__", json.dumps(list(chains or [])))
+                                 if _PROBE_TIMERS == "holdc" else HOLD_INTERVALS_JS)
     info = {"url": url}
     failed, errors = [], []
     page.on("requestfailed", lambda rq: len(failed) < 40 and failed.append(
@@ -510,6 +576,14 @@ def _shoot(ctx, url, vp, out: Path, timeout_ms=45000, extra_wait_ms=0, focus_key
             page.wait_for_load_state("networkidle", timeout=4000)
         with suppress(Exception):
             page.evaluate(SETTLE_MEDIA_JS, [max_h, 6000])
+        if _PROBE_TIMERS == "holdc":
+            # 放行的一次性长延时(≤9s)等它触发完再截: 两侧都落在"触发之后"的状态, 不取决于各自加载快慢
+            with suppress(Exception):
+                for _ in range(24):
+                    left = page.evaluate("window.__pth ? window.__pth.maxDue + 300 - performance.now() : 0")
+                    if not left or left <= 0:
+                        break
+                    page.wait_for_timeout(min(500, max(50, left)))
         if extra_wait_ms:
             page.wait_for_timeout(extra_wait_ms)
         with suppress(Exception):
@@ -703,7 +777,8 @@ def _probe_vp(browser, base, task_id, url, name, outdir: Path, clone_tpl=None, n
         try:
             a = outdir / f"{tag}_orig.png"
             b = outdir / f"{tag}_clone.png"
-            ia = _shoot(ctx, url, vp, a, focus_keys="self")
+            chains = _discover_chains(ctx, url, vp) if _PROBE_TIMERS == "holdc" else None
+            ia = _shoot(ctx, url, vp, a, focus_keys="self", chains=chains)
             clone_url = (clone_tpl or "{base}/preview/{id}/").format(base=base.rstrip("/"), id=task_id)
             focus = {}
             with suppress(Exception):
@@ -711,10 +786,10 @@ def _probe_vp(browser, base, task_id, url, name, outdir: Path, clone_tpl=None, n
                     g = re.search(r"grid gtr=([^ ]+(?: [0-9.]+(?:px|fr))*)", t[3])
                     if g and re.search(r"(^| )0px( |$)", g.group(1)) and len(focus) < 60:
                         focus[t[0]] = t[2]
-            ib = _shoot(ctx, clone_url, vp, b, focus_keys=focus or None)
+            ib = _shoot(ctx, clone_url, vp, b, focus_keys=focus or None, chains=chains)
         finally:
             ctx.close()
-        row = {"orig_overflow_x": ia.get("overflow_x"), "clone_overflow_x": ib.get("overflow_x"),
+        row = {"timer_chains": len(chains) if chains is not None else None, "orig_overflow_x": ia.get("overflow_x"), "clone_overflow_x": ib.get("overflow_x"),
                "orig_h": ia.get("height"), "clone_h": ib.get("height"),
                "orig_interstitial": ia.get("interstitial", 0), "clone_interstitial": ib.get("interstitial", 0),
                "clone_diag": ib.get("diag"), "orig_diag": ia.get("diag")}
@@ -735,7 +810,7 @@ def _probe_vp(browser, base, task_id, url, name, outdir: Path, clone_tpl=None, n
                     a2 = outdir / f"{tag}_orig2.png"
                     # 第二次原站多等几秒再截: 按定时轮换的区域(标签页/轮播由 setInterval 翻页)两次同相位
                     # 加载看不出来, 错开相位才会落进动态区被遮
-                    i2 = _shoot(ctx2, url, vp, a2, extra_wait_ms=NOISE_PHASE_SHIFT_MS)
+                    i2 = _shoot(ctx2, url, vp, a2, extra_wait_ms=NOISE_PHASE_SHIFT_MS, chains=chains)
                 finally:
                     ctx2.close()
                 if i2.get("ok"):

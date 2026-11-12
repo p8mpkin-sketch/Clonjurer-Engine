@@ -38,6 +38,7 @@ def ensure_instance(base, port, log):
     if _up(base):
         return None
     env = dict(os.environ, CLONER_PORT=str(port))
+    env.setdefault("CLONER_CFG_MAX_URLS_PER_BATCH", "200")     # 用例数已超过单批默认上限 50, 超出的会被静默截掉
     proc = subprocess.Popen([sys.executable, "app.py"], cwd=str(ROOT), env=env,
                             stdout=open(log, "w"), stderr=subprocess.STDOUT)
     for _ in range(60):
