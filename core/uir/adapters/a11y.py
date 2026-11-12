@@ -1129,18 +1129,44 @@ def _mark_open_bg(root: dict, sampler: "_Sampler") -> None:
 
 
 def _add_gap_lines(root: dict, sampler: "_Sampler") -> int:
-    """相邻兄弟节点之间 1~3 个单位的缝里画着一条颜色均匀的线(表格的横竖网格线、列表行之间的分隔线), 树里没有节点:
-    补一个线条叶子。缝的颜色要与两侧节点贴边处的颜色都不同(否则只是底色露出来)。"""
+    """相邻兄弟节点之间的缝里画着颜色均匀的细线(表格的横竖网格线、列表行之间的分隔线), 树里没有节点: 补线条叶子。
+    线 = 沿缝方向颜色均匀(≥85% 像素同色)、粗 ≤3 个截图像素、两侧紧邻的像素线都与它不同色。
+    行/单元格(list_item)之间还看贴边 1.25 个单位以内: 网格线常画在行框的最后一条像素线上, 两行的框是紧挨着的。"""
     np = sampler.np
     added = 0
+    ROWS = ("list_item",)
 
-    def strip(x, y, w, h):
-        a = sampler._crop(x, y, w, h)
+    def scan(rect, axis):
+        """rect 内沿 axis 方向逐条像素线找细线; 返回 [(起点逻辑坐标, 粗, 色)]。"""
+        a = sampler._crop(*rect)
         if a is None or a.size == 0:
-            return None, 0.0
-        px = a.reshape(-1, 3).astype(np.int32)
-        med = np.median(px, axis=0)
-        return med, float((np.abs(px - med).sum(axis=1) <= 24).mean())
+            return []
+        px = a.astype(np.int32)
+        if axis == 0:
+            px = px.transpose(1, 0, 2)              # 统一成"逐行"
+        if px.shape[1] < 12 or px.shape[0] < 1:
+            return []
+        med = np.median(px, axis=1)                                              # 每条像素线的中位色
+        uni = (np.abs(px - med[:, None, :]).sum(axis=2) <= 24).mean(axis=1) >= 0.85
+        out, r, n = [], 0, px.shape[0]
+        lim = max(3, int(round(2 * sampler.s)))
+        while r < n:
+            if not uni[r]:
+                r += 1
+                continue
+            e = r
+            while e + 1 < n and uni[e + 1] and np.abs(med[e + 1] - med[r]).sum() <= 12:
+                e += 1
+            before = med[r - 1] if r > 0 else None
+            after = med[e + 1] if e + 1 < n else None
+            ok = (e - r + 1) <= lim and before is not None and after is not None \
+                and (not uni[r - 1] or np.abs(before - med[r]).sum() > 12) \
+                and (not uni[e + 1] or np.abs(after - med[r]).sum() > 12) \
+                and uni[r - 1] and uni[e + 1]
+            if ok:
+                out.append((r / sampler.s, (e - r + 1) / sampler.s, sampler._hex(med[r:e + 1].mean(axis=0).round())))
+            r = e + 1
+        return out
 
     def walk(n):
         nonlocal added
@@ -1149,37 +1175,43 @@ def _add_gap_lines(root: dict, sampler: "_Sampler") -> int:
             walk(k)
         if not (2 <= len(kids) <= 400) or n.get("uir_role") in ("text", "image", "input", "divider", "badge"):
             return
-        new = []
+        rowish = n.get("uir_role") in ("table", "list", "list_item")
+        new, seen = [], set()
         for axis in (1, 0):                       # 1: 上下相邻(横线); 0: 左右相邻(竖线)
             o = 1 - axis
-            order = sorted((k for k in kids if k["bounds"][2] >= 8 and k["bounds"][3] >= 8), key=lambda k: k["bounds"][axis])
+            order = sorted((k for k in kids if k["bounds"][2] >= 8 and k["bounds"][3] >= 8 and not k.get("_band")),
+                           key=lambda k: k["bounds"][axis])
             for i, a in enumerate(order):
                 ab = a["bounds"]
                 a_end = ab[axis] + ab[axis + 2]
                 for b in order[i + 1:i + 12]:
                     bb = b["bounds"]
                     gap = bb[axis] - a_end
-                    if gap > 3:
-                        if bb[axis] - ab[axis] > ab[axis + 2] + 3:
+                    if gap > 24:
+                        if bb[axis] - ab[axis] > ab[axis + 2] + 24:
                             break
                         continue
-                    if gap < 0.5:
+                    if gap < -0.5:
                         continue
                     lo, hi = max(ab[o], bb[o]), min(ab[o] + ab[o + 2], bb[o] + bb[o + 2])
                     if hi - lo < 0.8 * min(ab[o + 2], bb[o + 2]) or hi - lo < 16:
                         continue
-                    rect = [lo, a_end, hi - lo, gap] if axis == 1 else [a_end, lo, gap, hi - lo]
-                    col, share = strip(*rect)
-                    if col is None or share < 0.85:
-                        continue
-                    e1 = [lo, a_end - 2, hi - lo, 1.5] if axis == 1 else [a_end - 2, lo, 1.5, hi - lo]
-                    e2 = [lo, bb[1] + 0.5, hi - lo, 1.5] if axis == 1 else [bb[0] + 0.5, lo, 1.5, hi - lo]
-                    c1, _ = strip(*e1)
-                    c2, _ = strip(*e2)
-                    if c1 is None or c2 is None or np.abs(col - c1).sum() <= 12 or np.abs(col - c2).sum() <= 12:
-                        continue
-                    new.append({"role": "", "uir_role": "divider", "bounds": [round(v, 2) for v in rect], "children": [],
-                                "_line": sampler._hex(col.round())})
+                    edge = 1.25 if (rowish or (a.get("uir_role") in ROWS and b.get("uir_role") in ROWS)) else 0.0
+                    if gap < 0.5 and not edge:
+                        break
+                    # 两侧各多看一条像素线作参照(线必须两侧都有不同色的邻线)
+                    m = 1.0 / sampler.s
+                    p0, p1 = a_end - edge - m, bb[axis] + edge + m
+                    rect = [lo, p0, hi - lo, p1 - p0] if axis == 1 else [p0, lo, p1 - p0, hi - lo]
+                    for off, th, col in scan(rect, axis):
+                        pos = round(p0 + off, 2)
+                        key = (axis, round(pos), round(lo))
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        lb = [lo, pos, hi - lo, th] if axis == 1 else [pos, lo, th, hi - lo]
+                        new.append({"role": "", "uir_role": "divider", "bounds": [round(v, 2) for v in lb],
+                                    "children": [], "_line": col})
                     break
         if new and len(new) <= 600:
             n["children"].extend(new)
@@ -1334,8 +1366,8 @@ def _asc_desc(text: str):
     拉丁 = 升部(大写/数字/bdfhklt ≈0.72, 否则 x 高 ≈0.53) + 降部(gjpqy 等 ≈0.21)。"""
     if any(ord(ch) > 0x2E80 for ch in text):
         return 0.80, 0.08
-    asc = 0.72 if re.search(r"[A-Z0-9bdfhklt\"'()/|\[\]{}!?&#%$@]", text) else 0.53
-    desc = 0.21 if re.search(r"[gjpqy(),;\[\]{}|@]", text) else 0.0
+    asc = 0.72 if re.search(r"[A-Z0-9bdfhijklt\"'()/|\[\]{}!?&#%$@]", text) else 0.53      # i/j 的点与升部齐高
+    desc = 0.21 if re.search(r"[gjpqy(),;\[\]{}|@]", text) else (0.12 if "_" in text else 0.0)   # 下划线画在基线以下
     return asc, desc
 
 
