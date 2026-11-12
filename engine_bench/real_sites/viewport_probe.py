@@ -472,15 +472,16 @@ TIMER_SIG_JS = r"""const __sig = (fn, ms) => { const t = String(fn).slice(0, 400
   for (let i = 0; i < t.length; i++) { x ^= t.charCodeAt(i); x = Math.imul(x, 16777619); } return ms + '|' + (x >>> 0); };"""
 DISCOVER_CHAINS_JS = r"""(() => {
   __SIG__
-  const D = window.__ptd = {chain: {}, cur: null, until: 0, maxDue: 0};
+  const D = window.__ptd = {chain: {}, seen: {}, cur: null, until: 0, maxDue: 0};   // maxDue: 首轮(非链上再登记的)长定时器最晚触发时刻
   const real = window.setInterval; let fake = 1 << 30;
   window.setInterval = function (fn, ms) { if (+ms >= 1000) return fake++; return real.apply(this, arguments); };
   const st = window.setTimeout;
   window.setTimeout = function (fn, ms) {
     if (typeof fn !== 'function' || !(+ms >= 3000)) return st.apply(this, arguments);
     const s = __sig(fn, +ms), now = performance.now();
-    if (D.cur && (D.cur.live || now <= D.until) && D.cur.ms === +ms) { D.chain[s] = 1; D.chain[D.cur.s] = 1; }
-    if (+ms <= 9000) D.maxDue = Math.max(D.maxDue, now + +ms);
+    const linked = D.cur && (D.cur.live || now <= D.until) && D.cur.ms === +ms;
+    if (linked) { D.chain[s] = 1; D.chain[D.cur.s] = 1; }
+    else if (+ms <= 9000) { D.maxDue = Math.max(D.maxDue, now + +ms); D.seen[s] = 1; }
     const a = Array.prototype.slice.call(arguments);
     a[0] = function () {
       const me = D.cur = {s: s, ms: +ms, live: true};
@@ -491,22 +492,33 @@ DISCOVER_CHAINS_JS = r"""(() => {
 })();""".replace("__SIG__", TIMER_SIG_JS)
 HOLD_CHAINS_JS = r"""(() => {
   __SIG__
-  const CH = new Set(__CHAINS__), H = window.__pth = {maxDue: 0};
+  const CH = new Set(__CHAINS__), ONE = new Set(__ONESHOTS__), H = window.__pth = {maxDue: 0};
   const real = window.setInterval; let fake = 1 << 30;
   window.setInterval = function (fn, ms) { if (+ms >= 1000) return fake++; return real.apply(this, arguments); };
   const st = window.setTimeout;
   window.setTimeout = function (fn, ms) {
     if (typeof fn === 'function' && +ms >= 3000) {
       if (CH.has(__sig(fn, +ms))) return fake++;
-      if (+ms <= 9000) H.maxDue = Math.max(H.maxDue, performance.now() + +ms);
+      if (ONE.has(__sig(fn, +ms))) H.maxDue = Math.max(H.maxDue, performance.now() + +ms);
     }
     return st.apply(this, arguments);
   };
 })();""".replace("__SIG__", TIMER_SIG_JS)
 
 
+_CHAIN_CACHE = {}
+
+
 def _discover_chains(ctx, url, vp, timeout_ms=45000):
-    """发现页: 返回周期性长 setTimeout 的指纹列表(失败返回空表 = 正式页只拦 setInterval)。"""
+    """发现页: 返回 {"chain": 周期性长 setTimeout 的指纹, "oneshot": 一次性长延时的指纹}(失败为空 = 正式页只拦 setInterval)。
+    同一(地址, 视口)在本进程内只发现一次(多次重复探测取中位数时复用)。"""
+    key = (url, vp["width"], vp["height"])
+    if key not in _CHAIN_CACHE:
+        _CHAIN_CACHE[key] = _discover_chains_once(ctx, url, vp, timeout_ms)
+    return _CHAIN_CACHE[key]
+
+
+def _discover_chains_once(ctx, url, vp, timeout_ms=45000):
     page = ctx.new_page()
     try:
         page.add_init_script(DISCOVER_CHAINS_JS)
@@ -516,13 +528,16 @@ def _discover_chains(ctx, url, vp, timeout_ms=45000):
         with suppress(Exception):
             page.evaluate(SCROLL_JS, vp["height"] * MAX_SCREENS)
         for _ in range(24):          # 等到已登记的长定时器都触发过一轮(≤9s 的才等), 再留出回调后登记的余量
-            left = page.evaluate("window.__ptd ? window.__ptd.maxDue + 400 - performance.now() : 0")
+            left = page.evaluate("window.__ptd ? window.__ptd.maxDue + 500 - performance.now() : 0")
             if not left or left <= 0:
                 break
             page.wait_for_timeout(min(500, max(50, left)))
-        return sorted((page.evaluate("window.__ptd ? Object.keys(window.__ptd.chain) : []") or []))[:400]
+        got = page.evaluate("window.__ptd ? [Object.keys(window.__ptd.chain), Object.keys(window.__ptd.seen)] : [[], []]")
+        chain = sorted(got[0])[:400]
+        # 原站上出现过、没有成链的长延时 = 一次性的: 正式页两侧只等这些触发(克隆页里引擎自带脚本的长延时不等)
+        return {"chain": chain, "oneshot": sorted(set(got[1]) - set(chain))[:400]}
     except Exception:   # noqa: BLE001
-        return []
+        return {"chain": [], "oneshot": []}
     finally:
         with suppress(Exception):
             page.close()
@@ -532,7 +547,8 @@ def _shoot(ctx, url, vp, out: Path, timeout_ms=45000, extra_wait_ms=0, focus_key
     page = ctx.new_page()
     if HOLD_INTERVALS:
         with suppress(Exception):
-            page.add_init_script(HOLD_CHAINS_JS.replace("__CHAINS__", json.dumps(list(chains or [])))
+            page.add_init_script(HOLD_CHAINS_JS.replace("__CHAINS__", json.dumps((chains or {}).get("chain") or []))
+                                 .replace("__ONESHOTS__", json.dumps((chains or {}).get("oneshot") or []))
                                  if _PROBE_TIMERS == "holdc" else HOLD_INTERVALS_JS)
     info = {"url": url}
     failed, errors = [], []
@@ -789,7 +805,8 @@ def _probe_vp(browser, base, task_id, url, name, outdir: Path, clone_tpl=None, n
             ib = _shoot(ctx, clone_url, vp, b, focus_keys=focus or None, chains=chains)
         finally:
             ctx.close()
-        row = {"timer_chains": len(chains) if chains is not None else None, "orig_overflow_x": ia.get("overflow_x"), "clone_overflow_x": ib.get("overflow_x"),
+        row = {"timer_chains": len(chains["chain"]) if chains is not None else None,
+               "timer_oneshots": len(chains["oneshot"]) if chains is not None else None, "orig_overflow_x": ia.get("overflow_x"), "clone_overflow_x": ib.get("overflow_x"),
                "orig_h": ia.get("height"), "clone_h": ib.get("height"),
                "orig_interstitial": ia.get("interstitial", 0), "clone_interstitial": ib.get("interstitial", 0),
                "clone_diag": ib.get("diag"), "orig_diag": ia.get("diag")}
