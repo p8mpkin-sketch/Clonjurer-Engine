@@ -128,6 +128,8 @@ from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部
     _source_id_classes,
     _source_sibling_groups,
     _subtree_sig,
+    _content_diff_roots,
+    _content_follows,
     beacon_like,
     ASSET_RESOURCE_TYPES,
     ASSET_SKIP_PREFIXES,
@@ -1138,6 +1140,7 @@ class CaptureMixin:
             for p2 in pages.values():
                 CaptureMixin._kick_settle_tail(p2)
         variants = {}                      # path -> {tag: html}
+        content_roots = set()              # 结构相同、内容按宽度不同而成为变体根的路径(见 _content_diff_roots)
         hidden_all = set()
         style_pre = {}                     # tag -> STYLE_TEXTS_JS 结果(窄屏页提前关闭前取)
         for tag, other in loads.items():
@@ -1177,6 +1180,14 @@ class CaptureMixin:
                                                            f"{q[-40:]} {sz_o.get(q, [0])[0]}/{sz_m[q][0]}" for q in short[:3]))
                                     lifted = [q for q in lifted if q not in short]
                         diff = sorted(set(diff) | set(lifted))
+            if getattr(config, "VARIANT_CONTENT_DIFF", True):
+                pair_c = ((loads.get("__pair") or {}).get(tag) or {}).get("paths") or {}
+                croots = [q for q in _content_diff_roots(main, other, pair_c) if q not in diff]
+                content_roots.update(croots)
+                if croots:
+                    self.log("RENDER", f"窄屏首载页 {tag}: {len(croots)} 个子树结构相同但内容按宽度不同(对照页一致), 作为变体根: "
+                                       + "; ".join(q[-60:] for q in croots[:4]))
+                    diff = sorted(set(diff) | set(croots))
             top = []
             for p in diff:
                 if not any(p.startswith(q + ">") for q in top):
@@ -1285,7 +1296,9 @@ class CaptureMixin:
         md = loads.get("__mdesk") or {}
         ua_only = {p for p, v in variants.items() if "m" in v and md and p not in hidden_all and p in md and p in main
                    and md[p][0] == main[p][0] and md[p][3] == main[p][3]
-                   and (len(md[p]) <= 8 or len(main[p]) <= 8 or md[p][8] == main[p][8])}
+                   and (len(md[p]) <= 8 or len(main[p]) <= 8 or md[p][8] == main[p][8])
+                   # 内容按宽度换的根(_content_diff_roots): 结构本来就和主页相同, 要看内容 —— 桌面 UA 同宽页的内容跟着窄屏页走就不是只按 UA
+                   and not (p in content_roots and _content_follows(md, loads.get("m") or {}, main, p))}
         if ua_only:
             self.log("RENDER", f"窄屏 DOM 变体: {len(ua_only)} 处只在手机 UA 下换结构, 只给触屏显示(桌面浏览器窄窗口仍用主页版): "
                                + "; ".join(p[-60:] for p in list(ua_only)[:4]))
