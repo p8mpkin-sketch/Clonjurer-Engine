@@ -116,3 +116,15 @@ class SchedulerStability(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ClockAnchorAligned(unittest.TestCase):
+    def test_t0_on_second_one_of_minute(self):
+        from core.clone.capture import CaptureMixin
+        o = CaptureMixin.__new__(CaptureMixin)
+        t0 = o._replay_clock_t0()
+        if t0 is None:
+            self.skipTest("REPLAY_CLOCK 关")
+        self.assertEqual(t0 % 60000, 1000)
+        import time as _t
+        self.assertLess(_t.time() * 1000 - t0, 60000)

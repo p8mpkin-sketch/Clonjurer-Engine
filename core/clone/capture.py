@@ -1604,7 +1604,11 @@ class CaptureMixin:
         if not getattr(config, "REPLAY_CLOCK", True):
             return None
         if not getattr(self, "_clock_t0", None):
-            self._clock_t0 = int(time.time() * 1000)
+            # 对齐到本分钟第 1 秒: 按「当前分钟」选内容的页(今日专题/更新于 hh:mm)脚本在 t0 之后几秒才执行, 采集页与克隆页
+            # 各自的执行延迟不同; t0 落在分钟末尾时两边会跨到不同分钟, 内容整段换掉(合成用例 drift_clock CI 偶发交互 51)。
+            # 往回拨不到 1 分钟, 两边都留出 59s 余量
+            now = int(time.time() * 1000)
+            self._clock_t0 = now - now % 60000 + 1000
         return self._clock_t0
 
     def _seed_page(self, page):
