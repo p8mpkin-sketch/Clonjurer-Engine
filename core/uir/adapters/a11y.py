@@ -890,6 +890,21 @@ class _Sampler:
         rp = int(round(r * s))
         if x1 < 0 or y1 < 0 or x2 > W or y2 > H or x2 - x1 < 4 * rp or y2 - y1 < 4 * rp:
             return 0
+        # 圆角半径随系统版本不同(10~16pt): 沿窗口边缘那一行/列从角点往里数「与窗口内色明显不同」的像素, 量出实际半径
+        # (底边常带一圈更深的阴影线, 取两条边的较大值; 上限 24pt)
+        def edge_run(py, px, dy, dx, ref):
+            n = 0
+            while n < int(24 * s) and 0 <= py + dy * n < H and 0 <= px + dx * n < W:
+                if np.abs(self.arr[py + dy * n, px + dx * n].astype(np.int32) - ref).sum() < 60:
+                    break
+                n += 1
+            return n
+        runs = []
+        for py, px, dy, dx in ((y1, x1, 0, 1), (y1, x1, 1, 0), (y2 - 1, x1, 0, 1), (y2 - 1, x1, -1, 0)):
+            ref = self.arr[min(H - 1, max(0, py + (int(rp) + 1) * (1 if py == y1 else -1))),
+                           min(W - 1, px + int(rp) + 1)].astype(np.int32)
+            runs.append(edge_run(py, px, dy, dx, ref))
+        rp = max(rp, min(int(24 * s), max(runs) + 1)) if max(runs) < 0.2 * min(x2 - x1, y2 - y1) else rp
         arr = self.arr.copy()
         yy, xx = np.mgrid[0:rp, 0:rp]
         outside = (rp - xx - 0.5) ** 2 + (rp - yy - 0.5) ** 2 > (rp + 0.5) ** 2      # 左上角方块里弧线以外
@@ -1553,7 +1568,7 @@ class _Builder:
         if self.sampler and role not in ("text", "image", "icon", "divider"):
             border = None
             if n.get("_window"):
-                bg = self.sampler.dominant(x, y, w, h)
+                bg = n.get("_root_open_bg") or self.sampler.dominant(x, y, w, h)
                 if n.get("_frame") and bg:
                     border = self.sampler.frame_line(x, y, w, h, bg)
                     hair = None if border else self.sampler.frame_hairline(x, y, w, h)
