@@ -908,7 +908,7 @@ class _Sampler:
             self.arr = arr
         return done
 
-    def open_bg(self, x, y, w, h, rects):
+    def open_bg(self, x, y, w, h, rects, min_free: float = 0.12):
         """容器里没有被任何子节点盖住的那部分面积的主色(占框面积 ≥12% 且颜色集中才返回)。
         表格/列表只占了上半截时, 边缘一圈多半落在表头、行号栏、边线上, 取出来的不是容器真正露出来的底色。"""
         a = self._crop(x, y, w, h)
@@ -922,7 +922,7 @@ class _Sampler:
             free[max(0, y1):max(0, y1 + int(round(rh * s))), max(0, x1):max(0, x1 + int(round(rw * s)))] = False
         free[:3, :] = free[-3:, :] = False
         free[:, :3] = free[:, -3:] = False
-        if free.mean() < 0.12:
+        if free.mean() < min_free:
             return None
         px = a[free]
         vals, counts, order, keys = self._mode(px)
@@ -1878,6 +1878,12 @@ def tree_to_uir(tree: dict, screenshot=None, embed_images: bool = True) -> UIR:
     wx, wy, ww, wh = prep["window"]
     root_bg = sampler.dominant(wx, wy, ww, wh) if sampler else "c0"
     rootn = prep["root"]
+    if sampler and rootn.get("children"):
+        # 窗口自己的底是子节点之间露出来的那部分(工具栏按钮的间隙、标题栏、状态栏两侧), 不是整块面积的众数:
+        # 大片白色列表/编辑区会让众数落成白色, 工具栏/状态栏一带整条画成白的
+        ob = sampler.open_bg(wx, wy, ww, wh, [k["bounds"] for k in rootn["children"]], min_free=0.04)
+        if ob and root_bg and not _near_hex(ob, root_bg):
+            root_bg = rootn["_root_open_bg"] = ob
     cur = rootn
     while cur is not None:                       # 与窗口同框的最外层包装都按整块面积取底色
         if not _same_box(cur["bounds"], rootn["bounds"]):
@@ -1889,7 +1895,7 @@ def tree_to_uir(tree: dict, screenshot=None, embed_images: bool = True) -> UIR:
     node.box.pop("_slack", None)
     for nd in node.walk():                      # 无同级可参照的符号文本保留墨迹估计
         nd.box.pop("_symbolic", None)
-    node.box["bg"] = node.box.get("bg") or root_bg or "c0"
+    node.box["bg"] = (rootn.get("_root_open_bg") or node.box.get("bg")) or root_bg or "c0"
     # 根节点相对窗口原点
     rx, ry = rootn["bounds"][0] - wx, rootn["bounds"][1] - wy
     if rx or ry:
