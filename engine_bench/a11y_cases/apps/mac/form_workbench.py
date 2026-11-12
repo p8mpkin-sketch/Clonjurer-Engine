@@ -107,7 +107,7 @@ outline.expandItem_(NODES[1])
 outline.selectRowIndexes_byExtendingSelection_(NSIndexSet.indexSetWithIndex_(2), False)
 split.addSubview_(side)
 
-main = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, 670, 530))
+main = NSView.alloc().initWithFrame_(NSMakeRect(221, 0, 679, 530))    # 分栏按初始 frame 的右缘定宽: 从分隔条右侧起排
 head = NSTextField.labelWithString_("Orchard map")
 head.setFrame_(NSMakeRect(16, 492, 400, 24))
 head.setFont_(NSFont.boldSystemFontOfSize_(17))
@@ -178,6 +178,7 @@ inner.addSubview_(prog)
 main.addSubview_(box)
 split.addSubview_(main)
 v.addSubview_(split)
+split.adjustSubviews()
 split.setPosition_ofDividerAtIndex_(220, 0)
 
 path = NSTextField.labelWithString_("Collections  >  Drafts  >  Orchard map")
