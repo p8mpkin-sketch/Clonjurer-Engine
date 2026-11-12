@@ -2827,6 +2827,66 @@ def _subtree_sig(paths, root):
     return {k: (v[0], v[3]) for k, v in paths.items() if k == root or k.startswith(pre)}
 
 
+def _content_diff_roots(main, other, pair, max_up=6, max_roots=8):
+    """同结构、内容按加载宽度不同的子树(电商「热销」按断点取另一组商品: 窄屏首载与主页标签序列逐层相同, 只有叶子文字/图源不同,
+    结构判据看不出, 手机段一直显示桌面那组商品, allbirds 手机 47)。
+    叶子(无子元素)文字或媒体源 主页 ≠ 窄屏首载页, 且 0.92 倍宽对照页(另一次独立加载)与窄屏首载页相同 → 是这个宽度本来如此,
+    不是每次加载随机。这些叶子在 max_up 层以内的最近公共容器(至少含 2 个这样的叶子, 根标签两页相同)作为变体根。
+    根数超过 max_roots 视为整页内容在变(信息流/时间), 不用。"""
+    if not pair:
+        return []
+    leaves = []
+    for p, v in main.items():
+        if not p or p.startswith("@") or v[3] or len(v) < 8:
+            continue
+        o, q = other.get(p), pair.get(p)
+        if not o or not q or len(o) < 8 or len(q) < 8 or o[0] != v[0]:
+            continue
+        if (o[7], o[6]) == (v[7], v[6]) or (q[7], q[6]) != (o[7], o[6]):
+            continue
+        if not (o[7] or o[6]):
+            continue
+        leaves.append(p)
+    if len(leaves) < 2:
+        return []
+
+    def lca(a, b):
+        x, y = a.split(">"), b.split(">")
+        k = 0
+        while k < len(x) and k < len(y) and x[k] == y[k]:
+            k += 1
+        return ">".join(x[:k])
+
+    clusters = []                          # [根, 叶子数, 最深叶子层数]
+    for leaf in sorted(leaves):
+        d = leaf.count(">") + 1
+        if clusters:
+            r = lca(clusters[-1][0], leaf)
+            if r and r.count(">") + 1 >= max(clusters[-1][2], d) - max_up:
+                clusters[-1] = [r, clusters[-1][1] + 1, max(clusters[-1][2], d)]
+                continue
+        clusters.append([leaf.rsplit(">", 1)[0] if ">" in leaf else leaf, 1, d])
+    roots = []
+    for r, n, _d in clusters:
+        if n < 2 or r not in main or r not in other:
+            continue
+        if main[r][0] != other[r][0] or r.count(">") < 1:
+            continue                       # 根标签要相同, 且不提到 body 直接子级(整页换版)
+        # 换的是另一组商品, 子树结构常有细小差异(有的带折扣价 span): 不要求结构逐层相同, 其下结构判据命中的子树被这个根覆盖
+        roots.append(r)
+    return [] if len(roots) > max_roots else roots
+
+
+def _content_follows(md, other, main, root, share=0.8):
+    """root 下主页与窄屏首载页内容不同的叶子里, 桌面 UA 同宽页(md)与窄屏首载页相同的占比 ≥ share: 内容按宽度换, 不是按 UA。"""
+    pre = root + ">"
+    keys = [k for k, v in main.items() if (k == root or k.startswith(pre)) and k in other and k in md and len(v) > 7
+            and len(other[k]) > 7 and len(md[k]) > 7 and (other[k][7], other[k][6]) != (v[7], v[6])]
+    if not keys:
+        return False
+    return sum(1 for k in keys if (md[k][7], md[k][6]) == (other[k][7], other[k][6])) >= share * len(keys)
+
+
 def _same_slot_ids(x, y):
     """两页同一序号上的两个 id 像同一个槽位每次加载换的随机名(广告位 beans_123/beans_456、aria8a6…/ariai92…):
     数字段归一后相同, 或共有 ≥4 字符前缀且两边都带数字。"""
