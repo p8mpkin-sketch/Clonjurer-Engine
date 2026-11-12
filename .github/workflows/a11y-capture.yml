@@ -1,0 +1,118 @@
+name: a11y-capture
+
+# 跨平台 a11y 样本采集: Windows runner(UIA) 与 Android 模拟器(uiautomator) 上打开开源应用 / 本仓库自建合成应用,
+# 采统一树 JSON + 同次截图, 提交回当前分支的 engine_bench/a11y_cases/。样本评分由 run_a11y.py 离线完成(任何平台可跑)。
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/a11y-capture.yml"
+      - "engine_bench/a11y_cases/capture_ci.py"
+      - "engine_bench/a11y_cases/apps/**"
+  workflow_dispatch:
+    inputs:
+      refresh_windows:
+        description: "重采已入库的 Windows 样本(采集口径修正后才用)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: a11y-capture-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  BRANCH: ${{ github.head_ref || github.ref_name }}
+  PYTHONUTF8: "1"
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BRANCH }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 安装依赖与开源样本应用
+        shell: pwsh
+        run: |
+          python -m pip install pillow numpy requests uiautomation
+          choco install notepadplusplus -y --no-progress
+      - name: 采集
+        shell: pwsh
+        run: python engine_bench/a11y_cases/capture_ci.py windows ${{ inputs.refresh_windows && '--refresh' || '' }}
+      - name: 提交样本
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add engine_bench/a11y_cases/tune engine_bench/a11y_cases/holdout
+          git commit -m "a11y 样本采集(CI Windows UIA)" || exit 0
+          for i in 1 2 3 4; do git pull --rebase origin "$BRANCH" && git push origin "HEAD:$BRANCH" && exit 0; sleep $((i * 5)); done; exit 1
+
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BRANCH }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 依赖
+        run: python -m pip install pillow numpy requests
+      - name: 开 KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: 模拟器里采集(AOSP 镜像自带的开源应用)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: default
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: python engine_bench/a11y_cases/capture_ci.py android
+      - name: 提交样本
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add engine_bench/a11y_cases/holdout
+          git commit -m "a11y 样本采集(CI Android 模拟器)" || exit 0
+          for i in 1 2 3 4; do git pull --rebase origin "$BRANCH" && git push origin "HEAD:$BRANCH" && exit 0; sleep $((i * 5)); done; exit 1
+
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BRANCH }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 依赖与开源样本应用
+        run: |
+          python -m pip install pillow numpy requests pyobjc-framework-Cocoa pyobjc-framework-ApplicationServices PySide6
+          brew install --cask db-browser-for-sqlite 2>&1 | tail -5 || true
+          brew install --cask coteditor 2>&1 | tail -5 || true
+          sudo xattr -dr com.apple.quarantine "/Applications/DB Browser for SQLite.app" || true
+          sudo xattr -dr com.apple.quarantine /Applications/CotEditor.app || true
+          ls /Applications | tr '\n' ' '
+      - name: 采集
+        run: python engine_bench/a11y_cases/capture_ci.py macos
+      - name: 提交样本
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add engine_bench/a11y_cases/tune engine_bench/a11y_cases/holdout
+          git commit -m "a11y 样本采集(CI macOS AX)" || exit 0
+          for i in 1 2 3 4; do git pull --rebase origin "$BRANCH" && git push origin "HEAD:$BRANCH" && exit 0; sleep $((i * 5)); done; exit 1

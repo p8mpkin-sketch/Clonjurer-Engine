@@ -20,3 +20,7 @@ engine_bench/real_sites/runs/
 .DS_Store
 .mypy_cache/
 engine_bench/mobile_cases/runs/
+
+# a11y 跑分的渲染中间产物
+engine_bench/a11y_cases/runs/work_*/
+engine_bench/a11y_cases/runs/capture_tmp/

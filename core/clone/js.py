@@ -2833,3 +2833,204 @@ if getattr(_config, "CV_PATH_MEMO", True):
     HIDDEN_ROOTS_JS = HIDDEN_ROOTS_JS.replace("pathOf = " + CV_PATH_FN, "pathOf = " + CV_PATH_MEMO_FN, 1)
     CV_RECORD_JS = CV_RECORD_JS.replace("m.paths = m.els.map(" + CV_PATH_FN + ");",
                                         "m.paths = m.els.map(" + CV_PATH_MEMO_FN + ");", 1)
+
+
+# ---------------------------------------------------------------------------
+# 随机数确定性重放: 采集页与克隆页用同一套"按脚本分流"的种子随机数发生器替换 Math.random。
+# 随机推荐位/随机起始相位这类内容, 克隆里脚本重跑会抽到另一版(交互轨与采集时的基准对不上,
+# 原站每次打开本来就不同, 所以哪一版都算忠实, 但克隆应当稳定地还原采集时那一版)。
+# - 每个 <script> 元素一条独立的流(键: 外链 = 原始地址的哈希; 内联 = 去掉字符串字面量后的代码哈希),
+#   某个脚本在克隆里被剥离(埋点/广告)不会带偏别的脚本抽到的数;
+# - 没有 currentScript 的异步回调共用一条流(顺序相关, 尽力而为);
+# - 用 Proxy 包原生函数: toString 仍是 native code, 不改 crypto.getRandomValues。
+# __SEED__ 整数; __MAP__ 采集侧为 null, 克隆侧为 {本地文件名: 原始地址哈希}。
+SEED_RANDOM_JS = r"""(function(){try{if(window.__cloneRnd)return;window.__cloneRnd=1;var SEED=__SEED__,MAP=__MAP__,ST={},WM=new WeakMap(),R=Math.random;
+function h(s){var x=2166136261;for(var i=0;i<s.length;i++){x^=s.charCodeAt(i);x=Math.imul(x,16777619);}return x>>>0;}
+function mk(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function key(){var c=document.currentScript;if(!c)return 0;var k=WM.get(c);if(k!==undefined)return k;
+if(c.src){if(MAP){var b=c.src.split(/[?#]/)[0].split('/').pop();k=MAP[b]!==undefined?MAP[b]:h('x:'+b);}else k=h(c.src);}
+else{var t=(c.textContent||'').replace(/(["'`])(?:\\[\s\S]|(?!\1)[^\\])*\1/g,'').replace(/\s+/g,'');k=h(t.slice(0,800)+'#'+t.length);}
+WM.set(c,k);return k;}
+var f=new Proxy(R,{apply:function(){var k=key();return(ST[k]||(ST[k]=mk((k^SEED)>>>0)))();}});
+try{Object.defineProperty(Math,'random',{value:f,writable:true,configurable:true});}catch(e){Math.random=f;}
+}catch(e){}})();"""
+
+
+def seed_random_hash(text: str) -> int:
+    """与 SEED_RANDOM_JS 里 h() 逐值一致的 FNV-1a(按 UTF-16 码元)。"""
+    raw = text.encode("utf-16-le", "surrogatepass")
+    x = 2166136261
+    for i in range(0, len(raw), 2):
+        x = ((x ^ int.from_bytes(raw[i:i + 2], "little")) * 16777619) & 0xFFFFFFFF
+    return x
+
+
+# 时钟锚定: 页面每次加载时, Date 从采集开始的那一刻(T0)起走(之后照常前进)。按当前时刻选内容的页面
+# ("今日专题"按分钟/小时取模、"更新于 hh:mm"、相对时间"3 分钟前")在采集的各张页面(主页/窄屏对照页/基准页)
+# 与克隆回放里都落在同一刻, 录制的接口数据与页面时钟也对得上。performance.now / 定时器不动。
+# 偏移不到 1 秒(采集主页面自身)不装。
+CLOCK_ANCHOR_JS = r"""(function(){try{if(window.__cloneClk)return;window.__cloneClk=1;var D=Date,off=__T0__-D.now();if(!(Math.abs(off)>=1000))return;
+var now=function now(){return D.now()+off;};
+var P=new Proxy(D,{construct:function(t,a,nt){return a.length?Reflect.construct(t,a,nt):Reflect.construct(t,[D.now()+off],nt);},
+apply:function(){return new D(D.now()+off).toString();},get:function(t,k){return k==='now'?now:Reflect.get(t,k);}});
+try{Object.defineProperty(D.prototype,'constructor',{value:P,writable:true,configurable:true});}catch(e){}
+window.Date=P;}catch(e){}})();"""
+
+
+def seed_random_js(seed: int, src_map=None, t0_ms=None) -> str:
+    js = (SEED_RANDOM_JS.replace("__SEED__", str(int(seed) & 0xFFFFFFFF))
+          .replace("__MAP__", "null" if src_map is None else json.dumps(src_map, separators=(",", ":"))))
+    if t0_ms:
+        js += CLOCK_ANCHOR_JS.replace("__T0__", str(int(t0_ms)))
+    return js
+
+
+# 定时器改动日志(采集侧, 导航前注入): 长周期定时器(≥1s 的 setInterval / setTimeout)回调里(含回调结束后 250ms 内,
+# 框架的批量渲染/分片提交在那里刷 DOM)对 class/style 的改动记下
+# "第一次被改之前的值"。自动轮播/轮换横幅/进度条这类周期性状态在采集的十几秒里已经转过几格, 冻进 DOM 的是"第 k 帧";
+# 新开的原站从初始帧起播, 克隆里站点脚本又从自己的初始帧起播(与冻进去的第 k 帧叠成两帧同时显示)。
+# 回退(TIMER_JOURNAL_REWIND_JS)只动有周期性证据的改动: 同一元素同一 class 词/样式属性在 ≥2 次回调里被改,
+# 或同一次回调里某个 class 词从一个元素摘下、戴到同父同标签的另一个元素上(当前项迁移)。只改一次的(轮询到条件后
+# 一次性揭示内容)不动。
+TIMER_JOURNAL_JS = r"""(() => {
+  if (window.__tj) return;
+  const J = window.__tj = {els: new Map(), frozen: 0, fires: 0, until: 0};
+  const MIN = 1000, MAX_ELS = 3000, LATE = 250;
+  const POS = /^(transform|translate|left|right|top|bottom|margin-left|margin-top|transition-duration|opacity|visibility|z-index|display)$/;
+  let mo = null;
+  const ensure = () => {
+    if (mo) return true;
+    if (!document.documentElement) return false;
+    try {
+      mo = new MutationObserver(recs => { if (!J.frozen && performance.now() <= J.until) { try { note(recs); } catch (e) {} } });
+      mo.observe(document.documentElement, {attributes: true, attributeFilter: ['class', 'style'], attributeOldValue: true, subtree: true});
+    } catch (e) { mo = null; }
+    return !!mo;
+  };
+  const toks = s => (s || '').split(/\s+/).filter(Boolean);
+  let dummy = null;
+  const parse = css => {
+    const o = {};
+    if (!css) return o;
+    dummy = dummy || document.createElement('div');
+    dummy.style.cssText = css;
+    for (let i = 0; i < dummy.style.length; i++) {
+      const p = dummy.style[i];
+      o[p] = [dummy.style.getPropertyValue(p), dummy.style.getPropertyPriority(p)];
+    }
+    return o;
+  };
+  const note = recs => {
+    if (!recs || !recs.length) return;
+    const first = new Map();
+    for (const r of recs) {
+      const el = r.target;
+      if (!el || el.nodeType !== 1) continue;
+      let m = first.get(el);
+      if (!m) first.set(el, m = {});
+      if (!(r.attributeName in m)) m[r.attributeName] = r.oldValue;
+    }
+    const add = new Map(), del = new Map(), sty = [], migP = new Set();
+    for (const [el, m] of first) {
+      let e = J.els.get(el);
+      if (!e) { if (J.els.size >= MAX_ELS) continue; J.els.set(el, e = {c: new Map(), s: new Map()}); }
+      if ('class' in m) {
+        const a = toks(m['class']), b = toks(el.getAttribute('class'));
+        const ch = (t, was) => {
+          let x = e.c.get(t);
+          if (!x) e.c.set(t, x = {init: was, n: 0, mig: 0});
+          x.n++;
+          const k = t + '|' + el.tagName;
+          const bag = was ? del : add;
+          if (!bag.has(k)) bag.set(k, []);
+          bag.get(k).push([el, x]);
+        };
+        a.forEach(t => { if (!b.includes(t)) ch(t, true); });
+        b.forEach(t => { if (!a.includes(t)) ch(t, false); });
+      }
+      if ('style' in m) {
+        const a = parse(m['style']), b = parse(el.getAttribute('style'));
+        const ks = new Set(Object.keys(a).concat(Object.keys(b)));
+        for (const p of ks) {
+          const va = a[p] ? a[p].join('!') : null, vb = b[p] ? b[p].join('!') : null;
+          if (va === vb) continue;
+          let x = e.s.get(p);
+          if (!x) e.s.set(p, x = {init: a[p] || null, n: 0, mig: 0});
+          x.n++;
+          if (POS.test(p)) sty.push([el, x]);
+        }
+      }
+    }
+    for (const [k, as] of add) {
+      const ds = del.get(k);
+      if (!ds) continue;
+      for (const [ea, xa] of as) for (const [ed, xd] of ds) {
+        if (ea !== ed && ea.parentNode && ea.parentNode === ed.parentNode) { xa.mig = 1; xd.mig = 1; migP.add(ea.parentNode); }
+      }
+    }
+    // 当前项迁移的同一次回调里, 条目自身 / 条目的容器 / 容器往上三层以内的位移与显隐样式属于同一次轮换(轮播轨道的
+    // translate、淡入淡出轮播各张的 opacity): 周期接近采集时长的轮播只步进一次, 没有"改过两次"的证据, 但当前项已经
+    // 会被退回, 位移不跟着退就成了"class 指第 1 张、位移停在第 2 张"
+    if (migP.size && sty.length) {
+      const near = new Set();
+      for (const p of migP) { let q = p; for (let i = 0; i < 4 && q && q.nodeType === 1; i++) { near.add(q); q = q.parentNode; } }
+      for (const [el, x] of sty) if (near.has(el) || migP.has(el.parentNode)) x.mig = 1;
+    }
+  };
+  const wrap = (fn, ms) => {
+    if (typeof fn !== 'function' || !(ms >= MIN)) return fn;
+    return function () {
+      if (J.frozen) return undefined;
+      const ok = ensure();
+      if (ok) { try { const pend = mo.takeRecords(); if (performance.now() <= J.until) note(pend); } catch (e) {} }
+      try { return fn.apply(this, arguments); }
+      finally {
+        if (ok) {
+          J.fires++;
+          try { note(mo.takeRecords()); } catch (e) {}
+          // 框架式渲染: 回调里只改状态, DOM 在回调之后才刷 —— 微任务(Vue)、下一个任务(React 调度器), 或隔几十毫秒
+          // 的分片提交(实测 React 的 setTimeout 链轮换, 回调到提交约 80ms, 中间穿插别的任务)。回调结束后 LATE 毫秒内
+          // 观察到的改动同样记在这次定时器名下(回退仍要求周期性证据, 偶然混进来的一次性改动不会被退)
+          J.until = performance.now() + LATE;
+        }
+      }
+    };
+  };
+  const si = window.setInterval, st = window.setTimeout;
+  window.setInterval = function (fn, ms) { const a = Array.prototype.slice.call(arguments); a[0] = wrap(fn, +ms); return si.apply(window, a); };
+  window.setTimeout = function (fn, ms) { const a = Array.prototype.slice.call(arguments); a[0] = wrap(fn, +ms); return st.apply(window, a); };
+  try { window.setInterval.toString = () => si.toString(); window.setTimeout.toString = () => st.toString(); } catch (e) {}
+})();"""
+
+# 把日志里有周期性证据的改动退回"第一次被定时器改之前"的值, 并停掉仍在跑的长定时器(页面即将截图/序列化)。
+TIMER_JOURNAL_REWIND_JS = r"""(styleMode) => {
+  const J = window.__tj;
+  const out = {els: 0, cls: 0, sty: 0, fires: J ? J.fires : -1, dbg: []};
+  if (!J) return out;
+  J.frozen = 1;
+  for (const [el, e] of J.els) {
+    if (!el.isConnected) continue;
+    let hit = false;
+    for (const [t, x] of e.c) {
+      if (!(x.n >= 2 || x.mig)) continue;
+      const has = el.classList.contains(t);
+      if (has === x.init) continue;
+      if (x.init) el.classList.add(t); else el.classList.remove(t);
+      out.cls++; hit = true;
+      if (out.dbg.length < 4) out.dbg.push(el.tagName.toLowerCase() + (x.init ? '+' : '-') + '.' + t);
+    }
+    // 样式只在多视口改写之前退(styleMode 0: 之后引擎已把内联 px 改写成百分比/分视口规则, 再退回会写回采集宽的 px)。
+    // 1 = 只退与当前项迁移同一次回调的位移/显隐(mig); 2 = 另加"改过 ≥2 次"的任意样式属性
+    for (const [p, x] of (styleMode ? e.s : [])) {
+      if (!(x.mig || (styleMode >= 2 && x.n >= 2))) continue;
+      const cur = el.style.getPropertyValue(p), pr = el.style.getPropertyPriority(p);
+      const want = x.init ? x.init[0] : '', wp = x.init ? x.init[1] : '';
+      if (cur === want && pr === wp) continue;
+      if (x.init) el.style.setProperty(p, want, wp); else el.style.removeProperty(p);
+      out.sty++; hit = true;
+      if (out.dbg.length < 4) out.dbg.push(el.tagName.toLowerCase() + ' ' + p + ':' + cur.slice(0, 24) + '>' + want.slice(0, 24));
+    }
+    if (hit) out.els++;
+  }
+  return out;
+}"""

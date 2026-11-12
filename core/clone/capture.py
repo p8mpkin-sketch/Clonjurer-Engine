@@ -33,6 +33,8 @@ import config
 from core import ai_mock_generator, ai_vision_repair, flask_generator, smart_downloader
 from core import pattern_detector, strategy_packs
 from core import pixel_calibrator
+from core.clone.api_match import request_pairs
+from core.clone.js import seed_random_js
 
 from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 import 路径不变
     CANVAS_PIN_JS,
@@ -42,6 +44,8 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     ROUNDTRIP_PIN_JS,
     SCROLL_LOCK_STRIP_JS,
     STATE_PHASE_RESET_JS,
+    TIMER_JOURNAL_JS,
+    TIMER_JOURNAL_REWIND_JS,
     TRANSITION_FINISH_JS,
     VISIBLE_PATHS_JS,
     DEPLOY_DEFER_IMG_JS,
@@ -603,7 +607,7 @@ class CaptureMixin:
         与主页同上下文时它拿到的是「第二次访问」的状态(按存储计数换标签页/关掉过的提示条/已同意的弹层),
         而原站对新访客(评分探针与真实首访都是全新上下文)显示的是首访状态 —— 平板段变体烘进了回访态(合成用例 rerun_state)。"""
         if not getattr(config, "NARROW_FRESH_CTX", True):
-            return page.context.new_page()
+            return self._seed_page(page.context.new_page())
         ua = None
         with suppress(Exception):
             ua = page.evaluate("navigator.userAgent")
@@ -611,7 +615,7 @@ class CaptureMixin:
         ctx = page.context.browser.new_context(viewport={"width": w, "height": height}, user_agent=ua or None,
                                                extra_http_headers=hdrs, ignore_https_errors=True)
         self._cv_extra_ctx.append(ctx)
-        return ctx.new_page()
+        return self._seed_page(ctx.new_page())
 
     def _start_narrow_loads(self, page, height):
         """同上下文另开平板/手机宽的页面重新加载目标页(只等到响应提交, 与主页后续采集并行):
@@ -634,7 +638,7 @@ class CaptureMixin:
                         viewport={"width": w, "height": height}, user_agent=config.PHONE_USER_AGENT,
                         extra_http_headers=hdrs, ignore_https_errors=True, **config.PHONE_DEVICE)
                     self._cv_extra_ctx.append(ctx2)
-                    p2 = ctx2.new_page()
+                    p2 = self._seed_page(ctx2.new_page())
                     # 同宽再开一张桌面 UA 页(只读结构): 手机 UA 页换了结构而桌面 UA 同宽页没换的子树是按 UA 下发的,
                     # 不是按宽度; 这类变体只给触屏设备显示, 桌面浏览器窄窗口仍显示主页版(wix 手机 390 89→43)
                     if getattr(config, "NARROW_UA_SPLIT", True):
@@ -657,10 +661,10 @@ class CaptureMixin:
                 self._cv_pages.append((tag, p2))
                 # 手机页旁再开一张 0.92 倍宽的首载对照页(同上下文): 只在加载时按宽度写一次的内联尺寸(wix 图片组件
                 # 的 height px)缩放不会重写, 同页三点采样看不出; 两张不同宽度的首载页对照才认得出同比
-                if tag == "m" and getattr(config, "NARROW_FLUID_PAIR", True):
+                if tag in getattr(config, "NARROW_PAIR_TAGS", ("m",)) and getattr(config, "NARROW_FLUID_PAIR", True):
                     w2 = int(round(w * 0.92))
                     try:
-                        p3 = p2.context.new_page()
+                        p3 = self._seed_page(p2.context.new_page())
                         p3.on("response", lambda r, pp=p3: self._on_narrow_response(r, pp))
                         p3.set_viewport_size({"width": w2, "height": height})
                         p3.goto(page.url, wait_until="commit", timeout=10000)
@@ -1184,6 +1188,7 @@ class CaptureMixin:
             # 窄屏首载页同样做状态类相位复位: 它滚到底再回顶后, 进视口才展开/自动轮换的同类组件(折叠卡、高亮卡)已不在
             # 源码 HTML 的首载分配上, 变体把那一刻的状态烘进交付页(主页做过复位, 变体没做: 手机端多展开一张卡, 其下整页错位)。
             # 源码用该页自己上下文再取一次(手机 UA 下发的 HTML 可能不同), 取不到退回主页源码
+            CaptureMixin._timer_rewind(self, pages[tag], f"窄屏首载页 {tag}")
             if getattr(config, "NARROW_PHASE_RESET", True):
                 with suppress(Exception):
                     src2 = None
@@ -1538,6 +1543,7 @@ class CaptureMixin:
                                        f"清空定时器 {frz.get('timers', 0)} 个")
             # 基准也按源码相位: 定时器已清, 把轮换过的同类组件(轮播/折叠卡)先复位成源码 HTML 的分配再截。否则基准是
             # 「采集那一刻转到的第 k 项」、克隆是复位后的第一项, 布局校准会按基准把收起的那项撑回展开时的高度(一块空白)
+            self._timer_rewind(page, "基准截图前")
             if getattr(config, "BASELINE_PHASE_RESET", True):
                 with suppress(Exception):
                     src_cls, src_grp = self._phase_src(getattr(self, "_src_html", None))
@@ -1592,8 +1598,38 @@ class CaptureMixin:
                     json.dumps(stable, ensure_ascii=False), encoding="utf-8")
         return baseline_text, layout_stable
 
+    def _replay_clock_t0(self):
+        """时钟锚点(毫秒): 本次采集第一张页面创建的时刻; 采集各页与克隆回放的 Date 都从这一刻起走。"""
+        if not getattr(config, "REPLAY_CLOCK", True):
+            return None
+        if not getattr(self, "_clock_t0", None):
+            self._clock_t0 = int(time.time() * 1000)
+        return self._clock_t0
+
+    def _seed_page(self, page):
+        """采集侧页面装上种子随机数(与克隆页同一套, 见 js.SEED_RANDOM_JS); 须在导航前调用。"""
+        if getattr(config, "REPLAY_SEED_RANDOM", True):
+            with suppress(Exception):
+                page.add_init_script(seed_random_js(getattr(config, "REPLAY_SEED", 0), t0_ms=self._replay_clock_t0()))
+        if getattr(config, "TIMER_JOURNAL", True):
+            with suppress(Exception):
+                page.add_init_script(TIMER_JOURNAL_JS)
+        return page
+
+    def _timer_rewind(self, page, where: str):
+        """长定时器改过的周期性状态(轮播帧/轮换横幅/进度条)退回初始值, 见 js.TIMER_JOURNAL_JS。"""
+        if not getattr(config, "TIMER_JOURNAL", True):
+            return
+        with suppress(Exception):
+            mode = 0 if where.startswith("序列化前") else 2 if getattr(config, "TIMER_JOURNAL_STYLE", False) \
+                else 1 if getattr(config, "TIMER_JOURNAL_LINKED", True) else 0
+            tj = page.evaluate(TIMER_JOURNAL_REWIND_JS, mode) or {}
+            if tj.get("els"):
+                self.log("RENDER", f"定时器改动回退({where}): {tj.get('els')} 个元素(class 词 {tj.get('cls', 0)} / 样式属性 {tj.get('sty', 0)})"
+                                   f"退回首次被定时器改动前的值, 定时器共触发 {tj.get('fires')} 次 {tj.get('dbg') or ''}"[:500])
+
     def _render_page(self, ctx, url: str, screenshot: bool, collect_links: bool, is_frame: bool = False):
-        page = ctx.new_page()
+        page = self._seed_page(ctx.new_page())
         rt = self.cfg.get("render_timeout")  # 批次级页面加载超时(秒), 0/缺省 = 平台默认
         try:
             page.set_default_timeout(int(float(rt) * 1000) if rt else config.PAGELOAD_TIMEOUT)
@@ -1735,6 +1771,7 @@ class CaptureMixin:
                 self.log("RENDER", f"冻结前等样式表: {ws_.get('ms')}ms, 直取补副本 {ws_.get('fetched', 0)} 张,"
                                    f" 仍未到 {ws_.get('pending', 0)} 张")
         counts = _safe_eval(DEEP_FREEZE_JS)
+        self._timer_rewind(page, "冻结后")
         with suppress(Exception):
             src_cls, src_grp = self._phase_src(getattr(self, "_src_html", None))
             if not src_cls and not src_grp:
@@ -1850,6 +1887,7 @@ class CaptureMixin:
             self.log("WARN", f"多视口内联样式/窄屏变体整步失败: {type(exc).__name__}: {str(exc)[:200]}")
         # 序列化前再做一次状态类相位复位: 第一次复位之后页面仍活着(多视口样式/变体注入期间组件框架重渲染会按自己的
         # 状态把 class 写回去, 或进视口观察器又展开一张), 复位过的展开态回到交付 HTML 里(wix 手机多展开一张卡, 整页错位)
+        self._timer_rewind(page, "序列化前复查")
         if getattr(config, "LATE_PHASE_RESET", True):
             with suppress(Exception):
                 src_cls, src_grp = self._phase_src(getattr(self, "_src_html", None))
@@ -2247,6 +2285,15 @@ class CaptureMixin:
             content_type = response.headers.get("content-type", "")
             parts = urlsplit(response.url)
             body = None
+            # 请求指纹(查询参数 + 请求体摊平的键值对): 同一接口靠请求体区分内容时, 回放按它挑对应的那份录制
+            req_sig = []
+            if getattr(config, "API_REQ_SIG", True):
+                post = None
+                if request.method != "GET":
+                    with suppress(Exception):
+                        post = request.post_data
+                req_sig = request_pairs(parts.query, post or "")
+            sig_key = tuple(req_sig) if request.method != "GET" else ()
             # VCR 网络磁带(W3 安全协商版): 录制 JSON 数据接口 + x-component
             # RSC 导航载荷。回放侧由请求方 Accept 协商精确供给 —— 文档导航
             # (Accept text/html 开头)永不命中, RSC 载荷仅供给自带
@@ -2263,9 +2310,13 @@ class CaptureMixin:
                     body = None
                 if body and len(body) <= config.MAX_TAPE_BODY_BYTES \
                         and self._tape_bytes < config.MAX_TAPE_TOTAL_BYTES:
-                    key = (request.method, parts.path or "/", parts.query)
-                    if key not in self._tape_seen:
+                    key = (request.method, parts.path or "/", parts.query, sig_key)
+                    pk = ("#variants", request.method, parts.path or "/")
+                    n_var = sum(1 for k in self._tape_seen if k[:3] == pk) if sig_key else 0
+                    if key not in self._tape_seen and n_var < getattr(config, "API_VARIANTS_PER_PATH", 48):
                         self._tape_seen.add(key)
+                        if sig_key:
+                            self._tape_seen.add(pk + (n_var,))
                         self._net_tape.append({
                             "path": parts.path or "/",
                             "method": request.method,
@@ -2273,6 +2324,7 @@ class CaptureMixin:
                             "status": response.status,
                             "content_type": content_type or "application/json",
                             "response_body": body,
+                            **({"req_sig": req_sig} if req_sig else {}),
                         })
                         self._tape_bytes += len(body)
             if "json" not in content_type:
@@ -2287,6 +2339,7 @@ class CaptureMixin:
                 "query": parts.query,
                 "status": response.status,
                 "response_body": body,
+                **({"req_sig": req_sig} if req_sig else {}),
             })
             self.log("MOCK-API",
                      f"录制 {request.method} {parts.path} ({response.status})")
@@ -2382,11 +2435,18 @@ class CaptureMixin:
 
 
     def _finalize_mocks(self):
-        entries, seen = [], set()
+        entries, seen, per_path = [], set(), {}
         for entry in self._mock_raw:
-            key = (entry["method"], entry["path"], entry["query"])
+            # 非 GET 请求体不同算不同的录制(同一接口靠请求体区分内容); 同一接口最多留 API_VARIANTS_PER_PATH 份,
+            # 防轮询/心跳类接口(请求体带时间戳, 每次都不同)挤占名额
+            sig = tuple(entry.get("req_sig") or ()) if entry["method"] != "GET" else ()
+            key = (entry["method"], entry["path"], entry["query"], sig)
             if key in seen:
                 continue
+            pk = (entry["method"], entry["path"])
+            if sig and per_path.get(pk, 0) >= getattr(config, "API_VARIANTS_PER_PATH", 48):
+                continue
+            per_path[pk] = per_path.get(pk, 0) + 1
             seen.add(key)
             entries.append(entry)
             if len(entries) >= config.MAX_MOCK_ENTRIES:

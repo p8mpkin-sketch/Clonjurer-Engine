@@ -472,3 +472,9 @@ jobs:
           PY
           # 部署首屏逐站(task_id → 站点): 与 COMPACT 行同在日志尾部
           [ -f logs/deploy_probe.txt ] && grep '^COMPACTDL' logs/deploy_probe.txt || true
+      - name: 通用性评分行(日志最尾, score_generality.py --from-log 直接读)
+        if: always()
+        run: |
+          j=$(ls -t engine_bench/real_sites/runs/run_*.json 2>/dev/null | head -1)
+          [ -n "$j" ] || exit 0
+          python engine_bench/score_generality.py --emit-rows "$j"

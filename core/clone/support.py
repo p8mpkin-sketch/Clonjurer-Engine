@@ -32,6 +32,7 @@ import config
 from core import ai_mock_generator, ai_vision_repair, flask_generator, smart_downloader
 from core import pattern_detector, strategy_packs
 from core import pixel_calibrator
+from core.clone.api_match import pick_entry
 
 from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 import 路径不变
     AD_RECTS_JS,
@@ -1654,16 +1655,34 @@ class _SandboxHandler(SimpleHTTPRequestHandler):
                 best, best_len = entry, len(segs)
         return best
 
+    def _req_body(self) -> bytes:
+        """当前请求体(只读一次, 供按请求指纹挑录制用)。"""
+        cached = getattr(self, "_req_body_cache", None)
+        if cached is None or cached[0] is not self.headers:   # 长连接上一个实例会处理多个请求
+            data = b""
+            with suppress(Exception):
+                n = int(self.headers.get("Content-Length") or 0)
+                if 0 < n <= 262144:
+                    data = self.rfile.read(n)
+            cached = self._req_body_cache = (self.headers, data)
+        return cached[1]
+
+    def _pick(self, cands: list):
+        """同方法同路径有多条录制时按请求指纹挑最像的(见 core/clone/api_match.py)。"""
+        if len(cands) <= 1:
+            return cands[0] if cands else None
+        return pick_entry(cands, urlsplit(self.path or "/").query, self._req_body())
+
     def _match_mock_path(self, target: str, method: str):
-        loose = None
+        loose, same = None, []
         for entry in self._mocks:
             if "/" + str(entry.get("path") or "").strip("/") != target:
                 continue
             if str(entry.get("method", "GET")).upper() == method:
-                return entry
-            if loose is None:
+                same.append(entry)
+            elif loose is None:
                 loose = entry
-        return loose
+        return self._pick(same) if same else loose
 
     def _serve_mock(self, method: str) -> bool:
         # 文档导航(Accept 以 text/html 开头)永不走 Mock —— 与磁带同一条边界。
@@ -1711,24 +1730,17 @@ class _SandboxHandler(SimpleHTTPRequestHandler):
         if accept.startswith("text/html"):
             return None
         accept_rsc = "text/x-component" in accept
+        exact, loose = [], []
         for e in self._tape:
-            if e.get("method", "GET").upper() == method \
-                    and e.get("path") == path and (e.get("query") or "") == query:
-                ect = e.get("content_type") or ""
-                if "x-component" in ect:
-                    if accept_rsc:
-                        return e
-                    continue   # RSC 载荷只供给明确索要它的路由 fetch
-                return e
-        for e in self._tape:
-            if e.get("method", "GET").upper() == method and e.get("path") == path:
-                ect = e.get("content_type") or ""
-                if "x-component" in ect:
-                    if accept_rsc:
-                        return e
-                    continue
-                return e
-        return None
+            if e.get("method", "GET").upper() != method or e.get("path") != path:
+                continue
+            if "x-component" in (e.get("content_type") or "") and not accept_rsc:
+                continue   # RSC 载荷只供给明确索要它的路由 fetch
+            loose.append(e)
+            if (e.get("query") or "") == query:
+                exact.append(e)
+        # 查询串精确的优先; 同一层有多条(同接口不同请求体/不同参数)时按请求指纹挑最像的
+        return self._pick(exact) if exact else self._pick(loose)
 
     def _serve_tape(self, method: str) -> bool:
         entry = self._tape_for(method)
@@ -2485,10 +2497,26 @@ function sim(a,b){var A=toks(a),B=toks(b);if(!A.length&&!B.length)return true;va
 // 用前 80 个词的 Jaccard 认亲
 function words(e){try{return new Set(String(e.innerText||'').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(function(w){return w.length>1;}).slice(0,80));}catch(e){return new Set();}}
 function tsim(a,b){var A=words(a),B=words(b);if(A.size<6||B.size<6)return false;var n=0;A.forEach(function(w){if(B.has(w))n++;});return n/Math.max(A.size,B.size)>=0.5;}
+// 非幂等的客户端渲染(脚本不先清空容器就追加): 序列化 DOM 里已有上次运行追加的那批, 克隆里脚本重跑又追加一批(页底索引 3 组→6 组)。
+// 解析结束后脚本新插入的元素, 同父元素下仍有一个**逐字相同**(忽略引擎自加属性)的序列化旧兄弟(约 0.35s 后查, 赶在评分/首屏之前) → 一对一移除旧的那份
+// (留脚本新建、带事件绑定的)。"先插新再删旧"的页面同一轮渲染里自己删了旧的, 不会命中
+var XR=/ data-(?:cb|cv[\w-]*|cssom|clone[\w-]*)="[^"]*"/g,XT=1;
+// 没有文字也没有媒体的空壳(轮播库补的空 slide、占位格)彼此本来就一样, 不算重复。
+// 内联样式按 CSSOM 规范化后再比: 引擎在采集期改写过旧份的 style(动画相位固化追加负的 animation-delay !important;
+// 改过任何一条声明, 整个 style 属性就被浏览器重新序列化, 空白/写法都变), 脚本新建的那份还是原样书写 —— 不规范化永远对不上
+var XS=/ style="([^"]*)"/g,XD=null;function nst(m,v){try{XD=XD||document.createElement('i');XD.style.cssText=v.replace(/&quot;/g,'"').replace(/&amp;/g,'&');if(XD.style.getPropertyPriority('animation-delay')==='important'&&/^\s*-/.test(XD.style.getPropertyValue('animation-delay')))XD.style.removeProperty('animation-delay');var t=XD.style.cssText;return t?' style="'+t+'"':'';}catch(e){return m;}}
+function nrm(h){return h.replace(XR,'').replace(XS,nst);}
+function exact(n){try{var h=n.outerHTML;if(h.length<24||h.length>200000)return null;var tc=n.textContent;if(!/\S/.test(tc)&&!n.querySelector('img,picture,video,svg,canvas,iframe'))return null;h=nrm(h);var ch=n.parentNode.children;for(var j=0;j<ch.length;j++){var c=ch[j];if(c===n||NEWS.has(c)||c.tagName!==n.tagName||c.textContent!==tc)continue;if(nrm(c.outerHTML)===h)return c;}}catch(e){}return null;}
+var xtm=0;function dedupX(){xtm=0;if(over())return;var now=Date.now(),more=0;for(var i=0;i<PAIRS.length;i++){var q=PAIRS[i];if(q.x)continue;if(now-q.t<340){more=1;continue;}q.x=1;var n=q.n;if(!n.isConnected||!n.parentNode||n.parentNode.nodeType!==1)continue;
+  var ex=exact(n);if(ex){try{selfRm=1;ex.remove();selfRm=0;window.__cloneHydrDedup=(window.__cloneHydrDedup||0)+1;}catch(e){selfRm=0;}}}if(more)xtm=setTimeout(dedupX,200);}
 function onAdded(n){if(over()||!n||n.nodeType!==1||RST.has(n)||!n.parentNode||n.parentNode.nodeType!==1)return;if(/^(SCRIPT|STYLE|LINK|TEMPLATE|NOSCRIPT|META|HTML|HEAD|BODY)$/.test(n.tagName))return;
   NEWS.add(n);if(!DCL)return;
-  if(PAIRS.length<200){PAIRS.push({n:n,t:Date.now()});setTimeout(dedup,1600);}}
-function dedup(){if(over())return;var now=Date.now(),rest=[];for(var i=0;i<PAIRS.length;i++){var q=PAIRS[i];if(now-q.t<1500){rest.push(q);continue;}var n=q.n;if(!n.isConnected||!n.parentNode||n.parentNode.nodeType!==1)continue;var a=hOf(n);if(a<MIN)continue;
+  // 候选队列只收可能成块的元素: 解析结束后页面常批量回填上百个 <source>/<option>/弹层模板里的小件, 把队列占满,
+  // 晚到的整批追加(页底索引)就进不来了
+  if(/^(SOURCE|TRACK|OPTION|OPTGROUP|BR|WBR|COL|COLGROUP|PARAM|AREA|MAP|PATH|G|USE|DEFS|TITLE|BASE|INPUT)$/i.test(n.tagName))return;
+  if(PAIRS.length<1500){PAIRS.push({n:n,t:Date.now()});setTimeout(dedup,1600);if(XT&&!xtm)xtm=setTimeout(dedupX,360);}}
+function dedup(){if(over())return;var now=Date.now(),rest=[];for(var i=0;i<PAIRS.length;i++){var q=PAIRS[i];if(now-q.t<1500){rest.push(q);continue;}var n=q.n;if(!n.isConnected||!n.parentNode||n.parentNode.nodeType!==1)continue;
+  var a=hOf(n);if(a<MIN)continue;
   var old=null,cnt=0,ch=n.parentNode.children;for(var j=0;j<ch.length;j++){var c=ch[j];if(c===n||NEWS.has(c))continue;var b=hOf(c);if(b<MIN)continue;if(c.tagName===n.tagName&&sim(c,n)){cnt++;old=c;continue;}if(Math.abs(a-b)<=Math.max(a,b)*0.6&&tsim(c,n)){cnt++;old=c;}}
   if(cnt!==1||!old)continue;var b2=hOf(old);if(old.tagName===n.tagName&&sim(old,n)&&Math.abs(a-b2)>Math.max(a,b2)*0.25)continue;
   try{selfRm=1;old.remove();selfRm=0;window.__cloneHydrDedup=(window.__cloneHydrDedup||0)+1;}catch(e){}}PAIRS=rest;}

@@ -288,6 +288,11 @@ def _norm(path):
     return "/" + str(path or "").strip("/")
 
 
+# ---- 请求指纹挑选(源码取自平台 core/clone/api_match.py, 生成时内嵌, 保持独立工程零依赖) ----
+__API_MATCH_SRC__
+# ---- /请求指纹挑选 ----
+
+
 def _match_mock(path, method):
     """优先 精确(方法+路径), 其次任意同路径接口。
 
@@ -298,15 +303,24 @@ def _match_mock(path, method):
     target = _norm(path)
 
     def _exact(t):
-        loose = None
+        loose, same = None, []
         for mock in MOCKS:
             if _norm(mock.get("path", "")) != t:
                 continue
             if str(mock.get("method", "GET")).upper() == method:
-                return mock
-            if loose is None:
+                same.append(mock)
+            elif loose is None:
                 loose = mock
-        return loose
+        if len(same) > 1:
+            # 同接口多条录制(靠请求体/参数区分内容): 按请求指纹挑最像的
+            body = b""
+            if method != "GET":
+                try:
+                    body = request.get_data(cache=True)[:262144]
+                except Exception:
+                    body = b""
+            return pick_entry(same, request.query_string.decode("latin-1"), body)
+        return same[0] if same else loose
 
     hit = _exact(target)
     if hit is None and "undefined/" in target:
@@ -724,6 +738,13 @@ Endpoint `__healthz` returns runtime metadata.
 """
 
 
+def _api_match_src() -> str:
+    """core/clone/api_match.py 的函数体(去掉模块文档串与 import): 内嵌进生成的独立工程。"""
+    src = (Path(__file__).resolve().parent / "clone" / "api_match.py").read_text(encoding="utf-8")
+    body = src.split('"""', 2)[2]
+    return "from urllib.parse import parse_qsl\n" + body.replace("import json\nfrom urllib.parse import parse_qsl\n", "").strip()
+
+
 def _write(path: Path, content: str):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -788,7 +809,7 @@ def generate_project(task_id: int, upstream_origin: str, workspace: Path,
 
     # app.py 令牌替换
     app_src = (
-        GENERATED_APP_PY
+        GENERATED_APP_PY.replace("__API_MATCH_SRC__", _api_match_src())
         .replace("@@PAGES_JSON@@", json.dumps(pages_map, ensure_ascii=False))
         .replace("@@UPSTREAM_ORIGIN@@", upstream_origin)
         .replace("@@PROXY_ENABLED@@", "True" if proxy_enabled else "False")
