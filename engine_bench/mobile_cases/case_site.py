@@ -198,6 +198,18 @@ var i=k%3;document.querySelectorAll('.tabs span')[i].className='on';document.que
     return _shell("Rerun state", mid, head=f"<style>{css}</style>")
 
 
+def case_rerun_measure_probe(ctx):
+    """脚本同步建一个隐藏测量 span 量字号(文字缩放探测), 字号不是 16px 就给导航加"已缩放"类、正文下移一个导航高。
+    冻结 DOM 里已留有上次的同款 span; 克隆重跑时新建的这个不能被当成重复删掉(删了脚本读到 NaN)。"""
+    css = ".lnav{background:#f5f5f7;padding:12px 24px;font-weight:bold}.lnav.zoomed{padding-bottom:56px}"
+    js = """<script>(function(){var s=document.createElement('span');s.className='tz-probe';s.setAttribute('aria-hidden','true');
+s.setAttribute('style','position:absolute;visibility:hidden;font-size:1rem;top:0;left:0');s.textContent='A';document.body.appendChild(s);
+document.addEventListener('DOMContentLoaded',function(){var f=parseFloat(getComputedStyle(s).fontSize);
+if(f!==16)document.querySelector('.lnav').className='lnav zoomed';});})();</script>"""
+    mid = f'<div class="lnav">Local nav · Overview · Tech specs · Buy</div>{js}<div class="band"><div class="wrap"><div class="grid">{_cards(6)}</div></div></div>'
+    return _shell("Rerun measure probe", mid, head=f"<style>{css}</style>")
+
+
 def case_lazy_reveal(ctx):
     """滚动进场且可回退: 进入视口加 .in(透明度/位移过渡), 离开视口去掉。回顶后下半页是"未显示"状态。"""
     css = ".rv{opacity:0;transform:translateY(40px);transition:opacity .5s,transform .5s}.rv.in{opacity:1;transform:none}"
@@ -722,6 +734,7 @@ CASES = {
     "rerun_block_drop": ("rerun", case_rerun_block_drop),
     "rerun_append": ("rerun", case_rerun_append),
     "rerun_state": ("rerun", case_rerun_state),
+    "rerun_measure_probe": ("rerun", case_rerun_measure_probe),
     "lazy_reveal": ("lazy", case_lazy_reveal),
     "lazy_images": ("lazy", case_lazy_images),
     "lazy_sections": ("lazy", case_lazy_sections),
@@ -770,6 +783,8 @@ CASES = {
 ENGINE_GATED = {"drift"}
 # 这些类别探针照常算, 另加一格引擎交互轨分: 交互轨塌了时引擎会改交付静态版, 探针看不出来(sohu 类: 头条 99 / 交互 66)
 INTERACTIVE_ALSO = {"api", "state"}
+# 单个用例也可要求交互轨分(交互轨塌了会被静态版接管, 探针看不出): 键为用例名
+INTERACTIVE_ALSO_CASES = {"rerun_measure_probe"}
 # 已知缺口: 用例保留、照常出分, 但不计入 --gate 门槛(修好后从这里删掉)
 KNOWN_GAPS = {
     "measured_canvas": "iPad 820 宽 ~94: canvas 固化成位图后按宽缩放, 图里按固定 px 画的边距/间隙不会像原站那样重画",

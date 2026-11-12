@@ -20,7 +20,7 @@ ROOT = HERE.parents[1]
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "engine_bench" / "real_sites"))
-from case_site import CASES, CATEGORY_LABEL, ENGINE_GATED, INTERACTIVE_ALSO, KNOWN_GAPS, serve   # noqa: E402
+from case_site import CASES, CATEGORY_LABEL, ENGINE_GATED, INTERACTIVE_ALSO, INTERACTIVE_ALSO_CASES, KNOWN_GAPS, serve   # noqa: E402
 
 DEFAULT_VPS = "desktop,tablet,mobile,iphone-air,galaxy-s24,ipad-air"
 RUNS = ROOT / "engine_bench" / "real_sites" / "runs"
@@ -60,7 +60,7 @@ def summarize(doc, names, vps, base_site):
         if CASES[n][0] in ENGINE_GATED:
             # 原页每次加载都不同的类别: 只看引擎交互轨分(对冻结基准), 探针分留档不计
             row["vp_probe"], row["vp"] = row["vp"], {"interactive": r.get("interactive")}
-        elif CASES[n][0] in INTERACTIVE_ALSO:
+        elif CASES[n][0] in INTERACTIVE_ALSO or n in INTERACTIVE_ALSO_CASES:
             row["vp"]["interactive"] = r.get("interactive")
         rows.append(row)
     return rows
@@ -72,7 +72,7 @@ def render(rows, vps, gate):
     for r in rows:
         gated = r["category"] in ENGINE_GATED
         vals = [(r.get("vp_probe") or r["vp"]).get(v) for v in vps]
-        also = r["category"] in INTERACTIVE_ALSO
+        also = r["category"] in INTERACTIVE_ALSO or r["case"] in INTERACTIVE_ALSO_CASES
         nums = [x for x in (list(r["vp"].values()) if (gated or also) else vals) if isinstance(x, (int, float))]
         if also and not isinstance(r["vp"].get("interactive"), (int, float)):
             nums = []   # 交互轨没出分 = 不达标

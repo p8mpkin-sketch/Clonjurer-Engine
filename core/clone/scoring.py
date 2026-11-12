@@ -341,6 +341,74 @@ class ScoringMixin:
                 route.abort()
 
 
+    _FF_RE = re.compile(r"@font-face\s*\{([^{}]*)\}", re.I | re.S)
+    _FF_URL_RE = re.compile(r"url\(\s*['\"]?([^'\")]+)['\"]?\s*\)", re.I)
+    _FF_MIME = {".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf", ".otf": "font/otf"}
+
+    def _fidelity_font_css(self, cap_bytes: int = 40 << 20) -> tuple:
+        """保真轨字体: Chromium 存 MHTML 不打包网页字体, 禁脚本回放时 @font-face 的原址全被离线守卫中止,
+        整页按回退字体排版(行盒变高, 越往下累积错位越大; 实测苹果页单行 28→40px、到页底 +120px, 保真轨恒 61 分)。
+        工作空间里已本地化的样式表声明了同名 @font-face 指向下载好的字体文件: 原样复制这些声明, src 换成 data: URL
+        (守卫放行 data:), 交给回放页。返回 (css, 字体数)。"""
+        blocks, seen, total = [], set(), 0
+        css_files = sorted((self.ws / "static" / "css").glob("*.css")) if (self.ws / "static" / "css").is_dir() else []
+        texts = []
+        for f in css_files:
+            with suppress(OSError):
+                texts.append((f.parent, f.read_text(encoding="utf-8", errors="replace")))
+        with suppress(OSError):
+            idx = self.ws / "index.html"
+            if idx.is_file():
+                texts.append((self.ws, idx.read_text(encoding="utf-8", errors="replace")))
+        for base, text in texts:
+            if "@font-face" not in text.lower():
+                continue
+            for m in self._FF_RE.finditer(text):
+                body = m.group(1)
+                srcs = []
+                for u in self._FF_URL_RE.findall(body):
+                    u = u.strip().split("?")[0].split("#")[0]
+                    if u.startswith(("data:", "http:", "https:", "//")):
+                        continue
+                    i = u.find("static/")
+                    f = (self.ws / u[i:]) if i >= 0 else (base / u)
+                    ext = f.suffix.lower()
+                    if ext in self._FF_MIME and f.is_file():
+                        srcs.append((f, ext))
+                if not srcs:
+                    continue
+                f, ext = sorted(srcs, key=lambda x: list(self._FF_MIME).index(x[1]))[0]
+                key = (re.sub(r"src\s*:[^;]*;?", "", body).strip(), str(f))
+                if key in seen:
+                    continue
+                size = f.stat().st_size
+                if total + size > cap_bytes:
+                    break
+                seen.add(key)
+                total += size
+                data = base64.b64encode(f.read_bytes()).decode("ascii")
+                desc = re.sub(r"src\s*:[^;]*;?", "", body).strip().rstrip(";")
+                blocks.append("@font-face{" + (desc + ";" if desc else "")
+                              + f"src:url(data:{self._FF_MIME[ext]};base64,{data}) format('{ext[1:].replace('ttf', 'truetype').replace('otf', 'opentype')}');}}")
+        return "\n".join(blocks), len(blocks)
+
+    def _fidelity_inject_fonts(self, fpage):
+        if not getattr(config, "FIDELITY_FONTS", True):
+            return
+        css, n = self._fidelity_font_css()
+        if not n:
+            return
+        # 禁脚本页里页内 Promise 不会结算: 只做同步 DOM 插入, 字体由浏览器自行解码; 驱动侧轮询 document.fonts.status
+        fpage.evaluate("css => { const s = document.createElement('style'); s.setAttribute('data-clone-fidelity-fonts', '');"
+                       " s.textContent = css; (document.head || document.documentElement).appendChild(s); document.body && document.body.offsetHeight; }", css)
+        end = time.monotonic() + 3.0
+        while time.monotonic() < end:
+            with suppress(Exception):
+                if fpage.evaluate("document.fonts.status") == "loaded":
+                    break
+            fpage.wait_for_timeout(100)
+        self.log("RENDER", f"保真轨补字体: {n} 个工作空间字体按原 @font-face 声明注入(MHTML 不打包网页字体)")
+
     def _prestart_fidelity(self, ctx):
         """后台页非阻塞加载 capture.mhtml(只等到提交), 供 _render_fidelity 接手。"""
         mh = self.ws / "capture.mhtml"
@@ -899,6 +967,8 @@ class ScoringMixin:
                         t0 = time.monotonic()
                         fpage.goto('file://' + str(self.ws / 'capture.mhtml'),
                                    wait_until='load', timeout=30000)
+                    with suppress(Exception):
+                        self._fidelity_inject_fonts(fpage)
                     with suppress(Exception):
                         self._settle_static(fpage, t0)
                     self._full_shot(fpage, self.ws / 'fidelity_preview.png', "保真轨")

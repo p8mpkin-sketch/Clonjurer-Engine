@@ -14,7 +14,7 @@ python engine_bench/mobile_cases/run.py --gate 95          # 低于门槛退出�
 | 响应式(对照) | responsive_grid / responsive_nav | 纯 CSS 媒体查询, 应当满分, 用来确认口径本身没问题 |
 | 按 UA 分发 | ua_server_template / ua_redirect / ua_client_branch | 服务端按 UA 换模板、跳转手机域路径、前端按 UA 换结构 |
 | 手机专有组件 | structure_swap | 窄屏渲染另一套 DOM(表单只留邮箱、列表换紧凑版) |
-| 脚本重跑 | rerun_list_trim / rerun_block_drop / rerun_append / rerun_state | 克隆里脚本再跑一次: 接口过期删列表、删整块、重复追加、按存储换状态 |
+| 脚本重跑 | rerun_list_trim / rerun_block_drop / rerun_append / rerun_state / rerun_measure_probe | 克隆里脚本再跑一次: 接口过期删列表、删整块、重复追加、按存储换状态、隐藏测量哨兵 |
 | 懒渲染/滚动进场 | lazy_reveal / lazy_images / lazy_sections | 进视口才显示且可回退、懒加载图、滚到才渲染的区块 |
 | 定时状态 | timed_carousel / timed_accordion | 定时轮播(无 id)、进视口后轮流展开的折叠卡 |
 | 弹层/滚动锁 | overlay_modal | 全屏弹窗 + body 滚动锁 |

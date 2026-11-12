@@ -2535,7 +2535,12 @@ function wrapSet(P,k){var d=Object.getOwnPropertyDescriptor(P,k);if(!d||!d.set)r
 ['appendChild','insertBefore','replaceChild'].forEach(function(k){wrap(Node.prototype,k);});
 ['insertAdjacentHTML','insertAdjacentElement','append','prepend','after','before','replaceWith','replaceChildren'].forEach(function(k){wrap(Element.prototype,k);});
 wrapSet(Element.prototype,'innerHTML');wrapSet(Element.prototype,'outerHTML');
-var R=/ data-(?:cb|cv[\w-]*|cssom|clone[\w-]*)="[^"]*"/g;function sweep(){try{take(null);var n=0;for(var i=0;i<M.length;i++){var m=M[i];if(!m||!m.isConnected||!m.parentNode)continue;var t=m.tagName;if(t==='SCRIPT'||t==='HTML'||t==='HEAD'||t==='BODY')continue;var h=m.outerHTML;if(h.length<24||h.length>400000)continue;h=h.replace(R,'');var tc=m.textContent,s=m.parentNode.children;for(var j=0;j<s.length;j++){var e=s[j];if(e===m||mark.has(e)||e.tagName!==t||e.textContent!==tc)continue;if(e.outerHTML.replace(R,'')===h){m.remove();M[i]=null;n++;break;}}}if(n)window.__cloneDedupeRemoved=(window.__cloneDedupeRemoved||0)+n;}catch(e){}}
+var R=/ data-(?:cb|cv[\w-]*|cssom|clone[\w-]*)="[^"]*"/g;
+// 不可见的测量哨兵(脚本建一个隐藏 span 量字号/滚动条宽, 手里握着引用读 computed style): 它与冻结 DOM 里上一次留下的
+// 同款逐字相同, 但删掉它脚本就读到脱离文档节点的空值(NaN), 按"已缩放"分支改版面(整页下移一个导航高)。
+// 不可见节点删不删都不影响画面, 一律留着
+function probe(m){try{if(!m.getClientRects().length)return true;var c=getComputedStyle(m);if(c.visibility==='hidden'||(c.position==='absolute'||c.position==='fixed')&&(+c.opacity===0||c.clip==='rect(0px, 0px, 0px, 0px)'||c.clipPath==='inset(50%)'))return true;var r=m.getBoundingClientRect();return r.width<=1&&r.height<=1||r.right<=0||r.bottom+scrollY<=0;}catch(e){return false;}}
+function sweep(){try{take(null);var n=0;for(var i=0;i<M.length;i++){var m=M[i];if(!m||!m.isConnected||!m.parentNode)continue;var t=m.tagName;if(t==='SCRIPT'||t==='HTML'||t==='HEAD'||t==='BODY')continue;if(probe(m))continue;var h=m.outerHTML;if(h.length<24||h.length>400000)continue;h=h.replace(R,'');var tc=m.textContent,s=m.parentNode.children;for(var j=0;j<s.length;j++){var e=s[j];if(e===m||mark.has(e)||e.tagName!==t||e.textContent!==tc)continue;if(e.outerHTML.replace(R,'')===h){m.remove();M[i]=null;n++;break;}}}if(n)window.__cloneDedupeRemoved=(window.__cloneDedupeRemoved||0)+n;}catch(e){}}
 window.__cloneDedupeSweep=sweep;document.addEventListener('DOMContentLoaded',function(){sweep();try{mo.disconnect();}catch(e){}});window.addEventListener('load',function(){sweep();setTimeout(sweep,800);setTimeout(sweep,2500);});}catch(e){}})();</script>"""
 
 
