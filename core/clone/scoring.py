@@ -614,7 +614,10 @@ class ScoringMixin:
                 self._feed_grew = bool(g and g[1] > g[0] + 4)
                 # 成规模的续载(长出 ≥ 一屏且 ≥ 原高 25%): 信息流, 不是图片撑高/懒挂载的零头(163 +54px、gitee +20px)
                 vh = int((page.viewport_size or {}).get("height") or 0)
-                self._feed_big = bool(g and g[1] - g[0] >= max(vh, 0.25 * g[0]))
+                # 且是「采集冻结的页比原站短、续载把它补到原站高」: 冻结 DOM 已经齐了还在长的(脚本重跑重复追加, 越滚越长)
+                # 不算 —— 那种页静态版才对(合成用例 lazy_infinite_cols: 2312→3608 超出基准, 交互轨 92 / 静态版 100)
+                self._feed_big = bool(g and g[1] - g[0] >= max(vh, 0.25 * g[0])
+                                      and g[0] < 0.9 * target and g[1] <= 1.1 * target)
                 if self._feed_grew and g:
                     self.log("RENDER", f"克隆滚动: 页高随滚动增长 {int(g[0])}→{int(g[1])}px(基准 {target}px)")
         if phases:
