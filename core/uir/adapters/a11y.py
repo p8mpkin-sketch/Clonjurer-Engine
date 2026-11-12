@@ -662,6 +662,7 @@ class _Sampler:
         # 去掉贯穿整框的横/竖线(分割线、边框), 它们不是字形
         mask[mask.mean(axis=1) > 0.85, :] = False
         mask[:, mask.mean(axis=0) > 0.85] = False
+        self._drop_dotted(mask)
         # 框边一圈(2 个截图像素)不算墨迹: 控件框贴着卡片/对话框边缘时, 那里是圆角/阴影/描边的抗锯齿像素,
         # 断断续续不构成"贯穿线", 却把墨迹左/上边界拉到框边(文字内边距被算成 0)
         if min(mask.shape) > 12:
@@ -728,6 +729,25 @@ class _Sampler:
                 "right": x + (cols[-1] + 1) / k, "lines": len(merged), "line_h": line_h, "pitch": pitch,
                 "stroke": stroke, "left_spread": spread, "spans": spans}
 
+    def _drop_dotted(self, mask):
+        """去掉虚线(焦点框、选区框: 隔一个像素点一个): 一行/一列里的墨迹几乎全是孤立单点、间隔恒为 2 且点数够多。
+        它们不是字形, 却会把墨迹行高撑满整框、把图标与文字连成一团(列表项首列的焦点虚线框)。"""
+        np = self.np
+        for axis in (0, 1):
+            m = mask if axis == 0 else mask.T
+            if m.shape[1] < 12:
+                continue
+            left = np.zeros_like(m)
+            left[:, 1:] = m[:, :-1]
+            right = np.zeros_like(m)
+            right[:, :-1] = m[:, 1:]
+            iso = m & ~left & ~right
+            for r in np.where(iso.sum(axis=1) >= 6)[0]:
+                idx = np.where(m[r])[0]
+                pts = np.where(iso[r])[0]
+                if pts.size >= 0.8 * idx.size and (np.diff(pts) == 2).mean() >= 0.8:
+                    m[r, pts] = False
+
     def icon_split(self, x, y, w, h, bg_hex, units: float):
         """带文字的控件框里是否还画着一个图标(工具栏按钮的"图标在上/字在下"、列表项的"图标在左/字在右")。
         返回 (图标框, 文字框)(逻辑单位)或 None。units = 文字按字宽折算的 em 数(判断剩下的墨迹像不像这段字)。
@@ -740,6 +760,7 @@ class _Sampler:
         mask = np.abs(px - self._bg_vec(bg_hex, px.reshape(-1, 3))).sum(axis=2) >= 90
         mask[mask.mean(axis=1) > 0.85, :] = False
         mask[:, mask.mean(axis=0) > 0.85] = False
+        self._drop_dotted(mask)
         mask[:2, :] = mask[-2:, :] = False
         mask[:, :2] = mask[:, -2:] = False
         k = self.s
@@ -789,7 +810,8 @@ class _Sampler:
                 if is_icon(ih, iw, th, mi, mt) and texty(tw, th):
                     cut = (up[1] + t0) / 2.0 / k
                     return [x, y, w, cut], [x, y + cut, w, h - cut]
-        cols = runs(mask.any(axis=0), 0)
+        # 列游程: 隔开至少 1 列空白就分团(min_gap=0 时每一列都自成一团, 图标永远只有 1 列宽, 横排拆分从未生效)
+        cols = runs(mask.any(axis=0), 1)
         if len(cols) >= 2:
             c0, c1 = cols[0]
             re_, rest = extent(mask[:, c0:c1], 1), extent(mask[:, cols[1][0]:], 1)
