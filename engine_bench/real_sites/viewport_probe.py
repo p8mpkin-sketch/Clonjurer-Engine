@@ -463,54 +463,49 @@ HOLD_INTERVALS_JS = r"""(() => {
 })();""".replace("__LONG__", "3000" if _PROBE_TIMERS == "hold3" else "0")
 
 
-# PROBE_TIMERS=holdc(提案口径): 只拦"周期性的"长 setTimeout 链, 一次性的长延时照常触发。hold3 把 ≥3s 的 setTimeout 一律
-# 拦掉, 一次性的揭示/收起(延时 3s 以上才把某块收起或换掉)在原站侧也被拦住, 而克隆里冻进去的是它触发之后的状态,
-# 两侧反而对不上。周期性无法在登记那一刻判断, 所以每个(原站, 视口)先开一张发现页: 定时器照常跑, 滚一遍让
-# "进视口才启动"的轮换也登记上, 等到首轮触发; 某个长定时器的回调期间(含结束后 250ms, 框架分片提交)又登记了同延时的
-# 长定时器 = 链。记下 延时|回调源码指纹, 正式页(原站与克隆两侧)只拦指纹命中的。
+# PROBE_TIMERS=holdc(提案口径): 在 hold3 的基础上, 只把"确认是一次性的"长延时放行并等它触发。hold3 把 ≥3s 的 setTimeout
+# 一律拦掉, 一次性的揭示/收起(延时 3s 以上才把某块收起或换掉)在原站侧也被拦住, 而克隆里冻进去的是它触发之后的状态,
+# 两侧反而对不上。是不是一次性, 登记那一刻看不出来, 所以每个(原站, 视口)先开一张发现页: 定时器照常跑, 滚一遍让
+# "进视口才启动"的也登记上; 某个指纹(延时|回调源码)触发过之后 1.5s 内没有再被登记 = 一次性, 触发后又登记 = 周期性。
+# 正式页(原站与克隆两侧): 只放行确认一次性的, 其余(周期性的、发现页里没来得及触发的、没见过的)照 hold3 拦住。
 TIMER_SIG_JS = r"""const __sig = (fn, ms) => { const t = String(fn).slice(0, 400); let x = 2166136261;
   for (let i = 0; i < t.length; i++) { x ^= t.charCodeAt(i); x = Math.imul(x, 16777619); } return ms + '|' + (x >>> 0); };"""
 DISCOVER_CHAINS_JS = r"""(() => {
   __SIG__
-  const D = window.__ptd = {chain: {}, seen: {}, cur: null, until: 0, maxDue: 0};   // maxDue: 首轮(非链上再登记的)长定时器最晚触发时刻
+  // fired: 指纹 → 最近一次触发时刻; chain: 触发过之后又被登记的指纹(周期性); maxDue: 已登记的(≤9s)最晚触发时刻
+  const D = window.__ptd = {chain: {}, fired: {}, maxDue: 0};
   const real = window.setInterval; let fake = 1 << 30;
   window.setInterval = function (fn, ms) { if (+ms >= 1000) return fake++; return real.apply(this, arguments); };
   const st = window.setTimeout;
   window.setTimeout = function (fn, ms) {
     if (typeof fn !== 'function' || !(+ms >= 3000)) return st.apply(this, arguments);
     const s = __sig(fn, +ms), now = performance.now();
-    const linked = D.cur && (D.cur.live || now <= D.until) && D.cur.ms === +ms;
-    if (linked) { D.chain[s] = 1; D.chain[D.cur.s] = 1; }
-    else if (+ms <= 9000) { D.maxDue = Math.max(D.maxDue, now + +ms); D.seen[s] = 1; }
+    if (D.fired[s] !== undefined) D.chain[s] = 1;
+    else if (+ms <= 9000) D.maxDue = Math.max(D.maxDue, now + +ms);
     const a = Array.prototype.slice.call(arguments);
-    a[0] = function () {
-      const me = D.cur = {s: s, ms: +ms, live: true};
-      try { return fn.apply(this, arguments); } finally { me.live = false; D.until = performance.now() + 250; }
-    };
+    a[0] = function () { D.fired[s] = performance.now(); return fn.apply(this, arguments); };
     return st.apply(window, a);
   };
 })();""".replace("__SIG__", TIMER_SIG_JS)
 HOLD_CHAINS_JS = r"""(() => {
   __SIG__
-  const CH = new Set(__CHAINS__), ONE = new Set(__ONESHOTS__), H = window.__pth = {maxDue: 0};
+  const ONE = new Set(__ONESHOTS__), H = window.__pth = {maxDue: 0};
   const real = window.setInterval; let fake = 1 << 30;
   window.setInterval = function (fn, ms) { if (+ms >= 1000) return fake++; return real.apply(this, arguments); };
   const st = window.setTimeout;
   window.setTimeout = function (fn, ms) {
     if (typeof fn === 'function' && +ms >= 3000) {
-      if (CH.has(__sig(fn, +ms))) return fake++;
-      if (ONE.has(__sig(fn, +ms))) H.maxDue = Math.max(H.maxDue, performance.now() + +ms);
+      if (!ONE.has(__sig(fn, +ms))) return fake++;
+      H.maxDue = Math.max(H.maxDue, performance.now() + +ms);
     }
     return st.apply(this, arguments);
   };
 })();""".replace("__SIG__", TIMER_SIG_JS)
-
-
 _CHAIN_CACHE = {}
 
 
 def _discover_chains(ctx, url, vp, timeout_ms=45000):
-    """发现页: 返回 {"chain": 周期性长 setTimeout 的指纹, "oneshot": 一次性长延时的指纹}(失败为空 = 正式页只拦 setInterval)。
+    """发现页: 返回 {"chain": 周期性长 setTimeout 的指纹, "oneshot": 确认是一次性的长延时指纹}(失败为空 = 全拦, 同 hold3)。
     同一(地址, 视口)在本进程内只发现一次(多次重复探测取中位数时复用)。"""
     key = (url, vp["width"], vp["height"])
     if key not in _CHAIN_CACHE:
@@ -527,15 +522,14 @@ def _discover_chains_once(ctx, url, vp, timeout_ms=45000):
             page.wait_for_load_state("networkidle", timeout=8000)
         with suppress(Exception):
             page.evaluate(SCROLL_JS, vp["height"] * MAX_SCREENS)
-        for _ in range(24):          # 等到已登记的长定时器都触发过一轮(≤9s 的才等), 再留出回调后登记的余量
-            left = page.evaluate("window.__ptd ? window.__ptd.maxDue + 500 - performance.now() : 0")
+        for _ in range(28):          # 等到已登记的长定时器(≤9s)都触发过, 再留 1.5s 看它会不会被重新登记
+            left = page.evaluate("window.__ptd ? window.__ptd.maxDue + 1500 - performance.now() : 0")
             if not left or left <= 0:
                 break
             page.wait_for_timeout(min(500, max(50, left)))
-        got = page.evaluate("window.__ptd ? [Object.keys(window.__ptd.chain), Object.keys(window.__ptd.seen)] : [[], []]")
-        chain = sorted(got[0])[:400]
-        # 原站上出现过、没有成链的长延时 = 一次性的: 正式页两侧只等这些触发(克隆页里引擎自带脚本的长延时不等)
-        return {"chain": chain, "oneshot": sorted(set(got[1]) - set(chain))[:400]}
+        got = page.evaluate("""() => { const D = window.__ptd; if (!D) return [[], []]; const now = performance.now();
+            return [Object.keys(D.chain), Object.keys(D.fired).filter(s => !D.chain[s] && now - D.fired[s] >= 1400)]; }""")
+        return {"chain": sorted(got[0])[:400], "oneshot": sorted(got[1])[:400]}
     except Exception:   # noqa: BLE001
         return {"chain": [], "oneshot": []}
     finally:
@@ -547,8 +541,7 @@ def _shoot(ctx, url, vp, out: Path, timeout_ms=45000, extra_wait_ms=0, focus_key
     page = ctx.new_page()
     if HOLD_INTERVALS:
         with suppress(Exception):
-            page.add_init_script(HOLD_CHAINS_JS.replace("__CHAINS__", json.dumps((chains or {}).get("chain") or []))
-                                 .replace("__ONESHOTS__", json.dumps((chains or {}).get("oneshot") or []))
+            page.add_init_script(HOLD_CHAINS_JS.replace("__ONESHOTS__", json.dumps((chains or {}).get("oneshot") or []))
                                  if _PROBE_TIMERS == "holdc" else HOLD_INTERVALS_JS)
     info = {"url": url}
     failed, errors = [], []
