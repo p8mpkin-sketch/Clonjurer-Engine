@@ -708,6 +708,7 @@ CV_PATH_FN = r"""(e) => {
   return p.join('>');
 }"""
 CV_ATTR_FN = r"""(e) => {
+  const SVGSKIP = 1;
   if (!(e instanceof SVGSVGElement) && e.tagName !== 'IMG' && e.tagName !== 'CANVAS') return '';
   let s = '';
   for (const a of ['width', 'height']) {
@@ -715,7 +716,7 @@ CV_ATTR_FN = r"""(e) => {
     // 内联样式已给了这一维(width:100% / height:auto): 尺寸属性只是展示提示, 被样式盖掉, 不当作该视口的取值 ——
     // 否则挂载时按宽写一次的 width 属性在平板/手机段被写成 px, 盖过 100%, 820 宽的插画按 768 首载页的 720px 定宽
     // (只对 svg: canvas/固化 canvas 的 img 的属性还承担位图尺寸对照, 见 CV_EMIT_JS 的 bFix)
-    if (e instanceof SVGSVGElement && e.style && e.style.getPropertyValue(a)) continue;
+    if (SVGSKIP && e instanceof SVGSVGElement && e.style && e.style.getPropertyValue(a)) continue;
     if (v && /^\d+(\.\d+)?$/.test(v.trim())) s += a + ':' + (+v).toFixed(2).replace(/\.?0+$/, '') + 'px;';
   }
   // 固化 canvas 的 img 只有 width 属性 + 内联 aspect-ratio(见 CANVAS_IMG_FN): 等价高度补出来, 才能与窄屏首载页里
@@ -2791,6 +2792,10 @@ if not getattr(_config, "VARIANT_CANVAS_FILL", True):
 if not getattr(_config, "ROOT_CLS_UA_SPLIT", True):
     CV_EMIT_JS = CV_EMIT_JS.replace("const ROOTUA = 1;", "const ROOTUA = 0;")
 ALT_INJECT_JS = ALT_INJECT_JS.replace("rs.textContent = CV_VP_SWAP_RUNTIME;", "rs.textContent = " + json.dumps(CV_VP_SWAP_RUNTIME) + ";")
+if not getattr(_config, "SVG_ATTR_INLINE_SKIP", True):
+    CV_RECORD_JS = CV_RECORD_JS.replace("const SVGSKIP = 1;", "const SVGSKIP = 0;")
+    CV_PATHS_JS = CV_PATHS_JS.replace("const SVGSKIP = 1;", "const SVGSKIP = 0;")
+    CV_EMIT_JS = CV_EMIT_JS.replace("const SVGSKIP = 1;", "const SVGSKIP = 0;")
 if not getattr(_config, "VARIANT_DOM_SWAP", True):
     ALT_INJECT_JS = ALT_INJECT_JS.replace("const VPSWAP = 1;", "const VPSWAP = 0;")
 # 交付首屏: 首屏(前 DEPLOY_DEFER_SCREENS 屏)以外、原站加载过的 <img> 改为原生懒加载 + 异步解码,

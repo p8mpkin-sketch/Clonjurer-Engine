@@ -337,6 +337,9 @@ TASK_STALE_S = 1800              # 本进程正在执行的任务心跳(updated_
 TASK_ORPHAN_S = 120              # 不在本进程执行名单里的 running 任务(工作线程已死)停了这么久即判 failed
 
 # ---------------------------------------------------------------------------
+# svg 的 width/height 属性被内联样式覆盖时不当作分视口尺寸(挂载时按宽写一次属性的插画); 0 关(A/B 用)
+SVG_ATTR_INLINE_SKIP = True
+
 # 常量环境覆盖(A/B 用): CLONER_CFG_<常量名>=值 覆盖本模块同名的 bool/int/float/str 常量。
 # 例 CLONER_CFG_NARROW_PHONE_UA=0 CLONER_CFG_MAIN_SETTLE_MS=0。CI 的 engine_env 输入就是一串这样的赋值,
 # 同一分支不改代码就能对照开关; 类型随原值, 解析失败忽略。
