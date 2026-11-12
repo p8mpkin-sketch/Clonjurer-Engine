@@ -101,7 +101,7 @@ jobs:
           python-version: "3.12"
       - name: 依赖与开源样本应用
         run: |
-          python -m pip install pillow numpy requests pyobjc-framework-Cocoa pyobjc-framework-ApplicationServices
+          python -m pip install pillow numpy requests pyobjc-framework-Cocoa pyobjc-framework-ApplicationServices PySide6
           brew install --cask db-browser-for-sqlite 2>&1 | tail -5 || true
           brew install --cask coteditor 2>&1 | tail -5 || true
           sudo xattr -dr com.apple.quarantine "/Applications/DB Browser for SQLite.app" || true

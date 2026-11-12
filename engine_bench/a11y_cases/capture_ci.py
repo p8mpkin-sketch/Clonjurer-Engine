@@ -170,6 +170,9 @@ def macos():
     apps = [
         ("tune", "mac_form_prefs", [sys.executable, str(HERE / "apps" / "mac" / "form_prefs.py")], None),
         ("tune", "mac_form_library", [sys.executable, str(HERE / "apps" / "mac" / "form_library.py")], None),
+        ("tune", "mac_form_workbench", [sys.executable, str(HERE / "apps" / "mac" / "form_workbench.py")], None),
+        ("tune", "mac_qt_workbench", [sys.executable, str(HERE / "apps" / "mac" / "qt_workbench.py")], None),
+        ("tune", "mac_qt_workbench_form", [sys.executable, str(HERE / "apps" / "mac" / "qt_workbench_form.py")], None),
         ("holdout", "mac_sqlitebrowser", ["open", "/Applications/DB Browser for SQLite.app"], "DB Browser for SQLite"),
         ("holdout", "mac_coteditor", ["open", "-a", "/Applications/CotEditor.app", str(doc)], "CotEditor"),
     ]
