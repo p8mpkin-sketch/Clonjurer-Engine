@@ -58,6 +58,7 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     INTERSTITIAL_RESTORE_JS,
     FONT_BAKE_NOSIZE_JS,
     SCROLL_TOP_JS,
+    NEST_FIX_JS,
     NARROW_STABLE_JS,
     DOM_COUNTS_JS,
     ALT_EXTRACT_JS,
@@ -1897,6 +1898,13 @@ class CaptureMixin:
                     ph = page.evaluate(STATE_PHASE_RESET_JS, [src_cls, src_grp]) or {}
                     if ph.get("els"):
                         self.log("RENDER", f"状态类相位复位(序列化前复查): 又有 {ph.get('els', 0)} 个实例偏离源码分配, 已再次复位 {ph.get('dbg') or ''}"[:600])
+        # 非法嵌套(<p> 里的块级容器)序列化后会被解析器拆树: MHTML 与交付 HTML 之前改成等价 span(见 NEST_FIX_JS)
+        if getattr(config, "NEST_FIX", True):
+            with suppress(Exception):
+                nf = _safe_eval(NEST_FIX_JS) or {}
+                if nf.get("fixed") or nf.get("reverted") or nf.get("other"):
+                    self.log("RENDER", f"非法嵌套修复: <p> 内块级容器 {nf.get('fixed', 0)} 个改等价 span"
+                                       f"(样式有差异换回 {nf.get('reverted', 0)}; 其它拆树块 {nf.get('other', 0)} 个未动)")
         # N1 保真轨: MHTML 快照(采集期活体渲染的权威固化)。
         # Chromium 对 MHTML 的回放默认禁脚本 —— 确定性由构造保证。
         if screenshot:

@@ -3074,3 +3074,59 @@ TIMER_JOURNAL_REWIND_JS = r"""(styleMode) => {
   }
   return out;
 }"""
+
+
+# 非法嵌套序列化回解析修复: 脚本(Vue/React)用 DOM API 能造出 <p><a><div>直播中</div>标题</a></p> 这种 HTML
+# 解析器不接受的树; 交付 HTML 与 MHTML 都是序列化后再解析, 解析器遇到块级开始标签就把 <p> 提前闭合 —— 卡片标题
+# 被拆成三段, 每张卡高 +40px(bilibili 保真轨)。修法: 序列化前把 <p> 里「会让 p 闭合」的中性块容器(div/section/
+# header… UA 默认样式只有 display:block)改成 span, 属性/子树原样搬过去, 由 :where(span[data-clone-div]){display:block}
+# (零特异度, 作者样式照样覆盖)补回块级。改前改后逐个比几何与关键计算样式, 有任何差异即原样换回(作者 CSS 用标签
+# 选择器 div.x / .a > div 命中它的情形)。返回 {fixed, reverted, other}: other = p 里其它会拆树的块(ul/h3/table…, 未改)
+NEST_FIX_JS = r"""
+() => {
+  const NEUTRAL = new Set(['DIV','SECTION','ARTICLE','ASIDE','HEADER','FOOTER','NAV','MAIN','HGROUP','SEARCH']);
+  const CLOSERS = new Set(['ADDRESS','BLOCKQUOTE','CENTER','DETAILS','DIALOG','DIR','DL','FIELDSET','FIGCAPTION',
+    'FIGURE','FORM','H1','H2','H3','H4','H5','H6','HR','MENU','OL','P','PRE','SUMMARY','TABLE','UL','LISTING','XMP']);
+  const SCOPE = new Set(['BUTTON','TABLE','TD','TH','CAPTION','OBJECT','APPLET','MARQUEE','TEMPLATE','SVG','MATH']);
+  const PROPS = ['display','position','float','width','height','marginTop','marginBottom','marginLeft','marginRight',
+    'paddingTop','paddingLeft','fontSize','fontWeight','fontStyle','lineHeight','color','backgroundColor',
+    'flexDirection','alignItems','justifyContent','gap','overflow','textAlign','whiteSpace','verticalAlign'];
+  const out = {fixed: 0, reverted: 0, other: 0};
+  if (!document.body) return out;
+  // 只看「落在 p 的 button 作用域内」的块: 中间隔着 button/table/svg 等时解析器不闭合 p
+  const inPScope = el => { for (let a = el.parentElement; a; a = a.parentElement) {
+      const t = a.tagName.toUpperCase(); if (t === 'P') return true; if (SCOPE.has(t)) return false; } return false; };
+  const cands = [], others = [];
+  for (const p of document.body.getElementsByTagName('p')) {
+    for (const el of p.getElementsByTagName('*')) {
+      const t = el.tagName.toUpperCase();
+      if (!inPScope(el)) continue;
+      if (NEUTRAL.has(t)) cands.push(el); else if (CLOSERS.has(t)) others.push(el);
+    }
+  }
+  out.other = new Set(others).size;
+  if (!cands.length) return out;
+  let st = document.querySelector('style[data-clone-nestfix]');
+  if (!st) { st = document.createElement('style'); st.setAttribute('data-clone-nestfix', '');
+    st.textContent = ':where(span[data-clone-div]){display:block}'; (document.head || document.documentElement).appendChild(st); }
+  const snap = el => { const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
+    return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)].join(',') + '|' +
+      PROPS.map(k => cs[k]).join('|'); };
+  const swap = (from, tag) => { const n = document.createElement(tag);
+    for (const a of Array.from(from.attributes)) { try { n.setAttribute(a.name, a.value); } catch (e) {} }
+    while (from.firstChild) n.appendChild(from.firstChild);
+    from.replaceWith(n); return n; };
+  // 由深到浅: 内层先换, 外层比对时子树已是终态
+  for (const el of cands.reverse()) {
+    if (!el.isConnected) continue;
+    const tag = el.tagName.toLowerCase(), par = el.parentElement;
+    const before = snap(el), pb = par ? snap(par) : '';
+    const n = swap(el, 'span');
+    n.setAttribute('data-clone-div', tag);
+    if (snap(n) !== before || (par && snap(par) !== pb)) {
+      const back = swap(n, tag); back.removeAttribute('data-clone-div'); out.reverted++;
+    } else out.fixed++;
+  }
+  return out;
+}
+"""

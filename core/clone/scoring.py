@@ -486,18 +486,45 @@ class ScoringMixin:
         results.update(snap["results"])
 
 
-    CLONE_SCROLL_JS = """async () => {
-        await new Promise(res => {
-            let y = 0;
-            const step = () => {
-                y += 800;
-                window.scrollTo(0, y);
-                if (y < document.body.scrollHeight) setTimeout(step, 60);
-                else { window.scrollTo(0, 0); setTimeout(res, 250); }
-            };
-            step();
-        });
+    # target: 原站基准整页高(CSS px, 0=未知)。克隆页滚到底时若还没到基准高, 且滚动途中页高涨过(无限下拉流:
+    # 页面脚本按「到底」再拉一批), 在底部等页高增长再继续滚, 直到达到基准高或连续两次等不到增长(每次 ≤1.2s,
+    # 总预算 12s, 低于驱动侧 CLONE_SCROLL_MAX_MS)。旧实现 800px/60ms 一口气滚到底即回顶: 原站基准按 400px/两帧
+    # 慢滚, 流加载了 4 批; 克隆只赶上 1 批, 整页短 40%(bilibili 交互轨 3072 vs 4938)。页高没涨过/已到基准高的
+    # 页面行为与旧实现完全相同, 不多等
+    CLONE_SCROLL_JS = """async (target) => {
+        const H = () => Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0);
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+        const t0 = performance.now(), h0 = H();
+        let y = 0, miss = 0;
+        for (;;) {
+            while (y < H()) { y += 800; window.scrollTo(0, y); await sleep(60); }
+            const h = H();
+            // 页高从没涨过时只等一次(新流在到底后才请求下一批); 涨过的流允许连续两次等不到
+            if (!(target > 0) || h >= target * 0.97 || miss >= (h <= h0 ? 1 : 2) || performance.now() - t0 > 12000) break;
+            let grew = false;
+            for (let i = 0; i < 8; i++) { await sleep(150); if (H() > h + 4) { grew = true; break; } }
+            if (grew) { miss = 0; continue; }
+            miss++;
+            window.scrollTo(0, Math.max(0, h - innerHeight * 2)); await sleep(120);
+            window.scrollTo(0, h); y = h;
+        }
+        window.__cloneScrollGrew = [h0, H()];
+        window.scrollTo(0, 0);
+        await sleep(250);
     }"""
+
+    def _scroll_target(self, page) -> int:
+        """原站基准截图的整页高(换算到当前视口 CSS px); 无基准或宽度对不上时 0(不做增长等待)。"""
+        try:
+            from PIL import Image
+            vw = int((page.viewport_size or {}).get("width") or 0)
+            with Image.open(self.ws / "original_preview.png") as im:
+                w, h = im.size
+            if vw <= 0 or w <= 0:
+                return 0
+            return int(h * vw / float(w))
+        except Exception:
+            return 0
 
 
     def _load_clone(self, page, base, phases: bool = False):
@@ -560,16 +587,26 @@ class ScoringMixin:
             # 懒加载触发: 分段滚动到底再回顶, 派发 IntersectionObserver
             # 不 await 页内滚动: 滚到某段触发页面脚本死循环时, 等它返回的 evaluate 会永久挂起;
             # 改为页内起跑 + 驱动侧限时轮询完成标记, 超时即判卡死(交互轨本轮作废)
+            # 首评之后的校准重渲染: 首评滚动没见到页高增长(不是下拉流)就不再在底部等
+            target = self._scroll_target(page) if (phases or getattr(self, "_feed_grew", True)) else 0
             try:
                 page.evaluate("(src) => { window.__cloneScrollDone = false;"
                               " (0, eval)('(' + src + ')')().then(() => { window.__cloneScrollDone = true; },"
-                              " () => { window.__cloneScrollDone = true; }); }", self.CLONE_SCROLL_JS)
+                              " () => { window.__cloneScrollDone = true; }); }",
+                              self.CLONE_SCROLL_JS.replace("async (target) =>", f"async (target = {target}) =>"))
                 page.wait_for_function("window.__cloneScrollDone === true",
                                        timeout=config.CLONE_SCROLL_MAX_MS, polling=200)
             except Exception as exc:
                 if "Timeout" in type(exc).__name__ or "Timeout" in str(exc):
                     raise CloneUnresponsive(
                         f"克隆页滚动 {config.CLONE_SCROLL_MAX_MS}ms 未完成(页面脚本死循环)") from exc
+            if phases and target:
+                g = None
+                with suppress(Exception):
+                    g = page.evaluate("() => window.__cloneScrollGrew || null")
+                self._feed_grew = bool(g and g[1] > g[0] + 4)
+                if self._feed_grew and g:
+                    self.log("RENDER", f"克隆滚动: 页高随滚动增长 {int(g[0])}→{int(g[1])}px(基准 {target}px)")
         if phases:
             tp = self._phase("评分-克隆滚动", tp)
         self._settle(page)
