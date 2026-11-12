@@ -182,6 +182,7 @@ REVEAL_SVG_KEEP_TRANSFORM = True # 入场动画强制显形不给 SVG 内部图�
 VARIANT_ID_SLOT_RENAME = True    # 窄屏变体 id 错位判据: 两侧 id 都不在对方页但像同一槽位的随机名(数字段不同/同前缀带数字) → 不算错位, 不提升变体根
 VARIANT_ID_LIFT_MIN_TEXT = 0.95  # 只因子项 id 错位提上来的变体根: 窄屏版文字须 ≥ 主页同子树的这个比例才用(否则是窄屏页模块未填充完)
 VARIANT_CONTENT_DIFF = True      # 窄屏变体: 结构相同但叶子文字/图源按加载宽度不同(对照页一致)的子树也作为变体根(按断点换商品组)
+VARIANT_ROOT_VARS = True         # <html>/<body> 内联 --自定义属性 按加载宽度不同(窄屏首载页与 0.92 倍宽对照一致) → 写进平板/手机段根规则
 ROOT_INLINE_VARIES_NOSIZE = True  # 根字号(html/body 内联 px)被脚本按屏宽改写时, 桌面宽采集的字体烘焙不烘字号/行高/字距(交回 rem 规则)
 NARROW_UA_SPLIT = True           # 手机 UA 首载页之外再开一张桌面 UA 390 页: 只在手机 UA 下才换结构的变体只给触屏显示
 NARROW_UA_CLS = True             # 手机 UA 首载页与桌面 UA 同宽页同路径 class 不同(桌面 UA 同宽与主页相同)→ 只给触屏手机段换 class(wix 手机卡片默认收起)

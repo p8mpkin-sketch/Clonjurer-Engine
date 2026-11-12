@@ -775,7 +775,10 @@ CV_PATHS_JS = r"""() => {
     Array.from(e.children).filter(c => !NONVIS.has(c.tagName)).map(c => /^[A-Za-z][\w-]{1,100}$/.test(c.id || '') ? c.id : '').join(',').slice(0, 2400)];
   // 根元素只记 class(加载时按宽度给 <html>/<body> 打的 _mobile / is-mobile 类标记)
   for (const [k, e] of [['@html', document.documentElement], ['@body', document.body]])
-    if (e) out[k] = [e.tagName, e.getAttribute('class') || '', '', '', '', '', '', '', ''];
+    if (e) out[k] = [e.tagName, e.getAttribute('class') || '', '', '', '', '', '', '', '',
+      // [9] 根元素内联自定义属性(--x:v; 逐条, 按名排序): 脚本按加载宽度量出来写进 <html style>(公告条折行高度
+      // --global-banner-height 46/32px, 首屏 calc(100vh - var(...)))
+      (() => { const st = e.style, o = []; for (let i = 0; i < st.length; i++) { const p = st[i]; if (p.startsWith('--')) o.push(p + ':' + st.getPropertyValue(p).trim()); } return o.sort().join(';'); })()];
   return out;
 }"""
 
@@ -1767,6 +1770,33 @@ CV_EMIT_JS = r"""
   });
   if (srcFill) out.srcFill = srcFill;
   if (textFill) out.textFill = textFill;
+  // <html>/<body> 内联自定义属性按加载宽度不同(脚本量公告条/页头高度写进根元素): 缩放快照与 class 对照都不含它,
+  // 冻结后各段都是采集宽的值(allbirds 手机首屏 calc(100vh - var) 高 14px, 其下整页错位)。窄屏首载页的值与主页不同、
+  // 且 0.92 倍宽对照页(另一次加载)同值时写进该段: 根规则 !important 压过主页留下的内联值, 桌面段不写
+  const ROOTVARS = 1;
+  if (ROOTVARS) {
+    const vmap = s => { const o = {}; (s || '').split(';').forEach(x => { const k = x.indexOf(':'); if (k > 2) o[x.slice(0, k)] = x.slice(k + 1); }); return o; };
+    let rv = 0;
+    for (const [k, el, sel] of [['@html', document.documentElement, 'html'], ['@body', document.body, 'body']]) {
+      if (!el) continue;
+      const cur = {};
+      for (let i = 0; i < el.style.length; i++) { const p = el.style[i]; if (p.startsWith('--')) cur[p] = el.style.getPropertyValue(p).trim(); }
+      for (const t of ['t', 'm']) {
+        const L = loads[t] && loads[t][k];
+        if (!L || L.length < 10 || !L[9]) continue;
+        const P = loads.__pair && loads.__pair[t] && loads.__pair[t].paths && loads.__pair[t].paths[k];
+        const pv = P && P.length >= 10 ? vmap(P[9]) : null;
+        const decl = [];
+        for (const [p, v] of Object.entries(vmap(L[9]))) {
+          if (!v || cur[p] === v || /[<>{};]/.test(v) || v.length > 200) continue;
+          if (pv && pv[p] !== v) continue;          // 另一次加载值不同: 随机/时间量, 不归视口
+          decl.push(p + ':' + v + '!important');
+        }
+        if (decl.length) { bands[t].push(sel + '{' + decl.join(';') + '}'); rv += decl.length; }
+      }
+    }
+    if (rv) out.rootVars = rv;
+  }
   if (out.cls || out.xattr || out.touchOff) {
     // 当前视口段由分视口样式表里的 --cv-band 告诉运行时(段边界落盘时才确定, 脚本不重复计算断点)
     bands.d.push(':root{--cv-band:d}'); bands.t.push(':root{--cv-band:t}'); bands.m.push(':root{--cv-band:m}');
@@ -2830,6 +2860,8 @@ if not getattr(_config, "VARIANT_CANVAS_FILL", True):
 if not getattr(_config, "REVEAL_SVG_KEEP_TRANSFORM", True):
     DEEP_FREEZE_JS = DEEP_FREEZE_JS.replace("const SVGKEEP = 1;", "const SVGKEEP = 0;")
     ALT_EXTRACT_JS = ALT_EXTRACT_JS.replace("const SVGKEEP = 1;", "const SVGKEEP = 0;")
+if not getattr(_config, "VARIANT_ROOT_VARS", True):
+    CV_EMIT_JS = CV_EMIT_JS.replace("const ROOTVARS = 1;", "const ROOTVARS = 0;")
 if not getattr(_config, "VARIANT_CANVAS_SHOT", True):
     ALT_EXTRACT_JS = ALT_EXTRACT_JS.replace("const VSHOT = 1;", "const VSHOT = 0;")
 if not getattr(_config, "ROOT_CLS_UA_SPLIT", True):
