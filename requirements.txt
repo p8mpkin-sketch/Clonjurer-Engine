@@ -5,3 +5,4 @@ pillow~=13.0.0  # 钉版: 逐值等价闸门依赖 PIL 重采样的字节级稳�
 paramiko>=3.4.0
 cryptography>=42.0.0
 numpy~=2.5.0    # 钉版: 同上, 与冻结基线逐值一致需稳定的 numpy
+rapidocr-onnxruntime>=1.2.3  # 可选: L1 截图本地 OCR 文字层(core/uir/ocr.py); 未安装时该层关闭, 行为不变

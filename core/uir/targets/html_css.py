@@ -196,6 +196,8 @@ def _node_css(node: Node, tokens: Tokens) -> dict:
             d["text-align"] = ts["align"]
     if B.get("color"):
         d["color"] = tokens.resolve("color", B["color"])
+    if B.get("letter_spacing") is not None:
+        d["letter-spacing"] = _px(B["letter_spacing"], tokens)
     return d
 
 
