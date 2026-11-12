@@ -2827,9 +2827,25 @@ def _subtree_sig(paths, root):
     return {k: (v[0], v[3]) for k, v in paths.items() if k == root or k.startswith(pre)}
 
 
-def _id_misaligned_parents(main, other):
+def _same_slot_ids(x, y):
+    """两页同一序号上的两个 id 像同一个槽位每次加载换的随机名(广告位 beans_123/beans_456、aria8a6…/ariai92…):
+    数字段归一后相同, 或共有 ≥4 字符前缀且两边都带数字。"""
+    if re.sub(r"\d+", "#", x) == re.sub(r"\d+", "#", y):
+        return True
+    k = 0
+    for a, b in zip(x, y):
+        if a != b:
+            break
+        k += 1
+    return k >= 4 and any(c.isdigit() for c in x) and any(c.isdigit() for c in y)
+
+
+def _id_misaligned_parents(main, other, samples=None):
     """CV_PATHS_JS 两页结果里, 子元素标签序列相同而 id 序列错位的容器路径。
-    错位: 同一序号两侧 id 不同, 且其中带 id 的那个在另一页整页都不存在(不是换了位置, 是另一页没有这个组件)。"""
+    错位: 同一序号两侧 id 不同, 且其中带 id 的那个在另一页整页都不存在(不是换了位置, 是另一页没有这个组件)。
+    两侧都带 id、都不在对方页、且像同一槽位的随机名(_same_slot_ids)的不算: 是同一个组件换了名字, 不是各有对方没有的
+    组件(sohu 平板: 广告位随机 id 命中 5 个容器 ≤ 上限, 变体根提到整个主栏, 换成广告条还没填的窄屏版, 平板 91→47;
+    同站命中 13 个时超上限不提, 两种结果随命中数摆动)。samples 给了就追加 (路径, 主页 id, 窄屏 id) 供日志归因。"""
     def _all_ids(tbl):
         out = set()
         for v in tbl.values():
@@ -2839,6 +2855,7 @@ def _id_misaligned_parents(main, other):
     ids_m, ids_o = _all_ids(main), _all_ids(other)
     if not ids_m or not ids_o:
         return []
+    rename_ok = getattr(config, "VARIANT_ID_SLOT_RENAME", True)
     out = []
     for p, v in main.items():
         o = other.get(p)
@@ -2847,8 +2864,14 @@ def _id_misaligned_parents(main, other):
         a, b = v[8].split(","), o[8].split(",")
         if len(a) != len(b):
             continue
-        if any(x != y and ((x and x not in ids_o) or (y and y not in ids_m)) for x, y in zip(a, b)):
+        hit = next(((x, y) for x, y in zip(a, b)
+                    if x != y and ((x and x not in ids_o) or (y and y not in ids_m))
+                    and not (rename_ok and x and y and x not in ids_o and y not in ids_m
+                             and _same_slot_ids(x, y))), None)
+        if hit:
             out.append(p)
+            if samples is not None and len(samples) < 3:
+                samples.append((p, hit[0], hit[1]))
     return out
 
 

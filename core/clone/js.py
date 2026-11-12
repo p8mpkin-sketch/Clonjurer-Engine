@@ -162,6 +162,7 @@ async () => {
 
 DEEP_FREEZE_JS = r"""
 () => {
+  const SVGKEEP = 1;
   const result = { lazy: 0, css: 0, crossOriginSheets: 0, canvas: 0, forms: 0, revealed: 0 };
 
   // 1) 懒加载属性标准化
@@ -183,7 +184,9 @@ DEEP_FREEZE_JS = r"""
   document.querySelectorAll('[data-aos], .wow, [data-scroll], [data-sr-id], [data-reveal], [data-animate]').forEach(el => {
     el.style.setProperty('opacity', '1', 'important');
     el.style.setProperty('visibility', 'visible', 'important');
-    el.style.setProperty('transform', 'none', 'important');
+    // SVG 内部图元(g/rect/path…)的 transform 是几何定位(transform="translate(35 2)" 呈现属性), 入场库只动 HTML 外壳;
+    // 写 transform:none 会把它压掉, 各组都挤回原点(github 角标像素点两角叠在左上)
+    if (!SVGKEEP || !(el instanceof SVGElement) || el instanceof SVGSVGElement) el.style.setProperty('transform', 'none', 'important');
     el.style.setProperty('filter', 'none', 'important');
     el.style.setProperty('transition', 'none', 'important');
     el.classList.add('aos-animate');
@@ -777,6 +780,21 @@ CV_PATHS_JS = r"""() => {
 # 也序列化进克隆, 两版各打 data-cv-vp 视口令牌, 由分视口样式表只显示当前视口那一版。
 ALT_EXTRACT_JS = r"""(paths) => {
   const VFILL = 1;
+  const VSHOT = 1;
+  const SVGKEEP = 1;
+  // 位图读回是空的(WebGL 没开 preserveDrawingBuffer, 合成后读回恒为全透明)或读回直接抛错(跨域贴图污染): 32x32 缩样看 alpha
+  const blankCv = (cv) => {
+    try {
+      if (!cv.width || !cv.height) return false;
+      const t = document.createElement('canvas'); t.width = 32; t.height = 32;
+      const g = t.getContext('2d'); g.drawImage(cv, 0, 0, 32, 32);
+      const d = g.getImageData(0, 0, 32, 32).data;
+      for (let i = 3; i < d.length; i += 4) if (d[i]) return false;
+      // 2D canvas 读回全透明就是真透明(空的装饰层), 截图会把底下的内容烤进去; 只有 WebGL/bitmaprenderer 才是"读不回"
+      try { return cv.getContext('2d') === null; } catch (e) { return true; }
+    } catch (e) { return true; }
+  };
+  let pi = 0;
   // 与 CV_PATH_FN 同口径: body 这一层有唯一 id 的段写成 tag#id, 序号段只数同标签且无唯一 id 的兄弟
   const resolve = (path) => {
     let e = document.body;
@@ -842,11 +860,27 @@ ALT_EXTRACT_JS = r"""(paths) => {
     // cloneNode 不带 canvas 位图: 按原节点逐个固化成 <img>(与 DEEP_FREEZE 第 5 步同口径), 否则窄屏版
     // 的图表/插画整块空白
     const cvs = el.querySelectorAll('canvas'), cvc = c.querySelectorAll('canvas');
+    // 读回为空的 canvas(WebGL 吉祥物/3D 插画: github 首屏 Mona 头像): toDataURL 只能得到透明图, 窄屏版整块消失。
+    // 打标记 + 记下它在窄屏页里的文档坐标, 由引擎对窄屏页按该矩形截图回填(主页同类 canvas 走基准截图回填, 同口径)
+    const shots = [];
+    pi++;
     cvs.forEach((cv, k) => {
       try {
-        const data = cv.toDataURL('image/png'), dst = cvc[k];
-        if (!dst || !data || data.length <= 128) return;
+        const dst = cvc[k];
+        let blank = VSHOT && blankCv(cv), data = '';
+        try { data = cv.toDataURL('image/png'); } catch (e) { blank = blank || VSHOT; }
+        if (!dst) return;
+        if (blank) {
+          const rb = cv.getBoundingClientRect();
+          if (rb.width < 8 || rb.height < 8) { if (!data || data.length <= 128) return; blank = false; }
+          else {
+            if (!data || data.length <= 128) data = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
+            shots.push([pi + '_' + k, rb.left + scrollX, rb.top + scrollY, rb.width, rb.height]);
+          }
+        }
+        if (!data || data.length <= 128) return;
         const im = (__CANVAS_IMG__)(cv, data);
+        if (blank) im.setAttribute('data-cv-shot', pi + '_' + k);
         // 脚本按容器宽写了内联 px 宽高、且显示盒正好撑满父元素内容宽的 canvas: 窄屏版只在首载那一个宽度(768/390)采到,
         // 钉着 px 到同段别的机型(820/360/420)就窄一截或溢出 → 写 width:100% + height:auto, 由内联 aspect-ratio 定高
         if (VFILL) try {
@@ -872,7 +906,7 @@ ALT_EXTRACT_JS = r"""(paths) => {
     c.querySelectorAll('[data-aos], .wow, [data-scroll], [data-sr-id], [data-reveal], [data-animate]').forEach(x => {
       x.style.setProperty('opacity', '1', 'important');
       x.style.setProperty('visibility', 'visible', 'important');
-      x.style.setProperty('transform', 'none', 'important');
+      if (!SVGKEEP || !(x instanceof SVGElement) || x instanceof SVGSVGElement) x.style.setProperty('transform', 'none', 'important');
     });
     // 相对地址按窄屏页绝对化(插入主页后基准相同, 但防 <base> 差异)
     c.querySelectorAll('[src],[href],[srcset],[poster]').forEach(x => {
@@ -881,7 +915,7 @@ ALT_EXTRACT_JS = r"""(paths) => {
         if (v && !/^(data:|blob:|#|javascript:|mailto:|tel:)/i.test(v)) { try { x.setAttribute(a, new URL(v, document.baseURI).href); } catch (e) {} }
       }
     });
-    out[p] = [c.outerHTML, (el.innerText || '').trim().length, el.getElementsByTagName('*').length, el.querySelectorAll('input:not([type=hidden]),textarea,select').length, normed];
+    out[p] = [c.outerHTML, (el.innerText || '').trim().length, el.getElementsByTagName('*').length, el.querySelectorAll('input:not([type=hidden]),textarea,select').length, normed, shots];
   }
   return out;
 }""".replace("__CANVAS_IMG__", CANVAS_IMG_FN)
@@ -914,6 +948,10 @@ SUBTREE_SIZE_JS = r"""(paths) => {
   for (const p of paths) { const el = resolve(p); if (el) out[p] = [(el.innerText || '').trim().length, el.getElementsByTagName('*').length, el.querySelectorAll('input:not([type=hidden]),textarea,select').length]; }
   return out;
 }"""
+
+# 同 SUBTREE_SIZE_JS, 文字量按 textContent(不随视口 CSS 隐藏变化): 判「窄屏页模块还没填充」只看内容在不在, 不受响应式隐藏影响
+SUBTREE_CONTENT_JS = SUBTREE_SIZE_JS.replace("(el.innerText || '').trim().length, el.getElementsByTagName",
+                                             "(el.textContent || '').replace(/\\s+/g, '').length, el.getElementsByTagName")
 
 # 运行时样式文本(<style> 与文档级构造样式表): 窄屏版组件的 CSS-in-JS 样式只在窄屏页里有
 # 页面全部样式规则的逐条文本(含 <link> 表、<style>、adoptedStyleSheets; 分组规则 @media/@supports/@layer 递归到
@@ -2784,6 +2822,11 @@ if not getattr(_config, "VARIANT_CANVAS_CANON", False):
     CV_PATHS_JS = CV_PATHS_JS.replace("const CANON = 1;", "const CANON = 0;")
 if not getattr(_config, "VARIANT_CANVAS_FILL", True):
     ALT_EXTRACT_JS = ALT_EXTRACT_JS.replace("const VFILL = 1;", "const VFILL = 0;")
+if not getattr(_config, "REVEAL_SVG_KEEP_TRANSFORM", True):
+    DEEP_FREEZE_JS = DEEP_FREEZE_JS.replace("const SVGKEEP = 1;", "const SVGKEEP = 0;")
+    ALT_EXTRACT_JS = ALT_EXTRACT_JS.replace("const SVGKEEP = 1;", "const SVGKEEP = 0;")
+if not getattr(_config, "VARIANT_CANVAS_SHOT", True):
+    ALT_EXTRACT_JS = ALT_EXTRACT_JS.replace("const VSHOT = 1;", "const VSHOT = 0;")
 if not getattr(_config, "ROOT_CLS_UA_SPLIT", True):
     CV_EMIT_JS = CV_EMIT_JS.replace("const ROOTUA = 1;", "const ROOTUA = 0;")
 ALT_INJECT_JS = ALT_INJECT_JS.replace("rs.textContent = CV_VP_SWAP_RUNTIME;", "rs.textContent = " + json.dumps(CV_VP_SWAP_RUNTIME) + ";")

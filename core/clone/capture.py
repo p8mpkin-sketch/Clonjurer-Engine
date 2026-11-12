@@ -110,6 +110,7 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     STORAGE_SNAPSHOT_JS,
     STYLE_TEXTS_JS,
     SUBTREE_SIZE_JS,
+    SUBTREE_CONTENT_JS,
     TEXT_EXTRACT_JS,
     TIME_FREEZE_JS,
     TRACKER_OBSERVE_JS,
@@ -1149,13 +1150,32 @@ class CaptureMixin:
             # 原站多一个占第三行的 0 高兄弟, 克隆少一道行距, 其下整页上移 16px)。把变体根提到这个容器, 整个换成窄屏版。
             # id 每次加载都变的站(随机 id)会大面积命中, 超过上限就整体不用这条判据
             if getattr(config, "VARIANT_ID_ALIGN", True):
-                lifted = _id_misaligned_parents(main, other)
+                id_samples = []
+                lifted = _id_misaligned_parents(main, other, id_samples)
                 if lifted:
                     if len(lifted) > int(getattr(config, "VARIANT_ID_ALIGN_MAX", 12)):
                         self.log("RENDER", f"窄屏首载页 {tag}: 子项 id 错位的容器 {len(lifted)} 个超上限, 视为 id 不稳定, 不按 id 提升变体根")
                     else:
                         self.log("RENDER", f"窄屏首载页 {tag}: {len(lifted)} 个容器的子项 id 与主页错位(各有对方没有的组件), 变体根提到容器: "
-                                           + "; ".join(q[-60:] for q in lifted[:4]))
+                                           + "; ".join(q[-60:] for q in lifted[:4])
+                                           + " | 样例 " + "; ".join(f"{a[:24]}≠{b[:24]}" for _p, a, b in id_samples))
+                        id_only = sorted(set(lifted) - set(diff))
+                        # 只因子项 id 错位才提上来的根(结构本身相同)换的是整个容器, 窄屏版少一截内容就整块丢失。id 错位常是
+                        # 窄屏页模块还没填充、仍挂着带 id 的占位(sohu 平板 serviceInfo/funnyblock 占位 → 整个主栏换成广告条/模块
+                        # 未到的版本, 文字 9073/10002, 平板 91→47): 窄屏版文字 < 主页同子树 VARIANT_ID_LIFT_MIN_TEXT 的不提,
+                        # 其下真正结构不同的子树仍按原判据各自成为变体根
+                        lift_min = float(getattr(config, "VARIANT_ID_LIFT_MIN_TEXT", 0.95) or 0)
+                        if id_only and lift_min and tag in pages:
+                            with suppress(Exception):
+                                sz_m = page.evaluate(SUBTREE_CONTENT_JS, id_only) or {}
+                                sz_o = pages[tag].evaluate(SUBTREE_CONTENT_JS, id_only) or {}
+                                short = [q for q in id_only if (sz_m.get(q) or [0])[0]
+                                         and (sz_o.get(q) or [0])[0] < lift_min * sz_m[q][0]]
+                                if short:
+                                    self.log("RENDER", f"窄屏首载页 {tag}: {len(short)} 个只因 id 错位提上来的根窄屏版文字不足 {lift_min:.0%}"
+                                                       f"(窄屏页模块未填充完), 不提: " + "; ".join(
+                                                           f"{q[-40:]} {sz_o.get(q, [0])[0]}/{sz_m[q][0]}" for q in short[:3]))
+                                    lifted = [q for q in lifted if q not in short]
                         diff = sorted(set(diff) | set(lifted))
             top = []
             for p in diff:
@@ -1212,6 +1232,7 @@ class CaptureMixin:
             tk.append(time.monotonic())
             with suppress(Exception):
                 htmls = pages[tag].evaluate(ALT_EXTRACT_JS, top) or {}
+                htmls = CaptureMixin._shoot_blank_canvases(self, pages[tag], tag, htmls)
                 tk.append(time.monotonic())
                 self.log("RENDER", f"窄屏首载页 {tag} 分步耗时: " + " / ".join(
                     f"{k} {b - a:.1f}s" for k, a, b in zip(("隐藏子树", "到位", "随宽", "相位", "过渡", "抽取"), tk, tk[1:])))
@@ -1344,6 +1365,49 @@ class CaptureMixin:
         except Exception:
             return None
 
+
+    _CV_SHOT_TAG = re.compile(r'<img\b[^>]*\bdata-cv-shot="([^"]+)"[^>]*>')
+
+    def _shoot_blank_canvases(self, npage, tag, htmls):
+        """窄屏变体里位图读回为空的 canvas(ALT_EXTRACT_JS 打了 data-cv-shot): 对窄屏页按文档矩形截图回填 img 的 src。
+        WebGL 没开 preserveDrawingBuffer 时 toDataURL 恒为全透明(github 首屏 Mona 头像: 桌面段走基准截图回填有图,
+        平板/手机段的窄屏版是透明图, 吉祥物整块消失); 截图拿的是合成后的帧, 与主页「空白 Canvas 从基准截图回填」同口径。"""
+        if not htmls:
+            return htmls
+        shots = [s for v in htmls.values() if len(v) > 5 for s in (v[5] or [])]
+        if not shots:
+            return htmls
+        srcs, t0 = {}, time.monotonic()
+        for sid, x, y, w, h in shots[:config.MEDIA_SHOT_MAX]:
+            if time.monotonic() - t0 > 4:
+                break
+            with suppress(Exception):
+                # 滚到画布所在处、按视口内矩形截: 整页截图会临时改视口尺寸触发 resize, WebGL 场景可能重建成空帧
+                sy = npage.evaluate("([y, h]) => { window.scrollTo(0, Math.max(0, y - Math.max(0, (innerHeight - h) / 2)));"
+                                    " return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(scrollY)))); }",
+                                    [y, h]) or 0
+                png = npage.screenshot(clip={"x": max(0.0, x), "y": max(0.0, y - sy), "width": w, "height": h},
+                                       type="png", timeout=3000)
+                with Image.open(io.BytesIO(png)) as im:
+                    im = im.convert("RGB")
+                    lo, hi = im.convert("L").getextrema()
+                    if hi - lo < 3:     # 截出来也是纯色(画布还没画/在视口外不渲染): 不回填, 维持原样
+                        continue
+                    buf = io.BytesIO()
+                    im.save(buf, format="PNG", optimize=True)
+                srcs[sid] = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+        with suppress(Exception):
+            npage.evaluate("() => window.scrollTo(0, 0)")
+        if srcs:
+            def fix(m):
+                u = srcs.get(m.group(1))
+                if not u:
+                    return m.group(0)
+                return re.sub(r'\bsrc="[^"]*"', lambda _m: f'src="{u}"', m.group(0), count=1)
+            htmls = {p: ([self._CV_SHOT_TAG.sub(fix, v[0])] + list(v[1:])) for p, v in htmls.items()}
+        self.log("RENDER", f"窄屏首载页 {tag}: {len(shots)} 个读回为空的 canvas(WebGL/跨域), {len(srcs)} 个按窄屏页截图回填"
+                           f"({time.monotonic() - t0:.1f}s)")
+        return htmls
 
     # ------------------------------------------------------------------
     def _freeze_media_from_baseline(self, page):
