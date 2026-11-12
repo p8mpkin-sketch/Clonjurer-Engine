@@ -37,6 +37,9 @@ jobs:
           python -m pip install -r requirements.txt
           python -m playwright install --with-deps chromium
       - name: 跑分类测试集
+        env:
+          # 探针口径: 只拦周期性的长定时器链, 一次性的长延时放行并等它触发(合成集里的定时类用例按这个口径设门槛)
+          PROBE_TIMERS: holdc
         run: |
           for kv in ${{ github.event.inputs.engine_env }}; do export "$kv"; echo "引擎常量覆盖: $kv"; done
           python engine_bench/mobile_cases/run.py --gate 95 --only "${{ github.event.inputs.only }}"
