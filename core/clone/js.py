@@ -1639,8 +1639,48 @@ CV_EMIT_JS = r"""
         const pc = getComputedStyle(pe);
         return Math.abs(pe.clientWidth - (parseFloat(pc.paddingLeft) || 0) - (parseFloat(pc.paddingRight) || 0) - dw) <= 1.5;
       };
+      // 手机段两点仿射: 390 采集值与 0.92 倍宽对照页值不同、也不与宽同比(按「屏宽 - 固定内边距」算的轨道/卡片宽:
+      // 390→310、359→279), 两点定出 a·vw + b, 写 calc(); 钉 390 的 px 到 420 宽真机就窄一截、整段折行全错。
+      // 只对横向尺寸(宽/左右), 斜率限在 (0, 1.2] 内(随屏宽单调增、不超过屏宽增量); 竖向尺寸常是折行结果, 不外推
+      const AFFINE = 1;
+      const pairPx = (q) => {
+        if (!pairM || !m.paths) return null;
+        const L2 = pairM.paths && pairM.paths[m.paths[i]];
+        if (!L2 || L2[0] !== tagOf(el) || L2[0] === 'CANVAS') return null;
+        const PV = parse(L2[2] + (L2[4] ? ';' + L2[4] : ''));
+        return PV[q] ? px(PV[q][0]) : null;
+      };
+      const mPx = (q) => (V.m && V.m[q]) ? px(V.m[q][0]) : null;
+      const affine = (q) => {
+        if (!AFFINE || !/^(width|min-width|max-width|left|right)$/.test(q)) return null;
+        const a0 = mPx(q), a1 = pairPx(q);
+        if (a0 === null || a1 === null || a0 === a1 || !pairM.w || pairM.w === W.m) return null;
+        const k = (a0 - a1) / (W.m - pairM.w);
+        if (!(k > 0 && k <= 1.2)) return null;
+        if (Math.abs(a1 / pairM.w - a0 / W.m) <= Math.abs(a0 / W.m) * 0.015) return null;   // 同比: pairVal 写 vw
+        const b0 = a0 - k * W.m;
+        return 'calc(' + (k * 100).toFixed(4) + 'vw ' + (b0 < 0 ? '- ' : '+ ') + Math.abs(b0).toFixed(2) + 'px)';
+      };
+      // 手机段高度由内容折行决定(脚本量完文字高写成等高 px): 宽度随屏宽变(上面的仿射)或 0.92 倍宽对照页里高度变大
+      // (折行数变)时, 钉 390 的高到别的宽度就错一截。只对含文字、无替换元素的块: 手机段写 height:auto, 由内容撑开
+      const CONTENT_H = 1;
+      const contentH = (k) => {
+        if (!CONTENT_H || k !== 'm' || p !== 'height' || fluid.has('m') || !pairM || !m.paths) return false;
+        const h0 = mPx('height');
+        if (!h0) return false;
+        if (!(el.innerText || el.textContent || '').trim() || el.querySelector('img,video,canvas,svg,iframe,picture')) return false;
+        if (affine('width')) return true;
+        const h1 = pairPx('height');
+        if (h1 === null || h1 <= h0) return false;
+        return Math.abs(h1 / pairM.w - h0 / W.m) > Math.abs(h0 / W.m) * 0.015;
+      };
       const emit = (k, v) => {
         if (!v) return;
+        if (contentH(k)) { rule[k].push('height:auto' + (v[1] ? '!important' : '')); out.contentH = (out.contentH || 0) + 1; return; }
+        if (k === 'm' && !fluid.has('m')) {
+          const af = affine(p);
+          if (af) { rule[k].push(p + ':' + af + (v[1] ? '!important' : '')); out.affine = (out.affine || 0) + 1; return; }
+        }
         if (cvFill(k)) { rule[k].push(p === 'width' ? 'width:100%' : 'height:auto'); out.cvFill = (out.cvFill || 0) + 1; return; }
         // 固化 canvas 的桌面段不钉 px: 桌面段靠 aspect-ratio 随宽缩(采集宽之外的桌面宽度也对), 只给平板/手机段写首载页量到的高
         if (k === 'd' && p === 'height' && el.getAttribute('data-canvas-frozen')) return;

@@ -773,7 +773,6 @@ INTERACTIVE_ALSO = {"api", "state"}
 # 已知缺口: 用例保留、照常出分, 但不计入 --gate 门槛(修好后从这里删掉)
 KNOWN_GAPS = {
     "measured_canvas": "iPad 820 宽 ~94: canvas 固化成位图后按宽缩放, 图里按固定 px 画的边距/间隙不会像原站那样重画",
-    "measured_inline": "420 宽: 脚本按文字折行算的等高卡片高度, 手机段只有 390/359 两个采样, 高度随宽不单调, 仍钉 390 的 px",
 }
 CATEGORY_LABEL = {
     "responsive": "响应式(对照)", "ua": "按 UA 分发", "structure": "手机专有组件", "rerun": "脚本重跑",
