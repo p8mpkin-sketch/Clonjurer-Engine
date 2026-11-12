@@ -65,7 +65,8 @@ def read_lines(image_path, max_h: int = 16000) -> list:
         im = im.convert("RGB")
         W, H = im.size
         H = min(H, max_h)
-        out, y = [], 0
+        out: list = []
+        y = 0
         while y < H:
             y1 = min(H, y + TILE_H)
             arr = np.asarray(im.crop((0, y, W, y1)))
@@ -85,7 +86,7 @@ def read_lines(image_path, max_h: int = 16000) -> list:
             if y1 >= H:
                 break
             y = y1 - TILE_OV
-    out.sort(key=lambda r: (round(r["y0"] / 4), r["x0"]))
+    out.sort(key=lambda r: (round(float(r["y0"]) / 4), float(r["x0"])))
     if len(_CACHE) > 32:
         _CACHE.clear()
     _CACHE[key] = out
@@ -191,14 +192,14 @@ def apply_ocr(uir, lines: list, min_conf: float = None) -> int:
     for li, sis in owner.items():
         lh = max(8.0, lines[li]["y1"] - lines[li]["y0"])
         for c, cx in centers[li]:
-            best = None
+            near = None
             for si in sis:
-                _, x0, _, x1, _ = slots[si]
-                d = 0.0 if x0 <= cx <= x1 else min(abs(cx - x0), abs(cx - x1))
-                if best is None or d < best[0]:
-                    best = (d, si)
-            if best is not None and best[0] <= lh:
-                got.setdefault(best[1], []).append((cx, li, c))
+                _, sx0, _, sx1, _ = slots[si]
+                d = 0.0 if sx0 <= cx <= sx1 else min(abs(cx - sx0), abs(cx - sx1))
+                if near is None or d < near[0]:
+                    near = (d, si)
+            if near is not None and near[0] <= lh:
+                got.setdefault(near[1], []).append((cx, li, c))
     filled = 0
     for si, chars in got.items():
         node, x0, y0, x1, y1 = slots[si]
