@@ -35,6 +35,23 @@ class IdMisalignedParents(unittest.TestCase):
         other = {"div:1": _row("DIV", "DIV,DIV", "a,b")}
         self.assertEqual(_id_misaligned_parents(main, other), [])
 
+    def test_random_slot_rename_does_not_lift(self):
+        # 广告位每次加载换随机 id: 两侧都不在对方页, 但只是同一槽位换名 → 不提升变体根
+        main = {"div:1": _row("DIV", "DIV,DIV,DIV", "nav,beans_1043,foot")}
+        other = {"div:1": _row("DIV", "DIV,DIV,DIV", "nav,beans_7781,foot")}
+        self.assertEqual(_id_misaligned_parents(main, other), [])
+        main = {"div:1": _row("DIV", "DIV,DIV", "x,aria8a600choz1c")}
+        other = {"div:1": _row("DIV", "DIV,DIV", "x,ariai92g36ikz1c")}
+        self.assertEqual(_id_misaligned_parents(main, other), [])
+
+    def test_different_named_components_still_lift(self):
+        # 两侧各有对方没有、名字也不同的组件(不是随机换名) → 仍提升; samples 记下样例
+        main = {"div:1": _row("DIV", "DIV,DIV", "hero,newsletter")}
+        other = {"div:1": _row("DIV", "DIV,DIV", "hero,appBanner")}
+        samples = []
+        self.assertEqual(_id_misaligned_parents(main, other, samples), ["div:1"])
+        self.assertEqual(samples, [("div:1", "newsletter", "appBanner")])
+
 
 if __name__ == "__main__":
     unittest.main()
