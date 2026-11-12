@@ -174,6 +174,17 @@ def apply_ocr(uir, lines: list, min_conf: float = None) -> int:
                 best = ((ov, xo), li)
         if best is not None:
             owner.setdefault(best[1], []).append(si)
+            # 同一行里横向并排的其它 OCR 行(两个相邻按钮/标签被识别成两行, 而版面把它们切成了一段): 也归这一段,
+            # 否则第二行的字整行丢失
+            bl = lines[best[1]]
+            for li, ln in enumerate(lines):
+                if li == best[1] or ln["x1"] < x0 - 2 or ln["x0"] > x1 + 2:
+                    continue
+                if ln["x0"] < bl["x1"] - 2 and ln["x1"] > bl["x0"] + 2:
+                    continue   # 与主行横向重叠: 是上下行, 不是并排
+                ov = min(y1, ln["y1"]) - max(y0, ln["y0"])
+                if ov >= 0.5 * min(h, max(1.0, ln["y1"] - ln["y0"])):
+                    owner.setdefault(li, []).append(si)
     # 2) 行内每个字符归「中心落在其横向范围内」的段; 落在段间空隙的字符归最近的段(距离 ≤ 1 行高),
     #    OCR 行框通常比墨迹略宽、字宽先验也有误差, 不归就会丢字
     got = {}
@@ -187,11 +198,18 @@ def apply_ocr(uir, lines: list, min_conf: float = None) -> int:
                 if best is None or d < best[0]:
                     best = (d, si)
             if best is not None and best[0] <= lh:
-                got.setdefault(best[1], []).append(c)
+                got.setdefault(best[1], []).append((cx, li, c))
     filled = 0
     for si, chars in got.items():
         node, x0, y0, x1, y1 = slots[si]
-        text = "".join(chars).strip()
+        chars.sort(key=lambda t: t[0])
+        parts, prev = [], None
+        for _, li, c in chars:
+            if prev is not None and li != prev:
+                parts.append(" ")      # 并排的两条 OCR 行之间
+            parts.append(c)
+            prev = li
+        text = "".join(parts).strip()
         if not text:
             continue
         node.content = dict(node.content or {}, text=text)

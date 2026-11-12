@@ -45,6 +45,14 @@ class OcrAssign(unittest.TestCase):
         self.assertTrue(a.content["text"].startswith("开源"))
         self.assertTrue(b.content["text"].endswith("案例"))
 
+    def test_side_by_side_lines_share_one_slot(self):
+        a = _text(0, 0, 200, 20)
+        u = _uir([_block(0, 0, [a])])
+        n = ocr.apply_ocr(u, [{"x0": 0, "y0": 2, "x1": 64, "y1": 18, "text": "开始使用", "conf": 0.9},
+                              {"x0": 120, "y0": 2, "x1": 184, "y1": 18, "text": "设计语言", "conf": 0.9}])
+        self.assertEqual(n, 1)
+        self.assertEqual(a.content["text"], "开始使用 设计语言")
+
     def test_low_confidence_and_far_lines_ignored(self):
         a = _text(0, 0, 64, 20)
         u = _uir([_block(0, 0, [a])])
