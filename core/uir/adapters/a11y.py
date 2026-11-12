@@ -92,10 +92,12 @@ _UIA_ROLE = {
 }
 # 勾选/单选/开关类控件的原生角色名: 采集后端没给出勾选状态时也按图形控件处理(方框/圆点是画出来的, 不是文字)
 # 弹出式选择按钮: 圆角槽 + 右侧箭头块都是画出来的控件外观, 与复选框/滑块同属图形控件
-_POPUP_RAW = {"AXPopUpButton"}
+_POPUP_RAW = {"AXPopUpButton", "AXMenuButton"}
 _TOGGLE_RAW = {"CheckBox", "RadioButton", "Switch", "SwitchCompat", "ToggleButton", "AXCheckBox", "AXRadioButton", "AXSwitch"}
 # 进度条/评分条/电量条: 画出来的量表, 可访问名(如"Progress")并不显示在屏幕上
 _GAUGE_RAW = {"ProgressBar", "RatingBar", "AXProgressIndicator", "AXLevelIndicator", "AXBusyIndicator"}
+# 表格/大纲/列表的行与单元格
+_ROW_RAW = {"AXRow", "AXCell", "ListItem", "DataItem", "TreeItem"}
 # 不参与界面重建的系统装饰(滚动条/窗口按钮等): 渲染出来只会是噪声
 _SKIP_RAW = {"AXScrollBar", "AXValueIndicator", "ScrollBar", "Thumb", "AXGrowArea"}
 
@@ -666,6 +668,17 @@ class _Sampler:
             mask[-2:, :] = False
             mask[:, :2] = False
             mask[:, -2:] = False
+        cols = np.where(mask.any(axis=0))[0]
+        if cols.size and mask.shape[0] <= 48 * self.s:
+            # 单行高的框里, 与主体墨迹隔开 2.5 个框高以上的零星墨迹不是这段文字(窗口圆角外的像素、贴边的缩放手柄、
+            # 另一头的小图标): 只留墨迹最多的那一簇, 否则行高/左右边界被它们撑大
+            gap = 2.5 * mask.shape[0]
+            cuts = [0] + [i + 1 for i in range(len(cols) - 1) if cols[i + 1] - cols[i] > gap] + [len(cols)]
+            if len(cuts) > 2:
+                best = max(range(len(cuts) - 1), key=lambda i: int(mask[:, cols[cuts[i]]:cols[cuts[i + 1] - 1] + 1].sum()))
+                keep = np.zeros(mask.shape[1], dtype=bool)
+                keep[cols[cuts[best]]:cols[cuts[best + 1] - 1] + 1] = True
+                mask[:, ~keep] = False
         rows, cols = np.where(mask.any(axis=1))[0], np.where(mask.any(axis=0))[0]
         if rows.size == 0 or mask.sum() < 4:
             return None
@@ -840,6 +853,28 @@ class _Sampler:
         vals, counts, order, keys = self._mode(px)
         return self._hex(px[keys == vals[order[0]]].mean(axis=0).round())
 
+    def open_bg(self, x, y, w, h, rects):
+        """容器里没有被任何子节点盖住的那部分面积的主色(占框面积 ≥12% 且颜色集中才返回)。
+        表格/列表只占了上半截时, 边缘一圈多半落在表头、行号栏、边线上, 取出来的不是容器真正露出来的底色。"""
+        a = self._crop(x, y, w, h)
+        if a is None or min(a.shape[:2]) < 12:
+            return None
+        np = self.np
+        free = np.ones(a.shape[:2], dtype=bool)
+        s = self.s
+        for rx, ry, rw, rh in rects:
+            x1, y1 = int(round((rx - x) * s)), int(round((ry - y) * s))
+            free[max(0, y1):max(0, y1 + int(round(rh * s))), max(0, x1):max(0, x1 + int(round(rw * s)))] = False
+        free[:3, :] = free[-3:, :] = False
+        free[:, :3] = free[:, -3:] = False
+        if free.mean() < 0.12:
+            return None
+        px = a[free]
+        vals, counts, order, keys = self._mode(px)
+        if counts[order[0]] < 0.6 * len(px):
+            return None
+        return self._hex(px[keys == vals[order[0]]].mean(axis=0).round())
+
     def detail(self, x, y, w, h, bg_hex=None) -> float:
         """框内与背景色明显不同的像素占比(0~1): 判断一个没有文字/子节点的叶子框里是否画了东西。"""
         a = self._crop(x, y, w, h)
@@ -911,15 +946,16 @@ def _prepare(tree: dict) -> dict:
     scale = float(tree.get("scale") or 1.0)
     win = [v / scale for v in (tree.get("window") or tree["root"]["bounds"])]
 
-    def rec(n, clip, depth):
+    def rec(n, clip, depth, in_row=False):
         if n.get("role") in _SKIP_RAW:
             return None
+        in_row = in_row or n.get("role") in _ROW_RAW
         b = [float(v) / scale for v in (n.get("bounds") or [0, 0, 0, 0])]
         vis = _intersect(b, clip)
         if vis[2] < 1 or vis[3] < 1:
             return None
         # 表头属于表格却画在表格框外面(紧贴上缘): 不按表格框裁掉, 表格框并上表头
-        kids = [k for k in (rec(c, clip if _is_header(c) else vis, depth + 1) for c in (n.get("children") or [])) if k]
+        kids = [k for k in (rec(c, clip if _is_header(c) else vis, depth + 1, in_row) for c in (n.get("children") or [])) if k]
         out = {k: v for k, v in n.items() if k != "children"}
         if isinstance(out.get("value"), str) and out["value"].startswith("<AXUIElement"):
             out["value"] = ""
@@ -931,6 +967,9 @@ def _prepare(tree: dict) -> dict:
                 vis = [x1, y1, x2 - x1, y2 - y1]
         out["bounds"] = [round(v, 2) for v in vis]
         out["uir_role"] = normalize_role(platform, n.get("role", ""), n)
+        if in_row and out["uir_role"] == "input" and not kids and not n.get("focused") and "\n" not in _visible_text(n):
+            # 表格/大纲/列表行里的单元格在无障碍树里是文本框(可就地编辑), 平时画出来只是一段文字, 没有输入框的框
+            out["uir_role"] = "text"
         out["children"] = kids
         # 折叠: 无名、不可交互、普通容器, 唯一子节点与自身同框 → 用子节点替代
         if (len(kids) == 1 and out["uir_role"] == "box" and not _label(out) and not out.get("clickable")
@@ -977,6 +1016,116 @@ def _mark_graphic_leaves(root: dict, win=None) -> int:
             n["_excl"] = True
             marked += 1
     return marked
+
+
+def _add_residual_bands(root: dict, sampler: "_Sampler") -> int:
+    """容器框内、所有子节点外接框之外的边条(上/下/左/右), 截图上画了东西而树里没有节点: 表头行、行号栏、
+    大纲的展开箭头栏、自绘的标尺/页签条。补一个无文字叶子占住这条区域, 之后与其他"独占区域的自绘叶子"同样处理
+    (独占且有内容才按图裁剪; 与别的叶子重叠的不裁)。窗口级容器不补(标题栏另有规则)。"""
+    added = 0
+    leaves = []
+
+    def collect(n):
+        if n.get("children"):
+            for k in n["children"]:
+                collect(k)
+        else:
+            leaves.append(n["bounds"])
+
+    collect(root)
+
+    def walk(n):
+        nonlocal added
+        kids = n.get("children") or []
+        for k in kids:
+            walk(k)
+        if len(kids) < 2 or n.get("_window_level") or n.get("uir_role") in ("text", "image", "input", "divider", "badge"):
+            return
+        x, y, w, h = n["bounds"]
+        ux1 = min(k["bounds"][0] for k in kids)
+        uy1 = min(k["bounds"][1] for k in kids)
+        ux2 = max(k["bounds"][0] + k["bounds"][2] for k in kids)
+        uy2 = max(k["bounds"][1] + k["bounds"][3] for k in kids)
+        g = 2.0                                     # 避开容器自己的边线
+        bands = [(x + g, y + g, w - 2 * g, uy1 - y - g), (x + g, uy2, w - 2 * g, y + h - uy2 - g),
+                 (x + g, uy1, ux1 - x - g, uy2 - uy1), (ux2, uy1, x + w - ux2 - g, uy2 - uy1)]
+        for bx, by, bw, bh in bands:
+            if min(bw, bh) < 12 or max(bw, bh) < 24:
+                continue
+            if sampler.detail(bx, by, bw, bh, sampler.bg(bx, by, bw, bh)) < 0.01:
+                continue
+            band = (bx, by, bw, bh)
+            if any(_intersect(band, lb)[2] * _intersect(band, lb)[3] > 0.05 * bw * bh
+                   or _intersect(band, lb)[2] * _intersect(band, lb)[3] > 0.05 * lb[2] * lb[3] > 0 for lb in leaves):
+                continue                            # 这条区域已有别的叶子(系统栏、叠在上面的控件)占着, 不抢
+            n["children"].append({"role": "", "uir_role": "box", "bounds": [round(v, 2) for v in (bx, by, bw, bh)],
+                                  "children": [], "_band": True})
+            added += 1
+
+    for k in root.get("children") or []:
+        walk(k)
+    return added
+
+
+def _add_gap_lines(root: dict, sampler: "_Sampler") -> int:
+    """相邻兄弟节点之间 1~3 个单位的缝里画着一条颜色均匀的线(表格的横竖网格线、列表行之间的分隔线), 树里没有节点:
+    补一个线条叶子。缝的颜色要与两侧节点贴边处的颜色都不同(否则只是底色露出来)。"""
+    np = sampler.np
+    added = 0
+
+    def strip(x, y, w, h):
+        a = sampler._crop(x, y, w, h)
+        if a is None or a.size == 0:
+            return None, 0.0
+        px = a.reshape(-1, 3).astype(np.int32)
+        med = np.median(px, axis=0)
+        return med, float((np.abs(px - med).sum(axis=1) <= 24).mean())
+
+    def walk(n):
+        nonlocal added
+        kids = [k for k in (n.get("children") or [])]
+        for k in kids:
+            walk(k)
+        if not (2 <= len(kids) <= 400) or n.get("uir_role") in ("text", "image", "input", "divider", "badge"):
+            return
+        new = []
+        for axis in (1, 0):                       # 1: 上下相邻(横线); 0: 左右相邻(竖线)
+            o = 1 - axis
+            order = sorted((k for k in kids if k["bounds"][2] >= 8 and k["bounds"][3] >= 8), key=lambda k: k["bounds"][axis])
+            for i, a in enumerate(order):
+                ab = a["bounds"]
+                a_end = ab[axis] + ab[axis + 2]
+                for b in order[i + 1:i + 12]:
+                    bb = b["bounds"]
+                    gap = bb[axis] - a_end
+                    if gap > 3:
+                        if bb[axis] - ab[axis] > ab[axis + 2] + 3:
+                            break
+                        continue
+                    if gap < 0.5:
+                        continue
+                    lo, hi = max(ab[o], bb[o]), min(ab[o] + ab[o + 2], bb[o] + bb[o + 2])
+                    if hi - lo < 0.8 * min(ab[o + 2], bb[o + 2]) or hi - lo < 16:
+                        continue
+                    rect = [lo, a_end, hi - lo, gap] if axis == 1 else [a_end, lo, gap, hi - lo]
+                    col, share = strip(*rect)
+                    if col is None or share < 0.85:
+                        continue
+                    e1 = [lo, a_end - 2, hi - lo, 1.5] if axis == 1 else [a_end - 2, lo, 1.5, hi - lo]
+                    e2 = [lo, bb[1] + 0.5, hi - lo, 1.5] if axis == 1 else [bb[0] + 0.5, lo, 1.5, hi - lo]
+                    c1, _ = strip(*e1)
+                    c2, _ = strip(*e2)
+                    if c1 is None or c2 is None or np.abs(col - c1).sum() <= 12 or np.abs(col - c2).sum() <= 12:
+                        continue
+                    new.append({"role": "", "uir_role": "divider", "bounds": [round(v, 2) for v in rect], "children": [],
+                                "_line": sampler._hex(col.round())})
+                    break
+        if new and len(new) <= 600:
+            n["children"].extend(new)
+            added += len(new)
+
+    walk(root)
+    return added
 
 
 def _text_units(text: str) -> float:
@@ -1186,6 +1335,9 @@ class _Builder:
 
     def build(self, n: dict, parent_bg: str, opaque: bool = False) -> Node:
         x, y, w, h = n["bounds"]
+        if n.get("_line"):
+            self.stats["dividers"] = self.stats.get("dividers", 0) + 1
+            return Node(role="divider", box={"w": round(w, 2), "h": round(h, 2), "bg": n["_line"], "pad": [0]})
         role = n["uir_role"]
         kids = n["children"]
         if (self.sampler and not kids and not n.get("_inner") and _visible_text(n)
@@ -1216,6 +1368,10 @@ class _Builder:
                 # 输入框自己就是带框控件(里面的子节点只是图标按钮/编辑区), 边线不限细线
                 bg, border = self.sampler.bg_border(x, y, w, h, thin_only=bool(kids) and role != "input")
                 framed = bg is not None and bg != self.sampler.bg(x, y, w, h)
+                if len(kids) >= 2 and role in ("table", "list"):
+                    ob = self.sampler.open_bg(x, y, w, h, [k["bounds"] for k in kids])
+                    if ob and bg and not _near_hex(ob, bg):
+                        bg = ob
             if bg and (bg != parent_bg or opaque):
                 box["bg"] = bg
             if border:
@@ -1250,7 +1406,7 @@ class _Builder:
             intents = [{"on": "click", "do": "toggle"}] if toggle_like else [{"on": "change", "do": "input"}]
             role = "image"
         if (role in ("box", "list_item") and not kids and not text and n.get("_excl") and self.sampler
-                and self.sampler.budget > 0 and w >= 16 and h >= 16
+                and self.sampler.budget > 0 and min(w, h) >= (12 if n.get("_band") else 16)
                 and self.sampler.detail(x, y, w, h, eff_bg) >= 0.01):
             # 没有文字、没有子节点、独占一块区域, 截图上却画了东西: 自绘视图(日历网格/图表/画布)、系统栏、
             # 无障碍树没展开的图形控件 —— 树里没有可重建的结构, 有截图时与图片同样按图裁剪内嵌
@@ -1433,6 +1589,8 @@ class _Builder:
                 cross = 0 if axis == "col" else 1
                 order = sorted(kids, key=lambda k: (k["bounds"][main], k["bounds"][cross]))
                 if axis == "col" and self.sampler and len(order) > 1:
+                    # 竖排流里的横线照旧由交界带检测给出(线的实际起止与粗细), 预先补的整宽横线让位
+                    order = [k for k in order if not (k.get("_line") and k["bounds"][2] > k["bounds"][3])]
                     order = self._with_dividers(order, x, y, w, h, eff_bg)
                 cursor = (y if axis == "col" else x)
                 for k in order:
@@ -1513,6 +1671,9 @@ def tree_to_uir(tree: dict, screenshot=None, embed_images: bool = True) -> UIR:
         sampler.core_stroke = prep["platform"] in ("windows", "macos")
         _add_title_band(prep["root"], sampler, prep["platform"])
         _refine_leaves(prep["root"], sampler)
+        if embed_images:
+            _add_residual_bands(prep["root"], sampler)
+        _add_gap_lines(prep["root"], sampler)
         _mark_graphic_leaves(prep["root"])
     b = _Builder(sampler, prep["platform"])
     wx, wy, ww, wh = prep["window"]
