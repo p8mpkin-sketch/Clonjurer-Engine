@@ -313,6 +313,23 @@ for(var i=0;i<8;i++){var bh=(h-30)*(0.25+0.09*i);g.fillRect(12+i*(w-24)/8,h-10-b
     return _shell("Measured canvas", mid)
 
 
+def case_measured_svg(ctx):
+    """svg 插画: 脚本按容器宽写 viewBox(宽 = 容器宽, 高按断点取不同比例), 样式 width:100%;height:auto, 盒高随 viewBox 比例。"""
+    js = """<script>(function(){var s=document.getElementById('art');function fit(){var w=s.parentNode.clientWidth,h=Math.round(w<1000?w*0.79:w*0.4375);
+s.setAttribute('viewBox','0 0 '+w+' '+h);var r=s.querySelectorAll('rect');for(var i=0;i<r.length;i++){r[i].setAttribute('x',Math.round(w*(0.05+0.18*i)));
+r[i].setAttribute('y',Math.round(h*(0.2+0.1*(i%3))));r[i].setAttribute('width',Math.round(w*0.14));r[i].setAttribute('height',Math.round(h*0.5));}}
+fit();addEventListener('resize',fit);})();</script>"""
+    rects = "".join(f'<rect fill="#{c}"></rect>' for c in ("1f5f8b", "8b1f5f", "5f8b1f", "c0782a", "2a78c0"))
+    mid = (f'<div class="band"><div><svg id="art" style="display:block;width:100%;height:auto;background:#eef3f8">{rects}</svg></div>'
+           f'<div class="wrap"><p>{LOREM}</p><div class="grid">{_cards(3)}</div></div></div>{js}')
+    return _shell("Measured svg", mid)
+
+
+def case_measured_svg_once(ctx):
+    """同上, 但 viewBox 与 width/height 属性只在挂载时按宽写一次(不监听 resize): 缩放采不到, 只能靠窄屏首载对照。"""
+    return case_measured_svg(ctx).replace("addEventListener('resize',fit);", "s.setAttribute('width',s.parentNode.clientWidth);")
+
+
 def case_legacy_fixed(ctx):
     """无 viewport meta 的 980 定宽老页(XHTML 过渡型 doctype, 表格布局)。"""
     rows = "".join(f'<tr><td width="200" bgcolor="#dfe6ee" valign="top"><b>Channel {i + 1}</b></td><td valign="top"><font size="2">{LOREM}</font></td>'
@@ -746,6 +763,8 @@ CASES = {
     "measured_inline": ("measured", case_measured_inline),
     "measured_rem": ("measured", case_measured_rem),
     "measured_canvas": ("measured", case_measured_canvas),
+    "measured_svg": ("measured", case_measured_svg),
+    "measured_svg_once": ("measured", case_measured_svg_once),
     "legacy_fixed": ("legacy", case_legacy_fixed),
     "media_picture": ("media", case_media_picture),
     "jslayout_masonry": ("jslayout", case_jslayout_masonry),
