@@ -622,6 +622,19 @@ def case_rerun_append_async(ctx):
                   head=f"<style>{_IDX_CSS}</style>")
 
 
+def case_rerun_append_animated(ctx):
+    """同上, 但 load 之后才整批追加, 且条目带进场动画和紧凑写法的内联样式(自定义属性做动画延时)。
+    采集侧会改写旧份的内联样式(动画相位固化追加 animation-delay、样式经 CSSOM 重排了空白), 新旧两份
+    的源码不再逐字相同; 又是 3 旧 + 3 新整批重复, 一对一的模糊去重也不认。"""
+    css = (_IDX_CSS + "@keyframes idxin{from{opacity:.2;transform:translateY(8px)}to{opacity:1;transform:none}}"
+           ".idx-group li{animation:idxin .6s both;animation-delay:calc(var(--i)*80ms)}")
+    js = ("<script>(function(){function render(){var n=document.getElementById('idx');for(var g=0;g<3;g++){var h='<div class=\"idx-group\"><h3>Group '+(g+1)+'</h3><ul>';"
+          "for(var i=0;i<4+g;i++)h+='<li class=\"it\" style=\"--i:'+i+';--k:'+(i*2)+';\">Index link '+(g+1)+'.'+(i+1)+'</li>';n.insertAdjacentHTML('beforeend',h+'</ul></div>');}}"
+          "addEventListener('load',function(){setTimeout(render,250);});})();</script>")
+    mid = f'<div class="band"><div class="wrap"><div class="grid">{_cards(3)}</div></div></div><nav id="idx"></nav>'
+    return _shell("Rerun append animated", mid + js, head=f"<style>{css}</style>")
+
+
 def case_state_tab_spy(ctx):
     """采集期被脚本改过的"当前项": 桌面宽全部面板都显示, 滚动监听把 .active 移到视口里的那一项;
     ≤768 宽变成选项卡只显示 .active 面板(各面板高度不同)。采集时滚过全页, active 停在后面的项;
@@ -686,6 +699,7 @@ CASES = {
     "device_hscroll": ("device", case_device_hscroll),
     "rerun_append_dcl": ("rerun", case_rerun_append_dcl),
     "rerun_append_async": ("rerun", case_rerun_append_async),
+    "rerun_append_animated": ("rerun", case_rerun_append_animated),
     "state_tab_spy": ("state", case_state_tab_spy),
     "state_carousel_frame": ("state", case_state_carousel_frame),
     "api_post_keyed": ("api", case_api_post_keyed),

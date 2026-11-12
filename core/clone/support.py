@@ -2501,7 +2501,11 @@ function tsim(a,b){var A=words(a),B=words(b);if(A.size<6||B.size<6)return false;
 // 解析结束后脚本新插入的元素, 同父元素下仍有一个**逐字相同**(忽略引擎自加属性)的序列化旧兄弟(约 0.35s 后查, 赶在评分/首屏之前) → 一对一移除旧的那份
 // (留脚本新建、带事件绑定的)。"先插新再删旧"的页面同一轮渲染里自己删了旧的, 不会命中
 var XR=/ data-(?:cb|cv[\w-]*|cssom|clone[\w-]*)="[^"]*"/g,XT=1;
-function exact(n){try{var h=n.outerHTML;if(h.length<24||h.length>200000)return null;h=h.replace(XR,'');var tc=n.textContent,ch=n.parentNode.children;for(var j=0;j<ch.length;j++){var c=ch[j];if(c===n||NEWS.has(c)||c.tagName!==n.tagName||c.textContent!==tc)continue;if(c.outerHTML.replace(XR,'')===h)return c;}}catch(e){}return null;}
+// 内联样式按 CSSOM 规范化后再比: 引擎在采集期改写过旧份的 style(动画相位固化追加负的 animation-delay !important;
+// 改过任何一条声明, 整个 style 属性就被浏览器重新序列化, 空白/写法都变), 脚本新建的那份还是原样书写 —— 不规范化永远对不上
+var XS=/ style="([^"]*)"/g,XD=null;function nst(m,v){try{XD=XD||document.createElement('i');XD.style.cssText=v.replace(/&quot;/g,'"').replace(/&amp;/g,'&');if(XD.style.getPropertyPriority('animation-delay')==='important'&&/^\s*-/.test(XD.style.getPropertyValue('animation-delay')))XD.style.removeProperty('animation-delay');var t=XD.style.cssText;return t?' style="'+t+'"':'';}catch(e){return m;}}
+function nrm(h){return h.replace(XR,'').replace(XS,nst);}
+function exact(n){try{var h=n.outerHTML;if(h.length<24||h.length>200000)return null;h=nrm(h);var tc=n.textContent,ch=n.parentNode.children;for(var j=0;j<ch.length;j++){var c=ch[j];if(c===n||NEWS.has(c)||c.tagName!==n.tagName||c.textContent!==tc)continue;if(nrm(c.outerHTML)===h)return c;}}catch(e){}return null;}
 var xtm=0;function dedupX(){xtm=0;if(over())return;var now=Date.now(),more=0;for(var i=0;i<PAIRS.length;i++){var q=PAIRS[i];if(q.x)continue;if(now-q.t<340){more=1;continue;}q.x=1;var n=q.n;if(!n.isConnected||!n.parentNode||n.parentNode.nodeType!==1)continue;
   var ex=exact(n);if(ex){try{selfRm=1;ex.remove();selfRm=0;window.__cloneHydrDedup=(window.__cloneHydrDedup||0)+1;}catch(e){selfRm=0;}}}if(more)xtm=setTimeout(dedupX,200);}
 function onAdded(n){if(over()||!n||n.nodeType!==1||RST.has(n)||!n.parentNode||n.parentNode.nodeType!==1)return;if(/^(SCRIPT|STYLE|LINK|TEMPLATE|NOSCRIPT|META|HTML|HEAD|BODY)$/.test(n.tagName))return;
