@@ -331,6 +331,11 @@ CONTENT_KEEP_EARLY_ADD = True
 # 拦截页识别看主页面标题(「验证码_xx」「安全验证」+ 正文很短): 风控页正文是登录框, 正文话术认不出
 BLOCK_TITLE_CHECK = True
 
+# ---- 任务稳定性(调度器) ----
+MIN_FREE_DISK_MB = 1024          # 工作区所在卷剩余低于此值时暂停领取新任务(0 关闭); 一轮国内 17 站约占 2GB
+TASK_STALE_S = 1800              # 本进程正在执行的任务心跳(updated_at)停了这么久判卡死 → failed
+TASK_ORPHAN_S = 120              # 不在本进程执行名单里的 running 任务(工作线程已死)停了这么久即判 failed
+
 # ---------------------------------------------------------------------------
 # 常量环境覆盖(A/B 用): CLONER_CFG_<常量名>=值 覆盖本模块同名的 bool/int/float/str 常量。
 # 例 CLONER_CFG_NARROW_PHONE_UA=0 CLONER_CFG_MAIN_SETTLE_MS=0。CI 的 engine_env 输入就是一串这样的赋值,
