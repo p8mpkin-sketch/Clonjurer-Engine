@@ -294,6 +294,19 @@ var b=document.getElementById('banner');b.style.height=Math.round(b.clientWidth*
     return _shell("Measured inline", mid, head=f"<style>{css}</style>")
 
 
+def case_measured_rootvar(ctx):
+    """脚本量公告条高度写到 html 内联自定义属性(--bh), hero 高 calc(100vh - var(--bh))。公告条窄屏折两行,
+    值随宽变; 脚本已有值就不再写(幂等守卫) —— 克隆里 html 上带着采集宽的值, 窄屏不会被重算。"""
+    css = (".gb{background:#212121;color:#fff;padding:8px 16px;font-size:15px;line-height:16px}"
+           ".hero{height:calc(100vh - var(--bh, 0px));min-height:260px;background:#5d4037;color:#fff;display:flex;align-items:flex-end;padding:0 20px 20px;box-sizing:border-box}")
+    js = """<script>(function(){var r=document.documentElement;if(r.style.getPropertyValue('--bh'))return;
+r.style.setProperty('--bh',document.getElementById('gb').offsetHeight+'px');})();</script>"""
+    mid = ('<div class="gb" id="gb">Free shipping on all orders over $75 and free returns within thirty days of purchase</div>'
+           '<div class="hero"><h1>Hero sized by the banner height</h1></div>'
+           f'<div class="band"><div class="wrap"><div class="grid">{_cards(6)}</div></div></div>{js}')
+    return _shell("Measured root var", mid, head=f"<style>{css}</style>")
+
+
 def case_measured_rem(ctx):
     """rem 基准随屏宽(html font-size = clientWidth/7.5, 上限 100px), 全页尺寸用 rem —— 国内移动站常见写法。"""
     css = """body{margin:0;font-family:Arial;font-size:.28rem;color:#222;background:#f4f4f4}.rh{background:#c62828;color:#fff;padding:.3rem;font-size:.36rem}
@@ -762,6 +775,7 @@ CASES = {
     "pinned_layout": ("pinned", case_pinned_layout),
     "measured_inline": ("measured", case_measured_inline),
     "measured_rem": ("measured", case_measured_rem),
+    "measured_rootvar": ("measured", case_measured_rootvar),
     "measured_canvas": ("measured", case_measured_canvas),
     "measured_svg": ("measured", case_measured_svg),
     "measured_svg_once": ("measured", case_measured_svg_once),
@@ -806,6 +820,7 @@ INTERACTIVE_ALSO = {"api", "state"}
 INTERACTIVE_ALSO_CASES = {"rerun_measure_probe"}
 # 已知缺口: 用例保留、照常出分, 但不计入 --gate 门槛(修好后从这里删掉)
 KNOWN_GAPS = {
+    "measured_rootvar": "手机 ~56: html 内联自定义属性(--bh)按宽取值, 窄屏首载页只记 html/body 的 class, 不记内联 --*",
     "measured_canvas": "iPad 820 宽 ~94: canvas 固化成位图后按宽缩放, 图里按固定 px 画的边距/间隙不会像原站那样重画",
 }
 CATEGORY_LABEL = {
