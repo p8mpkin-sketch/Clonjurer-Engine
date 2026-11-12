@@ -270,6 +270,13 @@ class ScoringMixin:
         if not (isinstance(fid, (int, float)) and isinstance(inter_score, (int, float))) \
                 or fid - inter_score < margin:
             return None
+        if getattr(config, "STATIC_KEEP_FEED", True) and getattr(self, "_feed_big", False) \
+                and inter_score >= config.STATIC_FEED_MIN_INTER:
+            # 交互轨滚动时页高在长(下拉流按到底续拉): 静态版剥了脚本, 流冻结在采集那一刻 —— 窄屏首载页没滚过, 首屏以下
+            # 全是骨架, 用户一滚就到底(bilibili 静态版 99.3 > 交互 70.3, 交付切静态后探针平板/手机 63→35)。
+            # 头条仍取两轨最优(保真轨), 只是预览/导出不换成冻结的静态版
+            self.log("RENDER", f"静态版不采用: 页面是滚动续载的信息流(交互轨 {inter_score} 可续拉, 静态版会冻结)")
+            return None
         main = self._main_page_file()
         original = self.ws / "original_preview.png"
         if not (main.is_file() and original.is_file()):
@@ -605,6 +612,9 @@ class ScoringMixin:
                 with suppress(Exception):
                     g = page.evaluate("() => window.__cloneScrollGrew || null")
                 self._feed_grew = bool(g and g[1] > g[0] + 4)
+                # 成规模的续载(长出 ≥ 一屏且 ≥ 原高 25%): 信息流, 不是图片撑高/懒挂载的零头(163 +54px、gitee +20px)
+                vh = int((page.viewport_size or {}).get("height") or 0)
+                self._feed_big = bool(g and g[1] - g[0] >= max(vh, 0.25 * g[0]))
                 if self._feed_grew and g:
                     self.log("RENDER", f"克隆滚动: 页高随滚动增长 {int(g[0])}→{int(g[1])}px(基准 {target}px)")
         if phases:

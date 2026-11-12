@@ -50,5 +50,26 @@ class CloneScrollFeed(unittest.TestCase):
         self.assertLess(h, 3600)         # 已到基准高即停, 不把流拉得比原站更长
 
 
+class StaticKeepsFeed(unittest.TestCase):
+    """保真轨领先但页面是滚动续载的信息流: 不换静态版(静态版流冻结, 窄屏首屏以下全是骨架)。"""
+
+    def _obj(self, big):
+        o = ScoringMixin.__new__(ScoringMixin)
+        o._fidelity_score, o._feed_big, o.logs = 99.8, big, []
+        o.log = lambda tag, msg: o.logs.append(msg)
+        o._main_page_file = lambda: (_ for _ in ()).throw(AssertionError("不该走到生成静态版"))
+        return o
+
+    def test_feed_keeps_interactive(self):
+        o = self._obj(True)
+        self.assertIsNone(o._try_static_track(None, 70.3))
+        self.assertTrue(any("信息流" in m for m in o.logs))
+
+    def test_collapsed_interactive_still_switches(self):
+        o = self._obj(True)
+        with self.assertRaises(AssertionError):   # 交互轨塌了(< 50): 照常试静态版
+            o._try_static_track(None, 20.0)
+
+
 if __name__ == "__main__":
     unittest.main()
