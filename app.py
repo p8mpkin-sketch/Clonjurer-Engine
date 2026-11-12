@@ -1706,6 +1706,57 @@ def v4_audit_purge():
     return jsonify({"ok": True, "purged": n, "days": days})
 
 
+def _dir_size(path: Path) -> int:
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for f in files:
+            with suppress(OSError):
+                total += os.lstat(os.path.join(root, f)).st_size
+    return total
+
+
+@app.get("/api/v4/admin/storage")
+def v4_storage():
+    """存储占用: 工作空间(克隆本体, 不自动删) / 导出包(可再生) / 资源缓存, 与所在卷剩余空间。"""
+    out = {}
+    for key, d in (("workspaces", config.WORKSPACE_ROOT), ("exports", config.EXPORTS_DIR),
+                   ("cache", config.CACHE_ROOT)):
+        out[key] = {"path": str(d), "bytes": _dir_size(d) if d.is_dir() else 0}
+    try:
+        du = shutil.disk_usage(str(config.WORKSPACE_ROOT))
+        out["disk"] = {"free": du.free, "total": du.total, "min_free_mb": config.MIN_FREE_DISK_MB}
+    except OSError:
+        out["disk"] = None
+    return jsonify(out)
+
+
+@app.post("/api/v4/admin/storage/prune_exports")
+def v4_prune_exports():
+    """删除可再生的导出包(已完成且工作空间仍在的任务, 下载时按需重建)与汇总包; 不动工作空间。"""
+    keep = set()
+    freed = n = 0
+    for t in db.list_tasks(limit=100000):
+        zp = Path(t["zip_path"]) if t.get("zip_path") else None
+        if not zp or not zp.is_file():
+            continue
+        if not (t.get("status") == "completed" and (_workspace_of(t) / "site.json").is_file()):
+            keep.add(zp.resolve())   # 工作空间没了: 导出包是唯一副本, 不删
+            continue
+        with suppress(OSError):
+            freed += zp.stat().st_size
+            zp.unlink()
+            n += 1
+    for zp in config.EXPORTS_DIR.glob("*.zip"):
+        if zp.resolve() in keep or not zp.name.startswith("all_clones_"):
+            continue
+        with suppress(OSError):
+            freed += zp.stat().st_size
+            zp.unlink()
+            n += 1
+    _audit("storage.prune_exports", f"清理可再生导出包 {n} 个, 释放 {freed // (1024 * 1024)}MB")
+    return jsonify({"ok": True, "deleted": n, "freed_bytes": freed})
+
+
 @app.get("/api/v4/admin/audit/export")
 def v4_audit_export():
     """审计日志导出 CSV(BOM 防 Excel 乱码)。"""
@@ -1850,7 +1901,15 @@ def download_zip(task_id):
     task = _task_or_404(task_id)
     zip_path = Path(task["zip_path"]) if task.get("zip_path") else Path()
     if not zip_path.is_file():
-        return jsonify({"error": "ZIP 尚未生成"}), 404
+        # 导出包是工作空间的可再生缓存(存储清理会删): 工作空间还在就当场重建
+        ws = _workspace_of(task)
+        if task.get("status") != "completed" or not (ws / "site.json").is_file():
+            return jsonify({"error": "ZIP 尚未生成"}), 404
+        try:
+            zip_path = Path(_regenerate_project(task, ws))
+            db.update_task(task_id, zip_path=str(zip_path))
+        except Exception as exc:
+            return jsonify({"error": f"ZIP 重建失败: {exc}"}), 500
     return send_file(zip_path, as_attachment=True,
                      download_name=f"clone_{task['domain'] or 'site'}_{task_id}.zip")
 
@@ -1858,10 +1917,20 @@ def download_zip(task_id):
 @app.get("/api/export_all")
 def export_all():
     completed = db.list_tasks(status="completed")
+    for t in completed:
+        # 被存储清理删掉的导出包按工作空间重建(与单任务下载同)
+        if not (t.get("zip_path") and Path(t["zip_path"]).is_file()) and (_workspace_of(t) / "site.json").is_file():
+            with suppress(Exception):
+                t["zip_path"] = str(_regenerate_project(t, _workspace_of(t)))
+                db.update_task(t["id"], zip_path=t["zip_path"])
     zips = [t for t in completed
             if t.get("zip_path") and Path(t["zip_path"]).is_file()]
     if not zips:
         return jsonify({"error": "暂无已完成的 ZIP 可导出"}), 404
+    # 一次性汇总包: 只留这一份, 以前每点一次留一份全量副本, 从不清理
+    for old in config.EXPORTS_DIR.glob("all_clones_*.zip"):
+        with suppress(OSError):
+            old.unlink()
     out = config.EXPORTS_DIR / f"all_clones_{time.strftime('%Y%m%d_%H%M%S')}.zip"
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
         for i, task in enumerate(zips):
