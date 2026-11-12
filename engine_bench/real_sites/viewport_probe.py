@@ -786,7 +786,15 @@ def _probe_vp(browser, base, task_id, url, name, outdir: Path, clone_tpl=None, n
         try:
             a = outdir / f"{tag}_orig.png"
             b = outdir / f"{tag}_clone.png"
-            chains = _discover_chains(ctx, url, vp) if _PROBE_TIMERS == "holdc" else None
+            chains = None
+            if _PROBE_TIMERS == "holdc":
+                # 发现页用独立的浏览器上下文: 不能与正式页共用 localStorage/cookie(按访问次数切内容、"已看过"的弹层,
+                # 发现页那次访问会让正式页的原站变成"第二次来")
+                dctx = browser.new_context(**context_opts(name))
+                try:
+                    chains = _discover_chains(dctx, url, vp)
+                finally:
+                    dctx.close()
             ia = _shoot(ctx, url, vp, a, focus_keys="self", chains=chains)
             clone_url = (clone_tpl or "{base}/preview/{id}/").format(base=base.rstrip("/"), id=task_id)
             focus = {}
