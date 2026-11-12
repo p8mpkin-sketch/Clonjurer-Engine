@@ -2896,6 +2896,7 @@ TIMER_JOURNAL_JS = r"""(() => {
   if (window.__tj) return;
   const J = window.__tj = {els: new Map(), frozen: 0, fires: 0, until: 0};
   const MIN = 1000, MAX_ELS = 3000, LATE = 250;
+  const POS = /^(transform|translate|left|right|top|bottom|margin-left|margin-top|transition-duration|opacity|visibility|z-index|display)$/;
   let mo = null;
   const ensure = () => {
     if (mo) return true;
@@ -2929,7 +2930,7 @@ TIMER_JOURNAL_JS = r"""(() => {
       if (!m) first.set(el, m = {});
       if (!(r.attributeName in m)) m[r.attributeName] = r.oldValue;
     }
-    const add = new Map(), del = new Map();
+    const add = new Map(), del = new Map(), sty = [], migP = new Set();
     for (const [el, m] of first) {
       let e = J.els.get(el);
       if (!e) { if (J.els.size >= MAX_ELS) continue; J.els.set(el, e = {c: new Map(), s: new Map()}); }
@@ -2954,8 +2955,9 @@ TIMER_JOURNAL_JS = r"""(() => {
           const va = a[p] ? a[p].join('!') : null, vb = b[p] ? b[p].join('!') : null;
           if (va === vb) continue;
           let x = e.s.get(p);
-          if (!x) e.s.set(p, x = {init: a[p] || null, n: 0});
+          if (!x) e.s.set(p, x = {init: a[p] || null, n: 0, mig: 0});
           x.n++;
+          if (POS.test(p)) sty.push([el, x]);
         }
       }
     }
@@ -2963,8 +2965,16 @@ TIMER_JOURNAL_JS = r"""(() => {
       const ds = del.get(k);
       if (!ds) continue;
       for (const [ea, xa] of as) for (const [ed, xd] of ds) {
-        if (ea !== ed && ea.parentNode && ea.parentNode === ed.parentNode) { xa.mig = 1; xd.mig = 1; }
+        if (ea !== ed && ea.parentNode && ea.parentNode === ed.parentNode) { xa.mig = 1; xd.mig = 1; migP.add(ea.parentNode); }
       }
+    }
+    // 当前项迁移的同一次回调里, 条目自身 / 条目的容器 / 容器往上三层以内的位移与显隐样式属于同一次轮换(轮播轨道的
+    // translate、淡入淡出轮播各张的 opacity): 周期接近采集时长的轮播只步进一次, 没有"改过两次"的证据, 但当前项已经
+    // 会被退回, 位移不跟着退就成了"class 指第 1 张、位移停在第 2 张"
+    if (migP.size && sty.length) {
+      const near = new Set();
+      for (const p of migP) { let q = p; for (let i = 0; i < 4 && q && q.nodeType === 1; i++) { near.add(q); q = q.parentNode; } }
+      for (const [el, x] of sty) if (near.has(el) || migP.has(el.parentNode)) x.mig = 1;
     }
   };
   const wrap = (fn, ms) => {
@@ -2993,7 +3003,7 @@ TIMER_JOURNAL_JS = r"""(() => {
 })();"""
 
 # 把日志里有周期性证据的改动退回"第一次被定时器改之前"的值, 并停掉仍在跑的长定时器(页面即将截图/序列化)。
-TIMER_JOURNAL_REWIND_JS = r"""(noStyle) => {
+TIMER_JOURNAL_REWIND_JS = r"""(styleMode) => {
   const J = window.__tj;
   const out = {els: 0, cls: 0, sty: 0, fires: J ? J.fires : -1, dbg: []};
   if (!J) return out;
@@ -3009,9 +3019,10 @@ TIMER_JOURNAL_REWIND_JS = r"""(noStyle) => {
       out.cls++; hit = true;
       if (out.dbg.length < 4) out.dbg.push(el.tagName.toLowerCase() + (x.init ? '+' : '-') + '.' + t);
     }
-    // 样式只在多视口改写之前退(noStyle: 之后引擎已把内联 px 改写成百分比/分视口规则, 再退回会写回采集宽的 px)
-    for (const [p, x] of (noStyle ? [] : e.s)) {
-      if (!(x.n >= 2)) continue;
+    // 样式只在多视口改写之前退(styleMode 0: 之后引擎已把内联 px 改写成百分比/分视口规则, 再退回会写回采集宽的 px)。
+    // 1 = 只退与当前项迁移同一次回调的位移/显隐(mig); 2 = 另加"改过 ≥2 次"的任意样式属性
+    for (const [p, x] of (styleMode ? e.s : [])) {
+      if (!(x.mig || (styleMode >= 2 && x.n >= 2))) continue;
       const cur = el.style.getPropertyValue(p), pr = el.style.getPropertyPriority(p);
       const want = x.init ? x.init[0] : '', wp = x.init ? x.init[1] : '';
       if (cur === want && pr === wp) continue;

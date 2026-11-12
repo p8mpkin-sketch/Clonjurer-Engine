@@ -85,6 +85,9 @@ NARROW_PAIR_TAGS = ("m", "t")   # 哪些窄屏段再开一张 0.92 倍宽的独�
 # 同一站 99.9/100/69.5 无回退(2026-11-11 本机 A/B)。CLONER_CFG_TIMER_JOURNAL=0 可整体关掉
 TIMER_JOURNAL = True
 TIMER_JOURNAL_STYLE = False   # 1 = 回退时连内联样式一起退(A/B 用)
+# 当前项(class)在兄弟间迁移的同一次定时器回调里, 条目/容器/容器上三层以内的位移与显隐样式一并退回(循环轮播只步进
+# 一次时, 轨道 translate 没有周期性证据, 但当前项已被退回: 不一起退就是 class 指第 1 张、位移停在第 2 张)
+TIMER_JOURNAL_LINKED = True
 API_VARIANTS_PER_PATH = 48              # 同一 方法+路径 最多保留多少份不同请求体的录制
 PROXY_CACHE_MAX_BYTES = 8 * 1024 * 1024   # 反向代理兜底单响应缓存上限(8MB)
 # 交付产物反代兜底超时(秒): 部署机离原站远/原站慢时, 旧值 20s 会把阻塞请求拖成

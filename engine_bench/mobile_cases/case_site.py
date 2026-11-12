@@ -663,6 +663,28 @@ show();setInterval(function(){k=(k+1)%fs.length;show();},3000);});})();</script>
     return _shell("State carousel frame", mid, head=f"<style>{css}</style>")
 
 
+def case_state_carousel_loop_once(ctx):
+    """循环轮播(轮播库 loop 写法): 轨道 = 末张副本 + 4 张真实卡 + 首张副本, 初始位移 -1 张宽(px 内联);
+    setTimeout 链每 3s 步进一次: 同一次回调里同步改轨道 transform 并把 active 类移到下一张。周期接近采集时长,
+    采集期只步进 1 次(没有"改过两次"的证据)。带初始化标记(data-inited), 克隆里脚本重跑不再初始化、也不再轮播。
+    新开的原页(探针拦住长定时器)停在第 1 张真实卡; 克隆的位移和 active 都应回到第 1 张。"""
+    css = (".lp{overflow:hidden;border-radius:10px;margin-bottom:16px}.lp .tr{display:flex}.lp .sl{flex:0 0 100%;height:420px;padding:28px;color:#fff;box-sizing:border-box}"
+           ".lp .sl h2{font-size:34px;margin:0 0 8px}.lp .bx{display:flex;gap:12px;margin-top:16px}.lp .bx u{display:block;height:150px;background:#fff;border:6px solid #111}.lp .sl.act h2{text-decoration:underline}.dots{display:flex;gap:8px;margin:-8px 0 20px}.dots b{width:26px;height:6px;background:#bbb}.dots b.on{background:#f0a500}")
+    js = """<script>(function(){document.querySelectorAll('.lp').forEach(function(lp){if(lp.dataset.inited)return;lp.dataset.inited='1';var tr=lp.querySelector('.tr'),sl=tr.children,dots=lp.nextElementSibling.children,i=1;
+function put(){tr.style.transitionDuration='0ms';tr.style.transform='translate3d('+(-i*lp.clientWidth)+'px,0,0)';for(var j=0;j<sl.length;j++)sl[j].classList.toggle('act',j===i);for(var d=0;d<dots.length;d++)dots[d].classList.toggle('on',d===i-1);}
+put();(function step(){setTimeout(function(){i=i>=4?1:i+1;put();step();},3000);})();});})();</script>"""
+    cols = ("1f5f8b", "7b3f8c", "2e7d32", "8c5a1f")
+
+    def card(n, j):
+        boxes = "".join(f'<u style="width:{18 + 9 * ((j + k) % 3)}%"></u>' for k in range(j + 1))
+        return (f'<div class="sl" style="background:#{cols[(j + n) % 4]}"><h2>Loop {n + 1} card {j + 1}</h2>'
+                f'<p>{"Card text %d of loop %d. " % (j + 1, n + 1) * (1 + 3 * j)}</p><div class="bx">{boxes}</div></div>')
+    lps = "".join('<div class="lp"><div class="tr">' + card(n, 3) + "".join(card(n, j) for j in range(4)) + card(n, 0)
+                  + '</div></div><div class="dots"><b></b><b></b><b></b><b></b></div>' for n in range(3))
+    mid = f'<div class="band"><div class="wrap">{lps}</div></div><div class="band"><div class="wrap"><div class="grid">{_cards(3)}</div></div></div>{js}'
+    return _shell("State carousel loop once", mid, head=f"<style>{css}</style>")
+
+
 CASES = {
     "responsive_grid": ("responsive", case_responsive_grid),
     "responsive_nav": ("responsive", case_responsive_nav),
@@ -702,6 +724,7 @@ CASES = {
     "rerun_append_animated": ("rerun", case_rerun_append_animated),
     "state_tab_spy": ("state", case_state_tab_spy),
     "state_carousel_frame": ("state", case_state_carousel_frame),
+    "state_carousel_loop_once": ("state", case_state_carousel_loop_once),
     "api_post_keyed": ("api", case_api_post_keyed),
     "api_get_variants": ("api", case_api_get_variants),
     "api_post_rerender": ("api", case_api_post_rerender),
