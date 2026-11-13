@@ -2055,12 +2055,93 @@ def _audit_retention_worker():
             bus.publish(None, "AUDIT", f"审计保留策略: 已清理 {n} 条超 {days} 天的日志")
 
 
+# ---------------------------------------------------------------------------
+# 部署(Docker): 极速启动 / 停止 / 重启 / 一键销毁 / 自动销毁
+# ---------------------------------------------------------------------------
+from core.deploy import DockerDeployer, DeployError  # noqa: E402
+
+deployer = DockerDeployer(db, _workspace_of, _regenerate_project, db.get_task)
+
+
+def _deploy_call(fn, *args, **kwargs):
+    try:
+        return jsonify(fn(*args, **kwargs) or {"ok": True})
+    except DeployError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.get("/api/v4/docker/summary")
+def v4_docker_summary():
+    return jsonify(deployer.summary())
+
+
+@app.get("/api/v4/docker")
+def v4_docker_list():
+    st = deployer.status()
+    return jsonify({"available": st["available"], "containers": deployer.list()})
+
+
+@app.get("/api/v4/docker/stats")
+def v4_docker_stats():
+    return jsonify({"stats": deployer.stats()})
+
+
+@app.get("/api/v4/docker/<int:task_id>/logs")
+def v4_docker_logs(task_id):
+    tail = request.args.get("tail", "200")
+    return jsonify({"logs": deployer.logs(task_id, int(tail) if tail.isdigit() else 200)})
+
+
+@app.post("/api/v4/docker/batch")
+def v4_docker_batch():
+    body = request.get_json(silent=True) or {}
+    action = body.get("action", "")
+    if action not in ("stop", "stop_all", "restart", "start", "destroy", "cleanup_stopped"):
+        return jsonify({"error": "不支持的批量操作"}), 400
+    ids = body.get("task_ids") or None
+    if ids is not None and not all(isinstance(i, int) for i in ids):
+        return jsonify({"error": "task_ids 必须是整数列表"}), 400
+    n = deployer.batch(action, ids)
+    _audit("docker.batch", f"{action} {ids or 'all'} -> {n}")
+    return jsonify({"affected": n})
+
+
+@app.post("/api/tasks/<int:task_id>/docker/<action>")
+def v4_docker_task_action(task_id, action):
+    body = request.get_json(silent=True) or {}
+    _task_or_404(task_id)
+    if action == "deploy" or (action == "start" and not db.get_docker(task_id)) or \
+            (action == "start" and body):
+        _audit("docker.deploy", f"task={task_id} {body}")
+        return _deploy_call(deployer.deploy, task_id,
+                            mode=body.get("mode", "fast"),
+                            ttl_hours=body.get("ttl_hours", 24),
+                            bind=body.get("bind", "127.0.0.1"),
+                            mem_limit=body.get("mem_limit", "512m"),
+                            port=int(body.get("port") or 0))
+    if action == "start":
+        resp = _deploy_call(deployer.start, task_id)
+    elif action == "stop":
+        resp = _deploy_call(deployer.stop, task_id)
+    elif action == "restart":
+        resp = _deploy_call(deployer.restart, task_id)
+    elif action in ("remove", "destroy"):
+        resp = _deploy_call(deployer.destroy, task_id)
+    elif action == "extend":
+        resp = _deploy_call(deployer.extend, task_id, body.get("hours", 24))
+    else:
+        return jsonify({"error": "不支持的操作"}), 400
+    _audit("docker." + action, f"task={task_id}")
+    return resp
+
+
 def _boot():
     db.ensure_default_project()
     _apply_saved_settings()
     scheduler.start()
     threading.Thread(target=_audit_retention_worker, daemon=True,
                      name="audit-retention").start()
+    deployer.start_background()
 
     def _shutdown():
         scheduler.shutdown()

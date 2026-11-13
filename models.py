@@ -225,6 +225,16 @@ class Database:
                    self._conn.execute("PRAGMA table_info(short_links)").fetchall()}
         if sl_cols and "link_task_id" not in sl_cols:
             self._conn.execute("ALTER TABLE short_links ADD COLUMN link_task_id INTEGER")
+        # 部署(Docker)扩展列: 启动方式 / 绑定地址 / 自动销毁时间 / 内存上限 / 最近错误
+        dk_cols = {r["name"] for r in
+                   self._conn.execute("PRAGMA table_info(docker_containers)").fetchall()}
+        for col, ddl in (("mode", "TEXT NOT NULL DEFAULT 'fast'"),
+                         ("bind", "TEXT NOT NULL DEFAULT '127.0.0.1'"),
+                         ("expires_at", "TEXT NOT NULL DEFAULT ''"),
+                         ("mem_limit", "TEXT NOT NULL DEFAULT '512m'"),
+                         ("last_error", "TEXT NOT NULL DEFAULT ''")):
+            if dk_cols and col not in dk_cols:
+                self._conn.execute(f"ALTER TABLE docker_containers ADD COLUMN {col} {ddl}")
 
     # ------------------------------------------------------------------
     # 批次
@@ -689,7 +699,8 @@ class Database:
     # ------------------------------------------------------------------
     # Docker 容器登记
     # ------------------------------------------------------------------
-    _DOCKER_COLUMNS = {"container_id", "image_tag", "port", "status"}
+    _DOCKER_COLUMNS = {"container_id", "image_tag", "port", "status",
+                       "mode", "bind", "expires_at", "mem_limit", "last_error"}
 
     def upsert_docker(self, task_id: int, **fields):
         allowed = {k: v for k, v in fields.items() if k in self._DOCKER_COLUMNS}
