@@ -14,6 +14,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 
 <!-- 顶级字体体系: Inter / Plus Jakarta Sans / JetBrains Mono / Noto Sans SC -->
 <link href="/vendor/fonts/fonts.css" rel="stylesheet">
+<!-- UI 改版 P0 规范层: 字号/对比度/焦点/语义色(只换样式) -->
+<link href="/vendor/css/ui-tokens.css?v=1" rel="stylesheet">
 
 <script src="/vendor/js/tailwind.js"></script>
 <script>
@@ -1020,14 +1022,14 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
     <div class="max-w-[1300px] mx-auto px-6 py-6 space-y-5">
       <div class="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 class="font-display text-lg font-bold text-slate-100">Docker 容器管理</h2>
-          <p class="text-[11px] text-slate-500 mt-0.5">克隆站一键容器化部署 · 动态端口映射 · 生命周期与日志</p>
+          <h2 class="font-display text-lg font-bold text-slate-100">部署</h2>
+          <p class="text-[11px] text-slate-500 mt-0.5">用 Docker 一键启动克隆站，约 1 秒可访问；不用了一键销毁，不留容器和镜像。默认 24 小时后自动销毁。</p>
         </div>
         <div class="flex items-center gap-2">
           <span class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px]"
             :class="docker.available ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-rose-500/30 bg-rose-500/10 text-rose-300'">
             <span class="w-1.5 h-1.5 rounded-full" :class="docker.available ? 'bg-emerald-400 breath' : 'bg-rose-400'"></span>
-            [[ docker.available ? 'Docker 在线' : 'Docker 不可用' ]]
+            [[ docker.available ? ('Docker 运行中' + (docker.version ? ' · ' + docker.version : '')) : '没有检测到 Docker' ]]
           </span>
           <label class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] cursor-pointer transition-all"
             :class="dockerAutoRefresh ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-white/[0.08] text-slate-400'"
@@ -1108,25 +1110,32 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <span class="flex items-center gap-1" title="CPU 占用"><i data-lucide="cpu" class="w-3 h-3"></i>[[ c.cpu ]]</span>
             <span class="flex items-center gap-1" title="内存占用"><i data-lucide="memory-stick" class="w-3 h-3"></i>[[ c.mem ]] ([[ c.mem_pct ]])</span>
           </div>
-          <div class="mt-2.5 text-[10px] font-mono text-slate-500 truncate">镜像: [[ c.image_tag || '—' ]]</div>
+          <div class="mt-2.5 flex items-center gap-3 flex-wrap">
+            <span class="ui-hint">[[ c.mode === 'image' ? '独立镜像' : '极速启动' ]][[ c.lan ? ' · 局域网可访问' : ' · 仅本机' ]]</span>
+            <span class="ui-ttl" :class="{ soon: c.expires_in_s !== null && c.expires_in_s < 3600 }" :title="c.expires_at ? ('到期时间 ' + c.expires_at) : ''">
+              <i data-lucide="timer" class="w-3.5 h-3.5"></i>[[ dockerTtlText(c) ]]
+            </span>
+            <button v-if="c.expires_at" @click.stop="dockerExtend(c)" class="text-[11px] text-indigo-300 hover:underline">延长 24 小时</button>
+          </div>
+          <div v-if="c.status==='failed' && c.last_error" class="mt-2 text-[11px] text-rose-300 line-clamp-2" :title="c.last_error">[[ c.last_error.split('\n')[0] ]]</div>
           <div class="mt-3 flex items-center gap-1" @click.stop title="启动 / 重启 / 停止 / 查看日志 / 销毁">
             <a v-if="c.status==='running' && c.url" :href="c.url" target="_blank" title="打开站点"
-              class="flex-1 flex items-center justify-center px-1.5 py-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 text-sky-300 hover:bg-sky-500/20 transition-all"><i data-lucide="globe" class="w-3.5 h-3.5"></i></a>
+              class="flex-1 flex items-center justify-center px-1.5 py-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 text-sky-300 hover:bg-sky-500/20 transition-all"><i data-lucide="globe" class="w-3.5 h-3.5"></i><span class="ui-btn-label ml-1">打开</span></a>
             <button v-if="c.status==='running'" @click="dockerTaskAction(c.task_id,'restart')" title="重启"
-              class="flex-1 flex items-center justify-center px-1.5 py-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20 transition-all"><i data-lucide="rotate-cw" class="w-3.5 h-3.5"></i></button>
+              class="flex-1 flex items-center justify-center px-1.5 py-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20 transition-all"><i data-lucide="rotate-cw" class="w-3.5 h-3.5"></i><span class="ui-btn-label ml-1">重启</span></button>
             <button v-if="c.status==='running'" @click="dockerTaskAction(c.task_id,'stop')" title="停止"
-              class="flex-1 flex items-center justify-center px-1.5 py-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 transition-all"><i data-lucide="square" class="w-3.5 h-3.5"></i></button>
-            <button v-else @click="dockerTaskAction(c.task_id,'start')" :disabled="c.status==='missing'" title="启动"
-              class="flex-1 flex items-center justify-center px-1.5 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-30 transition-all"><i data-lucide="play" class="w-3.5 h-3.5"></i></button>
+              class="flex-1 flex items-center justify-center px-1.5 py-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 transition-all"><i data-lucide="square" class="w-3.5 h-3.5"></i><span class="ui-btn-label ml-1">停止</span></button>
+            <button v-else @click="dockerTaskAction(c.task_id,'start')" title="启动"
+              class="flex-1 flex items-center justify-center px-1.5 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-30 transition-all"><i data-lucide="play" class="w-3.5 h-3.5"></i><span class="ui-btn-label ml-1">启动</span></button>
             <button @click="openDockerDetail(c)" title="查看日志"
-              class="flex-1 flex items-center justify-center px-1.5 py-1.5 rounded-lg border border-white/[0.08] text-slate-400 hover:text-slate-100 hover:border-white/25 transition-all"><i data-lucide="file-text" class="w-3.5 h-3.5"></i></button>
+              class="flex-1 flex items-center justify-center px-1.5 py-1.5 rounded-lg border border-white/[0.08] text-slate-400 hover:text-slate-100 hover:border-white/25 transition-all"><i data-lucide="file-text" class="w-3.5 h-3.5"></i><span class="ui-btn-label ml-1">日志</span></button>
             <button @click="dockerTaskAction(c.task_id,'remove')" title="销毁"
-              class="flex-1 flex items-center justify-center px-1.5 py-1.5 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 transition-all"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
+              class="flex-1 flex items-center justify-center px-1.5 py-1.5 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 transition-all"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i><span class="ui-btn-label ml-1">销毁</span></button>
           </div>
         </div>
         <div v-if="!filteredDocker.length" class="col-span-full rounded-2xl border border-dashed border-white/[0.1] py-20 flex flex-col items-center gap-3 text-slate-600">
           <i data-lucide="container" class="w-8 h-8 opacity-40"></i>
-          <div class="text-xs">[[ docker.available ? '暂无符合条件的容器 — 在任务详情页「启动容器」即可部署' : 'Docker 守护进程不可用' ]]</div>
+          <div class="text-xs">[[ docker.available ? '还没有部署。在任务详情的「部署」页签点「一键部署」，约 1 秒就能打开。' : (docker.hint || '没有检测到 Docker') ]]</div>
         </div>
       </div>
     </div>
@@ -2623,8 +2632,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <div class="panel rounded-xl overflow-hidden">
               <div class="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-white/[0.06] bg-slate-950/40">
                 <i data-lucide="container" class="w-3.5 h-3.5 text-sky-400"></i>
-                <span class="text-[10px] font-semibold text-slate-300">本地 Docker 一键部署</span>
-                <span v-if="!docker.available" class="flex items-center gap-1 px-2 py-0.5 rounded-md border border-rose-500/30 bg-rose-500/10 text-[9.5px] text-rose-300">Docker 守护进程不可用</span>
+                <span class="text-[10px] font-semibold text-slate-300">部署到本机 Docker</span>
+                <span v-if="!docker.available" class="flex items-center gap-1 px-2 py-0.5 rounded-md border border-rose-500/30 bg-rose-500/10 text-[9.5px] text-rose-300">没有检测到 Docker</span>
                 <template v-else-if="dockerInfo">
                   <span class="flex items-center gap-1 px-2 py-0.5 rounded-md border text-[9.5px]"
                     :class="dockerInfo.status==='running' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : dockerInfo.status==='missing' ? 'border-slate-600/40 bg-slate-700/30 text-slate-400' : 'border-amber-500/40 bg-amber-500/10 text-amber-300'">
@@ -2642,17 +2651,17 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                 <button v-if="dockerInfo && dockerInfo.status==='running'" @click="dockerAction('stop')" :disabled="docker.busy"
                   class="text-[9.5px] px-2.5 py-1 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 disabled:opacity-50 transition-all">[[ docker.busy ? '处理中…' : '停止' ]]</button>
                 <button v-if="dockerInfo && dockerInfo.status!=='missing' && dockerInfo.status!=='running'" @click="dockerAction('start')" :disabled="docker.busy"
-                  class="text-[9.5px] px-2.5 py-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50 transition-all">[[ docker.busy ? '启动中(构建镜像)…' : '重新启动' ]]</button>
+                  class="text-[9.5px] px-2.5 py-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50 transition-all">[[ docker.busy ? '启动中…' : '启动' ]]</button>
                 <button v-if="dockerInfo && dockerInfo.status!=='missing'" @click="dockerAction('remove')" :disabled="docker.busy"
-                  class="text-[9.5px] px-2.5 py-1 rounded-md border border-rose-500/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 disabled:opacity-50 transition-all">删除容器</button>
+                  class="text-[9.5px] px-2.5 py-1 rounded-md border border-rose-500/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 disabled:opacity-50 transition-all">销毁</button>
                 <button v-if="dockerInfo && dockerInfo.status==='missing'" @click="dockerAction('start')" :disabled="docker.busy || !docker.available"
                   class="flex items-center gap-1 text-[9.5px] px-2.5 py-1 rounded-md bg-gradient-to-r from-sky-600 to-cyan-600 text-white font-semibold disabled:opacity-50 transition-all">
-                  <i data-lucide="rocket" class="w-3 h-3"></i>[[ docker.busy ? '构建镜像并启动中…' : '构建镜像并启动' ]]
+                  <i data-lucide="rocket" class="w-3 h-3"></i>[[ docker.busy ? '正在启动…' : '一键部署' ]]
                 </button>
               </div>
               <div v-if="docker.error" class="px-3 py-2 text-[10px] text-rose-300 bg-rose-500/5 border-b border-rose-500/20">[[ docker.error ]]</div>
               <pre v-if="docker.showLogs" class="log-term max-h-40 overflow-auto custom-scroll rounded-lg p-3 text-[10px] font-mono leading-5">[[ docker.logs || '(暂无日志)' ]]</pre>
-              <div class="px-3 py-2 text-[9.5px] text-slate-500">镜像 clone_site_[[ selectedTask.id ]]:latest · 容器端口 8000 → 宿主 127.0.0.1 动态端口(9100~9699) · --restart unless-stopped</div>
+              <div class="px-3 py-2 text-[9.5px] text-slate-500">极速启动：不构建镜像，直接把工程挂载进通用运行环境，约 1 秒可访问。默认只允许本机访问，24 小时后自动销毁，可在「部署」页延长或销毁。</div>
             </div>
 
             <div class="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-2 gap-3">
@@ -3454,6 +3463,7 @@ const __vueApp = createApp({
         { title: '工作空间', items: [
           { id: 'hub', label: '项目工作台', icon: 'folder-kanban' },
           { id: 'browserpool', label: '浏览器池监控', icon: 'activity' },
+          { id: 'docker', label: '部署', icon: 'container' },
         ]},
         { title: 'AI 增强', items: [
           { id: 'ai', label: 'AI 视觉修复', icon: 'flask-conical' },
@@ -3529,7 +3539,7 @@ const __vueApp = createApp({
       ],
       users: [], userModal: { open: false, username: '', display_name: '', password: '', role: 'viewer', busy: false, error: '' },
       audit: { entries: [], actions: [], filter: '', q: '' },
-      docker: { available: false, list: [], busy: false, error: '', logs: '', showLogs: false },
+      docker: { available: false, hint: '', version: '', list: [], busy: false, error: '', logs: '', showLogs: false },
       settings: { base_url: '', model: '', api_key: '', trigger_score: 85, target_score: 90, max_rounds: 2, configured: false, masked: '', busy: false, testing: false, testMsg: '', testOk: false, testDone: false, latencyMs: null, chatOk: false, visionOk: false, providers: [], modelOptions: [], fetchingModels: false, modelsMsg: '', modelsOk: false, providerNote: '' , revealed: false, revealedKey: '' , resetBusy: false },
       batches: [], currentBatchId: '',
       tasks: [],
@@ -3637,7 +3647,7 @@ const __vueApp = createApp({
         tracker: ['表单捕获追踪', 'Form Tracker · 埋点配置总览与上报实时流'],
         links: ['短链管理', 'Link Shortener · 多服务短链生成与跳转统计'],
         scheduler: ['定时任务', 'Scheduler · 批次队列与执行状态'],
-        docker: ['Docker 容器管理', 'Docker Manager · 本地容器编排与资源监控'],
+        docker: ['部署', '用 Docker 一键启动和销毁克隆站'],
         remote: ['远程一键部署', 'Remote Deploy · SSH 推送 VPS 运行'],
         admin: ['安全与系统配置', 'Security & Config · 用户 / 审计 / 模型配置'],
       };
@@ -4564,12 +4574,14 @@ const __vueApp = createApp({
         this.toast('已删除');
       } catch (e) { this.toast('网络错误: ' + e); }
     },
-    async loadDocker() { return;  /* 引擎内核版: 运营功能已移除 */
+    async loadDocker() {
       try {
         const r = await fetch('/api/v4/docker/summary');
         if (!r.ok) return;
         const data = await r.json();
         this.docker.available = !!data.available;
+        this.docker.hint = data.hint || '';
+        this.docker.version = data.version || '';
         this.docker.list = data.containers || [];
         this.dockerSummary = { total: data.total || 0, running: data.running || 0,
                                stopped: data.stopped || 0, ports: data.ports || 0 };
@@ -4581,15 +4593,14 @@ const __vueApp = createApp({
       } catch (e) { return; }
       // 资源占用(异步补齐, 不阻塞列表): CPU/内存显示在运行中的卡片上
       if (!this.docker.list.some(c => c.status === 'running')) return;
-      try {
-        const sr = await fetch('/api/v4/docker/stats');
-        if (!sr.ok) return;
-        const stats = (await sr.json()).stats || {};
+      // 资源占用(docker stats 约 1~2 秒)后台补齐, 不阻塞列表与按钮状态
+      fetch('/api/v4/docker/stats').then(sr => sr.ok ? sr.json() : null).then(j => {
+        const stats = (j && j.stats) || {};
         this.docker.list = this.docker.list.map(c => {
           const s = stats['clone_site_' + c.task_id];
           return s ? { ...c, cpu: s.cpu, mem: s.mem, mem_pct: s.mem_pct } : c;
         });
-      } catch (e) { return; }
+      }).catch(() => {});
     },
     toggleDockerAutoRefresh() {
       clearInterval(this._dockerTimer);
@@ -4622,7 +4633,7 @@ const __vueApp = createApp({
       finally { this.docker.logLoading = false; }
     },
     async batchDocker(action) {
-      const names = { stop_all: '停止全部运行中的容器?', cleanup_stopped: '清理全部已停止的容器?' };
+      const names = { stop_all: '停止全部运行中的部署？之后可以随时再启动。', cleanup_stopped: '销毁全部已停止和启动失败的部署？\n会删除它们的容器和镜像，克隆任务不受影响。' };
       if (!confirm(names[action])) return;
       try {
         const r = await fetch('/api/v4/docker/batch', { method: 'POST',
@@ -4644,13 +4655,14 @@ const __vueApp = createApp({
     },
     async dockerAction(action) {
       if (!this.selectedTaskId) { this.toast('请先在任务矩阵选择任务'); return; }
-      if (action === 'remove' && !confirm('确认删除该任务的容器与镜像?')) return;
+      if (action === 'remove' && !confirm('销毁这个部署？\n\n会删除：容器、独立镜像，并释放端口。\n不会删除：克隆任务和下载包，之后可以重新部署。')) return;
       this.docker.busy = true; this.docker.error = '';
       try {
         const r = await fetch('/api/tasks/' + this.selectedTaskId + '/docker/' + action, { method: 'POST' });
         const data = await r.json();
         if (!r.ok) { this.docker.error = data.error || '操作失败'; return; }
-        this.toast(action === 'start' ? ('容器已启动: ' + data.container.url) : '操作成功');
+        const d = data.deploy || {};
+        this.toast(action === 'start' ? ('已启动' + (data.timings ? '，用时 ' + data.timings.total + ' 秒' : '') + (d.url ? '：' + d.url : '')) : ({ stop: '已停止', remove: '已销毁，端口已释放' }[action] || '操作成功'));
         await this.loadDocker();
         if (this.docker.showLogs) await this.loadDockerLogs();
       } catch (e) { this.docker.error = '网络错误: ' + e; }
@@ -4740,11 +4752,30 @@ const __vueApp = createApp({
       try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (e) {}
       location.reload();
     },
+    dockerTtlText(c) {
+      if (!c.expires_at) return '不自动销毁';
+      const s = c.expires_in_s;
+      if (s === null || s === undefined) return '到期 ' + c.expires_at;
+      if (s <= 0) return '即将自动销毁';
+      if (s < 3540) return Math.max(1, Math.round(s / 60)) + ' 分钟后自动销毁';
+      if (s < 86400) return Math.round(s / 3600) + ' 小时后自动销毁';
+      return Math.round(s / 86400) + ' 天后自动销毁';
+    },
+    async dockerExtend(c) {
+      try {
+        const r = await fetch('/api/tasks/' + c.task_id + '/docker/extend', { method: 'POST',
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hours: 24 }) });
+        const data = await r.json();
+        if (!r.ok) { this.toast(data.error || '操作失败'); return; }
+        this.toast('已延长到 24 小时后');
+        await this.loadDocker();
+      } catch (e) { this.toast('网络错误'); }
+    },
     dockerStatusMeta(s) {
-      if (s === 'running') return { badge: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300', dot: 'bg-emerald-400 breath', label: 'Running' };
-      if (s === 'dead' || s === 'unhealthy' || s === 'failed') return { badge: 'border-rose-500/40 bg-rose-500/10 text-rose-300', dot: 'bg-rose-400', label: 'Error' };
-      if (s === 'deploying') return { badge: 'border-amber-500/40 bg-amber-500/10 text-amber-300', dot: 'bg-amber-400 breath', label: 'Deploying' };
-      return { badge: 'border-white/[0.08] bg-slate-500/10 text-slate-400', dot: 'bg-slate-500', label: s === 'exited' ? 'Exited' : (s === 'missing' ? '未部署' : s) };
+      if (s === 'running') return { badge: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300', dot: 'bg-emerald-400 breath', label: '运行中' };
+      if (s === 'dead' || s === 'unhealthy' || s === 'failed') return { badge: 'border-rose-500/40 bg-rose-500/10 text-rose-300', dot: 'bg-rose-400', label: '启动失败' };
+      if (s === 'deploying' || s === 'starting') return { badge: 'border-amber-500/40 bg-amber-500/10 text-amber-300', dot: 'bg-amber-400 breath', label: '启动中' };
+      return { badge: 'border-white/[0.08] bg-slate-500/10 text-slate-400', dot: 'bg-slate-500', label: s === 'stopped' || s === 'exited' ? '已停止' : (s === 'missing' ? '容器已不在' : s) };
     },
     async testRemoteConn() {
       const f = this.remote.form;
@@ -4761,12 +4792,12 @@ const __vueApp = createApp({
       } catch (e) { this.remote.testState = { busy: false, ok: false, msg: '网络错误: ' + e }; }
     },
     async dockerTaskAction(taskId, action) {
-      if (action === 'remove' && !confirm('确认释放该容器与镜像?')) return;
+      if (action === 'remove' && !confirm('销毁这个部署？\n\n会删除：容器、独立镜像，并释放端口。\n不会删除：克隆任务和下载包，之后可以重新部署。')) return;
       try {
         const r = await fetch('/api/tasks/' + taskId + '/docker/' + action, { method: 'POST' });
         const data = await r.json();
         if (!r.ok) { this.toast(data.error || '操作失败'); return; }
-        this.toast({ stop: '容器已停止', restart: '容器已重启', remove: '容器与镜像已释放' }[action] || '操作成功');
+        this.toast({ stop: '已停止', restart: '已重启', start: '已启动', remove: '已销毁，端口已释放' }[action] || '操作成功');
         await this.loadDocker();
       } catch (e) { this.toast('网络错误'); }
     },
@@ -5754,6 +5785,8 @@ const __vueApp = createApp({
     },
   },
   mounted() {
+    // 窄屏(手机/小平板)默认折叠侧栏, 内容区不被 240px 侧栏挤成一列竖排
+    if (window.innerWidth < 900) this.navCollapsed = true;
     try { this.themeMode = localStorage.getItem('cloner-theme') || 'dark'; } catch (e) {}
     this.loadAuth();
   },

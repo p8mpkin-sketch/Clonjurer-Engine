@@ -1,0 +1,98 @@
+/* =====================================================================
+   Clonjurer 平台前端 · 规范层 (UI 改版 P0)
+   只换样式, 不动结构与逻辑。规则用 "html body .类名" 提高特异性,
+   以覆盖 Tailwind 运行时稍后注入的同名工具类(不依赖加载顺序)。
+   规范: 字号阶梯 12/13/14/16/20/24/32, 正文最小 12px;
+         文字对比 ≥ 4.5:1, 控件边框 ≥ 3:1; 单一品牌色 indigo + 4 个语义色。
+   ===================================================================== */
+
+:root{
+  --ui-brand:#4F46E5; --ui-brand-hover:#4338CA; --ui-brand-soft:rgba(99,102,241,.14);
+  --ui-ok:#34D399; --ui-warn:#FBBF24; --ui-bad:#F87171; --ui-info:#60A5FA;
+  --ui-fg-2:#B4BCCB;            /* 次要文字 (#050811 上约 10:1) */
+  --ui-fg-3:#8E99AD;            /* 辅助文字 (约 6.6:1) */
+  --ui-fg-4:#7A869B;            /* 最弱文字, 仍 ≥ 4.9:1 */
+  --ui-control:#4A5368;         /* 控件边框 (约 3.1:1) */
+  --ui-focus:0 0 0 2px var(--bg),0 0 0 4px #818CF8;
+  --ui-font:'Inter','PingFang SC','Hiragino Sans GB','Noto Sans SC','Microsoft YaHei',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+}
+[data-theme="light"]{
+  --ui-fg-2:#334155; --ui-fg-3:#475569; --ui-fg-4:#5B6676;   /* 白底上 ≥ 5.6:1 */
+  --ui-control:#94A3B8;
+  --ui-ok:#047857; --ui-warn:#B45309; --ui-bad:#B91C1C; --ui-info:#1D4ED8;
+}
+
+html body{font-family:var(--ui-font);-webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;font-feature-settings:"cv11","ss01"}
+html body .font-display{font-family:'Plus Jakarta Sans',var(--ui-font);letter-spacing:-.01em}
+.tnums,.font-mono{font-variant-numeric:tabular-nums}
+
+/* ---------- 1. 字号: 最小 12px (原 7.5px~11.5px 共 13 种自定义字号) ---------- */
+html body .text-\[7\.5px\],html body .text-\[8px\],html body .text-\[8\.5px\],
+html body .text-\[9px\],html body .text-\[9\.5px\],html body .text-\[10px\],
+html body .text-\[10\.5px\],html body .text-\[11px\],html body .text-\[11\.5px\],
+html body .text-xs{font-size:12px;line-height:1.5}
+html body .text-\[12px\],html body .text-\[12\.5px\]{font-size:13px;line-height:1.5}
+html body .text-\[13px\],html body .text-sm{font-size:14px;line-height:1.5}
+/* 原来靠缩小字号塞进一行的徽标/标签: 允许不换行省略, 不撑破布局 */
+html body .rounded-full.text-\[10px\],html body .rounded-md.text-\[10px\],
+html body .rounded-full.text-\[9\.5px\],html body .rounded-md.text-\[9\.5px\]{white-space:nowrap}
+
+/* ---------- 2. 文字对比度 (深色) ---------- */
+html:not([data-theme="light"]) body .text-slate-400{color:var(--ui-fg-2)}
+html:not([data-theme="light"]) body .text-slate-500{color:var(--ui-fg-3)}
+html:not([data-theme="light"]) body .text-slate-600,
+html:not([data-theme="light"]) body .text-slate-700{color:var(--ui-fg-4)}
+html:not([data-theme="light"]) body ::placeholder{color:#7A869B;opacity:1}
+
+/* ---------- 3. 文字对比度 (浅色): 浅色 300/400 色阶在白底上只有 1.5~2.6:1 ---------- */
+[data-theme="light"] body .text-slate-300{color:var(--ui-fg-2)}
+[data-theme="light"] body .text-slate-400,[data-theme="light"] body .text-slate-500{color:var(--ui-fg-3)}
+[data-theme="light"] body .text-slate-600{color:var(--ui-fg-4)}
+[data-theme="light"] body .text-emerald-300,[data-theme="light"] body .text-emerald-400,
+[data-theme="light"] body .text-green-300,[data-theme="light"] body .text-green-400{color:var(--ui-ok)}
+[data-theme="light"] body .text-amber-300,[data-theme="light"] body .text-amber-400,
+[data-theme="light"] body .text-yellow-300,[data-theme="light"] body .text-yellow-400,
+[data-theme="light"] body .text-orange-300,[data-theme="light"] body .text-orange-400{color:var(--ui-warn)}
+[data-theme="light"] body .text-rose-300,[data-theme="light"] body .text-rose-400,
+[data-theme="light"] body .text-red-300,[data-theme="light"] body .text-red-400,
+[data-theme="light"] body .text-pink-300,[data-theme="light"] body .text-pink-400{color:var(--ui-bad)}
+[data-theme="light"] body .text-sky-300,[data-theme="light"] body .text-sky-400,
+[data-theme="light"] body .text-cyan-300,[data-theme="light"] body .text-cyan-400,
+[data-theme="light"] body .text-blue-300,[data-theme="light"] body .text-blue-400,
+[data-theme="light"] body .text-teal-300,[data-theme="light"] body .text-teal-400{color:var(--ui-info)}
+[data-theme="light"] body .text-indigo-300,[data-theme="light"] body .text-indigo-400,
+[data-theme="light"] body .text-violet-300,[data-theme="light"] body .text-violet-400,
+[data-theme="light"] body .text-purple-300,[data-theme="light"] body .text-purple-400,
+[data-theme="light"] body .text-fuchsia-300,[data-theme="light"] body .text-fuchsia-400{color:#4338CA}
+[data-theme="light"] body ::placeholder{color:#64748B;opacity:1}
+/* 浅色下主色实底按钮里的白字不被 "文字变深" 规则误伤 */
+[data-theme="light"] body [class*="bg-[#4f46e5]"],[data-theme="light"] body [class*="bg-indigo-6"],
+[data-theme="light"] body [class*="bg-indigo-5"]:not([class*="/"]){color:#fff}
+
+/* ---------- 4. 装饰收敛: 9 个色系的半透明底 → 语义色; 渐变发光去掉 ---------- */
+html body .card-glow:hover{box-shadow:none}
+html body .breath{animation-duration:2.4s}
+
+/* ---------- 5. 交互: 统一焦点环 / 禁用态 / 触控尺寸 ---------- */
+html body :is(button,a,input,select,textarea,[tabindex]):focus-visible{outline:none;box-shadow:var(--ui-focus);border-radius:8px}
+html body button:disabled,html body button[disabled]{cursor:not-allowed}
+html body input[type="checkbox"],html body input[type="radio"]{accent-color:var(--ui-brand)}
+@media (pointer:coarse){html body button,html body a.rounded-lg{min-height:36px}}
+
+/* ---------- 6. 动效偏好 ---------- */
+@media (prefers-reduced-motion:reduce){
+  html body *,html body *::before,html body *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+}
+
+/* ---------- 7. 部署页新增元素 ---------- */
+.ui-ttl{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--ui-fg-3);font-variant-numeric:tabular-nums}
+.ui-ttl.soon{color:var(--ui-warn)}
+.ui-pill{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap}
+.ui-hint{font-size:12px;line-height:1.6;color:var(--ui-fg-3)}
+.ui-danger-list{margin:8px 0 0;padding-left:18px;font-size:13px;line-height:1.7;color:var(--ui-fg-2)}
+.ui-seg{display:inline-flex;padding:3px;border-radius:10px;border:1px solid var(--ui-control);gap:2px}
+.ui-seg button{height:30px;padding:0 12px;border-radius:7px;font-size:13px;color:var(--ui-fg-2)}
+.ui-seg button[aria-pressed="true"]{background:var(--ui-brand);color:#fff}
+.ui-btn-label{font-size:12px;white-space:nowrap}
+@media (max-width:520px){.ui-btn-label{display:none}}
