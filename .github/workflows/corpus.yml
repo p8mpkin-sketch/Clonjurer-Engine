@@ -478,3 +478,13 @@ jobs:
           j=$(ls -t engine_bench/real_sites/runs/run_*.json 2>/dev/null | head -1)
           [ -n "$j" ] || exit 0
           python engine_bench/score_generality.py --emit-rows "$j"
+      - name: 窄屏阶段耗时明细(日志最尾, 远程归因「细分·窄屏收回与变体」)
+        if: always()
+        run: |
+          for d in workspaces/*/; do
+            [ -f "$d/engine.log" ] || continue
+            u=$(grep -m1 -o "启动: [^ ]*" "$d/engine.log" | head -1)
+            l=$(grep -o "窄屏阶段分段: .*\|窄屏首载页收回: .*\|窄屏首载页关闭耗时 .*\|窄屏 DOM 变体[^,]*耗时[^,]*" "$d/engine.log" | tail -4 | tr '\n' ' ')
+            [ -n "$l" ] && echo "NARROWPH|$(basename "$d")|$u|$l"
+          done
+          true
