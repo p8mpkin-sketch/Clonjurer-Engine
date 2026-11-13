@@ -253,8 +253,14 @@ def run(args):
 
     RUNS.mkdir(parents=True, exist_ok=True)
     prev_name, prev = _previous_run()
+    probe_mode = None
+    if vps:
+        try:
+            from viewport_probe import PROBE_TIMERS_MODE as probe_mode   # 视口探针定时器口径(11-13 起默认 holdc)
+        except ImportError:
+            probe_mode = None
     out = {"stamp": stamp, "base": args.base, "batch_id": batch_id, "viewport": args.viewport,
-           "tag": args.tag, "rejected": rejected, "results": results,
+           "tag": args.tag, "probe_timers": probe_mode, "rejected": rejected, "results": results,
            "summary": dict(_summary(results), batch_wall_s=batch_wall)}
     json_path = RUNS / f"run_{stamp}.json"
     json_path.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -505,7 +511,8 @@ def _report(out, prev_name, prev):
     s = out["summary"]
     lines = [f"# 真实语料跑分 {out['stamp']}", "",
              f"实例 {out['base']} · 批次 #{out['batch_id']} · 视口 {out['viewport']}"
-             + (f" · 标签 {out['tag']}" if out['tag'] else ""), "",
+             + (f" · 标签 {out['tag']}" if out['tag'] else "")
+             + (f" · 探针口径 {out['probe_timers']}" if out.get('probe_timers') else ""), "",
              f"- 站点 {s['total']}: 完成 {s['completed']} / 失败 {s['failed']}"
              f"(网络不可达 {s.get('unreachable', 0)}, 引擎 {s.get('engine_failed', 0)}) / 超时 {s['timeout']}",
              f"- 还原度: 均分 **{_fmt(s['mean'])}**, 中位 {_fmt(s['median'])}, 最低 {_fmt(s['min'])};"

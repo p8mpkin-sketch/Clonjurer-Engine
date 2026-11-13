@@ -447,10 +447,14 @@ DIAG_JS = r"""() => {
 
 # 周期 ≥1s 的 setInterval(轮播翻页/折叠卡轮换/倒计时)两侧都不触发: 比的是首载状态。否则截图那一刻各自转到第几项
 # 取决于加载耗时, 分屏滚动截图期间翻页还会在拼接处留错位。与引擎自评同口径; PROBE_TIMERS=live 恢复放行
-# PROBE_TIMERS=hold3(提案口径, 默认不启用): 另外把 ≥3s 的 setTimeout 也两侧都不触发 —— 框架里的自动轮换常写成
+# PROBE_TIMERS=hold3(不启用): 另外把 ≥3s 的 setTimeout 也两侧都不触发 —— 框架里的自动轮换常写成
 # "setTimeout 链"(每轮渲染后重新登记, gitee 首页选项卡 5s 一换、swiper autoplay 同类), setInterval 这条规则拦不住;
 # 3s 以下的长延时多是内容装配, 不拦。改口径须在评分卡注明, 并与同口径的基线比
-_PROBE_TIMERS = os.environ.get("PROBE_TIMERS") or "hold"
+# 默认口径 holdc(2026-11-13 起, 此前默认 hold): hold 下 mi 平板 57 / gitee 平板 50 每轮相同, 是原站 setTimeout 链轮播在
+# 探针截图期间翻了几张、克隆停在首张(用户刚打开看到的就是首张); 同批任务 holdc 复测 mi 100/100/100、gitee 98/96/99。
+# 合成用例 mobile_cases 也用 holdc 验收。与 11-13 之前的历史数字对比时设 PROBE_TIMERS=hold
+_PROBE_TIMERS = os.environ.get("PROBE_TIMERS") or "holdc"
+PROBE_TIMERS_MODE = _PROBE_TIMERS
 HOLD_INTERVALS = _PROBE_TIMERS != "live"
 HOLD_INTERVALS_JS = r"""(() => {
   const real = window.setInterval; let fake = 1 << 30;
@@ -463,7 +467,7 @@ HOLD_INTERVALS_JS = r"""(() => {
 })();""".replace("__LONG__", "3000" if _PROBE_TIMERS == "hold3" else "0")
 
 
-# PROBE_TIMERS=holdc(提案口径): 在 hold3 的基础上, 只把"确认是一次性的"长延时放行并等它触发。hold3 把 ≥3s 的 setTimeout
+# PROBE_TIMERS=holdc(默认口径): 在 hold3 的基础上, 只把"确认是一次性的"长延时放行并等它触发。hold3 把 ≥3s 的 setTimeout
 # 一律拦掉, 一次性的揭示/收起(延时 3s 以上才把某块收起或换掉)在原站侧也被拦住, 而克隆里冻进去的是它触发之后的状态,
 # 两侧反而对不上。是不是一次性, 登记那一刻看不出来, 所以每个(原站, 视口)先开一张发现页: 定时器照常跑, 滚一遍让
 # "进视口才启动"的也登记上; 某个指纹(延时|回调源码)触发过之后 1.5s 内没有再被登记 = 一次性, 触发后又登记 = 周期性。
