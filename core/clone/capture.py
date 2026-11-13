@@ -715,6 +715,7 @@ class CaptureMixin:
             budget_s = min(24.0, max(8.0, float(getattr(self, "_nav_ready_s", 0) or 0) * 1.5))
         loads, t0 = {}, time.monotonic()
         kept = []
+        t_pre = 0.0
         if getattr(config, "NARROW_PARALLEL_WAITS", False):
             # 各窄屏首载页(平板/手机/桌面 UA 同宽/0.92 倍宽对照)的「静置 300ms」原本逐页串行等, 忙页各等满 1.5s;
             # 先等全部页 load(浏览器里本就并行加载), 再同时在各页里起静置, 后面逐页读路径时只等各自的结果
@@ -727,8 +728,11 @@ class CaptureMixin:
                     left = max(0.5, budget_s - (time.monotonic() - t0))
                     pp.wait_for_load_state("load", timeout=int(left * 1000))
                     CaptureMixin._kick_quiet(pp)
+        t_pre = time.monotonic() - t0
+        csteps = []   # 分步耗时(远程归因: 收回常超预算, 慢在等加载/静置/读路径/对照页哪一步)
         for tag, p2 in getattr(self, "_cv_pages", []) or []:
             try:
+                _cl = time.monotonic()
                 left = max(0.5, budget_s - (time.monotonic() - t0))
                 p2.wait_for_load_state("load", timeout=int(left * 1000))
                 if not self._narrow_same_doc(p2):
@@ -753,10 +757,14 @@ class CaptureMixin:
                             p2.close()
                         continue
                 kept.append((tag, p2))
+                _c0 = time.monotonic()
                 CaptureMixin._await_quiet(p2)
+                _c1 = time.monotonic()
                 loads[tag] = p2.evaluate(CV_PATHS_JS) or {}
+                _c2 = time.monotonic()
                 if self.cfg.get("viewport_variants", True):
                     CaptureMixin._start_settle_narrow(p2)
+                csteps.append(f"{tag} 加载 {_c0 - _cl:.1f}/静置 {_c1 - _c0:.1f}/读路径 {_c2 - _c1:.1f}s")
             except Exception as exc:
                 self.log("WARN", f"窄屏首载页 {tag} 在 {budget_s:.0f}s 预算内未加载完, 放弃({type(exc).__name__}): "
                                  f"该宽度无首载对照/变体")
@@ -765,6 +773,7 @@ class CaptureMixin:
         self._cv_pages = kept
         t_main = time.monotonic() - t0
         p4 = getattr(self, "_cv_mdesk", None)
+        _tm = time.monotonic()
         if p4 is not None and "m" in loads:
             try:
                 left = max(0.5, budget_s - (time.monotonic() - t0))
@@ -777,6 +786,7 @@ class CaptureMixin:
             with suppress(Exception):
                 p4.close()
             self._cv_mdesk = None
+        t_md = time.monotonic() - _tm
         for tag, (p3, w3) in list((getattr(self, "_cv_pair", {}) or {}).items()):
             try:
                 left = max(0.5, budget_s - (time.monotonic() - t0))
@@ -802,7 +812,9 @@ class CaptureMixin:
                     p3.close()
                 self._cv_pair.pop(tag, None)
         if time.monotonic() - t0 >= 3:
-            self.log("RENDER", f"窄屏首载页收回: 主两页 {t_main:.1f}s / 合计 {time.monotonic() - t0:.1f}s(预算 {budget_s:.0f}s)")
+            self.log("RENDER", f"窄屏首载页收回: 主两页 {t_main:.1f}s / 合计 {time.monotonic() - t0:.1f}s(预算 {budget_s:.0f}s)"
+                               + (f"; 分步 {', '.join(csteps)}" if csteps else "")
+                               + f"; 并行起静置前 {t_pre:.1f}s / UA 对照 {t_md:.1f}s / 随宽对照 {time.monotonic() - t0 - t_main - t_md:.1f}s")
         return loads
 
 

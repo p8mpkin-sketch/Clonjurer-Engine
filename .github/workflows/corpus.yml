@@ -484,7 +484,7 @@ jobs:
           for d in workspaces/*/; do
             [ -f "$d/engine.log" ] || continue
             u=$(grep -m1 -o "启动: [^ ]*" "$d/engine.log" | head -1)
-            l=$(grep -o "窄屏阶段分段: .*\|窄屏首载页收回: .*\|窄屏首载页关闭耗时 .*\|窄屏 DOM 变体[^,]*耗时[^,]*" "$d/engine.log" | tail -4 | tr '\n' ' ')
+            l=$(grep -o "窄屏阶段分段: .*\|窄屏首载页收回: .*\|窄屏首载页关闭耗时 .*\|窄屏 DOM 变体[^,]*耗时[^,]*\|窄屏首载页 [a-z]* 分步耗时: .*\|窄屏首载页 [a-z]* 随宽分步: [^;]*\|到位分步 .*" "$d/engine.log" | cut -c1-220 | tail -9 | tr '\n' ' ')
             [ -n "$l" ] && echo "NARROWPH|$(basename "$d")|$u|$l"
           done
           true
