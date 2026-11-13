@@ -450,7 +450,9 @@ DIAG_JS = r"""() => {
 # PROBE_TIMERS=hold3(提案口径, 默认不启用): 另外把 ≥3s 的 setTimeout 也两侧都不触发 —— 框架里的自动轮换常写成
 # "setTimeout 链"(每轮渲染后重新登记, gitee 首页选项卡 5s 一换、swiper autoplay 同类), setInterval 这条规则拦不住;
 # 3s 以下的长延时多是内容装配, 不拦。改口径须在评分卡注明, 并与同口径的基线比
-_PROBE_TIMERS = os.environ.get("PROBE_TIMERS") or "hold"
+# 默认口径: 2026-11-13 起由 hold 改为 holdc(cz 确认; 定时器链轮换不再按原站相位计分, 见下)。PROBE_TIMERS=hold 回旧口径
+# 对历史数字; 评分卡注明口径, 新旧数字不直接比
+_PROBE_TIMERS = os.environ.get("PROBE_TIMERS") or "holdc"
 HOLD_INTERVALS = _PROBE_TIMERS != "live"
 HOLD_INTERVALS_JS = r"""(() => {
   const real = window.setInterval; let fake = 1 << 30;
@@ -463,7 +465,7 @@ HOLD_INTERVALS_JS = r"""(() => {
 })();""".replace("__LONG__", "3000" if _PROBE_TIMERS == "hold3" else "0")
 
 
-# PROBE_TIMERS=holdc(提案口径): 在 hold3 的基础上, 只把"确认是一次性的"长延时放行并等它触发。hold3 把 ≥3s 的 setTimeout
+# PROBE_TIMERS=holdc(默认口径, 2026-11-13 起): 在 hold3 的基础上, 只把"确认是一次性的"长延时放行并等它触发。hold3 把 ≥3s 的 setTimeout
 # 一律拦掉, 一次性的揭示/收起(延时 3s 以上才把某块收起或换掉)在原站侧也被拦住, 而克隆里冻进去的是它触发之后的状态,
 # 两侧反而对不上。是不是一次性, 登记那一刻看不出来, 所以每个(原站, 视口)先开一张发现页: 定时器照常跑, 滚一遍让
 # "进视口才启动"的也登记上; 某个指纹(延时|回调源码)触发过之后 1.5s 内没有再被登记 = 一次性, 触发后又登记 = 周期性。
@@ -898,7 +900,7 @@ def main():
     vps = expand_viewports([v.strip() for v in args.viewports.split(",") if v.strip()])
     res, outdir = probe_tasks(args.base, pairs, vps, args.out or None, args.workers,
                               args.clone_url or None, args.noise)
-    print(f"\n截图/热力图: {outdir}")
+    print(f"\n截图/热力图: {outdir}  (定时器口径 PROBE_TIMERS={_PROBE_TIMERS})")
     print("| # | 站点 | " + " | ".join(vps) + " |")
     print("|---|---|" + "---|" * len(vps))
     for tid, url in pairs:

@@ -277,7 +277,7 @@ def run(args):
             print(f"  {name} {g['total']} 站: 均分 {_fmt(g['mean'])}  交互轨 {_fmt(g['interactive_mean'])}"
                   f"  最低 {_fmt(g['min'])}  p50 {_fmt(g['p50_elapsed'])}s" + _vp_line(g))
     if s.get("vp_mean"):
-        print("  视口分项(探针)" + _vp_line(s))
+        print(f"  视口分项(探针 {os.environ.get('PROBE_TIMERS') or 'holdc'} 口径)" + _vp_line(s))
     return 0 if s["completed"] == s["total"] else 2
 
 
