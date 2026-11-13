@@ -58,6 +58,7 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     INTERSTITIAL_RESTORE_JS,
     FONT_BAKE_NOSIZE_JS,
     SCROLL_TOP_JS,
+    NEST_FIX_JS,
     NARROW_STABLE_JS,
     DOM_COUNTS_JS,
     ALT_EXTRACT_JS,
@@ -109,6 +110,7 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
     STORAGE_SNAPSHOT_JS,
     STYLE_TEXTS_JS,
     SUBTREE_SIZE_JS,
+    SUBTREE_CONTENT_JS,
     TEXT_EXTRACT_JS,
     TIME_FREEZE_JS,
     TRACKER_OBSERVE_JS,
@@ -126,6 +128,8 @@ from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部
     _source_id_classes,
     _source_sibling_groups,
     _subtree_sig,
+    _content_diff_roots,
+    _content_follows,
     beacon_like,
     ASSET_RESOURCE_TYPES,
     ASSET_SKIP_PREFIXES,
@@ -1136,6 +1140,7 @@ class CaptureMixin:
             for p2 in pages.values():
                 CaptureMixin._kick_settle_tail(p2)
         variants = {}                      # path -> {tag: html}
+        content_roots = set()              # 结构相同、内容按宽度不同而成为变体根的路径(见 _content_diff_roots)
         hidden_all = set()
         style_pre = {}                     # tag -> STYLE_TEXTS_JS 结果(窄屏页提前关闭前取)
         for tag, other in loads.items():
@@ -1148,14 +1153,41 @@ class CaptureMixin:
             # 原站多一个占第三行的 0 高兄弟, 克隆少一道行距, 其下整页上移 16px)。把变体根提到这个容器, 整个换成窄屏版。
             # id 每次加载都变的站(随机 id)会大面积命中, 超过上限就整体不用这条判据
             if getattr(config, "VARIANT_ID_ALIGN", True):
-                lifted = _id_misaligned_parents(main, other)
+                id_samples = []
+                lifted = _id_misaligned_parents(main, other, id_samples)
                 if lifted:
                     if len(lifted) > int(getattr(config, "VARIANT_ID_ALIGN_MAX", 12)):
                         self.log("RENDER", f"窄屏首载页 {tag}: 子项 id 错位的容器 {len(lifted)} 个超上限, 视为 id 不稳定, 不按 id 提升变体根")
                     else:
                         self.log("RENDER", f"窄屏首载页 {tag}: {len(lifted)} 个容器的子项 id 与主页错位(各有对方没有的组件), 变体根提到容器: "
-                                           + "; ".join(q[-60:] for q in lifted[:4]))
+                                           + "; ".join(q[-60:] for q in lifted[:4])
+                                           + " | 样例 " + "; ".join(f"{a[:24]}≠{b[:24]}" for _p, a, b in id_samples))
+                        id_only = sorted(set(lifted) - set(diff))
+                        # 只因子项 id 错位才提上来的根(结构本身相同)换的是整个容器, 窄屏版少一截内容就整块丢失。id 错位常是
+                        # 窄屏页模块还没填充、仍挂着带 id 的占位(sohu 平板 serviceInfo/funnyblock 占位 → 整个主栏换成广告条/模块
+                        # 未到的版本, 文字 9073/10002, 平板 91→47): 窄屏版文字 < 主页同子树 VARIANT_ID_LIFT_MIN_TEXT 的不提,
+                        # 其下真正结构不同的子树仍按原判据各自成为变体根
+                        lift_min = float(getattr(config, "VARIANT_ID_LIFT_MIN_TEXT", 0.95) or 0)
+                        if id_only and lift_min and tag in pages:
+                            with suppress(Exception):
+                                sz_m = page.evaluate(SUBTREE_CONTENT_JS, id_only) or {}
+                                sz_o = pages[tag].evaluate(SUBTREE_CONTENT_JS, id_only) or {}
+                                short = [q for q in id_only if (sz_m.get(q) or [0])[0]
+                                         and (sz_o.get(q) or [0])[0] < lift_min * sz_m[q][0]]
+                                if short:
+                                    self.log("RENDER", f"窄屏首载页 {tag}: {len(short)} 个只因 id 错位提上来的根窄屏版文字不足 {lift_min:.0%}"
+                                                       f"(窄屏页模块未填充完), 不提: " + "; ".join(
+                                                           f"{q[-40:]} {sz_o.get(q, [0])[0]}/{sz_m[q][0]}" for q in short[:3]))
+                                    lifted = [q for q in lifted if q not in short]
                         diff = sorted(set(diff) | set(lifted))
+            if getattr(config, "VARIANT_CONTENT_DIFF", True):
+                pair_c = ((loads.get("__pair") or {}).get(tag) or {}).get("paths") or {}
+                croots = [q for q in _content_diff_roots(main, other, pair_c) if q not in diff]
+                content_roots.update(croots)
+                if croots:
+                    self.log("RENDER", f"窄屏首载页 {tag}: {len(croots)} 个子树结构相同但内容按宽度不同(对照页一致), 作为变体根: "
+                                       + "; ".join(q[-60:] for q in croots[:4]))
+                    diff = sorted(set(diff) | set(croots))
             top = []
             for p in diff:
                 if not any(p.startswith(q + ">") for q in top):
@@ -1211,6 +1243,7 @@ class CaptureMixin:
             tk.append(time.monotonic())
             with suppress(Exception):
                 htmls = pages[tag].evaluate(ALT_EXTRACT_JS, top) or {}
+                htmls = CaptureMixin._shoot_blank_canvases(self, pages[tag], tag, htmls)
                 tk.append(time.monotonic())
                 self.log("RENDER", f"窄屏首载页 {tag} 分步耗时: " + " / ".join(
                     f"{k} {b - a:.1f}s" for k, a, b in zip(("隐藏子树", "到位", "随宽", "相位", "过渡", "抽取"), tk, tk[1:])))
@@ -1263,7 +1296,9 @@ class CaptureMixin:
         md = loads.get("__mdesk") or {}
         ua_only = {p for p, v in variants.items() if "m" in v and md and p not in hidden_all and p in md and p in main
                    and md[p][0] == main[p][0] and md[p][3] == main[p][3]
-                   and (len(md[p]) <= 8 or len(main[p]) <= 8 or md[p][8] == main[p][8])}
+                   and (len(md[p]) <= 8 or len(main[p]) <= 8 or md[p][8] == main[p][8])
+                   # 内容按宽度换的根(_content_diff_roots): 结构本来就和主页相同, 要看内容 —— 桌面 UA 同宽页的内容跟着窄屏页走就不是只按 UA
+                   and not (p in content_roots and _content_follows(md, loads.get("m") or {}, main, p))}
         if ua_only:
             self.log("RENDER", f"窄屏 DOM 变体: {len(ua_only)} 处只在手机 UA 下换结构, 只给触屏显示(桌面浏览器窄窗口仍用主页版): "
                                + "; ".join(p[-60:] for p in list(ua_only)[:4]))
@@ -1343,6 +1378,49 @@ class CaptureMixin:
         except Exception:
             return None
 
+
+    _CV_SHOT_TAG = re.compile(r'<img\b[^>]*\bdata-cv-shot="([^"]+)"[^>]*>')
+
+    def _shoot_blank_canvases(self, npage, tag, htmls):
+        """窄屏变体里位图读回为空的 canvas(ALT_EXTRACT_JS 打了 data-cv-shot): 对窄屏页按文档矩形截图回填 img 的 src。
+        WebGL 没开 preserveDrawingBuffer 时 toDataURL 恒为全透明(github 首屏 Mona 头像: 桌面段走基准截图回填有图,
+        平板/手机段的窄屏版是透明图, 吉祥物整块消失); 截图拿的是合成后的帧, 与主页「空白 Canvas 从基准截图回填」同口径。"""
+        if not htmls:
+            return htmls
+        shots = [s for v in htmls.values() if len(v) > 5 for s in (v[5] or [])]
+        if not shots:
+            return htmls
+        srcs, t0 = {}, time.monotonic()
+        for sid, x, y, w, h in shots[:config.MEDIA_SHOT_MAX]:
+            if time.monotonic() - t0 > 4:
+                break
+            with suppress(Exception):
+                # 滚到画布所在处、按视口内矩形截: 整页截图会临时改视口尺寸触发 resize, WebGL 场景可能重建成空帧
+                sy = npage.evaluate("([y, h]) => { window.scrollTo(0, Math.max(0, y - Math.max(0, (innerHeight - h) / 2)));"
+                                    " return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(scrollY)))); }",
+                                    [y, h]) or 0
+                png = npage.screenshot(clip={"x": max(0.0, x), "y": max(0.0, y - sy), "width": w, "height": h},
+                                       type="png", timeout=3000)
+                with Image.open(io.BytesIO(png)) as im:
+                    im = im.convert("RGB")
+                    lo, hi = im.convert("L").getextrema()
+                    if hi - lo < 3:     # 截出来也是纯色(画布还没画/在视口外不渲染): 不回填, 维持原样
+                        continue
+                    buf = io.BytesIO()
+                    im.save(buf, format="PNG", optimize=True)
+                srcs[sid] = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+        with suppress(Exception):
+            npage.evaluate("() => window.scrollTo(0, 0)")
+        if srcs:
+            def fix(m):
+                u = srcs.get(m.group(1))
+                if not u:
+                    return m.group(0)
+                return re.sub(r'\bsrc="[^"]*"', lambda _m: f'src="{u}"', m.group(0), count=1)
+            htmls = {p: ([self._CV_SHOT_TAG.sub(fix, v[0])] + list(v[1:])) for p, v in htmls.items()}
+        self.log("RENDER", f"窄屏首载页 {tag}: {len(shots)} 个读回为空的 canvas(WebGL/跨域), {len(srcs)} 个按窄屏页截图回填"
+                           f"({time.monotonic() - t0:.1f}s)")
+        return htmls
 
     # ------------------------------------------------------------------
     def _freeze_media_from_baseline(self, page):
@@ -1603,7 +1681,11 @@ class CaptureMixin:
         if not getattr(config, "REPLAY_CLOCK", True):
             return None
         if not getattr(self, "_clock_t0", None):
-            self._clock_t0 = int(time.time() * 1000)
+            # 对齐到本分钟第 1 秒: 按「当前分钟」选内容的页(今日专题/更新于 hh:mm)脚本在 t0 之后几秒才执行, 采集页与克隆页
+            # 各自的执行延迟不同; t0 落在分钟末尾时两边会跨到不同分钟, 内容整段换掉(合成用例 drift_clock CI 偶发交互 51)。
+            # 往回拨不到 1 分钟, 两边都留出 59s 余量
+            now = int(time.time() * 1000)
+            self._clock_t0 = now - now % 60000 + 1000
         return self._clock_t0
 
     def _seed_page(self, page):
@@ -1857,7 +1939,9 @@ class CaptureMixin:
                 nt.append(time.monotonic())
                 if cv.get("els") or cv.get("cls") or cv.get("srcFill") or cv.get("textFill"):
                     self.log("RENDER", f"多视口内联样式: {cv['els']} 个元素, {cv.get('vw', 0)} 个按视口宽比例改写为 vw"
-                                       + (f"(另 {cv['pairvw']} 个手机段 px 由 0.92 倍宽首载对照认出同比)" if cv.get("pairvw") else "") + ","
+                                       + (f"(另 {cv['pairvw']} 个手机段 px 由 0.92 倍宽首载对照认出同比)" if cv.get("pairvw") else "")
+                                       + (f"(手机段两点仿射 {cv['affine']} 个)" if cv.get("affine") else "")
+                                       + (f"(手机段内容高改 auto {cv['contentH']} 个)" if cv.get("contentH") else "") + ","
                                        f" {cv.get('banded', 0)} 个移入分视口样式表(其中窄屏首载补采 {cv.get('reload', 0)})"
                                        f"; 分视口 class {cv.get('cls', 0)} 个"
                                        + (f"(其中只随手机 UA 变、只给触屏 {cv['clsTouch']} 个)" if cv.get("clsTouch") else "")
@@ -1895,6 +1979,13 @@ class CaptureMixin:
                     ph = page.evaluate(STATE_PHASE_RESET_JS, [src_cls, src_grp]) or {}
                     if ph.get("els"):
                         self.log("RENDER", f"状态类相位复位(序列化前复查): 又有 {ph.get('els', 0)} 个实例偏离源码分配, 已再次复位 {ph.get('dbg') or ''}"[:600])
+        # 非法嵌套(<p> 里的块级容器)序列化后会被解析器拆树: MHTML 与交付 HTML 之前改成等价 span(见 NEST_FIX_JS)
+        if getattr(config, "NEST_FIX", True):
+            with suppress(Exception):
+                nf = _safe_eval(NEST_FIX_JS) or {}
+                if nf.get("fixed") or nf.get("reverted") or nf.get("other"):
+                    self.log("RENDER", f"非法嵌套修复: <p> 内块级容器 {nf.get('fixed', 0)} 个改等价 span"
+                                       f"(样式有差异换回 {nf.get('reverted', 0)}; 其它拆树块 {nf.get('other', 0)} 个未动)")
         # N1 保真轨: MHTML 快照(采集期活体渲染的权威固化)。
         # Chromium 对 MHTML 的回放默认禁脚本 —— 确定性由构造保证。
         if screenshot:

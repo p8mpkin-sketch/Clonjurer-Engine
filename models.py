@@ -307,6 +307,27 @@ class Database:
                 return None  # 恰好被其他 worker 抢走
             return self.get_task(row["id"])
 
+    def recover_orphan_tasks(self, reason: str = "实例重启, 任务中断(可重建)") -> list:
+        """启动时收回上次进程留下的 running 任务(进程崩溃/被杀/机器休眠断电): 置为 failed 并写明原因。
+        不收回就永远卡在「运行中」, 前端连「重建」都被 409 拒绝。返回被收回的任务 id。"""
+        with self._lock:
+            ids = [r["id"] for r in self._conn.execute(
+                "SELECT id FROM clone_tasks WHERE status = 'running'").fetchall()]
+            if ids:
+                self._conn.execute(
+                    "UPDATE clone_tasks SET status = 'failed', stage = '中断', error_msg = ?, updated_at = ?"
+                    " WHERE status = 'running'", (reason, _now()))
+                self._conn.commit()
+        return ids
+
+    def stale_running_tasks(self, older_than_s: float) -> list:
+        """running 且 updated_at 早于 older_than_s 秒前的任务 id(心跳停了)。"""
+        cutoff = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() - older_than_s,
+                                        timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        with self._lock:
+            return [r["id"] for r in self._conn.execute(
+                "SELECT id FROM clone_tasks WHERE status = 'running' AND updated_at < ?", (cutoff,)).fetchall()]
+
     def touch_task(self, task_id: int) -> None:
         """心跳触摸: 仅刷新 updated_at(重型站长阶段防误收割)。"""
         with self._lock:

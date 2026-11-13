@@ -198,6 +198,18 @@ var i=k%3;document.querySelectorAll('.tabs span')[i].className='on';document.que
     return _shell("Rerun state", mid, head=f"<style>{css}</style>")
 
 
+def case_rerun_measure_probe(ctx):
+    """脚本同步建一个隐藏测量 span 量字号(文字缩放探测), 字号不是 16px 就给导航加"已缩放"类、正文下移一个导航高。
+    冻结 DOM 里已留有上次的同款 span; 克隆重跑时新建的这个不能被当成重复删掉(删了脚本读到 NaN)。"""
+    css = ".lnav{background:#f5f5f7;padding:12px 24px;font-weight:bold}.lnav.zoomed{padding-bottom:56px}"
+    js = """<script>(function(){var s=document.createElement('span');s.className='tz-probe';s.setAttribute('aria-hidden','true');
+s.setAttribute('style','position:absolute;visibility:hidden;font-size:1rem;top:0;left:0');s.textContent='A';document.body.appendChild(s);
+document.addEventListener('DOMContentLoaded',function(){var f=parseFloat(getComputedStyle(s).fontSize);
+if(f!==16)document.querySelector('.lnav').className='lnav zoomed';});})();</script>"""
+    mid = f'<div class="lnav">Local nav · Overview · Tech specs · Buy</div>{js}<div class="band"><div class="wrap"><div class="grid">{_cards(6)}</div></div></div>'
+    return _shell("Rerun measure probe", mid, head=f"<style>{css}</style>")
+
+
 def case_lazy_reveal(ctx):
     """滚动进场且可回退: 进入视口加 .in(透明度/位移过渡), 离开视口去掉。回顶后下半页是"未显示"状态。"""
     css = ".rv{opacity:0;transform:translateY(40px);transition:opacity .5s,transform .5s}.rv.in{opacity:1;transform:none}"
@@ -282,6 +294,19 @@ var b=document.getElementById('banner');b.style.height=Math.round(b.clientWidth*
     return _shell("Measured inline", mid, head=f"<style>{css}</style>")
 
 
+def case_measured_rootvar(ctx):
+    """脚本量公告条高度写到 html 内联自定义属性(--bh), hero 高 calc(100vh - var(--bh))。公告条窄屏折两行,
+    值随宽变; 脚本已有值就不再写(幂等守卫) —— 克隆里 html 上带着采集宽的值, 窄屏不会被重算。"""
+    css = (".gb{background:#212121;color:#fff;padding:8px 16px;font-size:15px;line-height:16px}"
+           ".hero{height:calc(100vh - var(--bh, 0px));min-height:260px;background:#5d4037;color:#fff;display:flex;align-items:flex-end;padding:0 20px 20px;box-sizing:border-box}")
+    js = """<script>(function(){var r=document.documentElement;if(r.style.getPropertyValue('--bh'))return;
+r.style.setProperty('--bh',document.getElementById('gb').offsetHeight+'px');})();</script>"""
+    mid = ('<div class="gb" id="gb">Free shipping on all orders over $75 and free returns within thirty days of purchase</div>'
+           '<div class="hero"><h1>Hero sized by the banner height</h1></div>'
+           f'<div class="band"><div class="wrap"><div class="grid">{_cards(6)}</div></div></div>{js}')
+    return _shell("Measured root var", mid, head=f"<style>{css}</style>")
+
+
 def case_measured_rem(ctx):
     """rem 基准随屏宽(html font-size = clientWidth/7.5, 上限 100px), 全页尺寸用 rem —— 国内移动站常见写法。"""
     css = """body{margin:0;font-family:Arial;font-size:.28rem;color:#222;background:#f4f4f4}.rh{background:#c62828;color:#fff;padding:.3rem;font-size:.36rem}
@@ -299,6 +324,23 @@ c.width=w*d;c.height=h*d;c.style.width=w+'px';c.style.height=h+'px';var g=c.getC
 for(var i=0;i<8;i++){var bh=(h-30)*(0.25+0.09*i);g.fillRect(12+i*(w-24)/8,h-10-bh,(w-24)/8-8,bh);}}draw();addEventListener('resize',draw);})();</script>"""
     mid = f'<div class="band"><div class="wrap"><h2>Chart</h2><div><canvas id="chart"></canvas></div><p>{LOREM}</p><div class="grid">{_cards(3)}</div></div></div>{js}'
     return _shell("Measured canvas", mid)
+
+
+def case_measured_svg(ctx):
+    """svg 插画: 脚本按容器宽写 viewBox(宽 = 容器宽, 高按断点取不同比例), 样式 width:100%;height:auto, 盒高随 viewBox 比例。"""
+    js = """<script>(function(){var s=document.getElementById('art');function fit(){var w=s.parentNode.clientWidth,h=Math.round(w<1000?w*0.79:w*0.4375);
+s.setAttribute('viewBox','0 0 '+w+' '+h);var r=s.querySelectorAll('rect');for(var i=0;i<r.length;i++){r[i].setAttribute('x',Math.round(w*(0.05+0.18*i)));
+r[i].setAttribute('y',Math.round(h*(0.2+0.1*(i%3))));r[i].setAttribute('width',Math.round(w*0.14));r[i].setAttribute('height',Math.round(h*0.5));}}
+fit();addEventListener('resize',fit);})();</script>"""
+    rects = "".join(f'<rect fill="#{c}"></rect>' for c in ("1f5f8b", "8b1f5f", "5f8b1f", "c0782a", "2a78c0"))
+    mid = (f'<div class="band"><div><svg id="art" style="display:block;width:100%;height:auto;background:#eef3f8">{rects}</svg></div>'
+           f'<div class="wrap"><p>{LOREM}</p><div class="grid">{_cards(3)}</div></div></div>{js}')
+    return _shell("Measured svg", mid)
+
+
+def case_measured_svg_once(ctx):
+    """同上, 但 viewBox 与 width/height 属性只在挂载时按宽写一次(不监听 resize): 缩放采不到, 只能靠窄屏首载对照。"""
+    return case_measured_svg(ctx).replace("addEventListener('resize',fit);", "s.setAttribute('width',s.parentNode.clientWidth);")
 
 
 def case_legacy_fixed(ctx):
@@ -722,6 +764,7 @@ CASES = {
     "rerun_block_drop": ("rerun", case_rerun_block_drop),
     "rerun_append": ("rerun", case_rerun_append),
     "rerun_state": ("rerun", case_rerun_state),
+    "rerun_measure_probe": ("rerun", case_rerun_measure_probe),
     "lazy_reveal": ("lazy", case_lazy_reveal),
     "lazy_images": ("lazy", case_lazy_images),
     "lazy_sections": ("lazy", case_lazy_sections),
@@ -732,7 +775,10 @@ CASES = {
     "pinned_layout": ("pinned", case_pinned_layout),
     "measured_inline": ("measured", case_measured_inline),
     "measured_rem": ("measured", case_measured_rem),
+    "measured_rootvar": ("measured", case_measured_rootvar),
     "measured_canvas": ("measured", case_measured_canvas),
+    "measured_svg": ("measured", case_measured_svg),
+    "measured_svg_once": ("measured", case_measured_svg_once),
     "legacy_fixed": ("legacy", case_legacy_fixed),
     "media_picture": ("media", case_media_picture),
     "jslayout_masonry": ("jslayout", case_jslayout_masonry),
@@ -770,10 +816,11 @@ CASES = {
 ENGINE_GATED = {"drift"}
 # 这些类别探针照常算, 另加一格引擎交互轨分: 交互轨塌了时引擎会改交付静态版, 探针看不出来(sohu 类: 头条 99 / 交互 66)
 INTERACTIVE_ALSO = {"api", "state"}
+# 单个用例也可要求交互轨分(交互轨塌了会被静态版接管, 探针看不出): 键为用例名
+INTERACTIVE_ALSO_CASES = {"rerun_measure_probe"}
 # 已知缺口: 用例保留、照常出分, 但不计入 --gate 门槛(修好后从这里删掉)
 KNOWN_GAPS = {
     "measured_canvas": "iPad 820 宽 ~94: canvas 固化成位图后按宽缩放, 图里按固定 px 画的边距/间隙不会像原站那样重画",
-    "measured_inline": "420 宽: 脚本按文字折行算的等高卡片高度, 手机段只有 390/359 两个采样, 高度随宽不单调, 仍钉 390 的 px",
 }
 CATEGORY_LABEL = {
     "responsive": "响应式(对照)", "ua": "按 UA 分发", "structure": "手机专有组件", "rerun": "脚本重跑",

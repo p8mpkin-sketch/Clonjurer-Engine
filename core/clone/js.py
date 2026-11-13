@@ -162,6 +162,7 @@ async () => {
 
 DEEP_FREEZE_JS = r"""
 () => {
+  const SVGKEEP = 1;
   const result = { lazy: 0, css: 0, crossOriginSheets: 0, canvas: 0, forms: 0, revealed: 0 };
 
   // 1) 懒加载属性标准化
@@ -183,7 +184,9 @@ DEEP_FREEZE_JS = r"""
   document.querySelectorAll('[data-aos], .wow, [data-scroll], [data-sr-id], [data-reveal], [data-animate]').forEach(el => {
     el.style.setProperty('opacity', '1', 'important');
     el.style.setProperty('visibility', 'visible', 'important');
-    el.style.setProperty('transform', 'none', 'important');
+    // SVG 内部图元(g/rect/path…)的 transform 是几何定位(transform="translate(35 2)" 呈现属性), 入场库只动 HTML 外壳;
+    // 写 transform:none 会把它压掉, 各组都挤回原点(github 角标像素点两角叠在左上)
+    if (!SVGKEEP || !(el instanceof SVGElement) || el instanceof SVGSVGElement) el.style.setProperty('transform', 'none', 'important');
     el.style.setProperty('filter', 'none', 'important');
     el.style.setProperty('transition', 'none', 'important');
     el.classList.add('aos-animate');
@@ -708,10 +711,15 @@ CV_PATH_FN = r"""(e) => {
   return p.join('>');
 }"""
 CV_ATTR_FN = r"""(e) => {
+  const SVGSKIP = 1;
   if (!(e instanceof SVGSVGElement) && e.tagName !== 'IMG' && e.tagName !== 'CANVAS') return '';
   let s = '';
   for (const a of ['width', 'height']) {
     const v = e.getAttribute(a);
+    // 内联样式已给了这一维(width:100% / height:auto): 尺寸属性只是展示提示, 被样式盖掉, 不当作该视口的取值 ——
+    // 否则挂载时按宽写一次的 width 属性在平板/手机段被写成 px, 盖过 100%, 820 宽的插画按 768 首载页的 720px 定宽
+    // (只对 svg: canvas/固化 canvas 的 img 的属性还承担位图尺寸对照, 见 CV_EMIT_JS 的 bFix)
+    if (SVGSKIP && e instanceof SVGSVGElement && e.style && e.style.getPropertyValue(a)) continue;
     if (v && /^\d+(\.\d+)?$/.test(v.trim())) s += a + ':' + (+v).toFixed(2).replace(/\.?0+$/, '') + 'px;';
   }
   // 固化 canvas 的 img 只有 width 属性 + 内联 aspect-ratio(见 CANVAS_IMG_FN): 等价高度补出来, 才能与窄屏首载页里
@@ -767,7 +775,10 @@ CV_PATHS_JS = r"""() => {
     Array.from(e.children).filter(c => !NONVIS.has(c.tagName)).map(c => /^[A-Za-z][\w-]{1,100}$/.test(c.id || '') ? c.id : '').join(',').slice(0, 2400)];
   // 根元素只记 class(加载时按宽度给 <html>/<body> 打的 _mobile / is-mobile 类标记)
   for (const [k, e] of [['@html', document.documentElement], ['@body', document.body]])
-    if (e) out[k] = [e.tagName, e.getAttribute('class') || '', '', '', '', '', '', '', ''];
+    if (e) out[k] = [e.tagName, e.getAttribute('class') || '', '', '', '', '', '', '', '',
+      // [9] 根元素内联自定义属性(--x:v; 逐条, 按名排序): 脚本按加载宽度量出来写进 <html style>(公告条折行高度
+      // --global-banner-height 46/32px, 首屏 calc(100vh - var(...)))
+      (() => { const st = e.style, o = []; for (let i = 0; i < st.length; i++) { const p = st[i]; if (p.startsWith('--')) o.push(p + ':' + st.getPropertyValue(p).trim()); } return o.sort().join(';'); })()];
   return out;
 }"""
 
@@ -777,6 +788,21 @@ CV_PATHS_JS = r"""() => {
 # 也序列化进克隆, 两版各打 data-cv-vp 视口令牌, 由分视口样式表只显示当前视口那一版。
 ALT_EXTRACT_JS = r"""(paths) => {
   const VFILL = 1;
+  const VSHOT = 1;
+  const SVGKEEP = 1;
+  // 位图读回是空的(WebGL 没开 preserveDrawingBuffer, 合成后读回恒为全透明)或读回直接抛错(跨域贴图污染): 32x32 缩样看 alpha
+  const blankCv = (cv) => {
+    try {
+      if (!cv.width || !cv.height) return false;
+      const t = document.createElement('canvas'); t.width = 32; t.height = 32;
+      const g = t.getContext('2d'); g.drawImage(cv, 0, 0, 32, 32);
+      const d = g.getImageData(0, 0, 32, 32).data;
+      for (let i = 3; i < d.length; i += 4) if (d[i]) return false;
+      // 2D canvas 读回全透明就是真透明(空的装饰层), 截图会把底下的内容烤进去; 只有 WebGL/bitmaprenderer 才是"读不回"
+      try { return cv.getContext('2d') === null; } catch (e) { return true; }
+    } catch (e) { return true; }
+  };
+  let pi = 0;
   // 与 CV_PATH_FN 同口径: body 这一层有唯一 id 的段写成 tag#id, 序号段只数同标签且无唯一 id 的兄弟
   const resolve = (path) => {
     let e = document.body;
@@ -842,11 +868,27 @@ ALT_EXTRACT_JS = r"""(paths) => {
     // cloneNode 不带 canvas 位图: 按原节点逐个固化成 <img>(与 DEEP_FREEZE 第 5 步同口径), 否则窄屏版
     // 的图表/插画整块空白
     const cvs = el.querySelectorAll('canvas'), cvc = c.querySelectorAll('canvas');
+    // 读回为空的 canvas(WebGL 吉祥物/3D 插画: github 首屏 Mona 头像): toDataURL 只能得到透明图, 窄屏版整块消失。
+    // 打标记 + 记下它在窄屏页里的文档坐标, 由引擎对窄屏页按该矩形截图回填(主页同类 canvas 走基准截图回填, 同口径)
+    const shots = [];
+    pi++;
     cvs.forEach((cv, k) => {
       try {
-        const data = cv.toDataURL('image/png'), dst = cvc[k];
-        if (!dst || !data || data.length <= 128) return;
+        const dst = cvc[k];
+        let blank = VSHOT && blankCv(cv), data = '';
+        try { data = cv.toDataURL('image/png'); } catch (e) { blank = blank || VSHOT; }
+        if (!dst) return;
+        if (blank) {
+          const rb = cv.getBoundingClientRect();
+          if (rb.width < 8 || rb.height < 8) { if (!data || data.length <= 128) return; blank = false; }
+          else {
+            if (!data || data.length <= 128) data = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
+            shots.push([pi + '_' + k, rb.left + scrollX, rb.top + scrollY, rb.width, rb.height]);
+          }
+        }
+        if (!data || data.length <= 128) return;
         const im = (__CANVAS_IMG__)(cv, data);
+        if (blank) im.setAttribute('data-cv-shot', pi + '_' + k);
         // 脚本按容器宽写了内联 px 宽高、且显示盒正好撑满父元素内容宽的 canvas: 窄屏版只在首载那一个宽度(768/390)采到,
         // 钉着 px 到同段别的机型(820/360/420)就窄一截或溢出 → 写 width:100% + height:auto, 由内联 aspect-ratio 定高
         if (VFILL) try {
@@ -872,7 +914,7 @@ ALT_EXTRACT_JS = r"""(paths) => {
     c.querySelectorAll('[data-aos], .wow, [data-scroll], [data-sr-id], [data-reveal], [data-animate]').forEach(x => {
       x.style.setProperty('opacity', '1', 'important');
       x.style.setProperty('visibility', 'visible', 'important');
-      x.style.setProperty('transform', 'none', 'important');
+      if (!SVGKEEP || !(x instanceof SVGElement) || x instanceof SVGSVGElement) x.style.setProperty('transform', 'none', 'important');
     });
     // 相对地址按窄屏页绝对化(插入主页后基准相同, 但防 <base> 差异)
     c.querySelectorAll('[src],[href],[srcset],[poster]').forEach(x => {
@@ -881,7 +923,7 @@ ALT_EXTRACT_JS = r"""(paths) => {
         if (v && !/^(data:|blob:|#|javascript:|mailto:|tel:)/i.test(v)) { try { x.setAttribute(a, new URL(v, document.baseURI).href); } catch (e) {} }
       }
     });
-    out[p] = [c.outerHTML, (el.innerText || '').trim().length, el.getElementsByTagName('*').length, el.querySelectorAll('input:not([type=hidden]),textarea,select').length, normed];
+    out[p] = [c.outerHTML, (el.innerText || '').trim().length, el.getElementsByTagName('*').length, el.querySelectorAll('input:not([type=hidden]),textarea,select').length, normed, shots];
   }
   return out;
 }""".replace("__CANVAS_IMG__", CANVAS_IMG_FN)
@@ -914,6 +956,10 @@ SUBTREE_SIZE_JS = r"""(paths) => {
   for (const p of paths) { const el = resolve(p); if (el) out[p] = [(el.innerText || '').trim().length, el.getElementsByTagName('*').length, el.querySelectorAll('input:not([type=hidden]),textarea,select').length]; }
   return out;
 }"""
+
+# 同 SUBTREE_SIZE_JS, 文字量按 textContent(不随视口 CSS 隐藏变化): 判「窄屏页模块还没填充」只看内容在不在, 不受响应式隐藏影响
+SUBTREE_CONTENT_JS = SUBTREE_SIZE_JS.replace("(el.innerText || '').trim().length, el.getElementsByTagName",
+                                             "(el.textContent || '').replace(/\\s+/g, '').length, el.getElementsByTagName")
 
 # 运行时样式文本(<style> 与文档级构造样式表): 窄屏版组件的 CSS-in-JS 样式只在窄屏页里有
 # 页面全部样式规则的逐条文本(含 <link> 表、<style>、adoptedStyleSheets; 分组规则 @media/@supports/@layer 递归到
@@ -1639,8 +1685,48 @@ CV_EMIT_JS = r"""
         const pc = getComputedStyle(pe);
         return Math.abs(pe.clientWidth - (parseFloat(pc.paddingLeft) || 0) - (parseFloat(pc.paddingRight) || 0) - dw) <= 1.5;
       };
+      // 手机段两点仿射: 390 采集值与 0.92 倍宽对照页值不同、也不与宽同比(按「屏宽 - 固定内边距」算的轨道/卡片宽:
+      // 390→310、359→279), 两点定出 a·vw + b, 写 calc(); 钉 390 的 px 到 420 宽真机就窄一截、整段折行全错。
+      // 只对横向尺寸(宽/左右), 斜率限在 (0, 1.2] 内(随屏宽单调增、不超过屏宽增量); 竖向尺寸常是折行结果, 不外推
+      const AFFINE = 1;
+      const pairPx = (q) => {
+        if (!pairM || !m.paths) return null;
+        const L2 = pairM.paths && pairM.paths[m.paths[i]];
+        if (!L2 || L2[0] !== tagOf(el) || L2[0] === 'CANVAS') return null;
+        const PV = parse(L2[2] + (L2[4] ? ';' + L2[4] : ''));
+        return PV[q] ? px(PV[q][0]) : null;
+      };
+      const mPx = (q) => (V.m && V.m[q]) ? px(V.m[q][0]) : null;
+      const affine = (q) => {
+        if (!AFFINE || !/^(width|min-width|max-width|left|right)$/.test(q)) return null;
+        const a0 = mPx(q), a1 = pairPx(q);
+        if (a0 === null || a1 === null || a0 === a1 || !pairM.w || pairM.w === W.m) return null;
+        const k = (a0 - a1) / (W.m - pairM.w);
+        if (!(k > 0 && k <= 1.2)) return null;
+        if (Math.abs(a1 / pairM.w - a0 / W.m) <= Math.abs(a0 / W.m) * 0.015) return null;   // 同比: pairVal 写 vw
+        const b0 = a0 - k * W.m;
+        return 'calc(' + (k * 100).toFixed(4) + 'vw ' + (b0 < 0 ? '- ' : '+ ') + Math.abs(b0).toFixed(2) + 'px)';
+      };
+      // 手机段高度由内容折行决定(脚本量完文字高写成等高 px): 宽度随屏宽变(上面的仿射)或 0.92 倍宽对照页里高度变大
+      // (折行数变)时, 钉 390 的高到别的宽度就错一截。只对含文字、无替换元素的块: 手机段写 height:auto, 由内容撑开
+      const CONTENT_H = 1;
+      const contentH = (k) => {
+        if (!CONTENT_H || k !== 'm' || p !== 'height' || fluid.has('m') || !pairM || !m.paths) return false;
+        const h0 = mPx('height');
+        if (!h0) return false;
+        if (!(el.innerText || el.textContent || '').trim() || el.querySelector('img,video,canvas,svg,iframe,picture')) return false;
+        if (affine('width')) return true;
+        const h1 = pairPx('height');
+        if (h1 === null || h1 <= h0) return false;
+        return Math.abs(h1 / pairM.w - h0 / W.m) > Math.abs(h0 / W.m) * 0.015;
+      };
       const emit = (k, v) => {
         if (!v) return;
+        if (contentH(k)) { rule[k].push('height:auto' + (v[1] ? '!important' : '')); out.contentH = (out.contentH || 0) + 1; return; }
+        if (k === 'm' && !fluid.has('m')) {
+          const af = affine(p);
+          if (af) { rule[k].push(p + ':' + af + (v[1] ? '!important' : '')); out.affine = (out.affine || 0) + 1; return; }
+        }
         if (cvFill(k)) { rule[k].push(p === 'width' ? 'width:100%' : 'height:auto'); out.cvFill = (out.cvFill || 0) + 1; return; }
         // 固化 canvas 的桌面段不钉 px: 桌面段靠 aspect-ratio 随宽缩(采集宽之外的桌面宽度也对), 只给平板/手机段写首载页量到的高
         if (k === 'd' && p === 'height' && el.getAttribute('data-canvas-frozen')) return;
@@ -1684,6 +1770,33 @@ CV_EMIT_JS = r"""
   });
   if (srcFill) out.srcFill = srcFill;
   if (textFill) out.textFill = textFill;
+  // <html>/<body> 内联自定义属性按加载宽度不同(脚本量公告条/页头高度写进根元素): 缩放快照与 class 对照都不含它,
+  // 冻结后各段都是采集宽的值(allbirds 手机首屏 calc(100vh - var) 高 14px, 其下整页错位)。窄屏首载页的值与主页不同、
+  // 且 0.92 倍宽对照页(另一次加载)同值时写进该段: 根规则 !important 压过主页留下的内联值, 桌面段不写
+  const ROOTVARS = 1;
+  if (ROOTVARS) {
+    const vmap = s => { const o = {}; (s || '').split(';').forEach(x => { const k = x.indexOf(':'); if (k > 2) o[x.slice(0, k)] = x.slice(k + 1); }); return o; };
+    let rv = 0;
+    for (const [k, el, sel] of [['@html', document.documentElement, 'html'], ['@body', document.body, 'body']]) {
+      if (!el) continue;
+      const cur = {};
+      for (let i = 0; i < el.style.length; i++) { const p = el.style[i]; if (p.startsWith('--')) cur[p] = el.style.getPropertyValue(p).trim(); }
+      for (const t of ['t', 'm']) {
+        const L = loads[t] && loads[t][k];
+        if (!L || L.length < 10 || !L[9]) continue;
+        const P = loads.__pair && loads.__pair[t] && loads.__pair[t].paths && loads.__pair[t].paths[k];
+        const pv = P && P.length >= 10 ? vmap(P[9]) : null;
+        const decl = [];
+        for (const [p, v] of Object.entries(vmap(L[9]))) {
+          if (!v || cur[p] === v || /[<>{};]/.test(v) || v.length > 200) continue;
+          if (pv && pv[p] !== v) continue;          // 另一次加载值不同: 随机/时间量, 不归视口
+          decl.push(p + ':' + v + '!important');
+        }
+        if (decl.length) { bands[t].push(sel + '{' + decl.join(';') + '}'); rv += decl.length; }
+      }
+    }
+    if (rv) out.rootVars = rv;
+  }
   if (out.cls || out.xattr || out.touchOff) {
     // 当前视口段由分视口样式表里的 --cv-band 告诉运行时(段边界落盘时才确定, 脚本不重复计算断点)
     bands.d.push(':root{--cv-band:d}'); bands.t.push(':root{--cv-band:t}'); bands.m.push(':root{--cv-band:m}');
@@ -2744,9 +2857,20 @@ if not getattr(_config, "VARIANT_CANVAS_CANON", False):
     CV_PATHS_JS = CV_PATHS_JS.replace("const CANON = 1;", "const CANON = 0;")
 if not getattr(_config, "VARIANT_CANVAS_FILL", True):
     ALT_EXTRACT_JS = ALT_EXTRACT_JS.replace("const VFILL = 1;", "const VFILL = 0;")
+if not getattr(_config, "REVEAL_SVG_KEEP_TRANSFORM", True):
+    DEEP_FREEZE_JS = DEEP_FREEZE_JS.replace("const SVGKEEP = 1;", "const SVGKEEP = 0;")
+    ALT_EXTRACT_JS = ALT_EXTRACT_JS.replace("const SVGKEEP = 1;", "const SVGKEEP = 0;")
+if not getattr(_config, "VARIANT_ROOT_VARS", True):
+    CV_EMIT_JS = CV_EMIT_JS.replace("const ROOTVARS = 1;", "const ROOTVARS = 0;")
+if not getattr(_config, "VARIANT_CANVAS_SHOT", True):
+    ALT_EXTRACT_JS = ALT_EXTRACT_JS.replace("const VSHOT = 1;", "const VSHOT = 0;")
 if not getattr(_config, "ROOT_CLS_UA_SPLIT", True):
     CV_EMIT_JS = CV_EMIT_JS.replace("const ROOTUA = 1;", "const ROOTUA = 0;")
 ALT_INJECT_JS = ALT_INJECT_JS.replace("rs.textContent = CV_VP_SWAP_RUNTIME;", "rs.textContent = " + json.dumps(CV_VP_SWAP_RUNTIME) + ";")
+if not getattr(_config, "SVG_ATTR_INLINE_SKIP", True):
+    CV_RECORD_JS = CV_RECORD_JS.replace("const SVGSKIP = 1;", "const SVGSKIP = 0;")
+    CV_PATHS_JS = CV_PATHS_JS.replace("const SVGSKIP = 1;", "const SVGSKIP = 0;")
+    CV_EMIT_JS = CV_EMIT_JS.replace("const SVGSKIP = 1;", "const SVGSKIP = 0;")
 if not getattr(_config, "VARIANT_DOM_SWAP", True):
     ALT_INJECT_JS = ALT_INJECT_JS.replace("const VPSWAP = 1;", "const VPSWAP = 0;")
 # 交付首屏: 首屏(前 DEPLOY_DEFER_SCREENS 屏)以外、原站加载过的 <img> 改为原生懒加载 + 异步解码,
@@ -3034,3 +3158,59 @@ TIMER_JOURNAL_REWIND_JS = r"""(styleMode) => {
   }
   return out;
 }"""
+
+
+# 非法嵌套序列化回解析修复: 脚本(Vue/React)用 DOM API 能造出 <p><a><div>直播中</div>标题</a></p> 这种 HTML
+# 解析器不接受的树; 交付 HTML 与 MHTML 都是序列化后再解析, 解析器遇到块级开始标签就把 <p> 提前闭合 —— 卡片标题
+# 被拆成三段, 每张卡高 +40px(bilibili 保真轨)。修法: 序列化前把 <p> 里「会让 p 闭合」的中性块容器(div/section/
+# header… UA 默认样式只有 display:block)改成 span, 属性/子树原样搬过去, 由 :where(span[data-clone-div]){display:block}
+# (零特异度, 作者样式照样覆盖)补回块级。改前改后逐个比几何与关键计算样式, 有任何差异即原样换回(作者 CSS 用标签
+# 选择器 div.x / .a > div 命中它的情形)。返回 {fixed, reverted, other}: other = p 里其它会拆树的块(ul/h3/table…, 未改)
+NEST_FIX_JS = r"""
+() => {
+  const NEUTRAL = new Set(['DIV','SECTION','ARTICLE','ASIDE','HEADER','FOOTER','NAV','MAIN','HGROUP','SEARCH']);
+  const CLOSERS = new Set(['ADDRESS','BLOCKQUOTE','CENTER','DETAILS','DIALOG','DIR','DL','FIELDSET','FIGCAPTION',
+    'FIGURE','FORM','H1','H2','H3','H4','H5','H6','HR','MENU','OL','P','PRE','SUMMARY','TABLE','UL','LISTING','XMP']);
+  const SCOPE = new Set(['BUTTON','TABLE','TD','TH','CAPTION','OBJECT','APPLET','MARQUEE','TEMPLATE','SVG','MATH']);
+  const PROPS = ['display','position','float','width','height','marginTop','marginBottom','marginLeft','marginRight',
+    'paddingTop','paddingLeft','fontSize','fontWeight','fontStyle','lineHeight','color','backgroundColor',
+    'flexDirection','alignItems','justifyContent','gap','overflow','textAlign','whiteSpace','verticalAlign'];
+  const out = {fixed: 0, reverted: 0, other: 0};
+  if (!document.body) return out;
+  // 只看「落在 p 的 button 作用域内」的块: 中间隔着 button/table/svg 等时解析器不闭合 p
+  const inPScope = el => { for (let a = el.parentElement; a; a = a.parentElement) {
+      const t = a.tagName.toUpperCase(); if (t === 'P') return true; if (SCOPE.has(t)) return false; } return false; };
+  const cands = [], others = [];
+  for (const p of document.body.getElementsByTagName('p')) {
+    for (const el of p.getElementsByTagName('*')) {
+      const t = el.tagName.toUpperCase();
+      if (!inPScope(el)) continue;
+      if (NEUTRAL.has(t)) cands.push(el); else if (CLOSERS.has(t)) others.push(el);
+    }
+  }
+  out.other = new Set(others).size;
+  if (!cands.length) return out;
+  let st = document.querySelector('style[data-clone-nestfix]');
+  if (!st) { st = document.createElement('style'); st.setAttribute('data-clone-nestfix', '');
+    st.textContent = ':where(span[data-clone-div]){display:block}'; (document.head || document.documentElement).appendChild(st); }
+  const snap = el => { const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
+    return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)].join(',') + '|' +
+      PROPS.map(k => cs[k]).join('|'); };
+  const swap = (from, tag) => { const n = document.createElement(tag);
+    for (const a of Array.from(from.attributes)) { try { n.setAttribute(a.name, a.value); } catch (e) {} }
+    while (from.firstChild) n.appendChild(from.firstChild);
+    from.replaceWith(n); return n; };
+  // 由深到浅: 内层先换, 外层比对时子树已是终态
+  for (const el of cands.reverse()) {
+    if (!el.isConnected) continue;
+    const tag = el.tagName.toLowerCase(), par = el.parentElement;
+    const before = snap(el), pb = par ? snap(par) : '';
+    const n = swap(el, 'span');
+    n.setAttribute('data-clone-div', tag);
+    if (snap(n) !== before || (par && snap(par) !== pb)) {
+      const back = swap(n, tag); back.removeAttribute('data-clone-div'); out.reverted++;
+    } else out.fixed++;
+  }
+  return out;
+}
+"""

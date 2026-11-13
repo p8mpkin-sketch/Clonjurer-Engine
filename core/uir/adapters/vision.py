@@ -354,6 +354,9 @@ def merge_fill(skel: UIR, fill: dict) -> UIR:
         bands = [c for c in node.walk() if c.role == "text" and c is not node]
         if node.role == "image" or role == "image":
             continue
+        if any((c.content or {}).get("ocr") for c in bands):
+            # 本地 OCR 已按坐标写入该区块的文字(逐行定位), 模型按阅读顺序回答的文字对不上行, 不覆盖
+            bands, texts = [], []
         for band, text in zip(bands, texts):          # 文字行: 原位替换
             band.content["text"] = text
             if color:
@@ -521,6 +524,23 @@ def fill_by_tiles(ai_cfg: dict, skel: UIR, image_path, workers: int = 32, per_re
     return {"blocks": out}
 
 
+def ocr_layer(uir: UIR, image_path, log=None) -> UIR:
+    """确定性骨架上叠本地 OCR 文字层(core.uir.ocr); 无后端时原样返回。"""
+    from core.uir import ocr
+    if not ocr.enabled():
+        return uir
+    t0 = time.monotonic()
+    try:
+        n = ocr.apply_ocr(uir, ocr.read_lines(image_path))
+    except Exception as exc:   # OCR 只是增强层, 失败不影响骨架
+        if log:
+            log("UIR", f"本地 OCR 不可用: {type(exc).__name__}: {str(exc)[:120]}")
+        return uir
+    if log:
+        log("UIR", f"本地 OCR 文字层: {uir.meta.get('ocr_lines')} 行 → 写入 {n} 段, {time.monotonic() - t0:.1f}s")
+    return uir
+
+
 @register_input("screenshot")
 class ScreenshotAdapter:
     def to_uir(self, req: GenRequest, ctx: BuildContext) -> UIR:
@@ -533,6 +553,7 @@ class ScreenshotAdapter:
         if ctx.ai_cfg and not ctx.expired() and not req.hints.get("force_tier0") and llm_mode == "skeleton_fill":
             from core.uir.adapters.layout import segment_v2
             skel = segment_v2(img, asset_dir=(ctx.ws / "static" / "img") if ctx.ws else None)
+            skel = ocr_layer(skel, img, ctx.log)
             try:
                 ctx.log("UIR", f"截图→UIR(骨架填充): 确定性骨架 {len(skel.root.children)} 块, 调用 {ctx.ai_cfg['model']} 逐块填充")
                 pre = (ctx.extra or {}).pop("prefetch_fill", None)
@@ -581,6 +602,8 @@ class ScreenshotAdapter:
         if (req.hints.get("seg_algo") or "v2") == "v2":
             from core.uir.adapters.layout import segment_v2
             uir = segment_v2(img, asset_dir=(ctx.ws / "static" / "img") if ctx.ws else None)
+            if not req.hints.get("no_ocr"):
+                uir = ocr_layer(uir, img, ctx.log)
             ctx.log("UIR", f"截图→UIR(确定性版面分析 v2: 原分辨率分层切分/边框圆角/文字行, "
                            f"图片回填 {uir.meta.get('picture_regions')} 块/{uir.meta.get('picture_area')}): "
                            f"{uir.root.count()} 节点, {W}×{H}")

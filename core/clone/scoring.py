@@ -270,6 +270,13 @@ class ScoringMixin:
         if not (isinstance(fid, (int, float)) and isinstance(inter_score, (int, float))) \
                 or fid - inter_score < margin:
             return None
+        if getattr(config, "STATIC_KEEP_FEED", True) and getattr(self, "_feed_big", False) \
+                and inter_score >= config.STATIC_FEED_MIN_INTER:
+            # 交互轨滚动时页高在长(下拉流按到底续拉): 静态版剥了脚本, 流冻结在采集那一刻 —— 窄屏首载页没滚过, 首屏以下
+            # 全是骨架, 用户一滚就到底(bilibili 静态版 99.3 > 交互 70.3, 交付切静态后探针平板/手机 63→35)。
+            # 头条仍取两轨最优(保真轨), 只是预览/导出不换成冻结的静态版
+            self.log("RENDER", f"静态版不采用: 页面是滚动续载的信息流(交互轨 {inter_score} 可续拉, 静态版会冻结)")
+            return None
         main = self._main_page_file()
         original = self.ws / "original_preview.png"
         if not (main.is_file() and original.is_file()):
@@ -340,6 +347,74 @@ class ScoringMixin:
             with suppress(Exception):
                 route.abort()
 
+
+    _FF_RE = re.compile(r"@font-face\s*\{([^{}]*)\}", re.I | re.S)
+    _FF_URL_RE = re.compile(r"url\(\s*['\"]?([^'\")]+)['\"]?\s*\)", re.I)
+    _FF_MIME = {".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf", ".otf": "font/otf"}
+
+    def _fidelity_font_css(self, cap_bytes: int = 40 << 20) -> tuple:
+        """保真轨字体: Chromium 存 MHTML 不打包网页字体, 禁脚本回放时 @font-face 的原址全被离线守卫中止,
+        整页按回退字体排版(行盒变高, 越往下累积错位越大; 实测苹果页单行 28→40px、到页底 +120px, 保真轨恒 61 分)。
+        工作空间里已本地化的样式表声明了同名 @font-face 指向下载好的字体文件: 原样复制这些声明, src 换成 data: URL
+        (守卫放行 data:), 交给回放页。返回 (css, 字体数)。"""
+        blocks, seen, total = [], set(), 0
+        css_files = sorted((self.ws / "static" / "css").glob("*.css")) if (self.ws / "static" / "css").is_dir() else []
+        texts = []
+        for f in css_files:
+            with suppress(OSError):
+                texts.append((f.parent, f.read_text(encoding="utf-8", errors="replace")))
+        with suppress(OSError):
+            idx = self.ws / "index.html"
+            if idx.is_file():
+                texts.append((self.ws, idx.read_text(encoding="utf-8", errors="replace")))
+        for base, text in texts:
+            if "@font-face" not in text.lower():
+                continue
+            for m in self._FF_RE.finditer(text):
+                body = m.group(1)
+                srcs = []
+                for u in self._FF_URL_RE.findall(body):
+                    u = u.strip().split("?")[0].split("#")[0]
+                    if u.startswith(("data:", "http:", "https:", "//")):
+                        continue
+                    i = u.find("static/")
+                    f = (self.ws / u[i:]) if i >= 0 else (base / u)
+                    ext = f.suffix.lower()
+                    if ext in self._FF_MIME and f.is_file():
+                        srcs.append((f, ext))
+                if not srcs:
+                    continue
+                f, ext = sorted(srcs, key=lambda x: list(self._FF_MIME).index(x[1]))[0]
+                key = (re.sub(r"src\s*:[^;]*;?", "", body).strip(), str(f))
+                if key in seen:
+                    continue
+                size = f.stat().st_size
+                if total + size > cap_bytes:
+                    break
+                seen.add(key)
+                total += size
+                data = base64.b64encode(f.read_bytes()).decode("ascii")
+                desc = re.sub(r"src\s*:[^;]*;?", "", body).strip().rstrip(";")
+                blocks.append("@font-face{" + (desc + ";" if desc else "")
+                              + f"src:url(data:{self._FF_MIME[ext]};base64,{data}) format('{ext[1:].replace('ttf', 'truetype').replace('otf', 'opentype')}');}}")
+        return "\n".join(blocks), len(blocks)
+
+    def _fidelity_inject_fonts(self, fpage):
+        if not getattr(config, "FIDELITY_FONTS", True):
+            return
+        css, n = self._fidelity_font_css()
+        if not n:
+            return
+        # 禁脚本页里页内 Promise 不会结算: 只做同步 DOM 插入, 字体由浏览器自行解码; 驱动侧轮询 document.fonts.status
+        fpage.evaluate("css => { const s = document.createElement('style'); s.setAttribute('data-clone-fidelity-fonts', '');"
+                       " s.textContent = css; (document.head || document.documentElement).appendChild(s); document.body && document.body.offsetHeight; }", css)
+        end = time.monotonic() + 3.0
+        while time.monotonic() < end:
+            with suppress(Exception):
+                if fpage.evaluate("document.fonts.status") == "loaded":
+                    break
+            fpage.wait_for_timeout(100)
+        self.log("RENDER", f"保真轨补字体: {n} 个工作空间字体按原 @font-face 声明注入(MHTML 不打包网页字体)")
 
     def _prestart_fidelity(self, ctx):
         """后台页非阻塞加载 capture.mhtml(只等到提交), 供 _render_fidelity 接手。"""
@@ -418,18 +493,45 @@ class ScoringMixin:
         results.update(snap["results"])
 
 
-    CLONE_SCROLL_JS = """async () => {
-        await new Promise(res => {
-            let y = 0;
-            const step = () => {
-                y += 800;
-                window.scrollTo(0, y);
-                if (y < document.body.scrollHeight) setTimeout(step, 60);
-                else { window.scrollTo(0, 0); setTimeout(res, 250); }
-            };
-            step();
-        });
+    # target: 原站基准整页高(CSS px, 0=未知)。克隆页滚到底时若还没到基准高, 且滚动途中页高涨过(无限下拉流:
+    # 页面脚本按「到底」再拉一批), 在底部等页高增长再继续滚, 直到达到基准高或连续两次等不到增长(每次 ≤1.2s,
+    # 总预算 12s, 低于驱动侧 CLONE_SCROLL_MAX_MS)。旧实现 800px/60ms 一口气滚到底即回顶: 原站基准按 400px/两帧
+    # 慢滚, 流加载了 4 批; 克隆只赶上 1 批, 整页短 40%(bilibili 交互轨 3072 vs 4938)。页高没涨过/已到基准高的
+    # 页面行为与旧实现完全相同, 不多等
+    CLONE_SCROLL_JS = """async (target) => {
+        const H = () => Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0);
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+        const t0 = performance.now(), h0 = H();
+        let y = 0, miss = 0;
+        for (;;) {
+            while (y < H()) { y += 800; window.scrollTo(0, y); await sleep(60); }
+            const h = H();
+            // 页高从没涨过时只等一次(新流在到底后才请求下一批); 涨过的流允许连续两次等不到
+            if (!(target > 0) || h >= target * 0.97 || miss >= (h <= h0 ? 1 : 2) || performance.now() - t0 > 12000) break;
+            let grew = false;
+            for (let i = 0; i < 8; i++) { await sleep(150); if (H() > h + 4) { grew = true; break; } }
+            if (grew) { miss = 0; continue; }
+            miss++;
+            window.scrollTo(0, Math.max(0, h - innerHeight * 2)); await sleep(120);
+            window.scrollTo(0, h); y = h;
+        }
+        window.__cloneScrollGrew = [h0, H()];
+        window.scrollTo(0, 0);
+        await sleep(250);
     }"""
+
+    def _scroll_target(self, page) -> int:
+        """原站基准截图的整页高(换算到当前视口 CSS px); 无基准或宽度对不上时 0(不做增长等待)。"""
+        try:
+            from PIL import Image
+            vw = int((page.viewport_size or {}).get("width") or 0)
+            with Image.open(self.ws / "original_preview.png") as im:
+                w, h = im.size
+            if vw <= 0 or w <= 0:
+                return 0
+            return int(h * vw / float(w))
+        except Exception:
+            return 0
 
 
     def _load_clone(self, page, base, phases: bool = False):
@@ -492,16 +594,32 @@ class ScoringMixin:
             # 懒加载触发: 分段滚动到底再回顶, 派发 IntersectionObserver
             # 不 await 页内滚动: 滚到某段触发页面脚本死循环时, 等它返回的 evaluate 会永久挂起;
             # 改为页内起跑 + 驱动侧限时轮询完成标记, 超时即判卡死(交互轨本轮作废)
+            # 首评之后的校准重渲染: 首评滚动没见到页高增长(不是下拉流)就不再在底部等
+            target = self._scroll_target(page) if (phases or getattr(self, "_feed_grew", True)) else 0
             try:
                 page.evaluate("(src) => { window.__cloneScrollDone = false;"
                               " (0, eval)('(' + src + ')')().then(() => { window.__cloneScrollDone = true; },"
-                              " () => { window.__cloneScrollDone = true; }); }", self.CLONE_SCROLL_JS)
+                              " () => { window.__cloneScrollDone = true; }); }",
+                              self.CLONE_SCROLL_JS.replace("async (target) =>", f"async (target = {target}) =>"))
                 page.wait_for_function("window.__cloneScrollDone === true",
                                        timeout=config.CLONE_SCROLL_MAX_MS, polling=200)
             except Exception as exc:
                 if "Timeout" in type(exc).__name__ or "Timeout" in str(exc):
                     raise CloneUnresponsive(
                         f"克隆页滚动 {config.CLONE_SCROLL_MAX_MS}ms 未完成(页面脚本死循环)") from exc
+            if phases and target:
+                g = None
+                with suppress(Exception):
+                    g = page.evaluate("() => window.__cloneScrollGrew || null")
+                self._feed_grew = bool(g and g[1] > g[0] + 4)
+                # 成规模的续载(长出 ≥ 一屏且 ≥ 原高 25%): 信息流, 不是图片撑高/懒挂载的零头(163 +54px、gitee +20px)
+                vh = int((page.viewport_size or {}).get("height") or 0)
+                # 且是「采集冻结的页比原站短、续载把它补到原站高」: 冻结 DOM 已经齐了还在长的(脚本重跑重复追加, 越滚越长)
+                # 不算 —— 那种页静态版才对(合成用例 lazy_infinite_cols: 2312→3608 超出基准, 交互轨 92 / 静态版 100)
+                self._feed_big = bool(g and g[1] - g[0] >= max(vh, 0.25 * g[0])
+                                      and g[0] < 0.9 * target and g[1] <= 1.1 * target)
+                if self._feed_grew and g:
+                    self.log("RENDER", f"克隆滚动: 页高随滚动增长 {int(g[0])}→{int(g[1])}px(基准 {target}px)")
         if phases:
             tp = self._phase("评分-克隆滚动", tp)
         self._settle(page)
@@ -899,6 +1017,8 @@ class ScoringMixin:
                         t0 = time.monotonic()
                         fpage.goto('file://' + str(self.ws / 'capture.mhtml'),
                                    wait_until='load', timeout=30000)
+                    with suppress(Exception):
+                        self._fidelity_inject_fonts(fpage)
                     with suppress(Exception):
                         self._settle_static(fpage, t0)
                     self._full_shot(fpage, self.ws / 'fidelity_preview.png', "保真轨")

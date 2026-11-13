@@ -60,6 +60,8 @@ BASELINE_IMG_STALL_MS = 4000      # 等待期间连续这么久无一张到齐�
 HOST_FAIL_TRIP = 3                # 单主机网络层失败(SSL/超时/连接)达此次数即熔断
 MAX_ASSETS_PER_TASK = 400          # 单任务最大静态资源条目数
 CLONE_SCROLL_MAX_MS = 30000        # 克隆页懒加载滚动的完成时限(超时即判页面脚本卡死)
+STATIC_KEEP_FEED = True         # 交互轨评分滚动见页高增长(下拉流)时不把预览/导出换成静态版(静态版流冻结)
+STATIC_FEED_MIN_INTER = 50      # 交互轨低于此分(塌了)时仍允许换静态版
 CLONE_RESPONSIVE_MS = 8000         # 克隆页主线程看门狗: 加载后这么久执行不了一行脚本即判卡死
 RENDER_ASSET_RESERVE = 300         # 名额外预留给"浏览器实际加载过/克隆渲染实际请求"的资源:
                                    # 静态提取先把名额用满(苹果 @font-face 每字重 woff/woff2/ttf 三份,
@@ -175,6 +177,12 @@ PHASE_RESET_SIBLINGS = True      # 状态类相位复位也认没有 id 的同�
 CANVAS_FILL_BANDS = True         # 固化 canvas 撑满容器且宽高比各段恒定 → 平板/手机段写 width:100%+height:auto, 不钉首载宽度的 px
 VARIANT_CANVAS_CANON = False     # 结构对比时把已固化的 canvas 按 CANVAS 记(不再给 canvas 父元素出窄屏变体)。默认关: vite 手机 98→60, 窄屏变体里的 canvas 才是该宽度的真状态
 VARIANT_CANVAS_FILL = True       # 窄屏变体里脚本写了内联 px 宽高且撑满父元素的 canvas → width:100%+height:auto, 不钉首载宽度的 px
+VARIANT_CANVAS_SHOT = True       # 窄屏变体里位图读回为空的 canvas(WebGL 未开 preserveDrawingBuffer / 跨域污染) → 对窄屏页按其矩形截图回填, 不再是透明图
+REVEAL_SVG_KEEP_TRANSFORM = True # 入场动画强制显形不给 SVG 内部图元写 transform:none(其 transform 是几何定位, 压掉后各组挤回原点)
+VARIANT_ID_SLOT_RENAME = True    # 窄屏变体 id 错位判据: 两侧 id 都不在对方页但像同一槽位的随机名(数字段不同/同前缀带数字) → 不算错位, 不提升变体根
+VARIANT_ID_LIFT_MIN_TEXT = 0.95  # 只因子项 id 错位提上来的变体根: 窄屏版文字须 ≥ 主页同子树的这个比例才用(否则是窄屏页模块未填充完)
+VARIANT_CONTENT_DIFF = True      # 窄屏变体: 结构相同但叶子文字/图源按加载宽度不同(对照页一致)的子树也作为变体根(按断点换商品组)
+VARIANT_ROOT_VARS = True         # <html>/<body> 内联 --自定义属性 按加载宽度不同(窄屏首载页与 0.92 倍宽对照一致) → 写进平板/手机段根规则
 ROOT_INLINE_VARIES_NOSIZE = True  # 根字号(html/body 内联 px)被脚本按屏宽改写时, 桌面宽采集的字体烘焙不烘字号/行高/字距(交回 rem 规则)
 NARROW_UA_SPLIT = True           # 手机 UA 首载页之外再开一张桌面 UA 390 页: 只在手机 UA 下才换结构的变体只给触屏显示
 NARROW_UA_CLS = True             # 手机 UA 首载页与桌面 UA 同宽页同路径 class 不同(桌面 UA 同宽与主页相同)→ 只给触屏手机段换 class(wix 手机卡片默认收起)
@@ -329,7 +337,15 @@ CONTENT_KEEP_EARLY_ADD = True
 # 拦截页识别看主页面标题(「验证码_xx」「安全验证」+ 正文很短): 风控页正文是登录框, 正文话术认不出
 BLOCK_TITLE_CHECK = True
 
+# ---- 任务稳定性(调度器) ----
+MIN_FREE_DISK_MB = 1024          # 工作区所在卷剩余低于此值时暂停领取新任务(0 关闭); 一轮国内 17 站约占 2GB
+TASK_STALE_S = 1800              # 本进程正在执行的任务心跳(updated_at)停了这么久判卡死 → failed
+TASK_ORPHAN_S = 120              # 不在本进程执行名单里的 running 任务(工作线程已死)停了这么久即判 failed
+
 # ---------------------------------------------------------------------------
+# svg 的 width/height 属性被内联样式覆盖时不当作分视口尺寸(挂载时按宽写一次属性的插画); 0 关(A/B 用)
+SVG_ATTR_INLINE_SKIP = True
+
 # 常量环境覆盖(A/B 用): CLONER_CFG_<常量名>=值 覆盖本模块同名的 bool/int/float/str 常量。
 # 例 CLONER_CFG_NARROW_PHONE_UA=0 CLONER_CFG_MAIN_SETTLE_MS=0。CI 的 engine_env 输入就是一串这样的赋值,
 # 同一分支不改代码就能对照开关; 类型随原值, 解析失败忽略。

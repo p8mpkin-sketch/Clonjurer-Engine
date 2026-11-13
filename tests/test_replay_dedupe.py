@@ -28,6 +28,27 @@ class ReplayDedupe(unittest.TestCase):
             finally:
                 b.close()
 
+    def test_hidden_measure_probe_kept(self):
+        """脚本同步新建的隐藏测量 span 与冻结 DOM 里的旧副本逐字相同: 不删, 否则脚本读到脱离文档节点的空字号。"""
+        from playwright.sync_api import sync_playwright
+        page_html = ("<!doctype html><html><head>GUARD</head><body><main>"
+                     '<span class="zoom-probe" style="position:absolute;visibility:hidden;font-size:1rem">x</span>'
+                     "<script>var s=document.createElement('span');s.className='zoom-probe';"
+                     "s.setAttribute('style','position:absolute;visibility:hidden;font-size:1rem');s.textContent='x';"
+                     "document.querySelector('main').appendChild(s);"
+                     "document.addEventListener('DOMContentLoaded',function(){window.__fs=parseFloat(getComputedStyle(s).fontSize);});</script>"
+                     "</main></body></html>")
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                page = b.new_page()
+                page.set_content(page_html.replace("GUARD", REPLAY_DEDUPE_JS))
+                page.wait_for_timeout(300)
+                self.assertEqual(page.evaluate("window.__fs"), 16)
+                self.assertEqual(page.evaluate("document.querySelectorAll('.zoom-probe').length"), 2)
+            finally:
+                b.close()
+
 
 if __name__ == "__main__":
     unittest.main()

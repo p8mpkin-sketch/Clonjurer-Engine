@@ -2151,6 +2151,17 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <i :data-lucide="poolRestarting ? 'loader-2' : 'refresh-ccw'" :class="poolRestarting ? 'animate-spin' : ''" class="w-3.5 h-3.5"></i>
             [[ poolRestarting ? '重启调度中…' : '一键清理重启实例池' ]]
           </button>
+          <div v-if="storage" class="mt-4 pt-3 border-t border-white/[0.06] space-y-1.5 text-[11px]">
+            <div class="flex justify-between"><span class="text-slate-500">磁盘剩余</span>
+              <span class="font-mono tnums" :class="storage.disk && storage.disk.free < storage.disk.min_free_mb * 1048576 ? 'text-rose-300' : 'text-emerald-300'">[[ storage.disk ? fmtBytes(storage.disk.free) : '—' ]]</span></div>
+            <div class="flex justify-between"><span class="text-slate-500">工作空间</span><span class="font-mono text-slate-300 tnums">[[ fmtBytes(storage.workspaces.bytes) ]]</span></div>
+            <div class="flex justify-between"><span class="text-slate-500">导出包(可再生)</span><span class="font-mono text-slate-300 tnums">[[ fmtBytes(storage.exports.bytes) ]]</span></div>
+            <div v-if="storage.disk && storage.disk.free < storage.disk.min_free_mb * 1048576" class="text-[9px] text-rose-300">剩余低于 [[ storage.disk.min_free_mb ]]MB, 已暂停领取新任务</div>
+            <button @click="pruneExports()" :disabled="pruning"
+              class="mt-1 w-full py-2 rounded-xl border border-white/10 bg-white/[0.03] text-[11px] text-slate-300 hover:bg-white/[0.06] disabled:opacity-50 transition-all">
+              [[ pruning ? '清理中…' : '清理可再生导出包(下载时自动重建)' ]]
+            </button>
+          </div>
         </div>
 
         <!-- 快速上手 -->
@@ -3525,7 +3536,7 @@ const __vueApp = createApp({
       telemetry: { browser: { active: 0, max: 4, alive: false }, cas: { assets: 0, hit_rate: 0 }, queue: { pending: 0, running: 0, completed: 0, failed: 0 }, batches: [] },
       urlsText: '',
       form: { mode: 'single', maxPages: 3, viewport: 'desktop', renderTimeout: 30, cssom: true, mockApi: true, proxy: true, interactionSim: true, simLoginMessage: '', simLoginRedirect: '', disableHydration: false, similarity: true, cookie: '', bearer: '', ua: '', aiRepair: false, aiKey: '', aiModel: '', aiBaseUrl: '', package: '' },
-      heroUrl: '', advOpen: true, poolRestarting: false,
+      heroUrl: '', advOpen: true, poolRestarting: false, storage: null, storageAt: 0, pruning: false,
       aiDefaults: { base_url: '', model: '' }, aiKeyConfigured: false,
       aiReport: { open: false, loading: false, busy: false, data: null },
       splitRight: 'cloned',
@@ -4180,6 +4191,27 @@ const __vueApp = createApp({
         this.telemetry = data;
         this.batches = data.batches || [];
       } catch (e) { return; }
+      if (Date.now() - this.storageAt > 60000) this.loadStorage();
+    },
+    async loadStorage() {
+      this.storageAt = Date.now();
+      try {
+        const r = await fetch('/api/v4/admin/storage');
+        if (r.ok) this.storage = await r.json();
+      } catch (e) { /* 存储占用只是参考信息 */ }
+    },
+    async pruneExports() {
+      if (this.pruning) return;
+      if (!confirm('删除可再生的导出包?\n只删工作空间仍在的已完成任务的 ZIP, 下载时会自动重建; 克隆工作空间不动。')) return;
+      this.pruning = true;
+      try {
+        const r = await fetch('/api/v4/admin/storage/prune_exports', { method: 'POST' });
+        const data = await r.json();
+        if (!r.ok) { this.toast('❌ ' + (data.error || '清理失败')); return; }
+        this.toast(`✅ 已清理 ${data.deleted} 个导出包, 释放 ${this.fmtBytes(data.freed_bytes)}`);
+        await this.loadStorage();
+      } catch (e) { this.toast('网络错误: ' + e); }
+      finally { this.pruning = false; }
     },
     /* ---------- 基础 ---------- */
     fmtNum(n) { return Number(n || 0).toLocaleString(); },
@@ -4187,7 +4219,8 @@ const __vueApp = createApp({
       b = Number(b || 0);
       if (b < 1024) return b + ' B';
       if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
-      return (b / 1048576).toFixed(1) + ' MB';
+      if (b < 1073741824) return (b / 1048576).toFixed(1) + ' MB';
+      return (b / 1073741824).toFixed(1) + ' GB';
     },
     domainOf(url) { try { return new URL(url).hostname; } catch (e) { return (url || '').replace(/^https?:\/\//, '').split('/')[0]; } },
     favBadge(task) {
