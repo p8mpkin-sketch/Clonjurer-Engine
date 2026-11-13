@@ -328,9 +328,10 @@ FLUID_SKIP_UNSTABLE_WAIT = True
 # 窄屏收回: 两张 0.92 倍宽对照页的「到位」等待(文字/图片计数连续不变, ≥0.75s)同时起、逐页取结果(原逐页串行等)
 NARROW_PAIR_PARALLEL = True
 # 窄屏变体: 各页网络静置共用一个 3s 截止时刻(各页的到位链本就同时起, 网络一直不静的站原来每页各白等 3s)。
-# 默认关: CI 同时段 A/B(run 656 开 / 655 关)techcrunch 手机 73.6 / 95.7, 单样本分不清是噪声还是手机页少等
-# 2.5s 网络静置让广告位没到位, 待多样本确认; 开时 solidjs/techcrunch/allbirds 变体阶段各省约 2.5s
-NARROW_IDLE_SHARED = False
+# 复核(run 657 开 / 659 关, 同时段 3 站): techcrunch 开 80.4(手机 63.1) / 关 74.2(手机 65.5), 关也一样掉,
+# 且 techcrunch 手机页网络静置两边都是 0.0s(共用截止根本没介入), 判定 656/655 的差是该站噪声;
+# solidjs 两边同分 99.6, allbirds 99.7/100.0; 耗时三站开时都更短。默认开, CLONER_CFG_NARROW_IDLE_SHARED=0 可回退
+NARROW_IDLE_SHARED = True
 # 内容守卫: 被删块原位出现了删除后才插入的同标签同类新块(水合失配后客户端重渲染, 数据少所以更矮)= 换了一份, 不放回
 CONTENT_KEEP_NEW_TWIN = True
 # 手机 UA 窄屏首载页启动失败时, 同宽桌面 UA 页接管手机段
