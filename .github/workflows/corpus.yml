@@ -48,7 +48,7 @@ on:
         required: false
         default: "false"
       probe_env:
-        description: "探针口径 A/B: 空格分隔(PROBE_CAPTURE=full 整页一次截图 / PROBE_TIMERS=live 不拦周期定时器 / PROBE_REPEAT=3 每格测 3 次取中位)"
+        description: "探针口径 A/B: 空格分隔(PROBE_CAPTURE=full 整页一次截图 / PROBE_TIMERS=hold 旧口径(默认 holdc) / PROBE_TIMERS=live 不拦周期定时器 / PROBE_REPEAT=3 每格测 3 次取中位)"
         required: false
         default: ""
       diag_keys:
