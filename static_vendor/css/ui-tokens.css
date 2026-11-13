@@ -109,3 +109,21 @@ html body input[type="checkbox"],html body input[type="radio"]{accent-color:var(
 [data-theme="light"] body .text-slate-100,[data-theme="light"] body .text-slate-200{color:#0F172A}
 [data-theme="light"] body [class*="bg-indigo-500/"]{border-color:rgba(79,70,229,.45)}
 [data-theme="light"] body button[class*="bg-slate-950/"]{background:#fff;border-color:#CBD5E1}
+
+/* ---------- 9. 窄屏顶栏: 运维指标胶囊收起, 面包屑不被遮挡 ---------- */
+@media (max-width:760px){
+  html body .top-header{padding-left:12px;padding-right:12px;gap:8px}
+  html body .top-header > :not(:first-child):not(:last-child){display:none}
+  html body .top-header > :first-child{flex:1;overflow:hidden}
+  html body .top-header > :last-child > :not(:last-child):not(:nth-last-child(3)){display:none}
+  /* 卡片网格最小 360px 的列在手机上会撑出屏幕: 改为单列自适应 */
+  html body [class*="minmax(360px"],html body [class*="minmax(340px"],html body [class*="minmax(320px"]{grid-template-columns:minmax(0,1fr)}
+  html body main.flex-1{min-width:0}
+  html body .console-pill{bottom:auto;top:12px;right:116px;padding:0;width:32px;height:32px;justify-content:center;border-radius:10px}
+  html body .console-pill > :not(:first-child){display:none}
+  /* 新建克隆: 左栏 560px 改满宽, 右侧说明栏收起, 三列卡片改单列 */
+  html body aside[class*="w-[560px]"]{width:100%;border-right:0}
+  html body aside.flex-1.overflow-y-auto{display:none}
+  html body aside .grid-cols-3{grid-template-columns:minmax(0,1fr)}
+  html body .main-wrapper div.flex.flex-1.min-h-0{min-width:0;max-width:100%}
+}
