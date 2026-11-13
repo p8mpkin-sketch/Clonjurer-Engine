@@ -106,6 +106,7 @@
 
 - 三个作业都是 `workflow_dispatch` + 夜间定时, 不进每次 push 的 `engine-gate`(构建 5~10 分钟)。
 - 闸门: 三平台 CI 绿, 产物签名校验通过, 冒烟截图与 html_css 渲染像素 v3 ≥90(同一 HTML 应接近逐值)。
+- **落地(2026-11-05)**: `.github/workflows/build.yml`(`app-build`, 手动 + 夜间 03:00)+ `core/uir/toolchain.py` 签名步骤 + `engine_bench/build/ci_build.py` 冒烟驱动, 详见 DESIGN.md §9.17。未配 secret 时照常出包, 文件名带 `-unsigned`。需要 cz 在仓库 Settings → Secrets and variables → Actions 添加的 secret 名见 §8 末尾。
 
 ### 3.4 L2 静态覆盖度补齐(配合 a11y 做兜底)
 `<include>/<merge>`、`@style/@dimen` 解析、多密度资源选择、ConstraintLayout 约束 → Flex 近似的精度提升; 解析不了的一律 `static_unavailable` 走动态通道, 不猜。
@@ -181,6 +182,12 @@
 | GitHub Actions: macOS + Windows runner 分钟数(或一台可 SSH 的 Windows 机器) | §3.3 CI 与 Windows 实机冒烟 | P4 | Windows 冒烟改为手动 |
 | L2/L3 授权样本: ≥10 个可合法采集的应用(开源 Android 应用 / 自研 / 已授权桌面应用), 其中 ≥4 个只做留出 | §3 语料 | P3 | 用 Flutter/Electron 官方示例应用自建语料(分数可信度较低) |
 | 一台可长期授予「辅助功能」权限的 macOS 与一台 Windows 机器 | a11y 采集 | P3 | macOS 本机已可; Windows 后端只做夹具测试 |
+
+**签名 secret 名(只填名字对应的值, 不入库; 缺哪组哪个平台就退回未签名)**:
+- Android: `ANDROID_KEYSTORE_BASE64`(keystore 文件 base64)、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`(可省, 缺省同 keystore 口令)
+- macOS 签名: `APPLE_CERT_P12_BASE64`(Developer ID Application 证书 .p12 的 base64)、`APPLE_CERT_PASSWORD`、`APPLE_SIGN_IDENTITY`(如 `Developer ID Application: 名字 (TEAMID)`)
+- macOS 公证(可选, 需先有签名): `APPLE_ID`、`APPLE_APP_PASSWORD`(App 专用密码)、`APPLE_TEAM_ID`
+- Windows: `WINDOWS_CERT_PFX_BASE64`(代码签名证书 .pfx 的 base64)、`WINDOWS_CERT_PASSWORD`
 
 ---
 
