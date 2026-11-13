@@ -62,3 +62,19 @@ class PrecompiledCssTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class IconSubsetTests(unittest.TestCase):
+    """图标改为子集(tools/icons/build_lucide_subset.js): 模板里出现的图标名都要在子集里, 否则图标静默空白。"""
+
+    def test_template_icons_in_subset(self):
+        sub = (ROOT / "static_vendor" / "js" / "lucide.subset.js").read_text(encoding="utf-8")
+        have = set(re.findall(r'"([A-Z][A-Za-z0-9]*)":\[\[', sub))
+
+        def pascal(n):
+            return re.sub(r"(\w)(\w*)(_|-|\s*)", lambda m: m.group(1).upper() + m.group(2).lower(), n)
+        names = set(re.findall(r'data-lucide="([a-z0-9-]+)"', HTML))
+        names |= set(re.findall(r"\bicon:\s*'([a-z0-9-]+)'", HTML))
+        missing = sorted(n for n in names if pascal(n) not in have)
+        self.assertEqual(missing, [], "模板用到的图标不在子集里, 请运行 node tools/icons/build_lucide_subset.js")
+        self.assertIn("/vendor/js/lucide.subset.js", HTML)
