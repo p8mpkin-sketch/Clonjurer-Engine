@@ -15,7 +15,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 <!-- 顶级字体体系: Inter / Plus Jakarta Sans / JetBrains Mono / Noto Sans SC -->
 <link href="/vendor/fonts/fonts.css" rel="stylesheet">
 <!-- UI 改版 P0 规范层: 字号/对比度/焦点/语义色(只换样式) -->
-<link href="/vendor/css/ui-tokens.css?v=1" rel="stylesheet">
+<link href="/vendor/css/ui-tokens.css?v=2" rel="stylesheet">
 
 <script src="/vendor/js/tailwind.js"></script>
 <script>
@@ -2212,42 +2212,50 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <i data-lucide="log-out" class="w-3.5 h-3.5"></i>看全部项目
         </button>
       </div>
-      <!-- 任务详情头 -->
-      <div v-if="view==='task' && selectedTask" class="shrink-0 flex flex-wrap items-center gap-2.5 px-4 py-2.5 border-b border-white/[0.07] bg-[#0A1120]/60">
-        <button @click="goModule('tasks')" class="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-white/[0.08] text-[11px] text-slate-400 hover:text-indigo-300 transition-all">
-          <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i>返回列表
+      <!-- 任务详情头: 左=是谁/状态/还原度, 右=一个主操作(部署或访问) + 次要操作 -->
+      <div v-if="view==='task' && selectedTask" class="task-head shrink-0 flex flex-wrap items-center gap-3 px-4 py-3 border-b border-white/[0.07] bg-[#0A1120]/60">
+        <button @click="goModule('tasks')" aria-label="返回任务列表" class="flex items-center justify-center w-8 h-8 rounded-lg border border-white/[0.10] text-slate-400 hover:text-white transition-all">
+          <i data-lucide="arrow-left" class="w-4 h-4"></i>
         </button>
-        <span class="w-4 h-4 rounded inline-flex items-center justify-center text-[8px] font-bold text-white shrink-0" v-html="favBadge(selectedTask)"></span>
+        <span class="w-6 h-6 rounded-md inline-flex items-center justify-center text-[10px] font-bold text-white shrink-0" v-html="favBadge(selectedTask)"></span>
         <div class="min-w-0">
-          <div class="text-xs font-bold text-slate-100 truncate max-w-[280px]">[[ selectedTask.domain ]]</div>
-          <div class="text-[9.5px] text-slate-500 font-mono truncate max-w-[280px]">任务 #[[ selectedTask.id ]] · [[ selectedTask.target_url ]]</div>
+          <div class="flex items-center gap-2">
+            <span class="text-base font-semibold text-slate-100 truncate max-w-[320px]">[[ selectedTask.domain ]]</span>
+            <span class="px-2 py-0.5 rounded-full border text-[12px] whitespace-nowrap" :class="statusBadge(selectedTask.status)">[[ statusText(selectedTask.status) ]]</span>
+          </div>
+          <div class="text-[12px] text-slate-500 truncate max-w-[420px]">#[[ selectedTask.id ]] · [[ selectedTask.target_url ]]</div>
         </div>
-        <span class="px-2 py-1 rounded-md border text-[10px]" :class="statusBadge(selectedTask.status)">[[ statusText(selectedTask.status) ]]</span>
-        <button @click="openTrackerConfig"
-          class="flex items-center gap-2 px-4 py-2 rounded-xl font-display font-bold text-xs shadow-lg transition-all duration-200"
-          :class="trackerEnabled ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-emerald-900/40 ring-2 ring-emerald-400/40' : 'bg-gradient-to-r from-emerald-500/90 to-teal-500/90 text-white hover:from-emerald-400 hover:to-teal-400'">
-          <i data-lucide="radio" class="w-4 h-4"></i>表单埋点推送
-          <span v-if="trackerEnabled" class="w-2 h-2 rounded-full bg-white breath"></span>
-        </button>
-        <span v-if="selectedTask.similarity_score != null" class="px-2 py-1 rounded-md border text-[10px] font-mono" :class="selectedTask.similarity_score >= 95 ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-indigo-500/40 bg-indigo-500/10 text-indigo-300'">还原度 [[ selectedTask.similarity_score ]]%</span>
+        <div v-if="selectedTask.similarity_score != null" class="flex items-baseline gap-1 pl-3 ml-1 border-l border-white/[0.08]" title="克隆站与原站的视觉还原度">
+          <span class="text-[12px] text-slate-500">还原度</span>
+          <span class="text-2xl font-semibold tnums" :class="selectedTask.similarity_score >= 95 ? 'text-emerald-400' : selectedTask.similarity_score >= 85 ? 'text-slate-100' : 'text-amber-400'">[[ Number(selectedTask.similarity_score).toFixed(1) ]]</span>
+        </div>
         <div class="flex-1"></div>
-        <!-- Docker 快捷控制 -->
-        <template v-if="dockerInfo">
-          <a v-if="dockerInfo.status==='running' && dockerInfo.url" :href="dockerInfo.url" target="_blank"
-            class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 text-[10.5px] text-sky-300 hover:bg-sky-500/20 transition-all">
-            <i data-lucide="external-link" class="w-3.5 h-3.5"></i>本地访问 :[[ dockerInfo.port ]]
-          </a>
-          <button v-if="dockerInfo.status==='running'" @click="dockerAction('stop')" :disabled="docker.busy"
-            class="px-2.5 py-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 text-[10.5px] text-amber-300 hover:bg-amber-500/20 disabled:opacity-50 transition-all">停止容器</button>
-          <button v-else @click="dockerAction('start')" :disabled="docker.busy"
-            class="px-2.5 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-[10.5px] text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50 transition-all">[[ docker.busy ? '启动中…' : '启动容器' ]]</button>
-        </template>
-        <button @click="openCompare(selectedTask)" class="px-2.5 py-1.5 rounded-lg border border-fuchsia-500/40 bg-fuchsia-500/10 text-[10.5px] text-fuchsia-300 hover:bg-fuchsia-500/20 transition-all">视觉对比</button>
-        <button @click="rebuild(selectedTask)" class="px-2.5 py-1.5 rounded-lg border border-white/[0.08] text-[10.5px] text-slate-400 hover:text-amber-300 transition-all">重建</button>
+        <div class="flex flex-wrap items-center gap-2">
+          <button @click="openCompare(selectedTask)" class="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white hover:border-white/[0.2] transition-all"><i data-lucide="images" class="w-4 h-4"></i><span class="ui-btn-label">对比原站</span></button>
+          <button @click="openTrackerConfig" class="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white hover:border-white/[0.2] transition-all" :title="trackerEnabled ? '表单埋点推送已开启' : '表单埋点推送'">
+            <i data-lucide="radio" class="w-4 h-4"></i><span class="ui-btn-label">表单推送</span>
+            <span v-if="trackerEnabled" class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+          </button>
+          <button v-if="selectedTask.zip_path" @click="downloadZip(selectedTask)" class="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white hover:border-white/[0.2] transition-all"><i data-lucide="download" class="w-4 h-4"></i><span class="ui-btn-label">下载 ZIP</span></button>
+          <button @click="rebuild(selectedTask)" class="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white hover:border-white/[0.2] transition-all" title="用当前引擎重新克隆"><i data-lucide="rotate-cw" class="w-4 h-4"></i><span class="ui-btn-label">重建</span></button>
+          <template v-if="['completed','partial'].includes(selectedTask.status)">
+            <template v-if="dockerInfo && dockerInfo.status==='running'">
+              <button @click="dockerAction('stop')" :disabled="docker.busy" class="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white hover:border-white/[0.2] transition-all disabled:opacity-50"><i data-lucide="square" class="w-4 h-4"></i><span class="ui-btn-label">停止部署</span></button>
+              <a v-if="dockerInfo.url" :href="dockerInfo.url" target="_blank" rel="noopener"
+                class="flex items-center gap-1.5 h-8 px-3.5 rounded-lg bg-[#4f46e5] hover:bg-[#4338ca] text-white text-[13px] font-medium transition-all">
+                <i data-lucide="external-link" class="w-4 h-4"></i>打开站点 :[[ dockerInfo.port ]]
+              </a>
+            </template>
+            <button v-else @click="dockerAction('start')" :disabled="docker.busy"
+              class="flex items-center gap-1.5 h-8 px-3.5 rounded-lg bg-[#4f46e5] hover:bg-[#4338ca] text-white text-[13px] font-medium disabled:opacity-60 transition-all">
+              <i data-lucide="rocket" class="w-4 h-4"></i>[[ docker.busy ? '部署中…' : '一键部署' ]]
+            </button>
+          </template>
+        </div>
       </div>
 
       <!-- 克隆流水线步进器(4 步) -->
-      <div v-if="view==='task' && selectedTask" class="shrink-0 px-4 py-3 border-b border-white/[0.06] bg-[#070C18]/70">
+      <div v-if="view==='task' && selectedTask && !['completed','partial'].includes(selectedTask.status)" class="shrink-0 px-4 py-3 border-b border-white/[0.06] bg-[#070C18]/70">
         <div class="flex items-center">
           <template v-for="(st, i) in pipeline4(selectedTask)" :key="st.label">
             <div class="flex items-center gap-2.5 shrink-0">
@@ -2260,7 +2268,6 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <div class="leading-tight hidden sm:block">
                 <div class="text-[11px] font-semibold"
                   :class="{ done: 'text-emerald-300', active: 'text-indigo-200', failed: 'text-rose-300', pending: 'text-slate-500' }[st.state]">[[ st.label ]]</div>
-                <div class="text-[9px] text-slate-600 font-mono">[[ st.sub ]]</div>
               </div>
             </div>
             <div v-if="i < 3" class="flex-1 h-0.5 mx-3 rounded-full bg-slate-800 overflow-hidden">
@@ -2272,13 +2279,12 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       </div>
 
       <!-- Tabs -->
-      <div v-show="view==='task'" class="h-11 shrink-0 border-b border-white/[0.07] bg-[#080D1A]/60 backdrop-blur-2xl flex items-center gap-1 px-3">
+      <div v-show="view==='task'" class="h-11 shrink-0 border-b border-white/[0.07] bg-[#080D1A]/60 backdrop-blur-2xl flex items-center gap-1 px-3 overflow-x-auto whitespace-nowrap">
         <button v-for="tab in tabs" :key="tab.id" @click="tabClick(tab.id)"
           :class="activeTab===tab.id ? 'text-indigo-300 border-indigo-400' : 'text-slate-500 border-transparent hover:text-slate-300'"
           class="flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-all">
           <i :data-lucide="tab.icon" class="w-3.5 h-3.5"></i>[[ tab.label ]]
         </button>
-        <div class="ml-auto text-[10px] font-mono text-slate-600 tnums">tasks: [[ filteredTasks.length ]]</div>
       </div>
 
       <div class="flex-1 min-h-0 overflow-y-auto custom-scroll p-4">
@@ -2448,30 +2454,26 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         <!-- ============ Tab 2: 双屏对比与响应式沙盒预览器 ============ -->
         <div v-show="activeTab==='sandbox'" class="h-full flex flex-col gap-3">
           <div class="flex flex-wrap items-center gap-2">
-            <div class="flex bg-slate-950/90 p-1 rounded-xl border border-white/[0.06]">
-              <button @click="previewMode='single'" :class="previewMode==='single' ? 'bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-[0_2px_10px_rgba(99,102,241,0.4),inset_0_1px_0_rgba(255,255,255,0.25)]' : 'text-slate-400 hover:text-slate-200'" class="text-[11px] px-3 py-1.5 rounded-lg transition-all">单屏克隆预览</button>
-              <button @click="previewMode='compare'" :class="previewMode==='compare' ? 'bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-[0_2px_10px_rgba(99,102,241,0.4),inset_0_1px_0_rgba(255,255,255,0.25)]' : 'text-slate-400 hover:text-slate-200'" class="text-[11px] px-3 py-1.5 rounded-lg transition-all">原站 vs 克隆站对比</button>
-              <button @click="previewMode='overlay'" :class="previewMode==='overlay' ? 'bg-gradient-to-b from-fuchsia-500 to-fuchsia-600 text-white shadow-[0_2px_10px_rgba(217,70,239,0.4),inset_0_1px_0_rgba(255,255,255,0.25)]' : 'text-slate-400 hover:text-slate-200'" class="text-[11px] px-3 py-1.5 rounded-lg transition-all">滑动卷帘重叠</button>
+            <div class="ui-seg" role="group">
+              <button @click="previewMode='single'" :aria-pressed="previewMode==='single'">克隆站</button>
+              <button @click="previewMode='compare'" :aria-pressed="previewMode==='compare'">并排对比</button>
+              <button @click="previewMode='overlay'" :aria-pressed="previewMode==='overlay'">卷帘对比</button>
             </div>
-            <div class="flex bg-slate-950/90 p-1 rounded-xl border border-white/[0.06]">
-              <button @click="previewWidth='full'" :class="previewWidth==='full' ? 'bg-slate-700/90 text-white shadow-inner' : 'text-slate-400 hover:text-slate-200'" class="text-[10px] px-2.5 py-1.5 rounded-lg transition-all font-mono">100% PC</button>
-              <button @click="previewWidth='tablet'" :class="previewWidth==='tablet' ? 'bg-slate-700/90 text-white shadow-inner' : 'text-slate-400 hover:text-slate-200'" class="text-[10px] px-2.5 py-1.5 rounded-lg transition-all font-mono">768px 平板</button>
-              <button @click="previewWidth='mobile'" :class="previewWidth==='mobile' ? 'bg-slate-700/90 text-white shadow-inner' : 'text-slate-400 hover:text-slate-200'" class="text-[10px] px-2.5 py-1.5 rounded-lg transition-all font-mono">390px 手机</button>
+            <div class="ui-seg" role="group">
+              <button @click="previewWidth='full'" :aria-pressed="previewWidth==='full'">桌面</button>
+              <button @click="previewWidth='tablet'" :aria-pressed="previewWidth==='tablet'">平板 768</button>
+              <button @click="previewWidth='mobile'" :aria-pressed="previewWidth==='mobile'">手机 390</button>
             </div>
-            <div v-if="previewMode==='compare'" class="flex bg-slate-950/90 p-1 rounded-xl border border-white/[0.06] fade-in">
-              <button @click="origView='live'" :class="origView==='live' ? 'bg-gradient-to-b from-sky-500 to-sky-600 text-white shadow-[0_2px_10px_rgba(14,165,233,0.4)]' : 'text-slate-400 hover:text-slate-200'" class="text-[10px] px-2.5 py-1.5 rounded-lg transition-all">实时 Iframe</button>
-              <button @click="origView='shot'" :class="origView==='shot' ? 'bg-gradient-to-b from-sky-500 to-sky-600 text-white shadow-[0_2px_10px_rgba(14,165,233,0.4)]' : 'text-slate-400 hover:text-slate-200'" class="text-[10px] px-2.5 py-1.5 rounded-lg transition-all">高清全页截图</button>
+            <div v-if="previewMode==='compare'" class="fade-in">
+              <div class="ui-seg" role="group">
+              <button @click="origView='live'" :aria-pressed="origView==='live'">原站实时</button>
+              <button @click="origView='shot'" :aria-pressed="origView==='shot'">原站截图</button>
             </div>
-            <button v-if="previewTask" @click="openHotpatch" class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 text-[11px] text-amber-300 hover:bg-amber-500/20 transition-all">
-              <i data-lucide="wand-sparkles" class="w-3.5 h-3.5"></i>🪄 样式热补丁
-            </button>
-            <button v-if="previewTask" @click="openCompare(previewTask)" class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-fuchsia-500/40 bg-fuchsia-500/10 text-[11px] text-fuchsia-300 hover:bg-fuchsia-500/20 transition-all">
-              <i data-lucide="images" class="w-3.5 h-3.5"></i>视觉快照对比
-            </button>
-            <button v-if="previewTask" @click="openNewWindow('/preview/' + previewTask.id + '/')" class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-white/[0.07] bg-slate-950/60 text-[11px] text-slate-400 hover:text-indigo-300 transition-all">
-              <i data-lucide="external-link" class="w-3.5 h-3.5"></i>新窗口打开
-            </button>
-            <div v-if="previewTask" class="ml-auto text-[10px] font-mono text-slate-500">当前: [[ previewTask.domain ]] · 相似度 [[ previewTask.similarity_score ?? '—' ]]</div>
+            </div>
+            <div class="flex-1"></div>
+            <button v-if="previewTask" @click="openHotpatch" class="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white transition-all" title="直接改克隆站的 CSS, 即时生效"><i data-lucide="paintbrush" class="w-4 h-4"></i><span class="ui-btn-label">改样式</span></button>
+            <button v-if="previewTask" @click="openCompare(previewTask)" class="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white transition-all"><i data-lucide="images" class="w-4 h-4"></i><span class="ui-btn-label">截图对比</span></button>
+            <button v-if="previewTask" @click="openNewWindow('/preview/' + previewTask.id + '/')" class="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white transition-all"><i data-lucide="external-link" class="w-4 h-4"></i><span class="ui-btn-label">新窗口</span></button>
           </div>
 
           <div v-if="!previewTask" class="flex-1 flex flex-col items-center justify-center gap-3 text-slate-600">
@@ -3426,7 +3428,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
   <div class="w-[560px] max-h-[82vh] rounded-2xl border border-amber-500/30 bg-[#0B1020]/95 backdrop-blur-2xl p-4 flex flex-col gap-3 fade-in shadow-2xl">
     <div class="flex items-center gap-3">
       <i data-lucide="wand-sparkles" class="w-4 h-4 text-amber-400"></i>
-      <span class="font-display font-bold text-sm text-slate-200">🪄 样式热补丁 · [[ previewTask ? previewTask.domain : '' ]]</span>
+      <span class="font-display font-bold text-sm text-slate-200">改样式 · [[ previewTask ? previewTask.domain : '' ]]</span>
       <button @click="hotpatch.open=false" class="ml-auto text-slate-500 hover:text-slate-200 p-1"><i data-lucide="x" class="w-4 h-4"></i></button>
     </div>
     <div class="flex flex-wrap gap-1.5">
@@ -3578,9 +3580,9 @@ const __vueApp = createApp({
       countUp: { projects: 0, tasks: 0, running: 0, done: 0 },
       toastMsg: '',
       tabs: [
-        { id: 'matrix', label: '任务矩阵', icon: 'layout-grid' },
-        { id: 'sandbox', label: '沙盒预览', icon: 'app-window' },
-        { id: 'inspector', label: 'API 与资产审查', icon: 'search-code' },
+        { id: 'matrix', label: '任务列表', icon: 'layout-grid' },
+        { id: 'sandbox', label: '预览', icon: 'app-window' },
+        { id: 'inspector', label: '资源与接口', icon: 'search-code' },
       ],
       deliveries: [
         { id: '', label: '网站工程', sub: 'Flask ZIP / Docker 部署', icon: 'globe', hint: '默认: 导出可独立运行的 Flask 网站工程' },
@@ -4663,7 +4665,7 @@ const __vueApp = createApp({
       try {
         const r = await fetch('/api/tasks/' + this.selectedTaskId + '/docker/' + action, { method: 'POST' });
         const data = await r.json();
-        if (!r.ok) { this.docker.error = data.error || '操作失败'; return; }
+        if (!r.ok) { this.docker.error = data.error || '操作失败'; this.toast(this.docker.error); return; }
         const d = data.deploy || {};
         this.toast(action === 'start' ? ('已启动' + (data.timings ? '，用时 ' + data.timings.total + ' 秒' : '') + (d.url ? '：' + d.url : '')) : ({ stop: '已停止', remove: '已销毁，端口已释放' }[action] || '操作成功'));
         await this.loadDocker();

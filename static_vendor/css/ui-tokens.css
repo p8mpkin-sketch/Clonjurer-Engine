@@ -127,3 +127,13 @@ html body input[type="checkbox"],html body input[type="radio"]{accent-color:var(
   html body aside .grid-cols-3{grid-template-columns:minmax(0,1fr)}
   html body .main-wrapper div.flex.flex-1.min-h-0{min-width:0;max-width:100%}
 }
+
+/* ---------- 10. 任务详情 (P2) ---------- */
+.ui-seg button{white-space:nowrap;transition:background .15s,color .15s}
+.ui-seg button:not([aria-pressed="true"]):hover{color:var(--fg,#fff);background:rgba(148,163,184,.12)}
+[data-theme="light"] .ui-seg button:not([aria-pressed="true"]):hover{color:#0F172A}
+@media (max-width:760px){
+  html body .task-head{gap:8px;padding:10px 12px}
+  html body .task-head .max-w-\[420px\],html body .task-head .max-w-\[320px\]{max-width:60vw}
+  html body .ui-seg button{padding:0 9px}
+}
