@@ -96,3 +96,16 @@ html body input[type="checkbox"],html body input[type="radio"]{accent-color:var(
 .ui-seg button[aria-pressed="true"]{background:var(--ui-brand);color:#fff}
 .ui-btn-label{font-size:12px;white-space:nowrap}
 @media (max-width:520px){.ui-btn-label{display:none}}
+
+/* ---------- 8. 浅色模式选中态: 原 *-100/200 浅字在浅色底上几乎看不见 ---------- */
+[data-theme="light"] body .text-indigo-100,[data-theme="light"] body .text-indigo-200,
+[data-theme="light"] body .text-violet-100,[data-theme="light"] body .text-violet-200,
+[data-theme="light"] body .text-purple-200{color:#3730A3}
+[data-theme="light"] body .text-sky-100,[data-theme="light"] body .text-sky-200,
+[data-theme="light"] body .text-cyan-200,[data-theme="light"] body .text-blue-200{color:#1E40AF}
+[data-theme="light"] body .text-emerald-100,[data-theme="light"] body .text-emerald-200{color:#065F46}
+[data-theme="light"] body .text-amber-100,[data-theme="light"] body .text-amber-200{color:#92400E}
+[data-theme="light"] body .text-rose-100,[data-theme="light"] body .text-rose-200{color:#9F1239}
+[data-theme="light"] body .text-slate-100,[data-theme="light"] body .text-slate-200{color:#0F172A}
+[data-theme="light"] body [class*="bg-indigo-500/"]{border-color:rgba(79,70,229,.45)}
+[data-theme="light"] body button[class*="bg-slate-950/"]{background:#fff;border-color:#CBD5E1}

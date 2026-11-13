@@ -1914,13 +1914,13 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                 class="flex-1 px-3 py-3 bg-transparent text-xs font-mono text-slate-100 placeholder-slate-600 focus:outline-none">
             </div>
             <button @click="heroSubmit()" :disabled="submitting" title="立即克隆"
-              class="shrink-0 px-5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 text-xs font-bold text-white shadow-lg shadow-indigo-900/50 hover:from-indigo-500 hover:to-violet-500 disabled:opacity-50 transition-all duration-200 flex items-center gap-2">
-              <i :data-lucide="submitting ? 'loader-2' : 'rocket'" :class="submitting ? 'animate-spin' : ''" class="w-4 h-4"></i>立即克隆
+              class="shrink-0 px-4 rounded-xl border border-indigo-400/50 text-[13px] font-semibold text-indigo-200 hover:bg-indigo-500/15 disabled:opacity-50 transition-all duration-200 flex items-center gap-2">
+              <i :data-lucide="submitting ? 'loader-2' : 'corner-down-left'" :class="submitting ? 'animate-spin' : ''" class="w-4 h-4"></i>克隆
             </button>
           </div>
           <!-- 交付形态: 同一个克隆任务, 产出网站工程 / 桌面应用 / Android 应用 -->
           <div class="space-y-1.5">
-            <div class="text-[10px] text-slate-500 tracking-[0.16em] font-semibold flex items-center gap-1.5">交付形态 DELIVERY
+            <div class="text-[10px] text-slate-500 tracking-[0.16em] font-semibold flex items-center gap-1.5">交付形态
               <span class="tracking-normal font-normal text-slate-600">· 任务完成后自动构建, 在任务卡片下载</span></div>
             <div class="grid grid-cols-3 gap-2">
               <button v-for="d in deliveries" :key="d.id" @click="form.package=d.id" :title="d.hint"
@@ -1965,7 +1965,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 
         <!-- 下载策略: 3 列网格卡片 -->
         <div class="space-y-2">
-          <label class="text-[10px] text-slate-500 tracking-[0.16em] font-semibold">下载策略 DOWNLOAD STRATEGY</label>
+          <label class="text-[10px] text-slate-500 tracking-[0.16em] font-semibold">抓取设置</label>
           <div class="grid grid-cols-3 gap-2">
             <div class="rounded-xl border p-2.5 space-y-2 transition-all"
               :class="form.mode==='crawler' ? 'border-indigo-500/40 bg-indigo-500/[0.06]' : 'border-white/[0.06] bg-slate-950/50'">
@@ -2005,7 +2005,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 
         <!-- 高阶工程开关: 3 列 Toggle 卡片 -->
         <div class="space-y-2">
-          <label class="text-[10px] text-slate-500 tracking-[0.16em] font-semibold">高阶工程开关 ENGINE SWITCHES</label>
+          <label class="text-[10px] text-slate-500 tracking-[0.16em] font-semibold">高级选项</label>
           <div class="grid grid-cols-3 gap-2">
             <div v-for="tg in toggles" :key="tg.key" @click="form[tg.key]=!form[tg.key]"
               class="rounded-xl border p-2.5 cursor-pointer transition-all select-none"
@@ -2102,12 +2102,12 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <!-- 底部常驻发射台(Sticky Footer): 永不挤出屏幕 -->
       <section class="shrink-0 p-4 bg-[#080D1A]/95 border-t border-white/[0.07] backdrop-blur-xl space-y-2">
         <button @click="submit" :disabled="submitting"
-          class="btn-shine w-full py-3.5 rounded-xl font-display font-bold text-sm text-white bg-gradient-to-r from-indigo-600 via-violet-600 to-indigo-600 bg-[length:200%_100%] hover:bg-[position:100%_0] disabled:opacity-60 disabled:cursor-not-allowed transition-all duration-500 shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_8px_24px_-6px_rgba(99,102,241,0.55)] flex items-center justify-center gap-2">
-          <i :data-lucide="submitting ? 'loader-2' : 'rocket'" :class="submitting ? 'w-4 h-4 animate-spin' : 'w-4 h-4'"></i>
-          [[ submitting ? '引擎调度中' : '🚀 启动提取与构建引擎' ]]
+          class="w-full py-3 rounded-xl font-semibold text-sm text-white bg-[#4f46e5] hover:bg-[#4338ca] disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2">
+          <i :data-lucide="submitting ? 'loader-2' : 'play'" :class="submitting ? 'w-4 h-4 animate-spin' : 'w-4 h-4'"></i>
+          [[ submitting ? '正在提交…' : (urlCount > 1 ? ('开始克隆 ' + urlCount + ' 个站点') : '开始克隆') ]]
         </button>
         <div class="text-[9.5px] text-slate-600 text-center leading-relaxed">
-          管线: DOM 渲染 → CSSOM 固化 → CAS 资源池 → 视觉比对 → Flask 打包
+          依次进行：打开页面 → 下载资源 → 生成工程 → 计算还原度。完成后可下载或一键部署。
         </div>
       </section>
     </aside>
@@ -2814,7 +2814,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <div class="flex items-center gap-2 text-[11px] text-slate-400">
             <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-white/[0.08] bg-slate-950/60">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5 text-indigo-300"><path d="m15 4 1 1-9 9-1-1zM3 21l3-1 1-3"/><path d="M14 7l3 3"/></svg>
-              确定性优先 · 大模型兜底(未配置 Key 时自动走 Tier 0)
+              先用规则生成，不够时再用大模型补（没配置 Key 时只用规则）
             </span>
           </div>
         </div>
@@ -2845,7 +2845,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                   <option value="html_css">HTML / CSS(可预览评分)</option><option value="flutter">Flutter 原生控件(D3 最小版)</option></select></div>
               <!-- 交付形态: 与「新建克隆」同一组选项 -->
               <div class="space-y-1.5 col-span-2">
-                <div class="text-[10px] text-slate-500 tracking-[0.16em] font-semibold flex items-center gap-1.5">交付形态 DELIVERY
+                <div class="text-[10px] text-slate-500 tracking-[0.16em] font-semibold flex items-center gap-1.5">交付形态
                   <span class="tracking-normal font-normal text-slate-600">· 任务完成后自动构建, 在任务卡片下载</span></div>
                 <div class="grid grid-cols-3 gap-2">
                   <button v-for="d in deliveries" :key="d.id" @click="gen.package=d.id" :title="d.hint"
@@ -3590,12 +3590,12 @@ const __vueApp = createApp({
         { id: 'mobile', label: 'Mobile', size: '390×844' },
       ],
       toggles: [
-        { key: 'cssom', label: 'CSSOM 动态样式固化', hint: '解决 React/Vue CSS-in-JS 样式丢失' },
-        { key: 'mockApi', label: 'XHR/Fetch 接口录制', hint: '生成 Flask Mock API (mock_data.json)' },
-        { key: 'proxy', label: '上游源站反向代理兜底', hint: '未捕获资源 100% 可用' },
-        { key: 'interactionSim', label: '仿真交互层', hint: '登录点击提示 / 验证码 60s 倒计时(展开可自定义文案与跳转)' },
-        { key: 'disableHydration', label: '剥离 SPA 水合脚本', hint: '纯静态化防白屏模式' },
-        { key: 'similarity', label: '视觉还原度评分', hint: '像素块 + 直方图双通道比对' },
+        { key: 'cssom', label: '保留动态生成的样式', hint: 'React/Vue 等框架运行时插入的样式也一起保存' },
+        { key: 'mockApi', label: '录制页面接口', hint: '把页面请求的数据存下来，克隆站离线也能显示' },
+        { key: 'proxy', label: '缺失文件回源站加载', hint: '没抓到的图片、脚本等，访问时再从原站取' },
+        { key: 'interactionSim', label: '模拟登录等交互', hint: '点击登录、发送验证码时给出提示和倒计时，可自定义文案' },
+        { key: 'disableHydration', label: '转成纯静态页面', hint: '去掉框架启动脚本，避免克隆站打开后白屏' },
+        { key: 'similarity', label: '计算还原度', hint: '完成后对比原站和克隆站截图，给出 0~100 分' },
       ],
       authTabs: [
         { id: 'cookie', label: 'Cookie' },
