@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import builtins
 import json
 import socket
 import subprocess
@@ -428,7 +429,7 @@ class DockerDeployer:
         return n
 
     # ------------------------------------------------------------------ 后台: 对账与自动销毁
-    def reap_expired(self) -> list:
+    def reap_expired(self) -> "builtins.list[int]":
         gone = []
         now = _now()
         for rec in self.db.list_docker():
