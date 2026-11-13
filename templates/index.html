@@ -17,16 +17,6 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 <!-- UI 改版 P0 规范层: 字号/对比度/焦点/语义色(只换样式) -->
 <link href="/vendor/css/ui-tokens.css?v=2" rel="stylesheet">
 
-<script src="/vendor/js/tailwind.js"></script>
-<script>
-  tailwind.config = {
-    theme: { extend: { fontFamily: {
-      sans: ['Inter', 'Plus Jakarta Sans', 'Noto Sans SC', '-apple-system', 'sans-serif'],
-      display: ['Plus Jakarta Sans', 'Noto Sans SC', 'sans-serif'],
-      mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
-    } } }
-  };
-</script>
 <script src="/vendor/js/lucide.min.js"></script>
 <script>
 /* Lucide 非破坏性 shim: 官方 createIcons 会把 <i data-lucide> 整节点替换为 <svg>,
@@ -381,6 +371,9 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
   .sandbox-frame{border:0;background:#fff;height:100%;transition:width .4s cubic-bezier(.4,0,.2,1)}
   textarea:focus,input:focus,select:focus{outline:none;border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.15)}
 </style>
+<!-- Tailwind 预编译(tools/build_css.sh): 原 451KB 运行时 JS 每次打开都在浏览器里扫描 DOM 生成样式;
+     放在 head 最后, 与运行时注入的位置一致, 层叠顺序不变 -->
+<link href="/vendor/css/app.css?v=1" rel="stylesheet">
 </head>
 <body class="h-screen overflow-hidden bg-[#050811] text-slate-200 font-sans antialiased">
 
@@ -441,7 +434,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         </div>
         <button @click="currentProjectId=''" class="mt-1 text-[9.5px] text-slate-500 hover:text-rose-300">退出项目过滤</button>
       </div>
-      <div class="px-2 py-2.5 rounded-xl border border-white/[0.06] bg-slate-950/40 flex items-center gap-2.5" :class="navCollapsed ? 'justify-center px-0' : ''">
+      <div class="py-2.5 rounded-xl border border-white/[0.06] bg-slate-950/40 flex items-center gap-2.5" :class="navCollapsed ? 'justify-center px-0' : 'px-2'">
         <div class="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center text-[11px] font-bold text-white shrink-0">[[ (auth.user ? (auth.user.display_name || auth.user.username) : '?').slice(0,1).toUpperCase() ]]</div>
         <div v-show="!navCollapsed" class="min-w-0 flex-1">
           <div class="text-[11px] text-slate-200 truncate">[[ auth.user ? (auth.user.display_name || auth.user.username) : '开放模式' ]]</div>
