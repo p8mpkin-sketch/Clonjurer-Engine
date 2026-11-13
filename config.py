@@ -325,6 +325,10 @@ SCORE_UNLOCK_SHOT = True
 NARROW_PAIR_EARLY_CLOSE = True
 NARROW_PAGE_EARLY_CLOSE = True
 FLUID_SKIP_UNSTABLE_WAIT = True
+# 窄屏收回: 两张 0.92 倍宽对照页的「到位」等待(文字/图片计数连续不变, ≥0.75s)同时起、逐页取结果(原逐页串行等)
+NARROW_PAIR_PARALLEL = True
+# 窄屏变体: 各页网络静置共用一个 3s 截止时刻(各页的到位链本就同时起, 网络一直不静的站原来每页各白等 3s)
+NARROW_IDLE_SHARED = True
 # 内容守卫: 被删块原位出现了删除后才插入的同标签同类新块(水合失配后客户端重渲染, 数据少所以更矮)= 换了一份, 不放回
 CONTENT_KEEP_NEW_TWIN = True
 # 手机 UA 窄屏首载页启动失败时, 同宽桌面 UA 页接管手机段

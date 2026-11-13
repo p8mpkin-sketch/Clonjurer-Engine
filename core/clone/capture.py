@@ -787,19 +787,43 @@ class CaptureMixin:
                 p4.close()
             self._cv_mdesk = None
         t_md = time.monotonic() - _tm
+        pair_par = bool(getattr(config, "NARROW_PAIR_PARALLEL", True)) and getattr(config, "NARROW_PAIR_EARLY_CLOSE", True)
+        pair_ok = {}
+        if pair_par:
+            # 先逐页「等加载 → 静置 → 读路径」, 读完即在该页起到位等待(window.__cvStab); 两张对照页的到位同时走,
+            # 下面逐页只取结果。每页内部顺序与原来一致(静置 → 读路径 → 到位 → 随宽读数)
+            for tag, (p3, w3) in list((getattr(self, "_cv_pair", {}) or {}).items()):
+                try:
+                    left = max(0.5, budget_s - (time.monotonic() - t0))
+                    p3.wait_for_load_state("load", timeout=int(left * 1000))
+                    CaptureMixin._await_quiet(p3)
+                    if tag in loads:
+                        loads.setdefault("__pair", {})[tag] = {"w": w3, "paths": p3.evaluate(CV_PATHS_JS) or {}}
+                    with suppress(Exception):
+                        p3.evaluate("([src]) => { window.__cvStab = (0, eval)(src)(1500).catch(() => 0); return 1; }",
+                                    [NARROW_STABLE_JS])
+                    pair_ok[tag] = True
+                except Exception:   # noqa: BLE001
+                    with suppress(Exception):
+                        p3.close()
+                    self._cv_pair.pop(tag, None)
         for tag, (p3, w3) in list((getattr(self, "_cv_pair", {}) or {}).items()):
             try:
-                left = max(0.5, budget_s - (time.monotonic() - t0))
-                p3.wait_for_load_state("load", timeout=int(left * 1000))
-                CaptureMixin._await_quiet(p3)
-                # 对照页的内联样式按路径交给 CV_EMIT_JS: 手机段 px 与之同比(值比≈宽比)的写 vw
-                if tag in loads:
-                    loads.setdefault("__pair", {})[tag] = {"w": w3, "paths": p3.evaluate(CV_PATHS_JS) or {}}
+                if not pair_ok.get(tag):
+                    left = max(0.5, budget_s - (time.monotonic() - t0))
+                    p3.wait_for_load_state("load", timeout=int(left * 1000))
+                    CaptureMixin._await_quiet(p3)
+                    # 对照页的内联样式按路径交给 CV_EMIT_JS: 手机段 px 与之同比(值比≈宽比)的写 vw
+                    if tag in loads:
+                        loads.setdefault("__pair", {})[tag] = {"w": w3, "paths": p3.evaluate(CV_PATHS_JS) or {}}
                 if getattr(config, "NARROW_PAIR_EARLY_CLOSE", True):
                     # 随宽对照要的读数现在就取, 然后关页: 这张页之后只剩这一次读, 留着它会在整个变体阶段
                     # 一直跑动画/定时器抢 CPU(4 核 runner 上同时开着 4 张窄屏页, remix 变体阶段 60s+)
                     with suppress(Exception):
-                        p3.evaluate(NARROW_STABLE_JS, 1500)
+                        if pair_ok.get(tag):
+                            p3.evaluate("async () => { const s = window.__cvStab; window.__cvStab = null; return s ? await s : 0; }")
+                        else:
+                            p3.evaluate(NARROW_STABLE_JS, 1500)
                     fp = p3.evaluate(FLUID_READ_JS) or {}
                     self._cv_pair_read = dict(getattr(self, "_cv_pair_read", {}) or {})
                     self._cv_pair_read[tag] = (fp, w3)
@@ -928,7 +952,7 @@ class CaptureMixin:
 
 
     @staticmethod
-    def _settle_narrow_page(p2):
+    def _settle_narrow_page(p2, idle_deadline=None):
         """窄屏首载页在抽取变体子树前与主页同口径「到位」: 平滑滚到底再回顶(触发进视口才起播的
         入场动画 / 懒加载, 否则抽到的是 opacity:0 的初始态, 克隆窄屏整块空白), 再把动画相位写成
         负 animation-delay(ANIM_PHASE_JS, 与主页基准后同一步)。时限内做不完就按当前态抽取。
@@ -941,8 +965,14 @@ class CaptureMixin:
         if tail is not None:
             st += [time.monotonic(), time.monotonic()]
             t_idle = time.monotonic()
+            idle_ms = 3000
+            if idle_deadline is not None:
+                # 各页到位链同时起: 网络静置共用第一页开始等时定下的截止时刻, 后面的页只等剩余部分(至少 0.5s)
+                if not idle_deadline:
+                    idle_deadline.append(t_idle + 3.0)
+                idle_ms = int(max(0.5, min(3.0, idle_deadline[0] - t_idle)) * 1000)
             with suppress(Exception):
-                p2.wait_for_load_state("networkidle", timeout=3000)
+                p2.wait_for_load_state("networkidle", timeout=idle_ms)
             st.append(time.monotonic())
             stable, counts = int(tail or 0), {}
             if time.monotonic() - t_idle > 0.3:
@@ -1151,6 +1181,7 @@ class CaptureMixin:
             # 逐页处理时只取结果; 网络静置仍逐页等(之后若真等了才重测稳定)
             for p2 in pages.values():
                 CaptureMixin._kick_settle_tail(p2)
+        idle_deadline: list = []           # 各页网络静置共用的截止时刻(NARROW_IDLE_SHARED)
         variants = {}                      # path -> {tag: html}
         content_roots = set()              # 结构相同、内容按宽度不同而成为变体根的路径(见 _content_diff_roots)
         hidden_all = set()
@@ -1214,7 +1245,8 @@ class CaptureMixin:
             top += hidden_tops
             if not top or len(top) > config.VIEWPORT_VARIANT_MAX:
                 continue
-            stable, counts = CaptureMixin._settle_narrow_page(pages[tag])
+            stable, counts = CaptureMixin._settle_narrow_page(
+                pages[tag], idle_deadline if getattr(config, "NARROW_IDLE_SHARED", True) else None)
             self._cv_unstable = dict(getattr(self, "_cv_unstable", {}) or {})
             self._cv_unstable[tag] = not stable
             tk.append(time.monotonic())
