@@ -15,9 +15,9 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 <!-- 顶级字体体系: Inter / Plus Jakarta Sans / JetBrains Mono / Noto Sans SC -->
 <link href="/vendor/fonts/fonts.css" rel="stylesheet">
 <!-- UI 改版 P0 规范层: 字号/对比度/焦点/语义色(只换样式) -->
-<link href="/vendor/css/ui-tokens.css?v=18" rel="stylesheet">
+<link href="/vendor/css/ui-tokens.css?v=19" rel="stylesheet">
 
-<script src="/vendor/js/lucide.subset.js?v=5"></script>
+<script src="/vendor/js/lucide.subset.js?v=6"></script>
 <script>
 /* Lucide 非破坏性 shim: 官方 createIcons 会把 <i data-lucide> 整节点替换为 <svg>,
    Vue 记录的 vnode 锚点随之失效, 任务列表轮询触发 patch 时报
@@ -266,7 +266,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 </style>
 <!-- Tailwind 预编译(tools/build_css.sh): 原 451KB 运行时 JS 每次打开都在浏览器里扫描 DOM 生成样式;
      放在 head 最后, 与运行时注入的位置一致, 层叠顺序不变 -->
-<link href="/vendor/css/app.css?v=8" rel="stylesheet">
+<link href="/vendor/css/app.css?v=9" rel="stylesheet">
 </head>
 <body class="h-screen overflow-hidden font-sans antialiased">
 
@@ -524,7 +524,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <nav class="dash-stats" aria-label="概览">
         <button type="button" @click="dashJump('projects')">项目 <b class="tnums">[[ countUp.projects ]]</b></button>
         <button type="button" @click="dashJump('tasks')">任务 <b class="tnums">[[ countUp.tasks ]]</b></button>
-        <button type="button" @click="dashJump('score')">平均还原度 <b class="tnums">[[ dashAvg ]]</b></button>
+        <button type="button" @click="dashJump('score')" title="只统计克隆任务">克隆平均还原度 <b class="tnums">[[ dashAvg ]]</b></button>
         <button type="button" @click="dashJump('running')" :class="{ live: countUp.running }">正在运行 <b class="tnums">[[ countUp.running ]]</b><span v-if="countUp.running" class="dash-live"></span></button>
       </nav>
 
@@ -2130,10 +2130,9 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <div v-if="view==='task' && selectedTask && fitDetail(selectedTask)" class="fit-panel">
         <button type="button" class="fit-bar" @click="fitDrawer = true" title="查看完整验收清单">
           <span class="fit-title">验收清单</span>
-          <span class="fit-count tnums">[[ fitDetail(selectedTask).items.filter(i => i.verdict === 'yes').length ]]<i>/</i>[[ fitDetail(selectedTask).items.length ]] 满足</span>
+          <span class="fit-count tnums" title="满足 = 完全做到; 部分 = 做到了但有瑕疵或现有证据确认不了">[[ fitDetail(selectedTask).items.filter(i => i.verdict === 'yes').length ]] 满足<template v-if="fitDetail(selectedTask).items.filter(i => i.verdict === 'partial').length"> · [[ fitDetail(selectedTask).items.filter(i => i.verdict === 'partial').length ]] 部分</template><i>/</i>[[ fitDetail(selectedTask).items.length ]] 条</span>
           <span class="fit-stats tnums">
             <span v-if="fitDetail(selectedTask).fidelity && fitDetail(selectedTask).fidelity.score != null">原图相似度 <b>[[ Math.round(fitDetail(selectedTask).fidelity.score) ]]</b></span>
-            <span>达成率 <b>[[ Math.round(fitDetail(selectedTask).coverage * 100) ]]%</b></span>
             <span>运行健康 <b>[[ Math.round(fitDetail(selectedTask).health * 100) ]]%</b></span>
             <span>设计 <b>[[ (fitDetail(selectedTask).design * 10).toFixed(1) ]]</b></span>
           </span>
@@ -2190,7 +2189,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <div v-if="view==='tasks'" class="flex items-end justify-between gap-4 flex-wrap pt-4 pb-3 px-1">
             <div>
               <h1 class="font-display text-[30px] leading-tight text-slate-100">[[ currentProject ? currentProject.name : '全部任务' ]]</h1>
-              <div class="mt-1 text-[13px] text-slate-500 tnums">[[ filteredTasks.length ]] 个任务<template v-if="dashDone.length"> · 平均还原度 <span class="serif-num text-[17px] text-slate-200">[[ dashAvg ]]</span></template></div>
+              <div class="mt-1 text-[13px] text-slate-500 tnums">[[ filteredTasks.length ]] 个任务<template v-if="listAvg"> · [[ listAvg.n ]] 个克隆的平均还原度 <span class="serif-num text-[17px] text-slate-200">[[ listAvg.v ]]</span></template></div>
             </div>
             <button @click="goModule('create')" class="ui-primary h-9 px-4 rounded-lg text-[13px] flex items-center gap-1.5"><i data-lucide="plus" class="w-4 h-4"></i>新建克隆</button>
           </div>
@@ -2302,7 +2301,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                 </div>
                 <div v-else class="h-[180px] flex flex-col items-center justify-center gap-1.5">
                   <i data-lucide="inbox" class="w-5 h-5 text-slate-700"></i>
-                  <span class="text-[9px] text-slate-600">[[ task.status==='failed' ? '克隆失败 — 可点底部按钮重建' : '排队等待渲染' ]]</span>
+                  <span class="text-[12px] text-slate-500 text-center px-4">[[ task.status==='failed' ? humanError(task).title : '排队中' ]]</span>
                 </div>
                 <div v-if="task.status==='completed'" class="absolute bottom-2 right-2 px-2 py-0.5 rounded-md bg-black/70 text-[12px] text-white opacity-0 group-hover:opacity-100 transition-opacity">查看详情</div>
               </div>
@@ -2328,7 +2327,6 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               </div>
 
               <!-- 失败: 一句人话原因 + 只保留「重试」 -->
-              <div v-if="task.status==='failed'" class="text-[12px] text-rose-400 leading-snug line-clamp-2" :title="task.error_msg || ''">[[ humanError(task).title ]]</div>
               <div v-if="task.status==='failed'" class="flex items-center gap-1.5 pt-0.5 border-t border-white/[0.05] mt-auto">
                 <button @click="rebuild(task)" class="flex items-center gap-1.5 px-3 h-8 rounded-lg text-[13px] font-medium text-slate-200 border border-white/[0.1] hover:border-white/[0.2] transition-colors">
                   <i data-lucide="rotate-cw" class="w-3.5 h-3.5"></i>重试
@@ -2369,11 +2367,15 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               </template>
               <button v-else-if="previewTask" @click="previewMode='code'; loadPreviewCode(previewTask)" :aria-pressed="previewMode==='code'">代码</button>
             </div>
-            <div class="ui-seg" role="group">
-              <button @click="previewWidth='full'" :aria-pressed="previewWidth==='full'">桌面</button>
+            <select v-model="previewWidth" class="sm:hidden mt-select h-8 text-[13px]" aria-label="预览宽度">
+              <option value="full">桌面 1440</option><option value="tablet">平板 768</option><option value="mobile">手机 390</option>
+            </select>
+            <div class="ui-seg hidden sm:inline-flex" role="group">
+              <button @click="previewWidth='full'" :aria-pressed="previewWidth==='full'">桌面 1440</button>
               <button @click="previewWidth='tablet'" :aria-pressed="previewWidth==='tablet'">平板 768</button>
               <button @click="previewWidth='mobile'" :aria-pressed="previewWidth==='mobile'">手机 390</button>
             </div>
+            <span v-if="previewScale < 0.995 && ['single','compare','overlay'].includes(previewMode)" class="text-[12px] text-slate-500 tnums whitespace-nowrap" title="页面按真实宽度排版, 容器不够宽时整体等比缩小显示">按 [[ Math.round(previewScale * 100) ]]% 显示</span>
             <div v-if="previewMode==='compare' && previewTask && taskKind(previewTask) === 'clone'" class="fade-in">
               <div class="ui-seg" role="group">
               <button @click="origView='live'" :aria-pressed="origView==='live'">原站实时</button>
@@ -2381,8 +2383,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             </div>
             </div>
             <div class="flex-1"></div>
-            <button v-if="previewTask" @click="openHotpatch" class="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white transition-all" title="直接改克隆站的 CSS, 即时生效"><i data-lucide="paintbrush" class="w-4 h-4"></i><span class="ui-btn-label">改样式</span></button>
-            <button v-if="previewTask" @click="openNewWindow('/preview/' + previewTask.id + '/')" class="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white transition-all"><i data-lucide="external-link" class="w-4 h-4"></i><span class="ui-btn-label">新窗口</span></button>
+            <button v-if="previewTask" @click="openHotpatch" class="hidden sm:flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white transition-all" title="直接改克隆站的 CSS, 即时生效"><i data-lucide="paintbrush" class="w-4 h-4"></i><span class="ui-btn-label">改样式</span></button>
+            <button v-if="previewTask" @click="openNewWindow('/preview/' + previewTask.id + '/')" class="hidden sm:flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white transition-all"><i data-lucide="external-link" class="w-4 h-4"></i><span class="ui-btn-label">新窗口</span></button>
           </div>
 
           <div v-if="!previewTask" class="flex-1 flex flex-col items-center justify-center gap-3 text-slate-600">
@@ -2394,26 +2396,35 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <div>[[ previewTask.status==='failed' ? (taskKind(previewTask) === 'clone' ? '这次克隆没有产出页面' : '这次生成没有产出页面') + '，点上方「重试」再来一次' : (taskKind(previewTask) === 'clone' ? '克隆完成后这里显示预览' : '页面写完并通过体检后这里显示预览') ]]</div>
           </div>
 
-          <div v-else-if="previewMode==='single'" class="flex-1 min-h-0 panel rounded-xl overflow-hidden p-2">
-            <iframe :src="'/preview/' + previewTask.id + '/'" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
-              class="sandbox-frame mx-auto block rounded-lg ring-1 ring-black/5" :style="{width: previewWidthStyle}"></iframe>
+          <div v-else-if="previewMode==='single'" class="flex-1 min-h-0 panel rounded-xl overflow-hidden p-2 flex">
+            <pv-scale :width="previewNominal" fill @scale="previewScale = $event">
+              <iframe :src="'/preview/' + previewTask.id + '/'" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+                class="sandbox-frame block w-full rounded-lg ring-1 ring-black/5"></iframe>
+            </pv-scale>
           </div>
 
           <div v-else-if="previewMode==='compare'" class="flex-1 min-h-0 grid grid-cols-2 gap-3">
             <div class="flex flex-col min-h-0 panel rounded-xl overflow-hidden p-2">
               <div class="text-[10px] font-mono text-slate-500 px-1 pb-1.5 flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-sky-400"></span><template v-if="taskKind(previewTask) === 'clone'">原站 [[ previewTask.domain ]][[ origView==='live' ? ' · 实时' : ' · 截图' ]]</template><template v-else>原图</template></div>
-              <div class="flex-1 min-h-0 overflow-auto custom-scroll">
-                <iframe v-if="origView==='live' && taskKind(previewTask) === 'clone'" :src="previewTask.target_url" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
-                  class="sandbox-frame mx-auto block rounded-lg ring-1 ring-black/5" :style="{width: previewWidthStyle}"></iframe>
-                <img v-else :src="origShotUrl" alt="原站全页截图"
-                  class="mx-auto block rounded-lg ring-1 ring-black/5 bg-white" :style="{width: previewWidthStyle}">
+              <div v-if="origView==='live' && taskKind(previewTask) === 'clone'" class="flex-1 min-h-0 flex">
+                <pv-scale :width="previewNominal" fill @scale="previewScale = $event">
+                  <iframe :src="previewTask.target_url" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+                    class="sandbox-frame block w-full rounded-lg ring-1 ring-black/5"></iframe>
+                </pv-scale>
+              </div>
+              <div v-else class="flex-1 min-h-0 overflow-auto custom-scroll">
+                <pv-scale :width="previewNominal">
+                  <img :src="origShotUrl" alt="原站全页截图" class="block w-full rounded-lg ring-1 ring-black/5 bg-white">
+                </pv-scale>
               </div>
             </div>
             <div class="flex flex-col min-h-0 panel rounded-xl overflow-hidden p-2" style="border-color:rgba(99,102,241,.3)">
               <div class="text-[10px] font-mono text-indigo-300 px-1 pb-1.5 flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-indigo-400 "></span>[[ taskKind(previewTask) === 'clone' ? '克隆站' : '产出' ]]</div>
-              <div class="flex-1 min-h-0 overflow-auto custom-scroll">
-                <iframe :src="'/preview/' + previewTask.id + '/'" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
-                  class="sandbox-frame mx-auto block rounded-lg ring-1 ring-black/5" :style="{width: previewWidthStyle}"></iframe>
+              <div class="flex-1 min-h-0 flex">
+                <pv-scale :width="previewNominal" fill @scale="previewScale = $event">
+                  <iframe :src="'/preview/' + previewTask.id + '/'" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+                    class="sandbox-frame block w-full rounded-lg ring-1 ring-black/5"></iframe>
+                </pv-scale>
               </div>
             </div>
           </div>
@@ -2434,16 +2445,18 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <div v-else-if="previewMode==='overlay'" class="flex-1 min-h-0 panel rounded-xl p-2 flex flex-col gap-2 fade-in" style="border-color:rgba(217,70,239,.3)">
             <div class="text-[10px] font-mono text-fuchsia-300 px-1 flex items-center gap-1.5">
               <span class="w-1.5 h-1.5 rounded-full bg-fuchsia-400 "></span>
-              滑动卷帘重叠对比 · 左侧露出 <span class="text-slate-400">原站截图</span> / 右侧 <span class="text-indigo-300">克隆站实时</span> · 卷帘位置 <span class="tnums">[[ overlayPos ]]%</span>
+              卷帘对比 · 左侧 <span class="text-slate-400">[[ taskKind(previewTask) === 'clone' ? '原站截图' : '原图' ]]</span> / 右侧 <span class="text-indigo-300">[[ taskKind(previewTask) === 'clone' ? '克隆站' : '产出' ]]</span> · 位置 <span class="tnums">[[ overlayPos ]]%</span>
             </div>
             <div class="flex-1 min-h-0 relative overflow-auto custom-scroll bg-slate-950/60">
-              <div class="relative mx-auto" :style="{width: previewWidthStyle, height: overlayHeight + 'px'}">
-                <iframe :src="'/preview/' + previewTask.id + '/'" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
-                  class="w-full h-full border-0 bg-white"></iframe>
-                <img :src="origShotUrl" alt="原站截图叠加层"
-                  class="absolute top-0 left-0 w-full h-full pointer-events-none object-fill border-r-2 border-fuchsia-400"
-                  :style="{clipPath: 'inset(0 ' + (100 - overlayPos) + '% 0 0)'}">
-              </div>
+              <pv-scale :width="previewNominal" @scale="previewScale = $event">
+                <div class="relative" :style="{ width: '100%', height: overlayHeight + 'px' }">
+                  <iframe :src="'/preview/' + previewTask.id + '/'" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+                    class="w-full h-full border-0 bg-white"></iframe>
+                  <img :src="origShotUrl" alt="原站截图叠加层"
+                    class="absolute top-0 left-0 w-full h-full pointer-events-none object-fill border-r-2 border-fuchsia-400"
+                    :style="{clipPath: 'inset(0 ' + (100 - overlayPos) + '% 0 0)'}">
+                </div>
+              </pv-scale>
             </div>
             <input type="range" min="0" max="100" v-model.number="overlayPos" class="accent-fuchsia-500 cursor-pointer">
           </div>
@@ -2820,7 +2833,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <div class="grid grid-cols-2 gap-3">
               <div class="space-y-1"><label class="text-[10px] text-slate-500">渲染视口</label>
                 <select v-model="gen.viewport" class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-2 py-1.5 text-xs text-slate-200">
-                  <option value="desktop">desktop 1920</option><option value="laptop">laptop 1440</option><option value="mobile">mobile 390</option></select></div>
+                  <option value="desktop">大屏桌面 1920</option><option value="laptop">笔记本 1440</option><option value="mobile">手机 390</option></select></div>
               <div class="space-y-1"><label class="text-[10px] text-slate-500">界面代码</label>
                 <select v-model="gen.target" @change="gen.package = (gen.target==='flutter' && gen.package==='desktop') ? '' : gen.package" class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-2 py-1.5 text-xs text-slate-200">
                   <option value="html_css">HTML / CSS(可预览评分)</option><option value="flutter">Flutter 原生控件(D3 最小版)</option></select></div>
@@ -3587,7 +3600,7 @@ const __vueApp = createApp({
       telemetry: { browser: { active: 0, max: 4, alive: false }, cas: { assets: 0, hit_rate: 0 }, queue: { pending: 0, running: 0, completed: 0, failed: 0 }, batches: [] },
       urlsText: '',
       form: { mode: 'single', maxPages: 3, viewport: 'laptop', renderTimeout: 30, cssom: true, mockApi: true, proxy: true, interactionSim: true, simLoginMessage: '', simLoginRedirect: '', disableHydration: false, similarity: true, cookie: '', bearer: '', ua: '', aiRepair: false, aiKey: '', aiModel: '', aiBaseUrl: '', package: '' },
-      heroUrl: '', advOpen: true, poolRestarting: false, storage: null, storageAt: 0, pruning: false,
+      heroUrl: '', advOpen: (() => { try { return localStorage.getItem('cloner-adv-open') === '1'; } catch (e) { return false; } })(), poolRestarting: false, storage: null, storageAt: 0, pruning: false,
       aiDefaults: { base_url: '', model: '' }, aiKeyConfigured: false, genReady: false, genModel: '',
       aiReport: { open: false, loading: false, busy: false, data: null },
       splitRight: 'cloned',
@@ -3603,7 +3616,7 @@ const __vueApp = createApp({
       selectedTaskId: null, previewTaskId: null,
       selectedIds: new Set(), batchBusy: false,
       previewMode: 'single', previewWidth: 'full',
-      origView: 'live', overlayPos: 50, overlayHeight: 1200,
+      origView: 'live', overlayPos: 50, overlayHeight: 1200, previewScale: 1,
       compareModal: false, compareData: { original: '', cloned: '', diff: '', rightMode: 'cloned', score: null },
       hotpatch: { open: false, css: '', saving: false },
       mockEntries: [], mockIndex: -1, mockBody: '', mockSaving: false, mockMsg: '',
@@ -3627,9 +3640,9 @@ const __vueApp = createApp({
         { id: 'apk', label: 'Android 应用', sub: 'APK(debug 证书签名)', icon: 'smartphone', hint: '原生 Android WebView 应用壳, 体积≈站点 + 约 20KB; 构建数秒' },
       ],
       viewports: [
-        { id: 'desktop', label: 'Desktop', size: '1920×1080' },
-        { id: 'laptop', label: 'Laptop', size: '1440×900' },
-        { id: 'mobile', label: 'Mobile', size: '390×844' },
+        { id: 'desktop', label: '大屏桌面', size: '1920×1080' },
+        { id: 'laptop', label: '笔记本', size: '1440×900' },
+        { id: 'mobile', label: '手机', size: '390×844' },
       ],
       toggles: [
         { key: 'cssom', label: '保留动态生成的样式', hint: 'React/Vue 等框架运行时插入的样式也一起保存' },
@@ -3931,7 +3944,12 @@ const __vueApp = createApp({
       const u = this.auth && this.auth.user;
       return u ? g + '，' + (u.display_name || u.username) : g;
     },
-    dashDone() { return this.tasks.filter(t => t.status === 'completed' && t.similarity_score != null && !this.isReqFit(t)); },
+    // 还原度只对克隆任务有意义(生成任务是需求符合度/对原图的还原度, 口径不同), 不混在一起平均
+    dashDone() { return this.tasks.filter(t => t.status === 'completed' && t.similarity_score != null && this.taskKind(t) === 'clone'); },
+    listAvg() {
+      const d = this.filteredTasks.filter(t => t.status === 'completed' && t.similarity_score != null && this.taskKind(t) === 'clone');
+      return d.length ? { n: d.length, v: (d.reduce((a, t) => a + Number(t.similarity_score), 0) / d.length).toFixed(1) } : null;
+    },
     dashAvg() {
       const d = this.dashDone; if (!d.length) return '—';
       return (d.reduce((a, t) => a + Number(t.similarity_score), 0) / d.length).toFixed(1);
@@ -3958,6 +3976,7 @@ const __vueApp = createApp({
     },
     selectedTask() { return this.tasks.find(t => t.id === this.selectedTaskId) || null; },
     previewTask() { return this.tasks.find(t => t.id === this.previewTaskId) || null; },
+    previewNominal() { return this.previewWidth === 'full' ? 1440 : (this.previewWidth === 'tablet' ? 768 : 390); },
     previewWidthStyle() { return this.previewWidth === 'full' ? '100%' : (this.previewWidth === 'tablet' ? '768px' : '390px'); },
     origShotUrl() { return this.previewTaskId ? ('/api/tasks/' + this.previewTaskId + '/screenshots/original') : ''; },
     compareRightUrl() { return this.previewTaskId ? ('/api/tasks/' + this.previewTaskId + '/screenshots/' + this.compareData.rightMode) : ''; },
@@ -4029,6 +4048,7 @@ const __vueApp = createApp({
     'remote.logKind'(v) {
       if (v === 'runtime' && this.remote.detail) this.loadRemoteRuntimeLogs();
     },
+    advOpen(v) { try { localStorage.setItem('cloner-adv-open', v ? '1' : '0'); } catch (e) { /* 隐私模式 */ } },
     selectedTaskId() {
       if (this.activeTab === 'deploy') this.loadDocker();
       const t = this.selectedTask;
@@ -6737,6 +6757,39 @@ __vueApp.component('live-code', {
     },
     resume() { this.follow = true; const el = this.$refs.code; if (el) { this._auto = true; el.scrollTop = el.scrollHeight; } },
   },
+});
+/* ---------- 预览按标称宽度渲染 ----------
+   iframe / 截图按真实视口宽度(桌面 1440 / 平板 768 / 手机 390)排版, 容器不够宽时整体等比缩小(transform), 不裁切、不挤压;
+   fill: 内容高度填满容器(iframe 用); 否则按内容自然高度缩放后占位(截图、卷帘叠层用)。缩放比通过 scale 事件告诉父组件。 */
+__vueApp.component('pv-scale', {
+  delimiters: ['[[', ']]'],
+  props: { width: { type: Number, required: true }, fill: Boolean },
+  emits: ['scale'],
+  data() { return { boxW: 0, boxH: 0, innerH: 0 }; },
+  computed: {
+    scale() { return this.boxW ? Math.min(1, this.boxW / this.width) : 1; },
+    left() { return Math.max(0, (this.boxW - this.width * this.scale) / 2); },
+  },
+  template: `
+  <div ref="box" class="pv-box" :class="fill ? 'pv-fill' : ''" :style="fill ? {} : { height: (innerH * scale) + 'px' }">
+    <div ref="inner" class="pv-inner" :style="{ width: width + 'px', height: fill ? (boxH / scale) + 'px' : 'auto', transform: 'scale(' + scale + ')', left: left + 'px' }"><slot></slot></div>
+  </div>`,
+  watch: { scale: { handler(v) { this.$emit('scale', v); }, immediate: true } },
+  mounted() {
+    const measure = () => {
+      const b = this.$refs.box, i = this.$refs.inner;
+      if (!b) return;
+      this.boxW = b.clientWidth; this.boxH = b.clientHeight;
+      if (!this.fill && i) this.innerH = i.offsetHeight;
+    };
+    measure();
+    if (window.ResizeObserver) {
+      this._ro = new ResizeObserver(measure);
+      this._ro.observe(this.$refs.box);
+      if (!this.fill && this.$refs.inner) this._ro.observe(this.$refs.inner);
+    }
+  },
+  beforeUnmount() { if (this._ro) this._ro.disconnect(); },
 });
 __vueApp.config.errorHandler = function (err, instance, info) {
   console.error('VUE-ERR[' + info + '] ' + (err && err.message));

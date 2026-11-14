@@ -742,3 +742,9 @@ html body label.tracking-\[0\.16em\],html body div.tracking-\[0\.16em\]{letter-s
   .task-head{gap:8px!important}
   .task-head .flex-1{display:none}
 }
+/* 预览按标称宽度渲染并等比缩放 */
+.pv-box{position:relative;width:100%;overflow:hidden}
+.pv-box.pv-fill{flex:1;min-height:0;height:100%}
+.pv-inner{position:absolute;top:0;transform-origin:top left}
+.pv-box:not(.pv-fill) .pv-inner{position:absolute}
+.pv-inner > iframe.sandbox-frame{height:100%}
