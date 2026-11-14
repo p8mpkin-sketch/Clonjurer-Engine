@@ -19,6 +19,7 @@ import config
 
 
 _NO_THINK_UNSUPPORTED = set()   # 不认 thinking 字段的上游(base_url)
+_NO_JSON_MODE = set()           # 不认 response_format=json_object 的上游(base_url)
 
 
 class DeadlineExceeded(RuntimeError):
@@ -150,7 +151,8 @@ def _build_content(user_text: str, images=(), parts=()) -> list:
     return content
 
 
-def _transport(ai_cfg: dict, system: str, content: list, temperature: float, timeout, deadline, thinking: bool):
+def _transport(ai_cfg: dict, system: str, content: list, temperature: float, timeout, deadline, thinking: bool,
+               json_mode: bool = False):
     """返回 (call, left): call(budget) 发一次请求(含瞬时网络错误重试)并返回上游 JSON; left() 为剩余墙钟。"""
     if deadline is None:
         deadline = time.monotonic() + float(getattr(config, "AI_CALL_WALL_LIMIT", 180))
@@ -184,10 +186,18 @@ def _transport(ai_cfg: dict, system: str, content: list, temperature: float, tim
         no_think = not thinking and ai_cfg.get("base_url") not in _NO_THINK_UNSUPPORTED
         if no_think:
             body_json["thinking"] = {"type": "disabled"}
+        want_json = json_mode and ai_cfg.get("base_url") not in _NO_JSON_MODE
+        if want_json:
+            body_json["response_format"] = {"type": "json_object"}
         resp = requests.post(
             f"{ai_cfg['base_url']}/chat/completions",
             headers={"Authorization": f"Bearer {ai_cfg['api_key']}"},
             json=body_json, timeout=(min(15.0, per), per), stream=True)
+        if want_json and resp.status_code in (400, 422):
+            # 先假定是 response_format 不被接受(可选能力): 去掉重发; 仍 400 再轮到 thinking 字段
+            resp.close()
+            _NO_JSON_MODE.add(ai_cfg.get("base_url"))
+            return _call_once(budget)
         if no_think and resp.status_code in (400, 422):
             resp.close()
             _NO_THINK_UNSUPPORTED.add(ai_cfg.get("base_url"))
@@ -217,7 +227,8 @@ def _transport(ai_cfg: dict, system: str, content: list, temperature: float, tim
 
 def chat_json(ai_cfg: dict, system: str, user_text: str, images=(),
               temperature: float = 0.2, timeout: int = None, max_tokens: int = None, parts=(),
-              deadline: float = None, thinking: bool = True, usage_out: dict = None) -> dict:
+              deadline: float = None, thinking: bool = True, usage_out: dict = None,
+              json_mode: bool = False) -> dict:
     """同步调用, 返回解析后的 JSON 对象; 失败抛 RuntimeError。usage_out 给出时写入上游 usage(用量统计)。
 
     deadline(time.monotonic() 绝对时刻)是整次调用(含重试与升档)的**墙钟上限**: 部分 OpenAI 兼容上游
@@ -230,7 +241,8 @@ def chat_json(ai_cfg: dict, system: str, user_text: str, images=(),
     预算阶梯 (b, 2b, 4b): 内容为空且思考 token 吃光预算 → 升档; 内容非空但 finish_reason=length
     且 JSON 解析失败(UIR 节点树上百节点时 JSON 很长, 被截断) → 同样升档重试, 而不是直接回落。"""
     content = _build_content(user_text, images, parts)
-    _call, _left = _transport(ai_cfg, system, content, temperature, timeout, deadline, thinking)
+    # json_mode: 请求带 response_format=json_object(上游保证输出是合法 JSON); 不认该字段的上游自动去掉重发
+    _call, _left = _transport(ai_cfg, system, content, temperature, timeout, deadline, thinking, json_mode)
     base = int(max_tokens or config.AI_PATCH_MAX_TOKENS)
     text, last_err = "", None
     for budget in (base, base * 2, base * 4):

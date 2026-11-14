@@ -61,11 +61,19 @@ WRITE_SYSTEM = (
     "9. 代码紧凑, 不写冗长注释, 整个文件控制在能一次完整输出的长度内。"
 )
 
-REPAIR_SYSTEM = WRITE_SYSTEM + (
+_REPAIR_HEAD = (
     "\n\n你现在的任务是修复一个已有页面。会给你: 用户需求、任务书、当前页面的完整代码、在真实浏览器里运行后发现的问题清单"
     "(可能附一张当前页面截图)。逐条解决问题清单里的每一项, 保留已经正确的部分, 不要顺手删掉已有功能。"
-    "输出修复后的完整 HTML 文档(不是补丁, 不是只输出改动的片段)。"
 )
+REPAIR_SYSTEM = WRITE_SYSTEM + _REPAIR_HEAD + (
+    "\n输出方式(二选一, 不要输出任何解释):\n"
+    "A. 改动集中在局部时优先用修改块 —— 只输出若干个修改块, 每块严格按下面的格式:\n"
+    "<<<<<<< SEARCH\n(当前代码里要被替换的原文: 逐字符照抄, 包括缩进和换行; 取连续的几行, 足以在文件中唯一定位)\n"
+    "=======\n(替换后的内容; 留空表示删除)\n>>>>>>> REPLACE\n"
+    "修改块之间互不重叠; 要新增内容, 就把插入位置相邻的原文放进 SEARCH, 在替换内容里带上原文和新增部分。\n"
+    "B. 需要大面积重写时, 输出修复后的完整 HTML 文档(从 <!DOCTYPE html> 到 </html>)。"
+)
+REPAIR_FULL_SYSTEM = WRITE_SYSTEM + _REPAIR_HEAD + "输出修复后的完整 HTML 文档(不是补丁, 不是只输出改动的片段)。"
 
 REVIEW_SYSTEM = (
     "你是严格的产品验收员。给你: 用户的原始需求、验收清单、页面在真实浏览器里运行的截图(不同时刻 / 不同宽度)、"
@@ -131,10 +139,31 @@ def normalize_plan(obj: dict, desc: str) -> dict:
             "checklist": items}
 
 
+def _json_call(ai_cfg: dict, system: str, user: str, deadline: float, normalize, usage: dict = None,
+               parts=(), temperature: float = 0.2, max_tokens: int = 4096):
+    """结构化调用: JSON 模式 + 关思考; 输出不是合法 JSON 或规整失败时原样重试一次(升一点温度避免复现同一处坏输出)。
+    实测小模型偶发吐出少逗号的 JSON, 一次重试比整步回落便宜得多。上游/网络错误不在这里重试(llm 层已处理)。"""
+    last = None
+    for attempt in range(2):
+        if attempt and deadline - time.monotonic() < 8:
+            break
+        try:
+            obj = llm.chat_json(ai_cfg, system, user, parts=parts, temperature=temperature + 0.25 * attempt,
+                                max_tokens=max_tokens, deadline=deadline, thinking=False, usage_out=usage,
+                                json_mode=True)
+            return normalize(obj)
+        except llm.DeadlineExceeded:
+            raise
+        except (ValueError, RuntimeError) as exc:
+            if getattr(exc, "response", None) is not None or "网络错误" in str(exc):
+                raise
+            last = exc
+    raise last or llm.DeadlineExceeded("调用墙钟上限已到")
+
+
 def plan(ai_cfg: dict, desc: str, deadline: float, usage: dict = None) -> dict:
-    obj = llm.chat_json(ai_cfg, PLAN_SYSTEM, f"用户需求:\n{desc}", temperature=0.3, max_tokens=4096,
-                        deadline=deadline, thinking=False, usage_out=usage)
-    return normalize_plan(obj, desc)
+    return _json_call(ai_cfg, PLAN_SYSTEM, f"用户需求:\n{desc}", deadline, lambda o: normalize_plan(o, desc),
+                      usage, temperature=0.3)
 
 
 # ---------------------------------------------------------------------------
@@ -209,16 +238,71 @@ def problem_list(defects: list, detail: dict, limit: int = 14) -> list:
     return out[:limit]
 
 
+_PATCH_RE = re.compile(r"<{5,9} ?SEARCH[^\n]*\n(.*?)\n?={5,9}[^\n]*\n(.*?)\n?>{5,9} ?REPLACE", re.S)
+
+
+def apply_patches(html: str, text: str):
+    """把模型输出的 SEARCH/REPLACE 修改块应用到 html → (新 html, 成功块数, 失败块数)。
+
+    先按原文精确匹配(只替换第一处); 不中再按「逐行去掉首尾空白后相等」匹配连续行 —— 模型抄原文时
+    最常见的偏差就是缩进与行尾空白。两种都不中的块记为失败, 不猜。"""
+    ok = bad = 0
+    for m in _PATCH_RE.finditer(text or ""):
+        search, repl = m.group(1), m.group(2)
+        if not search.strip():
+            bad += 1
+            continue
+        if search in html:
+            html = html.replace(search, repl, 1)
+            ok += 1
+            continue
+        want = [ln.strip() for ln in search.strip("\n").split("\n")]
+        lines = html.split("\n")
+        stripped = [ln.strip() for ln in lines]
+        hit = next((i for i in range(len(lines) - len(want) + 1) if stripped[i:i + len(want)] == want), -1)
+        if hit < 0:
+            bad += 1
+            continue
+        lines[hit:hit + len(want)] = repl.split("\n")
+        html = "\n".join(lines)
+        ok += 1
+    return html, ok, bad
+
+
+def _repair_complete(text: str) -> bool:
+    return _html_complete(text) or (text or "").rstrip().rstrip("`").rstrip().endswith("REPLACE")
+
+
 def repair_page(ai_cfg: dict, desc: str, brief: dict, html: str, problems: list, deadline: float,
                 shot: Path = None, stalled: bool = False):
+    """修复 → (新 html, meta)。默认允许模型只输出局部修改块(整页重写一次要几十秒到两分钟, 改一处样式不值得);
+    stalled(上一轮修复失败或没有改善)时要求整页重写并换思路。meta["mode"] = patch / full。"""
     user = (f"用户需求:\n{desc}\n\n任务书:\n{_brief_text(brief)}\n\n需要解决的问题(来自真实浏览器运行与验收):\n"
             + "\n".join(f"{i + 1}. {p}" for i, p in enumerate(problems))
             + ("\n\n上一次修复没有带来改善, 请换一种实现思路, 不要重复同样的改法。" if stalled else "")
-            + f"\n\n当前页面完整代码:\n{html}\n\n现在输出修复后的完整 HTML 文档。")
+            + f"\n\n当前页面完整代码:\n{html}\n\n现在输出"
+            + ("修复后的完整 HTML 文档。" if stalled else "修改块(或修复后的完整 HTML 文档)。"))
     parts: list = []
     if shot is not None and Path(shot).is_file() and _vision_ok(ai_cfg):
         parts = [{"type": "text", "text": "当前页面在桌面视口的截图:"}, llm._image_part(Path(shot), 1024)]
-    return _code_call(ai_cfg, REPAIR_SYSTEM, user, deadline, 0.75 if stalled else 0.4, parts=parts)
+    if stalled:
+        new, meta = _code_call(ai_cfg, REPAIR_FULL_SYSTEM, user, deadline, 0.75, parts=parts)
+        return new, dict(meta, mode="full")
+    out = llm.chat_text(ai_cfg, REPAIR_SYSTEM, user, parts=parts, temperature=0.4, max_tokens=settings.CODE_MAX_TOKENS,
+                        deadline=deadline, thinking=settings.CODE_THINKING, complete=_repair_complete)
+    meta = {"elapsed": out["elapsed"], "usage": out.get("usage") or {}}
+    text = out["text"]
+    if _PATCH_RE.search(text):
+        new, ok, bad = apply_patches(html, text)
+        if not ok or new == html:
+            raise CodegenError(f"修改块无法应用到当前代码(共 {ok + bad} 块, 全部未匹配或没有产生变化)")
+        if len(new) > settings.CODE_MAX_HTML_CHARS:
+            raise CodegenError(f"修复后页面过长({len(new)} 字符)")
+        return new, dict(meta, mode="patch", patches=ok, patches_failed=bad)
+    new, complete = extract_html(text)
+    if not complete:
+        raise CodegenError(f"修复输出不完整(既没有修改块也没有完整文档, finish_reason={out.get('finish')})")
+    return new, dict(meta, mode="full")
 
 
 # ---------------------------------------------------------------------------
@@ -255,10 +339,11 @@ def vision_selftest(ai_cfg: dict, deadline: float = None) -> bool:
                             parts=[llm._b64_png(img)], temperature=0, max_tokens=512, thinking=False,
                             deadline=deadline or time.monotonic() + 30)
         ok = re.sub(r"\D", "", str(obj.get("digits") or "")) == digits
-    except llm.DeadlineExceeded:
-        return False                       # 超时不下结论, 下次再测
-    except Exception:
-        ok = False
+    except Exception as exc:
+        # 只有上游明确拒绝图片(4xx)才下「不可用」的结论; 超时 / 网络抖动 / 坏 JSON 不下结论, 下次再测
+        if getattr(getattr(exc, "response", None), "status_code", None) in (400, 404, 415, 422):
+            _NO_VISION.add(key)
+        return False
     (_VISION_OK if ok else _NO_VISION).add(key)
     return ok
 
@@ -351,25 +436,29 @@ def review(ai_cfg: dict, desc: str, brief: dict, rep: dict, html: str, deadline:
     head = (f"用户原始需求:\n{desc}\n\n验收清单:\n"
             + "\n".join(f"- {i['id']} [{i['type']}{' · 用户明确要求' if i['must'] else ''}] {i['text']}" for i in brief["checklist"])
             + f"\n\n自动体检数据:\n{probe_digest(rep)}\n")
-    if _vision_ok(ai_cfg) and vision_selftest(ai_cfg, deadline):
+    norm = lambda o: normalize_review(o, brief)  # noqa: E731
+    why = ""
+    if not _vision_ok(ai_cfg):
+        why = "模型不接受图片输入"
+    elif not vision_selftest(ai_cfg, deadline):
+        why = "模型未通过看图自检" if not _vision_ok(ai_cfg) else "看图自检未完成(超时或上游异常)"
+    else:
         parts = _review_parts(rep)
-        if parts:
-            try:
-                obj = llm.chat_json(ai_cfg, REVIEW_SYSTEM, head + "\n下面是页面截图, 请据此验收。", parts=parts,
-                                    temperature=0.1, max_tokens=4096, deadline=deadline, thinking=False, usage_out=usage)
-                return dict(normalize_review(obj, brief), mode="vision")
-            except llm.DeadlineExceeded:
-                raise
-            except Exception as exc:
-                # 400/415/422 = 上游不接受图片输入: 记住, 之后直接文本验收; 其它错误只降级这一次
-                code = getattr(getattr(exc, "response", None), "status_code", None)
-                if code in (400, 404, 415, 422):
-                    _NO_VISION.add((ai_cfg.get("base_url"), ai_cfg.get("model")))
+        try:
+            out = _json_call(ai_cfg, REVIEW_SYSTEM, head + "\n下面是页面截图, 请据此验收。", deadline, norm, usage,
+                             parts=parts, temperature=0.1)
+            return dict(out, mode="vision", fallback="")
+        except llm.DeadlineExceeded:
+            raise
+        except Exception as exc:
+            # 4xx = 上游不接受图片输入: 记住, 之后直接文本验收; 其它错误只降级这一次
+            if getattr(getattr(exc, "response", None), "status_code", None) in (400, 404, 415, 422):
+                _NO_VISION.add((ai_cfg.get("base_url"), ai_cfg.get("model")))
+            why = f"看图验收调用失败({type(exc).__name__}: {str(exc)[:100]})"
     code_text = html if len(html) <= 60000 else html[:45000] + "\n<!-- …中间省略… -->\n" + html[-12000:]
-    obj = llm.chat_json(ai_cfg, REVIEW_SYSTEM, head + "\n本次没有截图, 只能依据页面源码和体检数据判断; 外观类条目没有把握时判 partial。"
-                        f"\n\n页面源码:\n{code_text}", temperature=0.1, max_tokens=4096, deadline=deadline,
-                        thinking=False, usage_out=usage)
-    return dict(normalize_review(obj, brief), mode="text")
+    out = _json_call(ai_cfg, REVIEW_SYSTEM, head + "\n本次没有截图, 只能依据页面源码和体检数据判断; 外观类条目没有把握时判 partial。"
+                     f"\n\n页面源码:\n{code_text}", deadline, norm, usage, temperature=0.1)
+    return dict(out, mode="text", fallback=why)
 
 
 # ---------------------------------------------------------------------------
@@ -488,7 +577,9 @@ def run(desc: str, ws: Path, pool, ai_cfg: dict, judge_cfg: dict, viewport: dict
                 log("GEN", f"修复目标 {len(problems)} 项: " + " | ".join(p[:60] for p in problems[:4]))
                 html, meta = repair_page(ai_cfg, desc, brief, best["html"], problems, wall(settings.CODE_WRITE_WALL),
                                          shot=(best["rep"].get("shots") or {}).get("f0"), stalled=stalled)
-            note(action, t0, meta["usage"])
+            note(action, t0, meta["usage"], **({"mode": meta["mode"]} if meta.get("mode") else {}))
+            if meta.get("mode") == "patch":
+                log("GEN", f"局部修改: 应用 {meta['patches']} 块" + (f", {meta['patches_failed']} 块未匹配" if meta.get("patches_failed") else ""))
         except Exception as exc:
             note(action, t0, error=f"{type(exc).__name__}: {str(exc)[:200]}")
             log("GEN", f"第 {rnd} 轮{'写页面' if action == 'write' else '修复'}失败: {type(exc).__name__}: {str(exc)[:200]}")
@@ -521,6 +612,8 @@ def run(desc: str, ws: Path, pool, ai_cfg: dict, judge_cfg: dict, viewport: dict
             try:
                 rev = review(judge_cfg or ai_cfg, desc, brief, rep, html, wall(settings.CODE_REVIEW_WALL), usage)
                 note("review", t0, usage, mode=rev["mode"])
+                if rev.get("fallback"):
+                    log("GEN", f"本轮改用文本验收: {rev['fallback']}")
             except Exception as exc:
                 note("review", t0, usage, error=f"{type(exc).__name__}: {str(exc)[:160]}")
                 log("GEN", f"模型验收失败, 仅按体检硬证据计分: {type(exc).__name__}: {str(exc)[:160]}")

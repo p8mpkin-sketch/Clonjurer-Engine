@@ -111,6 +111,20 @@ class Pure(unittest.TestCase):
         d = codegen.score(self.BRIEF, self._rev(("no", "no", "no"), design=6), self._rep())
         self.assertLess(d["score"], 35)
 
+    def test_apply_patches(self):
+        src = "<html>\n  <style>\n    .a { color: red; }\n  </style>\n  <p>旧</p>\n</html>"
+        out, ok, bad = codegen.apply_patches(src, "<<<<<<< SEARCH\n  <p>旧</p>\n=======\n  <p>新</p>\n>>>>>>> REPLACE")
+        self.assertEqual((ok, bad), (1, 0))
+        self.assertIn("<p>新</p>", out)
+        # 缩进抄错: 逐行去空白后仍能定位; 定位不到的块记失败, 不猜
+        text = ("```\n<<<<<<< SEARCH\n.a { color: red; }\n=======\n    .a { color: blue; }\n>>>>>>> REPLACE\n"
+                "<<<<<<< SEARCH\n不存在的原文\n=======\nx\n>>>>>>> REPLACE\n```")
+        out, ok, bad = codegen.apply_patches(src, text)
+        self.assertEqual((ok, bad), (1, 1))
+        self.assertIn("color: blue", out)
+        self.assertNotIn("color: red", out)
+        self.assertEqual(codegen.apply_patches(src, "没有修改块")[1:], (0, 0))
+
     def test_problem_list_order(self):
         d = codegen.score(self.BRIEF, dict(self._rev(("partial", "no", "yes")), issues=[
             {"severity": "mid", "problem": "标题被裁切", "fix": "减小字号"}]), self._rep())
@@ -203,9 +217,13 @@ class _FakeLLM(BaseHTTPRequestHandler):
                 "checklist": [{"text": "圆形主体", "type": "visual", "must": True},
                               {"text": "持续缩放动效", "type": "motion", "must": True},
                               {"text": "按钮点击后数字加一", "type": "interaction", "must": False}]})
+        elif system == codegen.REPAIR_FULL_SYSTEM:
+            step = "repair_full"
+            out = MOVING
         elif system == codegen.REPAIR_SYSTEM:
             step = "repair"
-            out = MOVING
+            out = {"patch": "<<<<<<< SEARCH\nlet n=0;undefinedFunctionCall();\n=======\nlet n=0;\n>>>>>>> REPLACE",
+                   "badpatch": "<<<<<<< SEARCH\n这段原文并不存在\n=======\nx\n>>>>>>> REPLACE"}.get(m.get("repair"), MOVING)
         elif system == codegen.WRITE_SYSTEM:
             step = "write"
             out = {"broken": BROKEN, "static": STATIC, "text": "抱歉, 做不到", "fenced": "```html\n" + MOVING + "\n```"}.get(
@@ -352,6 +370,21 @@ class EndToEnd(unittest.TestCase):
         # 假上游的看图自检不通过 → 文本验收, 报告如实标注
         self.assertEqual(rep["rounds"][1]["review_mode"], "text")
         self.assertTrue(any("修复目标" in ln and "undefinedFunctionCall" in ln for ln in lines))
+        self.assertTrue(any("文本验收" in ln and "自检" in ln for ln in lines))     # 降级原因写进日志
+
+    def test_patch_repair_and_fallback_to_full_rewrite(self):
+        task, rep, lines, ws, err = self._run({"write": "broken", "repair": "patch"})
+        self.assertIsNone(err)
+        self.assertEqual(next(c for c in rep["calls"] if c["step"] == "repair")["mode"], "patch")
+        self.assertNotIn("undefinedFunctionCall", (ws / "index.html").read_text(encoding="utf-8"))
+        self.assertGreaterEqual(task["similarity_score"], 85)
+        # 修改块对不上原文: 这一轮作废, 下一轮改为整页重写
+        task, rep, lines, ws, err = self._run({"write": "broken", "repair": "badpatch"})
+        self.assertIsNone(err)
+        steps = [c[0] for c in _FakeLLM.calls]
+        self.assertIn("repair_full", steps)
+        self.assertLess(steps.index("repair"), steps.index("repair_full"))
+        self.assertGreaterEqual(task["similarity_score"], 85)
 
     def test_static_page_fails_motion_item_despite_model(self):
         # 模型写了不会动的页面, 验收模型却全判满足: 帧差硬证据把动效项判回 no, 触发修复
