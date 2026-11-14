@@ -783,3 +783,20 @@ html body label.tracking-\[0\.16em\],html body div.tracking-\[0\.16em\]{letter-s
   /* 提示条避开底部导航 */
   .toast-wrap,#toast,.ui-toast{bottom:76px!important}
 }
+
+/* ===== 2026-11-15 第四轮: 新手引导 ===== */
+.dash-try{margin-top:14px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:13px;color:var(--fg-3)}
+.dash-try button{height:28px;padding:0 11px;border:1px dashed var(--line-strong);border-radius:999px;font-size:13px;color:var(--fg-2);background:transparent;transition:border-color .15s,color .15s}
+.dash-try button:hover{border-style:solid;color:var(--fg)}
+.dash-try button:disabled{opacity:.5}
+.dash-guide{margin-top:32px;display:grid;gap:14px}
+.dash-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;counter-reset:none}
+.dash-steps li{padding:16px 18px;border:1px solid var(--line);border-radius:12px;background:var(--surface);display:flex;flex-direction:column;gap:6px}
+.dash-steps b{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;color:var(--fg)}
+.dash-steps em{font-style:normal;width:20px;height:20px;border-radius:999px;border:1px solid var(--line-strong);display:inline-flex;align-items:center;justify-content:center;font-size:12px;color:var(--fg-2)}
+.dash-steps span{font-size:13px;line-height:1.6;color:var(--fg-3)}
+.dash-more{display:flex;flex-wrap:wrap;gap:8px}
+.dash-more button{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:transparent;font-size:13px;color:var(--fg-3);text-align:left}
+.dash-more button b{font-weight:600;color:var(--fg)}
+.dash-more button:hover{border-color:var(--line-strong);color:var(--fg-2)}
+@media (max-width:640px){.dash-steps{grid-template-columns:1fr}}
