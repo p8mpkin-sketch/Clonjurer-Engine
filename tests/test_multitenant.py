@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 import textwrap
+import importlib.util
 import unittest
 from pathlib import Path
 
@@ -88,6 +89,7 @@ SCRIPT = textwrap.dedent(r'''
 ''')
 
 
+@unittest.skipUnless(importlib.util.find_spec("flask"), "需要 flask(平台依赖)")
 class MultiTenantIsolation(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
