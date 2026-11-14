@@ -27,7 +27,7 @@ class _Pool:
 
 def _db(tmp):
     db = Database(Path(tmp) / "t.db")
-    bid = db.create_batch("b", [("https://a.example/", "a.example"), ("https://b.example/", "b.example")], {})
+    bid = db.create_batch("b", [("https://a.example/", "a.example"), ("https://b.example/", "b.example")], {}, workspace_id=1)
     return db, bid
 
 
@@ -44,7 +44,7 @@ class SchedulerStability(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.db, _ = _db(self.tmp.name)
-        self.ids = [t["id"] for t in self.db.list_tasks()]
+        self.ids = [t["id"] for t in self.db.list_tasks(workspace_id=1)]
         self.bus = _Bus()
         self.s = sched_mod.Scheduler(self.db, self.bus, _Pool())
 

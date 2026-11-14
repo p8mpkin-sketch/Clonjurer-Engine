@@ -61,6 +61,7 @@ except ImportError:  # pragma: no cover
 import config
 from core import ai_mock_generator, ai_vision_repair, flask_generator, smart_downloader
 from core import pattern_detector, strategy_packs
+from core import live
 from core import pixel_calibrator
 
 from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 import 路径不变
@@ -434,6 +435,7 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
 
     # ------------------------------------------------------------------
     def run(self):
+        live.attach_timeline(self.task_id, self._timeline)
         self.task = self.db.get_task(self.task_id)
         if self.task is None:
             return

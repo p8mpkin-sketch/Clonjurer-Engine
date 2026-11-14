@@ -325,6 +325,13 @@ SCORE_UNLOCK_SHOT = True
 NARROW_PAIR_EARLY_CLOSE = True
 NARROW_PAGE_EARLY_CLOSE = True
 FLUID_SKIP_UNSTABLE_WAIT = True
+# 窄屏收回: 两张 0.92 倍宽对照页的「到位」等待(文字/图片计数连续不变, ≥0.75s)同时起、逐页取结果(原逐页串行等)
+NARROW_PAIR_PARALLEL = True
+# 窄屏变体: 各页网络静置共用一个 3s 截止时刻(各页的到位链本就同时起, 网络一直不静的站原来每页各白等 3s)。
+# 复核(run 657 开 / 659 关, 同时段 3 站): techcrunch 开 80.4(手机 63.1) / 关 74.2(手机 65.5), 关也一样掉,
+# 且 techcrunch 手机页网络静置两边都是 0.0s(共用截止根本没介入), 判定 656/655 的差是该站噪声;
+# solidjs 两边同分 99.6, allbirds 99.7/100.0; 耗时三站开时都更短。默认开, CLONER_CFG_NARROW_IDLE_SHARED=0 可回退
+NARROW_IDLE_SHARED = True
 # 内容守卫: 被删块原位出现了删除后才插入的同标签同类新块(水合失配后客户端重渲染, 数据少所以更矮)= 换了一份, 不放回
 CONTENT_KEEP_NEW_TWIN = True
 # 手机 UA 窄屏首载页启动失败时, 同宽桌面 UA 页接管手机段
@@ -373,3 +380,14 @@ def _apply_env_overrides():
 
 
 _apply_env_overrides()
+
+# 多租户套餐(每个工作区一个 plan)。None = 不限。
+# self: 私有化/单机默认(不限额, 存量默认工作区与本机实例都用它, 跑语料不受影响)。
+PLANS: dict[str, dict] = {
+    "self": {"label": "私有部署", "clones_month": None, "concurrent": None, "deploys": None, "members": None},
+    "free": {"label": "免费版", "clones_month": 30, "concurrent": 1, "deploys": 1, "members": 3},
+    "team": {"label": "团队版", "clones_month": 1000, "concurrent": 4, "deploys": 10, "members": None},
+    "enterprise": {"label": "企业版", "clones_month": None, "concurrent": 8, "deploys": None, "members": None},
+}
+# 新建工作区的默认套餐: 私有化保持 self; 对外 SaaS 部署设 CLONER_NEW_WORKSPACE_PLAN=free
+NEW_WORKSPACE_PLAN = os.environ.get("CLONER_NEW_WORKSPACE_PLAN", "self")
