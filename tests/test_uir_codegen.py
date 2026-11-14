@@ -176,6 +176,27 @@ class Pure(unittest.TestCase):
         self.assertEqual(item["verdict"], "no")
         self.assertTrue(item["gate"])
 
+    def test_subject_crop(self):
+        from PIL import Image, ImageDraw
+        d = Path(tempfile.mkdtemp(prefix="crop_"))
+        try:
+            im = Image.new("RGB", (1440, 900), "#101014")
+            ImageDraw.Draw(im).ellipse((640, 380, 800, 520), fill="#e11d48")      # 居中的小图形
+            im.save(d / "small.png")
+            out = codegen.subject_crop(d / "small.png", d / "s.png")
+            self.assertIsNotNone(out)
+            with Image.open(out) as c:
+                self.assertGreaterEqual(max(c.size), 880)                          # 放大到看得清
+                self.assertEqual(c.getpixel((c.size[0] // 2, c.size[1] // 2))[0], 0xe1)
+            # 内容已经铺满画面: 不需要特写
+            full = Image.new("RGB", (1440, 900), "#101014")
+            ImageDraw.Draw(full).rectangle((60, 60, 1380, 840), fill="#f5f5f4")
+            full.save(d / "full.png")
+            self.assertIsNone(codegen.subject_crop(d / "full.png", d / "f.png"))
+            self.assertIsNone(codegen.subject_crop(d / "missing.png", d / "m.png"))
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
     def test_extract_json_tolerates_trailing_content(self):
         from core.uir import llm
         self.assertEqual(llm.extract_json('{"a": {"b": [1, 2]}}\n{"extra": 1}'), {"a": {"b": [1, 2]}})

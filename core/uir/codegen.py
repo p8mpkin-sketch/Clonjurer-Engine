@@ -43,7 +43,8 @@ PLAN_SYSTEM = (
     "- highlights: 2~4 个超出字面要求的亮点, 每个一句话, 写清楚用户能看到或操作到什么。必须贴合主题和使用场景: "
     "展示类页面侧重氛围层次、与主题相关的信息呈现、对指针/点击/按键的呼应; 工具类页面侧重效率与细节"
     "(键盘操作、空状态、即时反馈、数据不丢)。亮点是把这件事做到位, 不是另加一个大功能\n"
-    "- tech: 实现要点 —— 图形用 CSS / 内联 SVG / canvas 中的哪种, 动效怎么做, 有哪些状态和事件, 数据怎么存\n"
+    "- tech: 实现要点 —— 图形用 CSS / 内联 SVG / canvas 中的哪种, 动效怎么做, 有哪些状态和事件, 数据怎么存。"
+    "具象图形(形状、图标、物件、角色)用内联 SVG path 或 canvas 路径精确绘制, 不用 CSS 伪元素拼接\n"
     "- checklist: 6~12 条验收项, 每条 {id: \"c1\"..., text, type, must}\n"
     "验收项规则:\n"
     "1. 每条必须是打开页面后能直接观察或操作验证的具体事实, 不写空话(「体验良好」这类不算)。\n"
@@ -73,7 +74,8 @@ WRITE_SYSTEM = (
     "7. 游戏或可操作的内容: 同时支持键盘和鼠标/触屏, 在页面上写明操作方式, 有开始、结束、重新开始的完整流程。\n"
     "8. 设计质量按作品集水准要求, 以下几点缺一不可:\n"
     "   a. 层次 —— 画面至少有背景氛围层、主体、点缀或信息层; 主体要有体积感和质感(渐变、高光、阴影、描边的组合), "
-    "不能是一个扁平色块配一行字。\n"
+    "不能是一个扁平色块配一行字。具象图形(形状、图标、物件、角色)用内联 SVG path 或 canvas 路径精确绘制, "
+    "不要用 CSS 伪元素拼接; 写完核对形状完整、比例协调、该对称处对称。\n"
     "   b. 节奏 —— 动效用多段关键帧或基于时间的函数, 配合缓动, 符合主题在现实中的节奏; 相关元素(主体、光影、环境)联动; "
     "避免单一匀速的缩放或旋转。\n"
     "   c. 呼应 —— 至少有一处对用户操作(指针移动、点击或触摸、按键)的有意义的反馈, 并让用户知道可以这样操作。\n"
@@ -108,14 +110,16 @@ REVIEW_SYSTEM = (
     "unsure(现有截图和体检数据既不能证明满足, 也不能证明不满足 —— 例如要走完多步操作才能看到的结果)。"
     "不要把 unsure 的情况判成 no; 也不要因为拿不准就判 yes。\n"
     "3. 体检数据是确定性测量, 与你的观感冲突时以体检数据为准(例如相邻帧变化占比为 0 说明画面没有在动)。\n"
-    "4. 设计质量 design.score 为 0~10 的数, 以「顶尖设计师拿到同一句需求会交出的作品」为 9 分的参照: "
+    "4. 先核对主体图形有没有画对: 形状完整、比例协调、该对称处对称、没有错位或残缺(有「主体特写」图时以特写为准)。"
+    "画错了, 描述该图形的条目判 no, 并作为 high 级 issue 写清哪里画错。\n"
+    "5. 设计质量 design.score 为 0~10 的数, 以「顶尖设计师拿到同一句需求会交出的作品」为 9 分的参照: "
     "只做到字面要求、画面单薄(单一主体加一行字, 没有氛围层次, 对用户操作没有任何呼应)最多 6 分; "
     "有层次、有节奏、有细节但仍有明显瑕疵是 7~8 分。布局错乱、元素重叠、文字溢出或被裁切、对比度不足、"
     "内容缩在视口中间一小块而四周大片空白、手机宽度下不可用, 都要扣分并写进 issues。\n"
-    "5. 前两张截图拍在页面刚加载时, 入场动画可能还没结束(元素半透明、位置未到位属正常); 对比度、布局、内容是否齐全"
+    "6. 前两张截图拍在页面刚加载时, 入场动画可能还没结束(元素半透明、位置未到位属正常); 对比度、布局、内容是否齐全"
     "以「静置后的整页」为准。整页图在截取前已自动逐屏滚动过一遍, 仍然空白的区域才是真的没有内容。\n"
-    "6. 涉及时间、日期、计时的条目, 用体检数据里给出的截图时刻去核对画面上的读数。\n"
-    "7. issues 只列真正需要修改的问题, 按严重程度从高到低, 每条写清现象(problem)和修改方向(fix), 最多 6 条; 没有问题给空数组。\n"
+    "7. 涉及时间、日期、计时的条目, 用体检数据里给出的截图时刻去核对画面上的读数。\n"
+    "8. issues 只列真正需要修改的问题, 按严重程度从高到低, 每条写清现象(problem)和修改方向(fix), 最多 6 条; 没有问题给空数组。\n"
     "输出格式: {\"items\":[{\"id\":\"c1\",\"verdict\":\"yes|partial|no|unsure\",\"evidence\":\"...\"}],"
     "\"design\":{\"score\":0,\"comment\":\"...\"},"
     "\"issues\":[{\"severity\":\"high|mid|low\",\"problem\":\"...\",\"fix\":\"...\"}],\"summary\":\"一句话总评\"}"
@@ -456,6 +460,42 @@ def probe_digest(rep: dict) -> str:
     return "\n".join(lines)
 
 
+def subject_crop(src: Path, out: Path, max_frac: float = 0.45):
+    """从截图里裁出「画面主体」并放大 → out 路径; 主体已经占满大半画面(信息页、整屏画布)时返回 None。
+
+    缩到 1024 宽送审时, 居中的小图形只剩一两百像素, 验收模型看不出形状画错(残缺、错位、不对称) —— 本机实测过一个
+    用两个圆拼出来、左右错位的图形被判「形状正常」。做法与题材无关: 以四边像素的中位色作背景, 与背景色差明显的
+    像素算前景, 取前景坐标的 2%~98% 分位作外接框(忽略零星粒子 / 噪点), 外扩 15% 后裁剪, 长边放大到约 900px。"""
+    import numpy as np
+    from PIL import Image
+    try:
+        with Image.open(src) as im:
+            rgb = im.convert("RGB")
+        w, h = rgb.size
+        small = np.asarray(rgb.resize((max(1, w // 4), max(1, h // 4))), dtype=np.int16)
+        border = np.concatenate([small[0], small[-1], small[:, 0], small[:, -1]])
+        bg = np.median(border, axis=0)
+        mask = np.abs(small - bg).max(axis=2) > 40
+        ys, xs = np.nonzero(mask)
+        if len(xs) < 50:
+            return None
+        x0, x1 = np.percentile(xs, [2, 98]) * 4
+        y0, y1 = np.percentile(ys, [2, 98]) * 4
+        bw, bh = x1 - x0, y1 - y0
+        if bw < 40 or bh < 40 or (bw * bh) / (w * h) > max_frac:
+            return None
+        px, py = bw * 0.15, bh * 0.15
+        box = (int(max(0, x0 - px)), int(max(0, y0 - py)), int(min(w, x1 + px)), int(min(h, y1 + py)))
+        crop = rgb.crop(box)
+        k = 900 / max(crop.size)
+        if k > 1:
+            crop = crop.resize((round(crop.size[0] * k), round(crop.size[1] * k)), Image.LANCZOS)
+        crop.save(out)
+        return out
+    except Exception:
+        return None
+
+
 def _review_parts(rep: dict) -> list:
     shots, parts = rep.get("shots") or {}, []
     gap_s = sum(settings.PROBE_FRAME_GAPS_MS) / 1000.0
@@ -474,6 +514,11 @@ def _review_parts(rep: dict) -> list:
     if ok("peak"):
         add(f"同一视口, 之后 {gap_s:.1f} 秒内与上一张差异最大的一帧(对比两张可判断是否在动)",
             llm._image_part(Path(shots["peak"]), 1024))
+    base = shots.get("peak") if ok("peak") else (shots.get("f0") if ok("f0") else None)
+    if base:
+        crop = subject_crop(Path(base), Path(base).with_name("subject.png"))
+        if crop:
+            add("主体特写: 从上一张截图里裁出画面主体并放大, 用来核对主体图形画得对不对", llm._image_part(crop, 900))
     if ok("full"):
         tiles = llm.image_parts(Path(shots["full"]), 1024, max_tiles=3, tile_h=1700)[0]
         for k, part in enumerate(tiles):
@@ -729,6 +774,11 @@ def run(desc: str, ws: Path, pool, ai_cfg: dict, judge_cfg: dict, viewport: dict
         else:
             stalled = True
             log("GEN", f"第 {rnd} 轮未提升({best['detail']['score']} → {detail['score']}), 保留第 {best['round']} 轮版本")
+            # 修了一轮没变好: 只有还存在硬伤, 或用户明确要求的条目确实没做到, 才值得换思路整页重写;
+            # 其余情况(部分满足、设计意见)再修多半只是换一个随机结果, 实测每轮白花 40~60 秒
+            if not best["defects"] and not any(i.get("must") and i.get("verdict") == "no" for i in best["detail"]["items"]):
+                log("GEN", "没有硬伤, 用户明确要求的条目也没有未满足的, 不再重写")
+                break
         if (best["detail"]["score"] >= target_score and not best["defects"]
                 and best["detail"]["design"] >= settings.CODE_MIN_DESIGN):
             log("GEN", f"需求符合度达到 {target_score}、设计分达标且无硬伤, 停止迭代")
