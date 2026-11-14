@@ -5505,6 +5505,7 @@ const __vueApp = createApp({
     openTaskDetail(task) {
       this.selectedTaskId = task.id;
       this.fitDrawer = false;
+      if (window.innerWidth < 640) this.previewWidth = 'mobile';     // 手机上默认按手机宽度预览, 不把桌面页挤成一条
       this.taskTokens = { id: null, rows: [], tokens_in: 0, tokens_out: 0, total: 0 };
       if (this.isGenTask(task) || (task.stats && task.stats.generate)) this.loadTaskTokens(task.id);
       this.previewTaskId = task.id;
