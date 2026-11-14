@@ -57,8 +57,8 @@ class DeployTests(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         self.db = Database(self.tmp / "t.db")
         bid = self.db.create_batch("b", [("https://a.example/", "a.example"),
-                                         ("https://b.example/", "b.example")], {})
-        self.tasks = self.db.list_tasks(batch_id=bid)
+                                         ("https://b.example/", "b.example")], {}, workspace_id=1)
+        self.tasks = self.db.list_tasks(batch_id=bid, workspace_id=1)
         for t in self.tasks:
             self.db.update_task(t["id"], status="completed")
         self.fake = FakeDocker()

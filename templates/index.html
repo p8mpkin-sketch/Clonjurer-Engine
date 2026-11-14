@@ -15,7 +15,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 <!-- 顶级字体体系: Inter / Plus Jakarta Sans / JetBrains Mono / Noto Sans SC -->
 <link href="/vendor/fonts/fonts.css" rel="stylesheet">
 <!-- UI 改版 P0 规范层: 字号/对比度/焦点/语义色(只换样式) -->
-<link href="/vendor/css/ui-tokens.css?v=13" rel="stylesheet">
+<link href="/vendor/css/ui-tokens.css?v=14" rel="stylesheet">
 
 <script src="/vendor/js/lucide.subset.js?v=2"></script>
 <script>
@@ -240,11 +240,19 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <div v-if="wsMenu" class="fixed inset-0 z-[60]" @click="wsMenu=false"></div>
       <div v-if="wsMenu" class="ws-menu" @click="wsMenu=false">
         <div class="ws-menu-label">工作区</div>
-        <div class="ws-menu-cur">
+        <template v-if="workspace.spaces && workspace.spaces.length">
+          <button v-for="sp in workspace.spaces" :key="sp.id" type="button" class="ws-menu-space" :class="sp.id === workspace.id ? 'cur' : ''" @click="switchWorkspace(sp)">
+            <span class="ws-dot" :class="avTone(sp.name)">[[ sp.name.slice(0, 1) ]]</span>
+            <span class="flex-1 min-w-0 text-left"><span class="block truncate">[[ sp.name ]]</span><small>[[ roleText(sp.role) ]] · [[ sp.member_count ]] 人</small></span>
+            <i v-if="sp.id === workspace.id" data-lucide="check" class="w-4 h-4"></i>
+          </button>
+        </template>
+        <div v-else class="ws-menu-cur">
           <span class="brand-mark sm" aria-hidden="true"></span>
           <span class="flex-1 min-w-0 truncate">[[ workspace.name ]]</span>
           <i data-lucide="check" class="w-4 h-4"></i>
         </div>
+        <button v-if="auth.user" type="button" class="ws-menu-add" @click="wsCreate = { open: true, name: '', busy: false, error: '' }; $nextTick(() => iconRefresh())"><i data-lucide="plus" class="w-4 h-4"></i>新建工作区</button>
         <div v-if="workspace.members.length" class="ws-menu-people">
           <span class="av-stack">
             <span v-for="m in workspace.members.slice(0, 5)" :key="m.name" class="av" :class="avTone(m.name)" :title="m.name + ' · ' + roleText(m.role)">[[ m.name.slice(0, 1) ]]</span>
@@ -253,9 +261,10 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         </div>
         <div class="ws-menu-sep"></div>
         <template v-if="auth.user">
+          <button v-if="isAdmin()" type="button" @click="openInviteModal()"><i data-lucide="user-plus" class="w-4 h-4"></i>邀请成员</button>
           <button v-if="isAdmin()" type="button" @click="goModule('admin'); adminTab='users'; loadUsers();"><i data-lucide="users" class="w-4 h-4"></i>成员与权限</button>
+          <button v-if="isAdmin()" type="button" @click="goModule('admin'); adminTab='workspace'; loadUsage();"><i data-lucide="gauge" class="w-4 h-4"></i>套餐与用量</button>
           <button v-if="isAdmin()" type="button" @click="goModule('admin'); adminTab='audit'; loadAudit();"><i data-lucide="history" class="w-4 h-4"></i>操作记录</button>
-          <button v-if="isAdmin()" type="button" @click="goModule('admin'); adminTab='settings'; loadSettings();"><i data-lucide="settings" class="w-4 h-4"></i>工作区设置</button>
           <div v-if="!isAdmin()" class="ws-menu-note">你是[[ roleText(auth.user.role) ]]。成员和权限由管理员管理。</div>
         </template>
         <button v-else type="button" @click="auth.required = true"><i data-lucide="user-plus" class="w-4 h-4"></i>启用团队登录，邀请成员</button>
@@ -382,8 +391,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" style="width:20px;height:20px"><rect x="3.5" y="3.5" width="11" height="11" rx="2" opacity=".45"/><rect x="9.5" y="9.5" width="11" height="11" rx="2"/></svg>
           </div>
           <div>
-            <div class="font-display font-bold text-slate-100">[[ auth.openMode ? '初始化平台' : '登录平台' ]]</div>
-            <div class="text-[11px] text-slate-500">[[ auth.openMode ? '创建首个管理员账号后, 平台进入强制鉴权模式' : '登录后开始克隆' ]]</div>
+            <div class="font-display font-bold text-slate-100">[[ authMode==='invite' ? '加入「' + invite.info.workspace + '」' : (authMode==='bootstrap' ? '初始化平台' : '登录') ]]</div>
+            <div class="text-[12px] text-slate-500">[[ authMode==='invite' ? '你被邀请以' + roleText(invite.info.role) + '身份加入，创建账号即可进入' : (authMode==='bootstrap' ? '创建首个管理员账号后，平台进入团队登录模式' : (invite.info ? '登录后加入「' + invite.info.workspace + '」' : '登录后开始克隆')) ]]</div>
           </div>
         </div>
         <div class="space-y-3">
@@ -391,29 +400,35 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <label class="text-[11px] text-slate-400 mb-1 block">用户名</label>
             <div class="login-field">
               <svg class="lf-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-              <input v-model="auth.form.username" placeholder="2~32 位字母/数字/._-" @keyup.enter="auth.openMode ? doBootstrap() : doLogin()" class="login-input">
+              <input v-model="auth.form.username" placeholder="2~32 位字母/数字/._-" @keyup.enter="authSubmit()" class="login-input">
             </div>
           </div>
-          <div v-if="auth.openMode">
+          <div v-if="authMode !== 'login'">
             <label class="text-[11px] text-slate-400 mb-1 block">显示名称(可选)</label>
             <div class="login-field">
               <svg class="lf-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.2V11a2 2 0 0 0-2-2h-4.3l1-1.1a2 2 0 0 0-.1-2.8l-1.5-1.4a2 2 0 0 0-2.8.1L4.5 10.6a2 2 0 0 0-.6 1.4v7.6a2 2 0 0 0 2 2h12.7a2 2 0 0 0 2-2v-2.2"/><circle cx="16.8" cy="15.6" r="2.1"/></svg>
-              <input v-model="auth.form.display_name" placeholder="例如: 平台管理员" class="login-input">
+              <input v-model="auth.form.display_name" :placeholder="authMode==='invite' ? '同事看到的名字，例如：林夏' : '例如：平台管理员'" class="login-input">
             </div>
           </div>
           <div>
             <label class="text-[11px] text-slate-400 mb-1 block">密码</label>
             <div class="login-field">
               <svg class="lf-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-              <input v-model="auth.form.password" type="password" placeholder="至少 8 位" @keyup.enter="auth.openMode ? doBootstrap() : doLogin()" class="login-input">
+              <input v-model="auth.form.password" type="password" placeholder="至少 8 位" @keyup.enter="authSubmit()" class="login-input">
             </div>
           </div>
           <div v-if="auth.error" class="login-error">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><span>[[ auth.error ]]</span>
           </div>
-          <button @click="auth.openMode ? doBootstrap() : doLogin()" :disabled="auth.busy" class="login-submit">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>[[ auth.busy ? '请稍候…' : (auth.openMode ? '创建管理员并进入' : '登录') ]]
+          <button @click="authSubmit()" :disabled="auth.busy" class="login-submit">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>[[ auth.busy ? '请稍候…' : (authMode==='invite' ? '创建账号并加入' : (authMode==='bootstrap' ? '创建管理员并进入' : '登录')) ]]
           </button>
+          <div v-if="invite.info" class="text-center text-[12px] text-slate-500 pt-1">
+            <button type="button" class="dash-link" @click="invite.loginInstead = !invite.loginInstead; auth.error=''">[[ invite.loginInstead ? '没有账号？创建一个' : '已有账号？登录后加入' ]]</button>
+          </div>
+          <div v-if="auth.openMode && !invite.info" class="text-center pt-1">
+            <button type="button" class="dash-link text-[12px]" @click="auth.required=false">暂不启用</button>
+          </div>
         </div>
       </div>
     </div>
@@ -1579,52 +1594,105 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
   </div>
 
   <!-- ======================= 管理中心(仅 admin) ======================= -->
-  <div v-show="view==='admin' && auth.user && auth.user.role==='admin'" class="flex-1 min-h-0 overflow-y-auto custom-scroll">
+  <div v-show="view==='admin' && auth.user && isAdmin()" class="flex-1 min-h-0 overflow-y-auto custom-scroll">
     <div class="max-w-[1300px] mx-auto px-6 py-6 space-y-4">
-      <div class="flex items-center justify-between">
-        <div>
-          <h2 class="font-display text-[28px] leading-tight text-slate-100">管理中心</h2>
-          <p class="text-[13px] text-slate-500 mt-1.5">用户与角色 · 审计日志 · 系统设置</p>
+      <div class="flex items-center justify-between flex-wrap gap-4">
+        <div class="min-w-0">
+          <h2 class="font-display text-[28px] leading-tight text-slate-100">[[ workspace.name ]]</h2>
+          <p class="text-[13px] text-slate-500 mt-1.5">成员与权限、套餐用量、操作记录<template v-if="isPlatformAdmin()">，以及平台设置</template></p>
         </div>
-        <div class="flex items-center gap-1 p-0.5 rounded-xl border border-white/[0.07] bg-slate-950/60">
-          <button v-for="t in adminTabs" :key="t.id" @click="adminTab=t.id"
+        <div class="flex items-center gap-1 p-0.5 rounded-xl border border-white/[0.07] bg-slate-950/60 max-w-full overflow-x-auto">
+          <button v-for="t in adminTabs.filter(t => t.id !== 'settings' || isPlatformAdmin())" :key="t.id" @click="adminTab=t.id; if (t.id==='workspace') loadUsage()"
             :class="adminTab===t.id ? 'bg-slate-500/10 text-slate-50 border-slate-400' : 'text-slate-500 border-transparent hover:text-slate-300'"
-            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[11px] transition-all">
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[11px] whitespace-nowrap shrink-0 transition-all">
             <i :data-lucide="t.icon" class="w-3.5 h-3.5"></i>[[ t.label ]]
           </button>
         </div>
       </div>
 
       <!-- 用户管理 -->
-      <div v-show="adminTab==='users'" class="rounded-2xl border border-white/[0.07] bg-slate-900/70 backdrop-blur-xl overflow-hidden">
-        <div class="flex items-center justify-between px-5 py-3.5 border-b border-white/[0.06]">
-          <div class="text-xs font-semibold text-slate-300 flex items-center gap-2"><i data-lucide="users" class="w-4 h-4 text-indigo-400"></i>平台用户 <span class="text-slate-500 font-normal">([[ users.length ]])</span></div>
-          <button @click="openUserModal()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 text-[11px] text-indigo-300 hover:bg-indigo-500/20 transition-all"><i data-lucide="user-plus" class="w-3.5 h-3.5"></i>新增用户</button>
-        </div>
-        <table class="w-full text-[11px]">
-          <thead><tr class="text-slate-500 text-left border-b border-white/[0.05]">
-            <th class="px-5 py-2.5 font-medium">用户</th><th class="px-3 py-2.5 font-medium">角色</th>
-            <th class="px-3 py-2.5 font-medium">状态</th><th class="px-3 py-2.5 font-medium">最近登录</th>
-            <th class="px-5 py-2.5 font-medium text-right">操作</th>
-          </tr></thead>
-          <tbody>
-            <tr v-for="u in users" :key="u.id" class="border-b border-white/[0.03] hover:bg-white/[0.02]">
-              <td class="px-5 py-2.5">
-                <div class="flex items-center gap-2.5">
-                  <div class="w-7 h-7 rounded-full bg-slate-700 text-slate-100 flex items-center justify-center text-[10px] font-bold text-white">[[ (u.display_name || u.username).slice(0,1).toUpperCase() ]]</div>
-                  <div><div class="text-slate-200">[[ u.display_name || u.username ]]</div><div class="text-slate-600 font-mono">@[[ u.username ]]</div></div>
-                </div>
-              </td>
-              <td class="px-3 py-2.5"><span class="px-2 py-0.5 rounded-md border text-[10px]" :class="roleBadge(u.role)">[[ roleText(u.role) ]]</span></td>
-              <td class="px-3 py-2.5"><span class="w-1.5 h-1.5 rounded-full inline-block mr-1.5" :class="u.is_active ? 'bg-emerald-400' : 'bg-slate-600'"></span><span :class="u.is_active ? 'text-slate-300' : 'text-slate-600'">[[ u.is_active ? '正常' : '已停用' ]]</span></td>
-              <td class="px-3 py-2.5 text-slate-500 font-mono">[[ u.last_login_at || '从未' ]]</td>
-              <td class="px-5 py-2.5 text-right whitespace-nowrap">
-                <button @click="toggleUserActive(u)" class="px-2 py-1 rounded-md text-slate-500 hover:text-amber-300 hover:bg-amber-500/10 transition-all" :title="u.is_active ? '停用' : '启用'"><i data-lucide="power" class="w-3.5 h-3.5"></i></button>
-                <button v-if="u.id !== auth.user.id" @click="deleteUser(u)" class="px-2 py-1 rounded-md text-slate-500 hover:text-rose-300 hover:bg-rose-500/10 transition-all" title="删除"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <div v-show="adminTab==='users'" class="space-y-6">
+        <section class="mt-panel">
+          <div class="mt-head">
+            <div>
+              <h3>成员</h3>
+              <p>[[ users.length ]] 人<template v-if="usage.limits && usage.limits.members"> · 套餐上限 [[ usage.limits.members ]] 人</template></p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button type="button" @click="openUserModal()" class="mt-btn">直接创建账号</button>
+              <button type="button" @click="openInviteModal()" class="mt-btn primary"><i data-lucide="user-plus" class="w-4 h-4"></i>邀请成员</button>
+            </div>
+          </div>
+          <div class="mt-row mt-row-head"><span>成员</span><span>角色</span><span class="hide-sm">加入时间</span><span class="hide-sm">最近登录</span><span></span></div>
+          <div v-for="u in users" :key="u.id" class="mt-row">
+            <div class="flex items-center gap-3 min-w-0">
+              <span class="av lg" :class="avTone(u.display_name || u.username)">[[ (u.display_name || u.username).slice(0, 1) ]]</span>
+              <div class="min-w-0">
+                <div class="text-[14px] text-slate-100 truncate">[[ u.display_name || u.username ]]<span v-if="auth.user && u.id === auth.user.id" class="text-slate-500 text-[12px]">（你）</span></div>
+                <div class="text-[12px] text-slate-500 truncate">@[[ u.username ]]<template v-if="!u.is_active"> · 账号已停用</template></div>
+              </div>
+            </div>
+            <div>
+              <select v-if="canManageMember(u)" :value="u.role" @change="changeMemberRole(u, $event.target.value)" class="mt-select" :aria-label="'修改 ' + u.username + ' 的角色'">
+                <option v-if="workspace.role==='owner'" value="owner">所有者</option>
+                <option value="admin">管理员</option>
+                <option value="operator">成员</option>
+                <option value="viewer">只读</option>
+              </select>
+              <span v-else class="text-[13px] text-slate-300">[[ roleText(u.role) ]]</span>
+            </div>
+            <div class="hide-sm text-[13px] text-slate-500">[[ relTime(u.created_at) ]]</div>
+            <div class="hide-sm text-[13px] text-slate-500">[[ u.last_login_at ? relTime(u.last_login_at) : '从未登录' ]]</div>
+            <div class="flex justify-end">
+              <button v-if="canManageMember(u) && !(auth.user && u.id === auth.user.id)" type="button" @click="deleteUser(u)" class="mt-icon" title="移出工作区" aria-label="移出工作区"><i data-lucide="user-minus" class="w-4 h-4"></i></button>
+            </div>
+          </div>
+        </section>
+
+        <section v-if="invites.length" class="mt-panel">
+          <div class="mt-head"><div><h3>待接受的邀请</h3><p>链接被打开并注册后自动失效</p></div></div>
+          <div v-for="i in invites" :key="i.id" class="mt-row mt-row-invite">
+            <div class="flex items-center gap-3"><span class="av lg ghost"><i data-lucide="link" class="w-4 h-4"></i></span><span class="text-[13px] text-slate-300">邀请链接 #[[ i.id ]]</span></div>
+            <span class="text-[13px] text-slate-300">[[ roleText(i.role) ]]</span>
+            <span class="hide-sm text-[13px] text-slate-500">已用 [[ i.uses ]] / [[ i.max_uses ]]</span>
+            <span class="hide-sm text-[13px] text-slate-500">[[ expiresIn(i.expires_at) ]]</span>
+            <div class="flex justify-end"><button type="button" class="mt-icon" title="撤销" aria-label="撤销邀请" @click="revokeInvite(i)"><i data-lucide="x" class="w-4 h-4"></i></button></div>
+          </div>
+        </section>
+
+        <section class="mt-panel mt-roles">
+          <div class="mt-head"><div><h3>角色说明</h3></div></div>
+          <dl>
+            <div><dt>所有者</dt><dd>全部权限，含转让所有者和修改套餐</dd></div>
+            <div><dt>管理员</dt><dd>邀请和移除成员、改角色、看操作记录、改工作区设置</dd></div>
+            <div><dt>成员</dt><dd>新建项目、提交克隆、部署和导出</dd></div>
+            <div><dt>只读</dt><dd>查看项目、任务、报告和预览</dd></div>
+          </dl>
+        </section>
+      </div>
+
+      <!-- 工作区: 名称 / 套餐与用量 / 离开 -->
+      <div v-show="adminTab==='workspace'" class="space-y-6">
+        <section class="mt-panel">
+          <div class="mt-head"><div><h3>工作区名称</h3><p>成员在侧栏和邀请页看到的名字</p></div></div>
+          <form class="flex items-center gap-2 px-5 pb-5" @submit.prevent="saveWorkspaceName()">
+            <input v-model="wsForm.name" maxlength="40" class="mt-input" aria-label="工作区名称">
+            <button type="submit" class="mt-btn primary" :disabled="!wsForm.name || wsForm.name === workspace.name">保存</button>
+          </form>
+        </section>
+        <section class="mt-panel">
+          <div class="mt-head"><div><h3>套餐与用量</h3><p>[[ usage.plan_label || '—' ]] · 每月 1 日重置</p></div></div>
+          <div class="mt-usage">
+            <div v-for="m in usageMeters" :key="m.key" class="mt-meter">
+              <div class="flex items-baseline justify-between"><span>[[ m.label ]]</span><b>[[ m.used ]]<small> / [[ m.limit == null ? '不限' : m.limit ]]</small></b></div>
+              <div class="mt-bar"><span :style="{ width: m.pct + '%' }" :class="m.pct >= 90 ? 'hot' : ''"></span></div>
+            </div>
+          </div>
+        </section>
+        <section class="mt-panel">
+          <div class="mt-head"><div><h3>离开工作区</h3><p>离开后看不到这里的项目；需要时可以让管理员重新邀请你</p></div>
+            <button type="button" class="mt-btn danger" @click="leaveWorkspace()">离开</button></div>
+        </section>
       </div>
 
       <!-- 审计日志 -->
@@ -1799,6 +1867,40 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       </div>
 
       <!-- 新增用户弹窗 -->
+      <div v-if="wsCreate.open" class="fixed inset-0 z-[80] flex items-center justify-center bg-black/50" @click.self="workspace.id && (wsCreate.open=false)">
+        <form class="mt-modal" @submit.prevent="createWorkspace()">
+          <h3>[[ workspace.id ? '新建工作区' : '创建你的第一个工作区' ]]</h3>
+          <p>每个工作区有独立的项目、成员和用量，适合按团队或客户分开。</p>
+          <label for="ws-new-name">名称</label>
+          <input id="ws-new-name" v-model="wsCreate.name" maxlength="40" placeholder="例如：星桥设计" class="mt-input" autofocus>
+          <div v-if="wsCreate.error" class="text-[12px] text-rose-400">[[ wsCreate.error ]]</div>
+          <div class="flex justify-end gap-2 pt-2">
+            <button v-if="workspace.id" type="button" class="mt-btn" @click="wsCreate.open=false">取消</button>
+            <button type="submit" class="mt-btn primary" :disabled="wsCreate.busy || wsCreate.name.trim().length < 2">[[ wsCreate.busy ? '创建中…' : '创建' ]]</button>
+          </div>
+        </form>
+      </div>
+      <div v-if="inviteModal.open" class="fixed inset-0 z-[70] flex items-center justify-center bg-black/50" @click.self="inviteModal.open=false">
+        <div class="mt-modal">
+          <h3>邀请成员加入「[[ workspace.name ]]」</h3>
+          <p>生成一个链接发给同事，对方打开后创建账号或登录即可加入。</p>
+          <label>加入后的角色</label>
+          <div class="ui-seg w-full" role="group" aria-label="角色">
+            <button v-for="r in ['viewer','operator','admin']" :key="r" type="button" class="flex-1" :aria-pressed="inviteModal.role===r ? 'true' : 'false'" @click="inviteModal.role=r; inviteModal.url=''">[[ roleText(r) ]]</button>
+          </div>
+          <label>有效期与次数</label>
+          <div class="flex gap-2">
+            <select v-model.number="inviteModal.days" class="mt-select flex-1" aria-label="有效期"><option :value="1">1 天</option><option :value="7">7 天</option><option :value="30">30 天</option></select>
+            <select v-model.number="inviteModal.max_uses" class="mt-select flex-1" aria-label="可用次数"><option :value="1">仅 1 人</option><option :value="10">最多 10 人</option><option :value="50">最多 50 人</option></select>
+          </div>
+          <div v-if="inviteModal.url" class="mt-link"><input :value="inviteModal.url" readonly @focus="$event.target.select()" aria-label="邀请链接"><button type="button" class="mt-btn primary" @click="copyText(inviteModal.url)">复制</button></div>
+          <div v-if="inviteModal.error" class="text-[12px] text-rose-400">[[ inviteModal.error ]]</div>
+          <div class="flex justify-end gap-2 pt-2">
+            <button type="button" class="mt-btn" @click="inviteModal.open=false">[[ inviteModal.url ? '完成' : '取消' ]]</button>
+            <button v-if="!inviteModal.url" type="button" class="mt-btn primary" :disabled="inviteModal.busy" @click="createInvite()">[[ inviteModal.busy ? '生成中…' : '生成邀请链接' ]]</button>
+          </div>
+        </div>
+      </div>
       <div v-if="userModal.open" class="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm" @click.self="userModal.open=false">
         <div class="w-[400px] max-w-[92vw] rounded-2xl border border-white/[0.08] bg-slate-900 shadow-2xl p-6">
           <div class="flex items-center gap-2.5 mb-4">
@@ -3434,7 +3536,7 @@ const __vueApp = createApp({
       projectQ: '', projectMenu: null,
       renameModal: { open: false, id: null, name: '', description: '', busy: false, error: '' },
       aiPrompt: '',
-      workspace: { name: '我的团队', members: [], member_count: 0 },
+      workspace: { id: 1, name: '我的团队', role: 'owner', members: [], member_count: 0, spaces: [] },
       wsMenu: false,
       auth: { required: false, openMode: true, user: null, form: { username: '', password: '', display_name: '' }, busy: false, error: '' },
       navViews: [
@@ -3446,10 +3548,17 @@ const __vueApp = createApp({
       projectModal: { open: false, name: '', description: '', color: '#6366f1', busy: false, error: '' },
       adminTab: 'users',
       adminTabs: [
-        { id: 'users', label: '用户管理', icon: 'users' },
-        { id: 'audit', label: '审计日志', icon: 'scroll-text' },
-        { id: 'settings', label: '系统设置', icon: 'settings' },
+        { id: 'users', label: '成员', icon: 'users' },
+        { id: 'workspace', label: '套餐与用量', icon: 'gauge' },
+        { id: 'audit', label: '操作记录', icon: 'scroll-text' },
+        { id: 'settings', label: '平台设置', icon: 'settings' },
       ],
+      invites: [],
+      inviteModal: { open: false, role: 'operator', days: 7, max_uses: 1, url: '', busy: false, error: '' },
+      wsCreate: { open: false, name: '', busy: false, error: '' },
+      wsForm: { name: '' },
+      usage: { limits: {} },
+      invite: { token: '', info: null, loginInstead: false },
       users: [], userModal: { open: false, username: '', display_name: '', password: '', role: 'viewer', busy: false, error: '' },
       audit: { entries: [], actions: [], filter: '', q: '' },
       docker: { available: false, hint: '', version: '', list: [], busy: false, error: '', logs: '', showLogs: false },
@@ -3549,7 +3658,22 @@ const __vueApp = createApp({
       }
       return null;
     },
-    canWrite() { return !this.auth.required || !!(this.auth.user && ['admin', 'operator'].includes(this.auth.user.role)); },
+    canWrite() { return !this.auth.required || !!(this.auth.user && ['owner', 'admin', 'operator'].includes(this.auth.user.role)); },
+    authMode() {
+      if (this.invite.info && !this.invite.loginInstead) return 'invite';
+      return this.auth.openMode ? 'bootstrap' : 'login';
+    },
+    usageMeters() {
+      const u = this.usage || {}, l = u.limits || {};
+      const row = (key, label, used, limit) => ({ key, label, used: used || 0, limit: limit ?? null,
+        pct: limit ? Math.min(100, Math.round((used || 0) / limit * 100)) : 0 });
+      return [
+        row('clones', '本月克隆（含排队）', (u.clones_month || 0) + (u.queued || 0), l.clones_month),
+        row('concurrent', '同时运行', u.running, l.concurrent),
+        row('members', '成员', u.members, l.members),
+        row('deploys', '运行中的部署', u.deploys, l.deploys),
+      ];
+    },
     activeTitle() {
       const m = {
         dashboard: ['项目', '每个项目单独管理自己的批次、任务和部署'],
@@ -3565,7 +3689,7 @@ const __vueApp = createApp({
         scheduler: ['定时任务', 'Scheduler · 批次队列与执行状态'],
         docker: ['部署', '用 Docker 一键启动和销毁克隆站'],
         remote: ['远程一键部署', 'Remote Deploy · SSH 推送 VPS 运行'],
-        admin: ['安全与系统配置', 'Security & Config · 用户 / 审计 / 模型配置'],
+        admin: ['团队与设置', 'Team · 成员 / 用量 / 审计'],
       };
       const t = m[this.view] || ['Clonjurer', ''];
       return { title: t[0], sub: t[1] };
@@ -3890,8 +4014,11 @@ const __vueApp = createApp({
       try {
         const r = await fetch('/api/v4/users');
         if (!r.ok) return;
-        this.users = (await r.json()).users || [];
+        const d = await r.json();
+        this.users = d.users || [];
+        this.invites = d.invites || [];
       } catch (e) { return; } finally { this.iconRefresh(); }
+      if (!this.usage.plan) this.loadUsage();
     },
     openUserModal() { this.userModal = { open: true, username: '', display_name: '', password: '', role: 'viewer', busy: false, error: '' }; this.iconRefresh(); },
     async saveUser() {
@@ -3921,13 +4048,13 @@ const __vueApp = createApp({
       } catch (e) { this.toast('网络错误'); }
     },
     async deleteUser(u) {
-      if (!confirm('确认删除用户 @' + u.username + '?')) return;
+      if (!confirm('把 ' + (u.display_name || u.username) + ' 移出「' + this.workspace.name + '」？账号本身会保留。')) return;
       try {
         const r = await fetch('/api/v4/users/' + u.id, { method: 'DELETE' });
         const data = await r.json();
         if (!r.ok) { this.toast(data.error || '删除失败'); return; }
         await this.loadUsers();
-        this.toast('用户已删除');
+        this.toast('已移出工作区');
       } catch (e) { this.toast('网络错误'); }
     },
 
@@ -4261,6 +4388,15 @@ const __vueApp = createApp({
       if (s < 86400) return Math.floor(s / 3600) + ' 小时前';
       if (s < 86400 * 7) return Math.floor(s / 86400) + ' 天前';
       const d = new Date(t); return (d.getMonth() + 1) + ' 月 ' + d.getDate() + ' 日';
+    },
+    expiresIn(ts) {
+      const t = new Date(String(ts).replace(' ', 'T') + (/[zZ]|[+-]\d\d:?\d\d$/.test(ts) ? '' : 'Z')).getTime();
+      const s = (t - Date.now()) / 1000;
+      if (isNaN(s)) return '—';
+      if (s <= 0) return '已过期';
+      if (s < 3600) return Math.max(1, Math.round(s / 60)) + ' 分钟后过期';
+      if (s < 86400) return Math.round(s / 3600) + ' 小时后过期';
+      return Math.round(s / 86400) + ' 天后过期';
     },
     projThumbs(p) {
       const bp = this.batchProject;
@@ -4700,7 +4836,7 @@ const __vueApp = createApp({
     },
 
     /* ---------- 鉴权 / RBAC / 项目 / 管理中心 ---------- */
-    roleText(r) { return { admin: '管理员', operator: '操作员', viewer: '观察者' }[r] || r; },
+    roleText(r) { return { owner: '所有者', admin: '管理员', operator: '成员', viewer: '只读' }[r] || r; },
     roleBadge(r) {
       return { admin: 'bg-rose-500/10 text-rose-300 border-rose-500/40',
         operator: 'bg-slate-500/10 text-slate-50 border-slate-400',
@@ -4713,7 +4849,100 @@ const __vueApp = createApp({
       return 'bg-slate-500/10 text-slate-50 border-slate-400';
     },
     avgClass(v) { return v == null ? 'text-slate-500' : (v >= 95 ? 'text-emerald-300' : v >= 85 ? 'text-indigo-300' : 'text-amber-300'); },
-    isAdmin() { return this.auth.user && this.auth.user.role === 'admin'; },
+    isAdmin() { return !this.auth.required || !!(this.auth.user && ['owner', 'admin'].includes(this.auth.user.role)); },
+    isPlatformAdmin() { return !this.auth.required || !!(this.auth.user && this.auth.user.platform_admin); },
+    canManageMember(u) {
+      if (!this.isAdmin()) return false;
+      return u.role !== 'owner' || this.workspace.role === 'owner';
+    },
+    async apiJson(url, opts) {
+      const r = await fetch(url, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts || {}));
+      let data = {}; try { data = await r.json(); } catch (e) {}
+      return { ok: r.ok, status: r.status, data };
+    },
+    async switchWorkspace(sp) {
+      if (sp.id === this.workspace.id) return;
+      const { ok, data } = await this.apiJson('/api/v4/workspaces/switch', { method: 'POST', body: JSON.stringify({ id: sp.id }) });
+      if (!ok) { this.toast('❌ ' + (data.error || '切换失败')); return; }
+      try { localStorage.removeItem('cloner-current-project'); } catch (e) {}
+      location.reload();
+    },
+    async createWorkspace() {
+      const m = this.wsCreate; m.busy = true; m.error = '';
+      const { ok, data } = await this.apiJson('/api/v4/workspaces', { method: 'POST', body: JSON.stringify({ name: m.name.trim() }) });
+      m.busy = false;
+      if (!ok) { m.error = data.error || '创建失败'; return; }
+      location.reload();
+    },
+    openInviteModal() {
+      this.inviteModal = { open: true, role: 'operator', days: 7, max_uses: 1, url: '', busy: false, error: '' };
+      this.iconRefresh();
+    },
+    async createInvite() {
+      const m = this.inviteModal; m.busy = true; m.error = '';
+      const { ok, data } = await this.apiJson('/api/v4/invites', { method: 'POST', body: JSON.stringify({ role: m.role, days: m.days, max_uses: m.max_uses }) });
+      m.busy = false;
+      if (!ok) { m.error = data.error || '生成失败'; return; }
+      m.url = data.url;
+      this.loadUsers();
+    },
+    async revokeInvite(i) {
+      const { ok, data } = await this.apiJson('/api/v4/invites/' + i.id, { method: 'DELETE' });
+      if (!ok) { this.toast('❌ ' + (data.error || '撤销失败')); return; }
+      this.loadUsers();
+    },
+    copyText(t) {
+      try { navigator.clipboard.writeText(t); this.toast('✅ 已复制'); } catch (e) { this.toast('请手动复制'); }
+    },
+    async changeMemberRole(u, role) {
+      const { ok, data } = await this.apiJson('/api/v4/users/' + u.id, { method: 'PATCH', body: JSON.stringify({ role }) });
+      if (!ok) { this.toast('❌ ' + (data.error || '修改失败')); }
+      await this.loadUsers();
+      if (ok && this.auth.user && u.id === this.auth.user.id) this.loadAuth();
+    },
+    async loadUsage() {
+      const { ok, data } = await this.apiJson('/api/v4/usage');
+      if (ok) this.usage = data;
+      this.wsForm.name = this.workspace.name;
+    },
+    async saveWorkspaceName() {
+      const { ok, data } = await this.apiJson('/api/v4/workspace/settings', { method: 'PATCH', body: JSON.stringify({ name: this.wsForm.name }) });
+      if (!ok) { this.toast('❌ ' + (data.error || '保存失败')); return; }
+      this.workspace.name = data.workspace.name;
+      this.loadWorkspace();
+      this.toast('✅ 已保存');
+    },
+    async leaveWorkspace() {
+      if (!confirm('确定离开「' + this.workspace.name + '」？')) return;
+      const { ok, data } = await this.apiJson('/api/v4/workspaces/leave', { method: 'POST' });
+      if (!ok) { this.toast('❌ ' + (data.error || '离开失败')); return; }
+      location.href = '/';
+    },
+    async checkInvite() {
+      const tok = new URLSearchParams(location.search).get('invite');
+      if (!tok) return;
+      this.invite.token = tok;
+      const { ok, data } = await this.apiJson('/api/auth/invite/' + encodeURIComponent(tok));
+      if (!ok) { this.invite.token = ''; history.replaceState(null, '', '/'); this.toast('⚠️ ' + (data.error || '邀请链接无效')); return; }
+      this.invite.info = data;
+      if (data.logged_in) await this.acceptInvite();
+    },
+    async acceptInvite(body) {
+      const { ok, data } = await this.apiJson('/api/auth/invite/' + encodeURIComponent(this.invite.token), { method: 'POST', body: JSON.stringify(body || {}) });
+      if (!ok) { this.auth.error = data.error || '加入失败'; if (!body) this.toast('⚠️ ' + this.auth.error); return false; }
+      history.replaceState(null, '', '/');
+      location.reload();
+      return true;
+    },
+    authSubmit() {
+      if (this.authMode === 'invite') {
+        this.auth.busy = true; this.auth.error = '';
+        this.acceptInvite({ username: this.auth.form.username, password: this.auth.form.password, display_name: this.auth.form.display_name })
+          .finally(() => { this.auth.busy = false; });
+        return;
+      }
+      return this.authMode === 'bootstrap' ? this.doBootstrap() : this.doLogin();
+    },
     animateCount(key, target) {
       const from = Number(this.countUp[key]) || 0, to = Number(target) || 0;
       if (from === to) { this.countUp[key] = to; return; }
@@ -4747,7 +4976,7 @@ const __vueApp = createApp({
         if (!r.ok) { this.auth.error = data.error || '初始化失败'; return; }
         this.auth.user = data.user; this.auth.required = true; this.auth.openMode = false;
         this.auth.form.password = '';
-        this.proceed();
+        await this.loadAuth();
         this.toast('管理员已创建, 平台进入强制鉴权模式');
       } catch (e) { this.auth.error = '网络错误: ' + e; }
       finally { this.auth.busy = false; }
@@ -4761,9 +4990,9 @@ const __vueApp = createApp({
         });
         const data = await r.json();
         if (!r.ok) { this.auth.error = data.error || '登录失败'; return; }
-        this.auth.user = data.user;
         this.auth.form.password = '';
-        this.proceed();
+        if (this.invite.token) { await this.acceptInvite(); return; }
+        await this.loadAuth();
         this.toast('欢迎回来, ' + (data.user.display_name || data.user.username));
         this.iconRefresh();
       } catch (e) { this.auth.error = '网络错误: ' + e; }
@@ -4842,6 +5071,11 @@ const __vueApp = createApp({
         this.auth.user = data.user || null;
         if (data.workspace) this.workspace = data.workspace;
       } catch (e) { this.auth.required = false; this.auth.openMode = true; }
+      if (!this.invite.token) await this.checkInvite();
+      if (this.auth.user && !this.workspace.id) {  // 已登录但不属于任何工作区: 先建一个
+        this.wsCreate = { open: true, name: '', busy: false, error: '' };
+        return;
+      }
       if (!this.auth.required || this.auth.user) this.proceed();
     },
     openAiLab(task) {

@@ -243,14 +243,14 @@ class EngineEndToEnd(unittest.TestCase):
         db = Database(self.tmp / "e2e.db")
         bus = LogBus(2000)
         pool = SyncBrowserPool.instance(2)
-        batch = db.create_batch("e2e", [(self.url, "localhost")], {"crawl_depth": 1})
+        batch = db.create_batch("e2e", [(self.url, "localhost")], {"crawl_depth": 1}, workspace_id=1)
         sched = Scheduler(db, bus, pool)
         sched.start()
         try:
             task = None
             deadline = time.monotonic() + 240
             while time.monotonic() < deadline:
-                tasks = db.list_tasks(batch_id=batch)
+                tasks = db.list_tasks(batch_id=batch, workspace_id=1)
                 task = db.get_task(tasks[0]["id"]) if tasks else None
                 if task and task["status"] in ("completed", "failed"):
                     break
@@ -297,7 +297,7 @@ class EngineEndToEnd(unittest.TestCase):
         from core.logger import LogBus
         from models import Database
         db = Database(self.tmp / f"direct_{abs(hash(url))}.db")
-        db.create_batch("direct", [(url, "localhost")], {})
+        db.create_batch("direct", [(url, "localhost")], {}, workspace_id=1)
         task = db.claim_next_task()
         try:
             ClonerEngine(task["id"], db, LogBus(2000), SyncBrowserPool.instance(2)).run()
@@ -473,7 +473,7 @@ class EngineEndToEnd(unittest.TestCase):
         rich.write_text(rich.read_text(encoding="utf-8").replace("CROSS", f"http://127.0.0.1:{port}"), encoding="utf-8")
         db = Database(self.tmp / "rich.db")
         db.create_batch("rich", [(f"http://localhost:{port}/rich.html", "localhost")],
-                        {"mode": "crawler", "max_pages": 3, "cookie": "sid=abc", "bearer": "tok"})
+                        {"mode": "crawler", "max_pages": 3, "cookie": "sid=abc", "bearer": "tok"}, workspace_id=1)
         task = db.claim_next_task()
         ClonerEngine(task["id"], db, LogBus(4000), SyncBrowserPool.instance(2)).run()
         task = db.get_task(task["id"])

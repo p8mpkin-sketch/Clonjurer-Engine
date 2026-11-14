@@ -157,7 +157,7 @@ class PhoneEditionEndToEnd(unittest.TestCase):
         from core.logger import LogBus
         from models import Database
         db = Database(self.tmp / "p.db")
-        db.create_batch("phone", [(self.url, "localhost")], {})
+        db.create_batch("phone", [(self.url, "localhost")], {}, workspace_id=1)
         task = db.claim_next_task()
         ClonerEngine(task["id"], db, LogBus(4000), SyncBrowserPool.instance(2)).run()
         SyncBrowserPool.instance()._teardown_thread_browser()

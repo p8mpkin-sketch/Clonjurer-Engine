@@ -39,8 +39,10 @@ class LogBus:
                 break
         return text[:2000]
 
-    def publish(self, task_id, stage: str, message: str, level: str = None):
-        """发布一条结构化日志。task_id 为 None 表示系统级消息。"""
+    def publish(self, task_id, stage: str, message: str, level: str = None,
+                workspace_id=None):
+        """发布一条结构化日志。task_id 为 None 表示系统级消息;
+        workspace_id 标明归属的工作区(多租户订阅按它过滤)。"""
         stage = str(stage or "INFO").upper()[:24]
         clean = self._strip_prefix(stage, message)
         if level is None:
@@ -59,6 +61,7 @@ class LogBus:
                 "stage": stage,
                 "level": level,
                 "task_id": task_id,
+                "workspace_id": workspace_id,
                 "message": clean,
             })
             if len(self._entries) > self._capacity:
@@ -75,7 +78,7 @@ class LogBus:
         self.publish(task_id, "ERROR", message, "ERROR")
 
     # ------------------------------------------------------------------
-    def stream(self, task_id=None, replay: int = 300):
+    def stream(self, task_id=None, replay: int = 300, accept=None):
         """SSE 生成器: 过滤指定任务(系统级消息始终放行)。
 
         全任务流订阅时只回放最近 replay 条(前端也只保留 300 条),
@@ -99,6 +102,9 @@ class LogBus:
                         e for e in self._entries
                         if e["seq"] > last_seq and self._match(e, task_id)
                     ]
+            if accept is not None and fresh:
+                last_seq = fresh[-1]["seq"]  # 被过滤掉的也要推进游标
+                fresh = [e for e in fresh if accept(e)]
             if not fresh:
                 yield ": ping\n\n"
                 continue

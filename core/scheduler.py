@@ -26,6 +26,11 @@ def with_suppress_publish(bus, task_id, kind, msg):
         pass
 
 
+def _plan_concurrency(plan: str):
+    spec = config.PLANS.get(plan) or {}
+    return spec.get("concurrent")
+
+
 class Scheduler:
     def __init__(self, db, bus, pool: SyncBrowserPool = None):
         self.db = db
@@ -115,7 +120,8 @@ class Scheduler:
             return
         task = None
         try:
-            task = self.db.claim_next_task()
+            task = self.db.claim_next_task(
+                concurrency=_plan_concurrency)
         except Exception as exc:
             self.bus.publish(None, "ERROR", f"领取任务失败: {exc}", "ERROR")
         if task is None:
@@ -139,6 +145,7 @@ class Scheduler:
                 engine = ClonerEngine(task["id"], self.db, self.bus, self.pool)
                 engine.run()
             self._package_if_requested(task)
+            self._record_usage(task["id"])
         except Exception as exc:
             # 瞬时 Playwright 会话崩溃(页面运行时重导航/浏览器回收)与
             # 稳定失败不同源: 换新会话整体重跑一次, 避免偶发即判死
@@ -154,6 +161,15 @@ class Scheduler:
                 msg = "磁盘空间不足(清理后可重建): " + msg
             with_suppress_publish(self.bus, task["id"], "ERROR", f"引擎异常终止: {msg}")
             self._save(task["id"], status="failed", error_msg=msg[:1500])
+
+    def _record_usage(self, task_id: int):
+        """克隆成功记 1 次用量(失败不计), 配额与账单都从 usage_events 流水算。"""
+        try:
+            cur = self.db.get_task(task_id) or {}
+            if cur.get("status") == "completed" and cur.get("workspace_id"):
+                self.db.record_usage(cur["workspace_id"], "clone", 1, task_id)
+        except Exception:  # noqa: BLE001 - 计量失败不影响任务结果
+            pass
 
     def _save(self, task_id: int, **fields):
         """任务状态落库; 写库失败(磁盘满/库锁)退避重试, 仍失败只记日志, 由看门狗兜底收回。"""

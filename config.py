@@ -380,3 +380,14 @@ def _apply_env_overrides():
 
 
 _apply_env_overrides()
+
+# 多租户套餐(每个工作区一个 plan)。None = 不限。
+# self: 私有化/单机默认(不限额, 存量默认工作区与本机实例都用它, 跑语料不受影响)。
+PLANS: dict[str, dict] = {
+    "self": {"label": "私有部署", "clones_month": None, "concurrent": None, "deploys": None, "members": None},
+    "free": {"label": "免费版", "clones_month": 30, "concurrent": 1, "deploys": 1, "members": 3},
+    "team": {"label": "团队版", "clones_month": 1000, "concurrent": 4, "deploys": 10, "members": None},
+    "enterprise": {"label": "企业版", "clones_month": None, "concurrent": 8, "deploys": None, "members": None},
+}
+# 新建工作区的默认套餐: 私有化保持 self; 对外 SaaS 部署设 CLONER_NEW_WORKSPACE_PLAN=free
+NEW_WORKSPACE_PLAN = os.environ.get("CLONER_NEW_WORKSPACE_PLAN", "self")
