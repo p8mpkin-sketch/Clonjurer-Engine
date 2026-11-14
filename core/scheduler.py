@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 
 import config
+from core import live
 from core.browser_pool import SyncBrowserPool
 from core.cloner_engine import ClonerEngine
 from core.uir import generate as uir_generate
@@ -129,10 +130,12 @@ class Scheduler:
             return
         tid = task["id"]
         self._active[tid] = index
+        live.begin(tid, index)
         try:
             self._run_task(index, task)
         finally:
             self._active.pop(tid, None)
+            live.end(tid)
 
     def _run_task(self, index: int, task: dict):
         self.bus.publish(task["id"], "SCHED",

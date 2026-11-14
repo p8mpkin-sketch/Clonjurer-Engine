@@ -50,7 +50,7 @@ from flask import (Flask, Response, abort, jsonify, render_template, request,
                    g, send_file, send_from_directory, session)
 
 import config
-from core import flask_generator, security
+from core import flask_generator, live, security
 from core import ai_mock_generator
 from core.clone.api_match import pick_entry
 from core.browser_pool import SyncBrowserPool
@@ -1242,6 +1242,25 @@ def v4_theme_put():
 # ---------------------------------------------------------------------------
 # AI 实验室: 交互式视觉修复(playground)
 # ---------------------------------------------------------------------------
+_ai_jobs: dict = {}   # task_id -> 视觉修复进度(内存, 平台重启即清)
+
+
+@app.get("/api/v4/ai/jobs")
+def v4_ai_jobs():
+    wid = _cur_ws()
+    now = time.time()
+    out = []
+    for j in list(_ai_jobs.values()):
+        if _auth_required() and j.get("workspace_id") != wid:
+            continue
+        if j["state"] != "running" and j.get("ended") and now - j["ended"] > 3600:
+            continue
+        out.append({k: v for k, v in j.items() if k != "workspace_id"}
+                   | {"elapsed_s": round((j.get("ended") or now) - j["started"], 1)})
+    out.sort(key=lambda j: -j["started"])
+    return jsonify({"jobs": out})
+
+
 @app.post("/api/v4/ai/playground-repair")
 def v4_ai_playground_repair():
     """AI 实验室一键修复: 复用任务级视觉闭环, 支持附加用户 Prompt 提示。"""
@@ -1263,6 +1282,17 @@ def v4_ai_playground_repair():
     if not key:
         return jsonify({"error": "未配置大模型 API Key(系统设置 → AI 供应商)"}), 400
     prompt = str(data.get("prompt") or "").strip()[:2000]
+    job = _ai_jobs.get(task_id)
+    if job and job.get("state") == "running":
+        return jsonify({"error": "这个任务正在修复中"}), 409
+    job = {"task_id": task_id, "domain": task.get("domain") or "", "state": "running",
+           "started": time.time(), "ended": None, "before": task.get("similarity_score"),
+           "after": None, "log": [], "prompt": prompt[:120], "workspace_id": task.get("workspace_id")}
+    _ai_jobs[task_id] = job
+
+    def _say(stage, msg):
+        bus.publish(task_id, stage, msg)
+        job["log"] = (job["log"] + [str(msg)[:160]])[-6:]
 
     def _run():
         from core import ai_vision_repair, cloner_engine
@@ -1282,7 +1312,7 @@ def v4_ai_playground_repair():
             with pool.context(viewport={"width": 1920, "height": 1080}) as ctx:
                 report = ai_vision_repair.run_vision_repair(
                     ws, ai_cfg, detail,
-                    lambda stage, msg: bus.publish(task_id, stage, msg),
+                    _say,
                     engine._make_render_and_score(ctx),
                     page_file=engine._main_page_file(),
                     region_cells=engine._region_cells())
@@ -1290,10 +1320,12 @@ def v4_ai_playground_repair():
             if final is not None:
                 db.update_task(task_id, similarity_score=final)
             _regenerate_project(db.get_task(task_id), ws)
+            job.update(state="done", after=final, ended=time.time())
         except Exception as exc:  # noqa: BLE001 - 后台线程兜底
             bus.publish(task_id, "AI-VISION",
                         f"AI 实验室修复异常: {type(exc).__name__}: {exc}", "ERROR")
             db.update_task(task_id, stage="AI修复失败")
+            job.update(state="failed", ended=time.time(), log=(job["log"] + [f"{type(exc).__name__}: {exc}"[:200]])[-6:])
 
     threading.Thread(target=_run, name=f"ai-play-{task_id}", daemon=True).start()
     _audit("ai.playground", f"AI 实验室修复任务 #{task_id}")
@@ -2303,6 +2335,221 @@ def telemetry():
     })
 
 
+def _live_task(t: dict, run: dict, stages: dict, total: float) -> dict:
+    trail = live.stage_trail(run) if run else []
+    elapsed = round(time.time() - run["started"], 1) if run else None
+    return {
+        "id": t["id"], "domain": t.get("domain") or "", "target_url": t.get("target_url") or "",
+        "batch_name": t.get("batch_name") or "", "creator": t.get("creator_name") or "",
+        "status": t.get("status"), "stage": t.get("stage") or "", "progress": t.get("progress") or 0,
+        "worker": run.get("worker") if run else None, "elapsed_s": elapsed,
+        "eta_s": live.eta_seconds(trail, elapsed or 0.0, stages, total) if run else None,
+        "trail": [{"stage": s, "secs": d, "current": c} for s, d, c in trail],
+    }
+
+
+@app.get("/api/v4/live")
+def v4_live():
+    """运行态快照(工作台/浏览器池/定时任务页 2s 轮询): 工位、运行中任务的阶段与预计剩余、队列、本机资源。"""
+    wid = _cur_ws()
+    runs = live.runs()
+    stages, total = live.eta_model(db)
+    running = db.list_tasks(status="running", workspace_id=wid, limit=50)
+    mine = {t["id"]: t for t in running}
+    tasks = [_live_task(t, runs.get(t["id"]) or {}, stages, total) for t in running]
+    workers = []
+    by_worker = {r["worker"]: tid for tid, r in runs.items()}
+    for i in range(pool.max):
+        tid = by_worker.get(i)
+        if tid is None:
+            workers.append({"index": i, "busy": False})
+        elif tid in mine:
+            workers.append({"index": i, "busy": True, "task_id": tid})
+        else:   # 别的工作区的任务: 只说忙, 不露内容
+            workers.append({"index": i, "busy": True, "task_id": None,
+                            "elapsed_s": round(time.time() - runs[tid]["started"], 1)})
+    pending = db.list_tasks(status="pending", workspace_id=wid, limit=200)
+    pending.sort(key=lambda t: t["id"])
+    return jsonify({
+        "now": time.time(),
+        "workers": workers,
+        "tasks": tasks,
+        "pending": [{"id": t["id"], "domain": t.get("domain") or "", "batch_name": t.get("batch_name") or ""}
+                    for t in pending[:12]],
+        "pending_total": len(pending),
+        "queue": db.queue_counts(wid),
+        "throughput": db.throughput(wid, 60),
+        "median_s": total,
+        "browser": pool.stats(),
+        "procs": live.browser_processes(),
+        "host": live.host(config.WORKSPACE_ROOT),
+        "scheduler": {"paused": scheduler.paused()},
+    })
+
+
+# ---------------------------------------------------------------------------
+# 定时克隆: 按时间把一组网址自动重新克隆(批次入队), 用来盯竞品/客户站点的变化
+# ---------------------------------------------------------------------------
+from core import schedules as sched_rules  # noqa: E402
+
+
+def _schedule_view(sc: dict, briefs: dict) -> dict:
+    hist = json.loads(sc.get("history_json") or "[]")
+    urls = json.loads(sc.get("urls_json") or "[]")
+    runs = [{"batch_id": h["batch_id"], "at": h["at"], **(briefs.get(h["batch_id"]) or {})}
+            for h in hist[-8:]][::-1]
+    return {
+        "id": sc["id"], "name": sc["name"], "urls": urls, "project_id": sc.get("project_id"),
+        "config": json.loads(sc.get("config_json") or "{}"),
+        "freq": sc["freq"], "hour": sc["hour"], "minute": sc["minute"], "weekday": sc["weekday"],
+        "rule": sched_rules.describe(sc["freq"], sc["hour"], sc["minute"], sc["weekday"]),
+        "enabled": bool(sc["enabled"]), "next_run_at": sc["next_run_at"] if sc["enabled"] else "",
+        "last_run_at": sc["last_run_at"], "runs_total": sc["runs"], "runs": runs,
+        "created_by": sc.get("created_by") or "", "created_at": sc["created_at"],
+    }
+
+
+def _fire_schedule(sc: dict, actor: str) -> dict:
+    """把定时任务的网址作为一个新批次入队; 额度不足时跳过本次并记日志。"""
+    wid = sc["workspace_id"]
+    accepted, _rej = _normalize_urls(json.loads(sc.get("urls_json") or "[]"))
+    nxt = sched_rules.next_run(sc["freq"], sc["hour"], sc["minute"], sc["weekday"])
+    if not accepted:
+        db.update_schedule(sc["id"], next_run_at=nxt)
+        return {"error": "没有可克隆的网址"}
+    with app.app_context():
+        blocked = _quota_block(wid, "clone", len(accepted))
+    if blocked:
+        db.update_schedule(sc["id"], next_run_at=nxt)
+        msg = blocked[0].get_json().get("error", "额度不足")
+        bus.publish(None, "SCHED", f"定时任务「{sc['name']}」本次跳过: {msg}", "WARN", workspace_id=wid)
+        return {"error": msg}
+    name = f"定时 · {sc['name']} · {time.strftime('%m-%d %H:%M')}"
+    cfg = json.loads(sc.get("config_json") or "{}")
+    batch_id = db.create_batch(name, accepted, cfg, sc.get("project_id"), created_by=actor,
+                               workspace_id=wid)
+    hist = json.loads(sc.get("history_json") or "[]")
+    hist.append({"batch_id": batch_id, "at": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())})
+    db.update_schedule(sc["id"], last_run_at=hist[-1]["at"], history_json=json.dumps(hist[-30:]),
+                       runs=int(sc.get("runs") or 0) + 1, next_run_at=nxt)
+    scheduler.start()
+    bus.publish(None, "SCHED", f"定时任务「{sc['name']}」触发: 批次 #{batch_id} 入队 {len(accepted)} 个站点",
+                workspace_id=wid)
+    return {"batch_id": batch_id, "accepted": len(accepted)}
+
+
+def _schedule_ticker():
+    while True:
+        time.sleep(20)
+        try:
+            for sc in db.due_schedules(time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())):
+                _fire_schedule(sc, sc.get("created_by") or "定时任务")
+        except Exception as exc:  # noqa: BLE001 — 后台线程不得退出
+            with suppress(Exception):
+                bus.publish(None, "ERROR", f"定时任务触发失败: {exc}", "ERROR")
+
+
+def _schedule_body(data: dict, partial: bool = False) -> tuple:
+    out: dict = {}
+    if not partial or "name" in data:
+        name = str(data.get("name") or "").strip()[:60]
+        if len(name) < 1:
+            return None, "请填写名称"
+        out["name"] = name
+    if not partial or "urls" in data:
+        accepted, _rej = _normalize_urls(data.get("urls") or [])
+        if not accepted:
+            return None, "至少需要 1 个合法网址"
+        out["urls_json"] = json.dumps([u for u, _d in accepted], ensure_ascii=False)
+    if not partial or "freq" in data:
+        freq = data.get("freq", "daily")
+        if freq not in sched_rules.FREQS:
+            return None, "频率只能是 每小时 / 每天 / 工作日 / 每周"
+        out["freq"] = freq
+    for k, lo, hi in (("hour", 0, 23), ("minute", 0, 59), ("weekday", 0, 6)):
+        if k in data or not partial:
+            try:
+                v = int(data.get(k, {"hour": 9, "minute": 0, "weekday": 0}[k]))
+            except (TypeError, ValueError):
+                return None, "时间格式不对"
+            if not lo <= v <= hi:
+                return None, "时间超出范围"
+            out[k] = v
+    if "enabled" in data:
+        out["enabled"] = 1 if data.get("enabled") else 0
+    if "config" in data or not partial:
+        out["config_json"] = json.dumps(_sanitize_config(data.get("config") or {}), ensure_ascii=False)
+    if "project_id" in data:
+        pid = data.get("project_id")
+        pid = int(pid) if str(pid or "").isdigit() else None
+        if pid is not None and (db.get_project(pid) or {}).get("workspace_id") != _cur_ws():
+            return None, f"项目 #{pid} 不存在"
+        out["project_id"] = pid
+    return out, ""
+
+
+def _schedule_or_404(schedule_id: int) -> dict:
+    sc = db.get_schedule(schedule_id)
+    if not sc or sc["workspace_id"] != _cur_ws():
+        abort(404)
+    return sc
+
+
+@app.get("/api/v4/schedules")
+def v4_schedules():
+    items = db.list_schedules(_cur_ws())
+    ids = [h["batch_id"] for sc in items for h in json.loads(sc.get("history_json") or "[]")[-8:]]
+    briefs = db.batch_brief(ids)
+    return jsonify({"schedules": [_schedule_view(sc, briefs) for sc in items],
+                    "tz": time.strftime("%z")})
+
+
+@app.post("/api/v4/schedules")
+def v4_schedule_create():
+    body, err = _schedule_body(request.get_json(silent=True) or {})
+    if err:
+        return jsonify({"error": err}), 400
+    body["next_run_at"] = sched_rules.next_run(body["freq"], body["hour"], body["minute"], body["weekday"])
+    sid = db.create_schedule(_cur_ws(), (_current_user() or {}).get("username", ""), **body)
+    _audit("schedule.create", f"定时任务 #{sid}「{body['name']}」{sched_rules.describe(body['freq'], body['hour'], body['minute'], body['weekday'])}")
+    return jsonify({"schedule": _schedule_view(db.get_schedule(sid) or {}, {})}), 201
+
+
+@app.patch("/api/v4/schedules/<int:schedule_id>")
+def v4_schedule_update(schedule_id):
+    sc = _schedule_or_404(schedule_id)
+    body, err = _schedule_body(request.get_json(silent=True) or {}, partial=True)
+    if err:
+        return jsonify({"error": err}), 400
+    merged = {**sc, **body}
+    if merged["enabled"]:
+        body["next_run_at"] = sched_rules.next_run(merged["freq"], merged["hour"], merged["minute"],
+                                                   merged["weekday"])
+    db.update_schedule(schedule_id, **body)
+    _audit("schedule.update", f"定时任务 #{schedule_id} {sorted(body)}")
+    new = db.get_schedule(schedule_id) or {}
+    hist = [h["batch_id"] for h in json.loads(new.get("history_json") or "[]")[-8:]]
+    return jsonify({"schedule": _schedule_view(new, db.batch_brief(hist))})
+
+
+@app.delete("/api/v4/schedules/<int:schedule_id>")
+def v4_schedule_delete(schedule_id):
+    sc = _schedule_or_404(schedule_id)
+    db.delete_schedule(schedule_id)
+    _audit("schedule.delete", f"定时任务 #{schedule_id}「{sc['name']}」")
+    return jsonify({"ok": True})
+
+
+@app.post("/api/v4/schedules/<int:schedule_id>/run")
+def v4_schedule_run(schedule_id):
+    sc = _schedule_or_404(schedule_id)
+    res = _fire_schedule(sc, (_current_user() or {}).get("username", ""))
+    if res.get("error"):
+        return jsonify(res), 429 if "额度" in res["error"] else 400
+    _audit("schedule.run", f"定时任务 #{schedule_id} 手动运行 → 批次 #{res['batch_id']}")
+    return jsonify(res), 201
+
+
 @app.get("/api/stream_logs")
 def stream_logs():
     task_id = request.args.get("task_id", type=int)
@@ -2587,12 +2834,30 @@ def v4_docker_task_action(task_id, action):
         if blocked:
             return blocked
         _audit("docker.deploy", f"task={task_id} {body}")
-        return _deploy_call(deployer.deploy, task_id,
-                            mode=body.get("mode", "fast"),
-                            ttl_hours=body.get("ttl_hours", 24),
-                            bind=body.get("bind", "127.0.0.1"),
-                            mem_limit=body.get("mem_limit", "512m"),
-                            port=int(body.get("port") or 0))
+        kw = dict(mode=body.get("mode") or deployer.default_mode(),
+                  ttl_hours=body.get("ttl_hours", 24),
+                  bind=body.get("bind", "127.0.0.1"),
+                  mem_limit=body.get("mem_limit", "512m"),
+                  port=int(body.get("port") or 0))
+        if not body.get("async"):
+            return _deploy_call(deployer.deploy, task_id, **kw)
+        try:   # 异步: 参数错误立刻返回; 之后列表按 step 显示 准备工程 → 启动 → 健康检查
+            deployer.precheck(task_id, kw["mode"], kw["ttl_hours"], kw["bind"], kw["mem_limit"])
+        except DeployError as e:
+            return jsonify({"error": str(e)}), 400
+        deployer.mark_starting(task_id, kw["mode"])
+
+        def _bg():
+            t0 = time.time()
+            try:
+                deployer.deploy(task_id, **kw)
+                bus.publish(task_id, "DEPLOY", f"部署完成, 用时 {time.time() - t0:.1f}s")
+            except DeployError as e:
+                bus.publish(task_id, "DEPLOY", f"部署失败: {str(e)[:200]}", "ERROR")
+            except Exception as e:  # noqa: BLE001
+                db.upsert_docker(task_id, status="failed", last_error=str(e)[:600])
+        threading.Thread(target=_bg, daemon=True, name=f"deploy-{task_id}").start()
+        return jsonify({"deploy": deployer.get(task_id), "async": True}), 202
     if action == "start":
         resp = _deploy_call(deployer.start, task_id)
     elif action == "stop":
@@ -2615,6 +2880,7 @@ def _boot():
     scheduler.start()
     threading.Thread(target=_audit_retention_worker, daemon=True,
                      name="audit-retention").start()
+    threading.Thread(target=_schedule_ticker, daemon=True, name="schedule-ticker").start()
     deployer.start_background()
 
     def _shutdown():

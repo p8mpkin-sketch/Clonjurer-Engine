@@ -181,3 +181,64 @@ class DeployTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProcessModeTests(unittest.TestCase):
+    """没有 Docker 时的本机进程部署: 启动 / 停止 / 重启 / 销毁 / 对账, 全用假进程。"""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = Path(tempfile.mkdtemp())
+        self.db = Database(self.tmp / "t.db")
+        bid = self.db.create_batch("b", [("https://a.example/", "a.example")], {}, workspace_id=1)
+        self.tid = self.db.list_tasks(batch_id=bid, workspace_id=1)[0]["id"]
+        self.db.update_task(self.tid, status="completed")
+        self.procs = {}
+        self.next_pid = [1000]
+
+        def regen(task, ws):
+            (ws / "flask_app").mkdir(parents=True, exist_ok=True)
+            (ws / "flask_app" / "app.py").write_text("app = None")
+
+        def spawn(app_dir, bind, port, log):
+            self.next_pid[0] += 1
+            self.procs[self.next_pid[0]] = (bind, port)
+            return self.next_pid[0]
+
+        self.dep = D.DockerDeployer(
+            self.db, lambda t: self.tmp / "ws" / str(t["id"]), regen, self.db.get_task,
+            run=lambda args, timeout=60, input_text=None: (1, "", "Cannot connect to the Docker daemon"),
+            port_free=lambda h, p: True, health=lambda port, t: True,
+            spawn=spawn, alive=lambda pid: pid in self.procs, kill=lambda pid: self.procs.pop(pid, None))
+
+    def test_default_mode_falls_back_to_process(self):
+        self.assertEqual(self.dep.default_mode(), "process")
+
+    def test_process_lifecycle(self):
+        out = self.dep.deploy(self.tid, "process", 24, "127.0.0.1", "512m")
+        d = out["deploy"]
+        self.assertEqual((d["status"], d["mode"]), ("running", "process"))
+        self.assertTrue(d["url"].startswith("http://127.0.0.1:"))
+        self.assertEqual(len(self.procs), 1)
+        self.dep.stop(self.tid)
+        self.assertEqual(self.dep.get(self.tid)["status"], "stopped")
+        self.assertEqual(self.procs, {})
+        self.dep.start(self.tid)
+        self.assertEqual(self.dep.get(self.tid)["status"], "running")
+        port = self.dep.get(self.tid)["port"]
+        self.dep.restart(self.tid)
+        self.assertEqual(self.dep.get(self.tid)["port"], port)
+        self.assertEqual(len(self.procs), 1)
+        self.dep.destroy(self.tid)
+        self.assertEqual(self.procs, {})
+        self.assertIsNone(self.dep.get(self.tid))
+
+    def test_dead_process_reconciles_to_stopped(self):
+        self.dep.deploy(self.tid, "process", 24, "127.0.0.1", "512m")
+        self.procs.clear()
+        self.dep.reconcile()
+        self.assertEqual(self.dep.get(self.tid)["status"], "stopped")
+
+    def test_docker_modes_still_need_docker(self):
+        with self.assertRaises(D.DeployError):
+            self.dep.precheck(self.tid, "fast", 24, "127.0.0.1", "512m")

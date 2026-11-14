@@ -13,7 +13,7 @@ import json
 import secrets
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
 
@@ -184,6 +184,26 @@ CREATE TABLE IF NOT EXISTS invites (
     uses         INTEGER NOT NULL DEFAULT 0,
     revoked      INTEGER NOT NULL DEFAULT 0,
     created_at   TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS schedules (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id  INTEGER NOT NULL,
+    project_id    INTEGER,
+    name          TEXT    NOT NULL,
+    urls_json     TEXT    NOT NULL DEFAULT '[]',
+    config_json   TEXT    NOT NULL DEFAULT '{}',
+    freq          TEXT    NOT NULL DEFAULT 'daily',
+    hour          INTEGER NOT NULL DEFAULT 9,
+    minute        INTEGER NOT NULL DEFAULT 0,
+    weekday       INTEGER NOT NULL DEFAULT 0,
+    enabled       INTEGER NOT NULL DEFAULT 1,
+    next_run_at   TEXT    NOT NULL DEFAULT '',
+    last_run_at   TEXT    NOT NULL DEFAULT '',
+    history_json  TEXT    NOT NULL DEFAULT '[]',
+    runs          INTEGER NOT NULL DEFAULT 0,
+    created_by    TEXT    NOT NULL DEFAULT '',
+    created_at    TEXT    NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS usage_events (
@@ -897,6 +917,104 @@ class Database:
                 (invite_id, workspace_id))
             self._conn.commit()
             return cur.rowcount == 1
+
+    # ------------------------------------------------------------------
+    # 定时任务
+    # ------------------------------------------------------------------
+    _SCHEDULE_COLS = ("project_id", "name", "urls_json", "config_json", "freq", "hour", "minute",
+                      "weekday", "enabled", "next_run_at", "last_run_at", "history_json", "runs")
+
+    def create_schedule(self, workspace_id: int, created_by: str = "", **fields) -> int:
+        cols = {k: v for k, v in fields.items() if k in self._SCHEDULE_COLS}
+        names = ["workspace_id", "created_by", "created_at", *cols]
+        with self._lock:
+            cur = self._conn.execute(
+                f"INSERT INTO schedules ({', '.join(names)}) VALUES ({', '.join('?' * len(names))})",
+                (workspace_id, created_by, _now(), *cols.values()))
+            self._conn.commit()
+            return int(cur.lastrowid or 0)
+
+    def update_schedule(self, schedule_id: int, **fields):
+        cols = {k: v for k, v in fields.items() if k in self._SCHEDULE_COLS}
+        if not cols:
+            return
+        with self._lock:
+            self._conn.execute(f"UPDATE schedules SET {', '.join(k + ' = ?' for k in cols)} WHERE id = ?",
+                               (*cols.values(), schedule_id))
+            self._conn.commit()
+
+    def get_schedule(self, schedule_id: int):
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM schedules WHERE id = ?", (schedule_id,)).fetchone()
+            return dict(row) if row else None
+
+    def list_schedules(self, workspace_id=None) -> list:
+        with self._lock:
+            if workspace_id is None:
+                rows = self._conn.execute("SELECT * FROM schedules ORDER BY id").fetchall()
+            else:
+                rows = self._conn.execute("SELECT * FROM schedules WHERE workspace_id = ? ORDER BY id DESC",
+                                          (workspace_id,)).fetchall()
+            return [dict(r) for r in rows]
+
+    def delete_schedule(self, schedule_id: int):
+        with self._lock:
+            self._conn.execute("DELETE FROM schedules WHERE id = ?", (schedule_id,))
+            self._conn.commit()
+
+    def due_schedules(self, now_str: str) -> list:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM schedules WHERE enabled = 1 AND next_run_at != '' AND next_run_at <= ?",
+                (now_str,)).fetchall()
+            return [dict(r) for r in rows]
+
+    def batch_brief(self, batch_ids: list) -> dict:
+        """批次 id → {total, completed, failed, running, pending, avg_score}。"""
+        ids = [int(i) for i in batch_ids if i]
+        if not ids:
+            return {}
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT batch_id, status, COUNT(*), AVG(similarity_score) FROM clone_tasks"
+                f" WHERE batch_id IN ({', '.join('?' * len(ids))}) GROUP BY batch_id, status", ids).fetchall()
+        out: dict = {}
+        for bid, st, n, avg in rows:
+            d = out.setdefault(bid, {"total": 0, "completed": 0, "failed": 0, "running": 0,
+                                     "pending": 0, "avg_score": None})
+            d["total"] += n
+            d[st] = d.get(st, 0) + n
+            if st == "completed" and avg is not None:
+                d["avg_score"] = round(avg, 1)
+        return out
+
+    def recent_stage_times(self, limit: int = 60) -> list:
+        """最近完成任务的 stats_json(只取含 stage_times 的), 供预计剩余时间统计。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT stats_json FROM clone_tasks WHERE status = 'completed'"
+                " AND stats_json LIKE '%stage_times%' ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        out = []
+        for (raw,) in rows:
+            try:
+                out.append(json.loads(raw or "{}"))
+            except ValueError:
+                continue
+        return out
+
+    def throughput(self, workspace_id=None, minutes: int = 60) -> dict:
+        """最近 N 分钟完成/失败数(按 updated_at)。"""
+        since = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).strftime("%Y-%m-%d %H:%M:%S")
+        sql = ("SELECT t.status, COUNT(*) FROM clone_tasks t JOIN batch_jobs b ON b.id = t.batch_id"
+               " WHERE t.updated_at >= ? AND t.status IN ('completed', 'failed')")
+        args: list = [since]
+        if workspace_id is not None:
+            sql += " AND b.workspace_id = ?"
+            args.append(workspace_id)
+        with self._lock:
+            rows = self._conn.execute(sql + " GROUP BY t.status", args).fetchall()
+        d = {r[0]: r[1] for r in rows}
+        return {"completed": d.get("completed", 0), "failed": d.get("failed", 0), "minutes": minutes}
 
     def record_usage(self, workspace_id: int, kind: str, amount: int = 1, task_id=None):
         with self._lock:
