@@ -2046,13 +2046,13 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           </div>
           <div class="text-[12px] text-slate-500 truncate max-w-[420px]">#[[ selectedTask.id ]] · [[ selectedTask.target_url ]]</div>
         </div>
-        <div v-if="selectedTask.similarity_score != null" class="flex items-baseline gap-1 pl-3 ml-1 border-l border-white/[0.08]" title="克隆站与原站的视觉还原度">
-          <span class="text-[12px] text-slate-500">还原度</span>
+        <div v-if="selectedTask.similarity_score != null" class="flex items-baseline gap-1 pl-3 ml-1 border-l border-white/[0.08]" :title="isReqFit(selectedTask) ? '页面对照需求验收清单的符合程度' : '克隆站与原站的视觉还原度'">
+          <span class="text-[12px] text-slate-500">[[ scoreLabel(selectedTask) ]]</span>
           <span class="serif-num text-[34px] leading-none" :class="selectedTask.similarity_score >= 85 ? 'text-slate-100' : 'text-amber-400'">[[ Number(selectedTask.similarity_score).toFixed(1) ]]</span>
         </div>
         <div class="flex-1"></div>
         <div class="flex flex-wrap items-center gap-2">
-          <button @click="openCompare(selectedTask)" class="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white hover:border-white/[0.2] transition-all"><i data-lucide="images" class="w-4 h-4"></i><span class="ui-btn-label">对比原站</span></button>
+          <button v-if="!isReqFit(selectedTask)" @click="openCompare(selectedTask)" class="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white hover:border-white/[0.2] transition-all"><i data-lucide="images" class="w-4 h-4"></i><span class="ui-btn-label">对比原站</span></button>
           <button @click="openTrackerConfig" class="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white hover:border-white/[0.2] transition-all" :title="trackerEnabled ? '表单埋点推送已开启' : '表单埋点推送'">
             <i data-lucide="radio" class="w-4 h-4"></i><span class="ui-btn-label">表单推送</span>
             <span v-if="trackerEnabled" class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
@@ -2088,7 +2088,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <span v-if="liveById[selectedTask.id]" class="ml-auto tnums text-slate-500">已用 [[ fmtDur(liveById[selectedTask.id].elapsed_s) ]]<template v-if="liveById[selectedTask.id].eta_s != null"> · [[ etaText(liveById[selectedTask.id].eta_s) ]]</template></span>
           </template>
           <template v-else-if="selectedTask.status==='pending'"><b>排队中</b><span v-if="live.pending.findIndex(p => p.id === selectedTask.id) >= 0">前面还有 [[ live.pending.findIndex(p => p.id === selectedTask.id) ]] 个</span></template>
-          <template v-else><b class="text-rose-500">克隆失败</b><span class="truncate">停在「[[ selectedTask.stage || '开始' ]]」</span>
+          <template v-else><b class="text-rose-500">[[ isGenTask(selectedTask) ? '生成失败' : '克隆失败' ]]</b><span class="truncate" :title="selectedTask.error_msg || ''">[[ isGenTask(selectedTask) && selectedTask.error_msg ? selectedTask.error_msg : '停在「' + (selectedTask.stage || '开始') + '」' ]]</span>
             <button v-if="canWrite" type="button" class="mt-btn ml-auto" @click="rebuild(selectedTask)"><i data-lucide="rotate-cw" class="w-4 h-4"></i>重建</button></template>
         </div>
         <div class="run-track">
@@ -2101,6 +2101,27 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <div v-for="(l, i) in taskLogs(selectedTask.id, 4)" :key="i" :class="l.level === 'ERROR' ? 'err' : ''"><span>[[ l.time ]]</span>[[ l.message ]]</div>
         </div>
       </div>
+
+      <!-- 界面生成: 需求验收清单(需求符合度的逐条依据) -->
+      <details v-if="view==='task' && selectedTask && isReqFit(selectedTask) && fitDetail(selectedTask)" class="fit-panel" :open="selectedTask.similarity_score < 85">
+        <summary>
+          <b>验收清单</b>
+          <span class="tnums">[[ fitDetail(selectedTask).items.filter(i => i.verdict === 'yes').length ]] / [[ fitDetail(selectedTask).items.length ]] 条满足</span>
+          <span class="fit-meta tnums">达成率 [[ Math.round(fitDetail(selectedTask).coverage * 100) ]]% · 运行健康 [[ Math.round(fitDetail(selectedTask).health * 100) ]]% · 设计 [[ (fitDetail(selectedTask).design * 10).toFixed(1) ]]</span>
+          <span class="fit-meta tnums ml-auto" v-if="fitGen(selectedTask)">[[ fitGen(selectedTask).rounds.length ]] 轮 · 模型用时 [[ fmtDur(fitGen(selectedTask).llm_seconds) ]] · [[ fitGen(selectedTask).ai_model ]]</span>
+        </summary>
+        <p v-if="fitGen(selectedTask) && fitGen(selectedTask).brief && fitGen(selectedTask).brief.summary" class="fit-note">需求理解：[[ fitGen(selectedTask).brief.summary ]]</p>
+        <ul class="fit-list">
+          <li v-for="it in fitDetail(selectedTask).items" :key="it.id" :class="it.verdict">
+            <span class="fit-mark">[[ ({yes: '满足', partial: '部分', no: '未满足'})[it.verdict] || '未验收' ]]</span>
+            <span class="fit-text">[[ it.text ]]<em v-if="it.must">用户要求</em></span>
+            <span class="fit-why">[[ it.gate || it.evidence ]]</span>
+          </li>
+        </ul>
+        <p v-for="c in fitDetail(selectedTask).caps" :key="c.reason" class="fit-note warn">分数封顶 [[ c.max ]]：[[ c.reason ]]</p>
+        <p v-if="fitDetail(selectedTask).review_mode !== 'vision'" class="fit-note warn">[[ fitDetail(selectedTask).review_mode === 'text' ? '当前模型未通过看图自检，本次验收只依据页面源码和浏览器体检数据，外观类条目可信度较低。' : '本次未经模型验收，分数只依据浏览器体检数据。' ]]</p>
+        <p v-for="(d, i) in (fitGen(selectedTask) ? fitGen(selectedTask).remaining_defects || [] : [])" :key="'d' + i" class="fit-note warn">仍存在：[[ d ]]</p>
+      </details>
 
       <!-- Tabs -->
       <div v-show="view==='task'" class="h-11 shrink-0 border-b border-white/[0.07] flex items-end gap-1 px-3 overflow-x-auto whitespace-nowrap">
@@ -2193,7 +2214,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                 </div>
                 <div class="flex flex-col items-end gap-1 shrink-0">
                   <!-- 已完成: 还原度大数字即状态; 其他状态才显示状态徽标 -->
-                  <span v-if="task.status==='completed' && task.similarity_score != null" class="tnums leading-none text-right" :title="'还原度 ' + task.similarity_score + ' 分'"
+                  <span v-if="task.status==='completed' && task.similarity_score != null" class="tnums leading-none text-right" :title="scoreLabel(task) + ' ' + task.similarity_score + ' 分'"
                     :class="task.similarity_score >= 85 ? 'text-slate-100' : 'text-amber-300'">
                     <span class="serif-num text-[30px]">[[ Number(task.similarity_score).toFixed(1) ]]</span><span class="text-[12px] text-slate-500 ml-0.5">分</span>
                   </span>
@@ -2668,12 +2689,12 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         <div class="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <h2 class="font-display text-[28px] leading-tight text-slate-100">界面生成</h2>
-            <p class="text-[13px] text-slate-500 mt-1.5">上传截图或写一段描述，生成可运行、可评分的网站；达到目标分即停。</p>
+            <p class="text-[13px] text-slate-500 mt-1.5">写一段需求或上传截图，生成可运行的网页；按需求逐条验收，不达标自动修复。</p>
           </div>
           <div class="flex items-center gap-2 text-[11px] text-slate-400">
-            <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-white/[0.08] bg-slate-950/60">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5 text-indigo-300"><path d="m15 4 1 1-9 9-1-1zM3 21l3-1 1-3"/><path d="M14 7l3 3"/></svg>
-              先用规则生成，不够时再用大模型补（没配置 Key 时只用规则）
+            <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border border-white/[0.08] bg-slate-950/60">
+              <span class="w-1.5 h-1.5 rounded-full" :class="genReady ? 'bg-emerald-400' : 'bg-amber-400'"></span>
+              [[ genReady ? '模型已就绪 · ' + (genModel || '') : '未配置模型' ]]
             </span>
           </div>
         </div>
@@ -2686,8 +2707,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                 class="flex-1 px-3 py-1.5 rounded-md border text-[11px] transition-all">界面截图</button>
             </div>
             <div v-show="gen.kind==='description'" class="space-y-1.5">
-              <label class="text-[10px] text-slate-500">页面描述(原型由关键词决定: 登录 / 落地页 / 仪表盘 / 商品列表 / 文章; 用「」给出标题文案, 可写颜色与数量)</label>
-              <textarea v-model="gen.description" rows="6" maxlength="4000" placeholder="例如: 一个蓝色主题的登录页, 有手机号、密码和短信验证码, 品牌叫 云帆, 标题「欢迎登录云帆控制台」"
+              <label class="text-[10px] text-slate-500">想要什么样的网页(一句话也可以; 动效、小游戏、工具、信息页都行, 写得越具体越贴合)</label>
+              <textarea v-model="gen.description" rows="6" maxlength="4000" placeholder="例如: 做一个番茄钟, 25 分钟专注 5 分钟休息, 可以开始、暂停、重置, 配色安静一些"
                 class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500 resize-none"></textarea>
             </div>
             <div v-show="gen.kind==='screenshot'" class="space-y-1.5">
@@ -2722,21 +2743,25 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                 <div class="flex gap-2"><input v-model.number="gen.maxRounds" type="number" min="1" max="12" class="w-1/2 rounded-lg bg-slate-950/80 border border-white/[0.08] px-2 py-1.5 text-xs text-slate-200">
                 <input v-model.number="gen.timeBudget" type="number" min="10" max="3600" class="w-1/2 rounded-lg bg-slate-950/80 border border-white/[0.08] px-2 py-1.5 text-xs text-slate-200"></div></div>
             </div>
-            <p class="text-[10px] text-slate-500">大模型配置沿用「新建批次」表单里的 AI 字段(任务级 &gt; 环境变量 &gt; 默认); 未配置时走确定性版面分析 / 页面原型。</p>
+            <p v-if="gen.kind==='description' && gen.target==='html_css' && !genReady && !form.aiKey" class="text-[11px] text-amber-300">文字生成需要大模型。请先在「系统设置 → AI 供应商」配置 Key，否则任务会直接失败。</p>
+            <p v-else class="text-[10px] text-slate-500">[[ gen.kind==='description' ? '模型配置：任务级 > 系统设置 > 环境变量。' : '截图生成：未配置模型时只做确定性版面分析。' ]]</p>
             <div v-if="gen.error" class="text-[11px] text-rose-300">[[ gen.error ]]</div>
             <button @click="submitGenerate" :disabled="gen.submitting"
               class="w-full px-3 py-2 rounded-lg ui-primary text-xs font-semibold disabled:opacity-50 transition-all">
               [[ gen.submitting ? '提交中…' : '开始生成' ]]</button>
           </div>
           <div class="rounded-2xl border border-white/[0.07] bg-slate-900/70 backdrop-blur-xl p-4 space-y-3 text-[11px] text-slate-400 leading-relaxed">
-            <div class="text-xs font-semibold text-slate-300">流程与口径</div>
+            <div class="text-xs font-semibold text-slate-300">文字描述怎么生成</div>
             <ol class="list-decimal pl-4 space-y-1">
-              <li>输入经 InputAdapter 归一化为 <b class="text-slate-200">UIR</b>(组件树 + 设计令牌 + 内容 + 交互意图)。</li>
-              <li>OutputTarget 把 UIR 渲染为离线可运行的 HTML/CSS(无外链), Playwright 整页截图。</li>
-              <li>截图输入: 与参考图过三通道评分 v3(结构 NCC / 边缘 IoU / 文本 F2), 与克隆任务同一函数。描述输入: 无参考图, 自评分单列。</li>
-              <li>低于目标分则把像素差分线索回喂下一轮; 只保留净提升轮次; 达标或预算耗尽即停。</li>
-              <li>产物进任务矩阵: 预览 / 导出 ZIP / 评分明细与「生成报告」均可查看; 选了桌面应用 / Android 应用交付形态的任务另有 .app / .exe / APK 下载按钮。</li>
+              <li><b class="text-slate-200">理解需求</b>：模型把一句话扩写成任务书和验收清单，清单会显示在任务详情里。</li>
+              <li><b class="text-slate-200">编写页面</b>：模型直接写完整网页(HTML / CSS / JS 内联，不依赖外网)，支持动效、canvas 和交互。</li>
+              <li><b class="text-slate-200">浏览器体检</b>：真实运行，检查报错、空白、外网依赖、横向溢出；连拍多帧判断是否在动；逐个操作按钮和输入框看有没有反应。</li>
+              <li><b class="text-slate-200">对照验收</b>：模型看着运行截图逐条判定清单；体检的硬证据优先于模型的说法。</li>
+              <li><b class="text-slate-200">定向修复</b>：没达标就带着问题清单让模型修改，只保留分数更高的版本，达到目标分或用完预算即停。</li>
             </ol>
+            <p><b class="text-slate-200">需求符合度</b> = 60% 清单达成率 + 20% 运行健康度 + 20% 设计质量。有运行报错最高 40，有明确要求未满足最高 60。它与克隆任务的「还原度」不是一个口径。</p>
+            <div class="text-xs font-semibold text-slate-300 pt-2">截图怎么生成</div>
+            <p>截图先归一化为界面树(UIR)，再渲染成 HTML / CSS 或 Flutter；与参考截图做像素评分，口径同克隆任务。</p>
             <div class="text-xs font-semibold text-slate-300 pt-2">边界</div>
             <p>仅重建界面外观与交互意图; 不做任何站点 / 应用特判; 移动端(L2)只处理自有 / 授权安装包的公开资源。</p>
           </div>
@@ -3464,7 +3489,7 @@ const __vueApp = createApp({
       urlsText: '',
       form: { mode: 'single', maxPages: 3, viewport: 'desktop', renderTimeout: 30, cssom: true, mockApi: true, proxy: true, interactionSim: true, simLoginMessage: '', simLoginRedirect: '', disableHydration: false, similarity: true, cookie: '', bearer: '', ua: '', aiRepair: false, aiKey: '', aiModel: '', aiBaseUrl: '', package: '' },
       heroUrl: '', advOpen: true, poolRestarting: false, storage: null, storageAt: 0, pruning: false,
-      aiDefaults: { base_url: '', model: '' }, aiKeyConfigured: false,
+      aiDefaults: { base_url: '', model: '' }, aiKeyConfigured: false, genReady: false, genModel: '',
       aiReport: { open: false, loading: false, busy: false, data: null },
       splitRight: 'cloned',
       repairHistory: { open: false, items: [] },
@@ -3800,7 +3825,7 @@ const __vueApp = createApp({
       const u = this.auth && this.auth.user;
       return u ? g + '，' + (u.display_name || u.username) : g;
     },
-    dashDone() { return this.tasks.filter(t => t.status === 'completed' && t.similarity_score != null); },
+    dashDone() { return this.tasks.filter(t => t.status === 'completed' && t.similarity_score != null && !this.isReqFit(t)); },
     dashAvg() {
       const d = this.dashDone; if (!d.length) return '—';
       return (d.reduce((a, t) => a + Number(t.similarity_score), 0) / d.length).toFixed(1);
@@ -5780,12 +5805,18 @@ const __vueApp = createApp({
         return { label: d.label, sub: d.sub, state };
       });
     },
+    isGenTask(t) { return !!t && String(t.target_url || '').startsWith('uir:generate:'); },
+    isReqFit(t) { return !!t && !!t.stats && t.stats.scoring === 'req-fit-v1'; },
+    scoreLabel(t) { return this.isReqFit(t) ? '需求符合度' : '还原度'; },
+    fitDetail(t) { const d = t && t.stats && t.stats.similarity_detail; return d && Array.isArray(d.items) ? d : null; },
+    fitGen(t) { const g = t && t.stats && t.stats.generate; return g && Array.isArray(g.rounds) ? g : null; },
     async loadAiConfig() {
       try {
         const r = await fetch('/api/ai/config');
         const data = await r.json();
         this.aiDefaults = { base_url: data.base_url || '', model: data.model || '' };
         this.aiKeyConfigured = !!data.key_configured;
+        this.genReady = !!data.generate_ready; this.genModel = data.generate_model || '';
       } catch (e) { return; }
     },
 

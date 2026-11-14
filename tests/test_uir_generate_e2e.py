@@ -137,7 +137,8 @@ class GenerateEndToEnd(unittest.TestCase):
 
     def test_description_deterministic(self):
         self._key(False)
-        task, rep, _ = self._run({"kind": "description", "description": "商品列表页: 顶栏, 搜索框, 六个商品卡片, 页脚"})
+        task, rep, _ = self._run({"kind": "description", "description": "商品列表页: 顶栏, 搜索框, 六个商品卡片, 页脚",
+                                  "track": "uir"})
         self.assertEqual(task["status"], "completed")
         self.assertEqual(rep["scoring"], "desc-self-v1")
         self.assertGreater(task["similarity_score"], 50)

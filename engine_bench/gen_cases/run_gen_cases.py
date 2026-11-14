@@ -177,7 +177,8 @@ def main():
         if not want(c["id"]):
             continue
         print(f"== {c['id']} (描述)", flush=True)
-        r = run_one(db, pool, {"kind": "description", "description": c["text"], "max_rounds": args.rounds,
+        # track=uir: 这组是关键词原型轨的基线回环; 模型直写网页的用例见 run_code_cases.py
+        r = run_one(db, pool, {"kind": "description", "description": c["text"], "max_rounds": args.rounds, "track": "uir",
                                "time_budget": args.budget, "viewport": {"width": 1440, "height": 900}}, args.verbose)
         r.update({"id": c["id"], "group": "desc", "holdout": False})
         results.append(r)
