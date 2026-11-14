@@ -164,8 +164,58 @@ def _build_content(user_text: str, images=(), parts=()) -> list:
     return content
 
 
+_NO_STREAM = set()          # 不接受 stream / stream_options 的上游(按 base_url 记住, 之后走非流式)
+
+
+def _read_sse(resp, left, on_delta) -> dict:
+    """读 OpenAI 兼容的 SSE 流, 逐段回调 on_delta(kind, text) (kind = "content" / "reasoning"),
+    结束后拼成与非流式相同形状的 payload。每收到一块都核对墙钟; 回调出错不影响生成。"""
+    content, reasoning, finish, usage = [], [], None, {}
+    buf = b""
+    raw = resp.raw
+    try:
+        on_delta("start", "")
+    except Exception:
+        pass
+    while True:
+        chunk = raw.read1(65536, decode_content=True)
+        if not chunk:
+            break
+        if left() <= 0:
+            raise DeadlineExceeded("调用墙钟上限已到(上游仍在生成)")
+        buf += chunk
+        while b"\n" in buf:
+            line, buf = buf.split(b"\n", 1)
+            line = line.strip()
+            if not line.startswith(b"data:"):
+                continue
+            data = line[5:].strip()
+            if not data or data == b"[DONE]":
+                continue
+            try:
+                ev = json.loads(data.decode("utf-8", errors="replace"))
+            except ValueError:
+                continue
+            if ev.get("usage"):
+                usage = ev["usage"]
+            for ch in ev.get("choices") or []:
+                d = ch.get("delta") or {}
+                for kind, key, acc in (("reasoning", "reasoning_content", reasoning), ("content", "content", content)):
+                    piece = d.get(key)
+                    if piece:
+                        acc.append(piece)
+                        try:
+                            on_delta(kind, piece)
+                        except Exception:
+                            pass
+                if ch.get("finish_reason"):
+                    finish = ch["finish_reason"]
+    return {"choices": [{"message": {"content": "".join(content), "reasoning_content": "".join(reasoning)},
+                         "finish_reason": finish}], "usage": usage}
+
+
 def _transport(ai_cfg: dict, system: str, content: list, temperature: float, timeout, deadline, thinking: bool,
-               json_mode: bool = False):
+               json_mode: bool = False, on_delta=None):
     """返回 (call, left): call(budget) 发一次请求(含瞬时网络错误重试)并返回上游 JSON; left() 为剩余墙钟。"""
     if deadline is None:
         deadline = time.monotonic() + float(getattr(config, "AI_CALL_WALL_LIMIT", 180))
@@ -202,6 +252,11 @@ def _transport(ai_cfg: dict, system: str, content: list, temperature: float, tim
         want_json = json_mode and ai_cfg.get("base_url") not in _NO_JSON_MODE
         if want_json:
             body_json["response_format"] = {"type": "json_object"}
+        want_stream = on_delta is not None and ai_cfg.get("base_url") not in _NO_STREAM
+        if want_stream:
+            # 流式只为让界面实时看到模型正在写的代码; 拼回与非流式同形的 payload, 调用方无感
+            body_json["stream"] = True
+            body_json["stream_options"] = {"include_usage": True}
         resp = requests.post(
             f"{ai_cfg['base_url']}/chat/completions",
             headers={"Authorization": f"Bearer {ai_cfg['api_key']}"},
@@ -215,6 +270,15 @@ def _transport(ai_cfg: dict, system: str, content: list, temperature: float, tim
             resp.close()
             _NO_THINK_UNSUPPORTED.add(ai_cfg.get("base_url"))
             return _call_once(budget)
+        if want_stream and resp.status_code in (400, 422):
+            resp.close()
+            _NO_STREAM.add(ai_cfg.get("base_url"))
+            return _call_once(budget)
+        if want_stream and resp.ok and "event-stream" in (resp.headers.get("Content-Type") or ""):
+            try:
+                return _read_sse(resp, _left, on_delta)
+            finally:
+                resp.close()
         try:
             resp.raise_for_status()
             chunks = []
@@ -288,13 +352,14 @@ def chat_json(ai_cfg: dict, system: str, user_text: str, images=(),
 
 def chat_text(ai_cfg: dict, system: str, user_text: str, images=(), temperature: float = 0.2,
               timeout: int = None, max_tokens: int = None, parts=(), deadline: float = None,
-              thinking: bool = True, complete=None) -> dict:
+              thinking: bool = True, complete=None, on_delta=None) -> dict:
     """同 chat_json 的传输与墙钟语义, 但返回原始文本: {"text","finish","usage","elapsed","budget"}。
+    on_delta(kind, text) 给出时走流式, 边生成边回调(界面实时展示代码用); 上游不支持流式时自动回落。
 
     用于模型直接写代码(整页 HTML)这类非 JSON 产出。预算阶梯 (b, 2b): 内容为空且思考吃光预算, 或
     finish_reason=length 且 complete(text) 判定产物不完整 → 升档重试一次; 仍被截断则原样返回, 由调用方处理。"""
     content = _build_content(user_text, images, parts)
-    _call, _left = _transport(ai_cfg, system, content, temperature, timeout, deadline, thinking)
+    _call, _left = _transport(ai_cfg, system, content, temperature, timeout, deadline, thinking, on_delta=on_delta)
     base = int(max_tokens or config.AI_PATCH_MAX_TOKENS)
     t0 = time.monotonic()
     out, last_err = None, None

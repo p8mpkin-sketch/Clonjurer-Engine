@@ -19,6 +19,7 @@ REST API:
   GET  /api/tasks/<id>/assets       工作空间静态资产文件树
   GET  /api/tasks/<id>/file         文本资产内容预览
   GET  /api/tasks/<id>/structure    生成的 Flask 工程结构树
+  GET  /api/tasks/<id>/live_code    界面生成: 模型正在写的代码(增量, 任务卡实时展示)
   GET  /api/tasks/<id>/screenshots/<img_type>   原站/克隆/差异图
   GET  /api/stream_logs             SSE 实时日志流
   GET  /api/telemetry               系统遥测(浏览器池/CAS/队列)
@@ -845,6 +846,24 @@ def task_file(task_id):
         return jsonify({"error": "文件超过 512KB, 暂不支持在线预览"}), 400
     content = target.read_text(encoding="utf-8", errors="replace")
     return jsonify({"path": rel, "size": size, "content": content})
+
+
+@app.get("/api/tasks/<int:task_id>/live_code")
+def task_live_code(task_id):
+    """界面生成: 模型正在写的代码(增量)。?epoch=&since=&think_since= 为客户端已收到的位置;
+    epoch 变了(进入新一轮写页面/修复)时从头返回 reset=true。非运行中或非生成任务返回 active=false。"""
+    from core.uir import livecode
+    task = _task_or_404(task_id)
+    if task.get("status") != "running":
+        return jsonify({"active": False})
+
+    def _int(name):
+        try:
+            return max(0, int(request.args.get(name, 0)))
+        except (TypeError, ValueError):
+            return 0
+    out = livecode.read(_workspace_of(task), _int("epoch"), _int("since"), _int("think_since"))
+    return jsonify(out)
 
 
 @app.get("/api/tasks/<int:task_id>/structure")

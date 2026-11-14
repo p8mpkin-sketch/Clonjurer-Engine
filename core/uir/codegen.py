@@ -18,7 +18,7 @@ import shutil
 import time
 from pathlib import Path
 
-from core.uir import llm, probe, settings
+from core.uir import livecode, llm, probe, settings
 
 SCORING = "req-fit-v1"
 ITEM_TYPES = ("content", "visual", "motion", "effect", "interaction")
@@ -254,10 +254,10 @@ def _brief_text(brief: dict) -> str:
     return json.dumps(slim, ensure_ascii=False, indent=1)
 
 
-def _code_call(ai_cfg, system, user, deadline, temperature, parts=()):
+def _code_call(ai_cfg, system, user, deadline, temperature, parts=(), on_delta=None):
     out = llm.chat_text(ai_cfg, system, user, parts=parts, temperature=temperature,
                         max_tokens=settings.CODE_MAX_TOKENS, deadline=deadline,
-                        thinking=settings.CODE_THINKING, complete=_html_complete)
+                        thinking=settings.CODE_THINKING, complete=_html_complete, on_delta=on_delta)
     html, complete = extract_html(out["text"])
     if not complete:
         raise CodegenError(f"模型输出的网页不完整(没有 </html>, finish_reason={out.get('finish')}, "
@@ -267,9 +267,9 @@ def _code_call(ai_cfg, system, user, deadline, temperature, parts=()):
     return html, {"elapsed": out["elapsed"], "usage": out.get("usage") or {}}
 
 
-def write_page(ai_cfg: dict, desc: str, brief: dict, deadline: float, note: str = ""):
+def write_page(ai_cfg: dict, desc: str, brief: dict, deadline: float, note: str = "", on_delta=None):
     user = f"用户需求:\n{desc}\n\n任务书:\n{_brief_text(brief)}\n\n" + (f"{note}\n\n" if note else "") + "现在输出完整的 HTML 文档。"
-    return _code_call(ai_cfg, WRITE_SYSTEM, user, deadline, 0.6)
+    return _code_call(ai_cfg, WRITE_SYSTEM, user, deadline, 0.6, on_delta=on_delta)
 
 
 def problem_list(defects: list, detail: dict, limit: int = 14) -> list:
@@ -332,7 +332,7 @@ def _repair_complete(text: str) -> bool:
 
 
 def repair_page(ai_cfg: dict, desc: str, brief: dict, html: str, problems: list, deadline: float,
-                shot: Path = None, stalled: bool = False):
+                shot: Path = None, stalled: bool = False, on_delta=None):
     """修复 → (新 html, meta)。默认允许模型只输出局部修改块(整页重写一次要几十秒到两分钟, 改一处样式不值得);
     stalled(上一轮修复失败或没有改善)时要求整页重写并换思路。meta["mode"] = patch / full。"""
     user = (f"用户需求:\n{desc}\n\n任务书:\n{_brief_text(brief)}\n\n需要解决的问题(来自真实浏览器运行与验收):\n"
@@ -344,10 +344,11 @@ def repair_page(ai_cfg: dict, desc: str, brief: dict, html: str, problems: list,
     if shot is not None and Path(shot).is_file() and _vision_ok(ai_cfg):
         parts = [{"type": "text", "text": "当前页面在桌面视口的截图:"}, llm._image_part(Path(shot), 1024)]
     if stalled:
-        new, meta = _code_call(ai_cfg, REPAIR_FULL_SYSTEM, user, deadline, 0.75, parts=parts)
+        new, meta = _code_call(ai_cfg, REPAIR_FULL_SYSTEM, user, deadline, 0.75, parts=parts, on_delta=on_delta)
         return new, dict(meta, mode="full")
     out = llm.chat_text(ai_cfg, REPAIR_SYSTEM, user, parts=parts, temperature=0.4, max_tokens=settings.CODE_MAX_TOKENS,
-                        deadline=deadline, thinking=settings.CODE_THINKING, complete=_repair_complete)
+                        deadline=deadline, thinking=settings.CODE_THINKING, complete=_repair_complete,
+                        on_delta=on_delta)
     meta = {"elapsed": out["elapsed"], "usage": out.get("usage") or {}}
     text = out["text"]
     if _PATCH_RE.search(text):
@@ -672,6 +673,16 @@ def _tokens(usage: dict) -> dict:
 
 def run(desc: str, ws: Path, pool, ai_cfg: dict, judge_cfg: dict, viewport: dict, log, stage,
         deadline: float, target_score: float, max_rounds: int) -> dict:
+    """见 _run。模型写代码的过程实时写进 livecode 通道(任务卡/详情页展示用), 结束即关闭。"""
+    live = livecode.Channel(ws)
+    try:
+        return _run(desc, ws, pool, ai_cfg, judge_cfg, viewport, log, stage, deadline, target_score, max_rounds, live)
+    finally:
+        live.close()
+
+
+def _run(desc: str, ws: Path, pool, ai_cfg: dict, judge_cfg: dict, viewport: dict, log, stage,
+         deadline: float, target_score: float, max_rounds: int, live) -> dict:
     """跑完一次代码直写生成。产物写入 ws(index.html / cloned_preview.png / cloned_text.txt / brief.json / gen_probe/),
     返回 {"brief","rounds","calls","best":{"score","detail","round"}}; 没有任何可用产物时抛 CodegenError。"""
     left = lambda: deadline - time.monotonic()  # noqa: E731
@@ -719,13 +730,18 @@ def run(desc: str, ws: Path, pool, ai_cfg: dict, judge_cfg: dict, viewport: dict
         t0 = time.monotonic()
         try:
             if action == "write":
+                live.begin("编写页面")
                 html, meta = write_page(ai_cfg, desc, brief, wall(settings.CODE_WRITE_WALL),
-                                        note="上一次输出不完整, 请精简实现, 确保一次输出完整文档。" if rounds else "")
+                                        note="上一次输出不完整, 请精简实现, 确保一次输出完整文档。" if rounds else "",
+                                        on_delta=live.feed)
             else:
                 problems = problem_list(best["defects"], best["detail"])
                 log("GEN", f"修复目标 {len(problems)} 项: " + " | ".join(p[:60] for p in problems[:4]))
+                live.begin(f"修复第 {rnd - 1} 轮" + (" · 整页重写" if stalled else ""))
                 html, meta = repair_page(ai_cfg, desc, brief, best["html"], problems, wall(settings.CODE_WRITE_WALL),
-                                         shot=(best["rep"].get("shots") or {}).get("f0"), stalled=stalled)
+                                         shot=(best["rep"].get("shots") or {}).get("f0"), stalled=stalled,
+                                         on_delta=live.feed)
+            live.done()
             note(action, t0, meta["usage"], **({"mode": meta["mode"]} if meta.get("mode") else {}))
             if meta.get("mode") == "patch":
                 log("GEN", f"局部修改: 应用 {meta['patches']} 块" + (f", {meta['patches_failed']} 块未匹配" if meta.get("patches_failed") else ""))
