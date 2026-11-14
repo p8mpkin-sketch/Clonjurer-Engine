@@ -76,8 +76,9 @@ def compute(orig: Path, clone: Path) -> dict:
 
 def for_workspace(ws: Path) -> dict | None:
     """读缓存或计算: 原图 original_preview.png vs 产出 cloned_preview.png。缺图返回 None。"""
-    orig, clone = ws / "original_preview.png", ws / "cloned_preview.png"
-    if not (orig.is_file() and clone.is_file()):
+    orig = ws / "original_preview.png"
+    clone = next((ws / n for n in ("cloned_preview.png", "static_preview.png", "fidelity_preview.png") if (ws / n).is_file()), None)
+    if not orig.is_file() or clone is None:
         return None
     key = f"{orig.stat().st_mtime}:{clone.stat().st_mtime}:v1"
     cache = ws / "diff_regions.json"

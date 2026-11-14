@@ -206,6 +206,19 @@ SCREENSHOT_FILES = {
     "cloned": "cloned_preview.png",
     "diff": "diff_preview.png",
 }
+# 交互版渲染失败、改交静态版时, 引擎只留下静态版/保真轨截图: 依次回退, 卡片缩略图与对比视图不至于空白
+SCREENSHOT_FALLBACKS = {
+    "cloned": ("cloned_preview.png", "static_preview.png", "fidelity_preview.png"),
+    "diff": ("diff_preview.png", "fidelity_diff.png"),
+    "original": ("original_preview.png",),
+}
+
+
+def _shot_file(ws: Path, img_type: str):
+    for name in SCREENSHOT_FALLBACKS.get(img_type, ()):
+        if (ws / name).is_file():
+            return ws / name
+    return None
 
 HOTPATCH_CSS_RE = re.compile(
     r'<style id="clone-hotpatch">.*?</style>', re.S)
@@ -565,7 +578,7 @@ def list_tasks():
     for task in tasks:
         task["stats"] = _parse_json(task.pop("stats_json", "") or "{}")
         ws = _workspace_of(task)
-        task["has_cloned_preview"] = (ws / "cloned_preview.png").is_file()
+        task["has_cloned_preview"] = _shot_file(ws, "cloned") is not None
         task["title"] = _display_title(task, ws)
     return jsonify({"tasks": tasks})
 
@@ -622,8 +635,8 @@ def task_detail(task_id):
     site = _load_site_meta(ws)
     task["site"] = site
     task["has_original_preview"] = (ws / "original_preview.png").is_file()
-    task["has_cloned_preview"] = (ws / "cloned_preview.png").is_file()
-    task["has_diff_preview"] = (ws / "diff_preview.png").is_file()
+    task["has_cloned_preview"] = _shot_file(ws, "cloned") is not None
+    task["has_diff_preview"] = _shot_file(ws, "diff") is not None
     task["has_ai_report"] = (ws / "ai_repair_report.json").is_file()
     task["title"] = _display_title(task, ws)
     return jsonify({"task": task})
@@ -829,8 +842,8 @@ def task_screenshot(task_id, img_type):
         return jsonify({"error": "img_type 必须是 original / cloned / diff"}), 400
     task = db.get_task(task_id)
     ws = _workspace_of(task)
-    target = ws / filename
-    if not target.is_file():
+    target = _shot_file(ws, img_type)
+    if target is None:
         return jsonify({"error": f"{filename} 尚未生成"}), 404
     # 评分截图可能是 JPEG 编码(config.SHOT_JPEG, 文件名仍 .png), 按内容给类型
     with open(target, "rb") as fh:
@@ -850,8 +863,8 @@ def task_thumb(task_id, img_type):
     if filename is None:
         return jsonify({"error": "img_type 必须是 original / cloned / diff"}), 400
     ws = _workspace_of(task)
-    source = ws / filename
-    if not source.is_file():
+    source = _shot_file(ws, img_type)
+    if source is None:
         return jsonify({"error": f"{filename} 尚未生成"}), 404
     thumb = ws / f"{img_type}_thumb.webp"
     if not thumb.is_file() or thumb.stat().st_mtime < source.stat().st_mtime:

@@ -2314,7 +2314,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                 </div>
                 <div v-else class="h-[180px] flex flex-col items-center justify-center gap-1.5">
                   <i data-lucide="inbox" class="w-5 h-5 text-slate-700"></i>
-                  <span class="text-[12px] text-slate-500 text-center px-4">[[ task.status==='failed' ? humanError(task).title : '排队中' ]]</span>
+                  <span class="text-[12px] text-slate-500 text-center px-4">[[ task.status==='failed' ? humanError(task).title : (task.status==='pending' ? '排队中' : '没有截图, 点「预览」查看页面') ]]</span>
                 </div>
                 <div v-if="task.status==='completed'" class="absolute bottom-2 right-2 px-2 py-0.5 rounded-md bg-black/70 text-[12px] text-white opacity-0 group-hover:opacity-100 transition-opacity">查看详情</div>
               </div>
