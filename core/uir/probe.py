@@ -27,7 +27,7 @@ from core.uir import settings
 _INIT_JS = r"""
 (() => {
   if (window.__probe) return;
-  const P = window.__probe = {raf: 0, mut: 0, anim: 0, listeners: {}, dialogs: 0};
+  const P = window.__probe = {raf: 0, mut: 0, anim: 0, trans: 0, names: [], listeners: {}, dialogs: 0};
   const raf = window.requestAnimationFrame.bind(window);
   window.requestAnimationFrame = cb => { P.raf++; return raf(cb); };
   const add = EventTarget.prototype.addEventListener;
@@ -39,8 +39,13 @@ _INIT_JS = r"""
     return add.call(this, type, fn, opt);
   };
   // 关键帧动画的「开始」事件: 无限循环的动画只在启动时触发一次, 所以操作之后新增的次数可归因于这次操作。
-  // 不统计 transition: 鼠标移上按钮的悬停过渡几乎每个页面都有, 算进来等于所有页面「操作后都会动」
-  add.call(document, 'animationstart', () => { P.anim++; }, true);
+  // 一次性的短动效(入场动画、操作后的过渡)几百毫秒就结束, 连拍多半拍不到, 只能靠事件留下「发生过」的证据。
+  // 过渡单独计数: 鼠标移上按钮的悬停过渡几乎每个页面都有, 不能当成「操作引出了动画」
+  add.call(document, 'animationstart', e => {
+    P.anim++;
+    if (e.animationName && P.names.length < 8 && !P.names.includes(e.animationName)) P.names.push(e.animationName);
+  }, true);
+  add.call(document, 'transitionrun', () => { P.trans++; }, true);
   const watch = () => new MutationObserver(l => { P.mut += l.length; }).observe(
     document.documentElement, {subtree: true, childList: true, attributes: true, characterData: true});
   if (document.documentElement) watch(); else document.addEventListener('readystatechange', watch, {once: true});
@@ -83,7 +88,8 @@ _STATE_JS = r"""
   try { anims = document.getAnimations().filter(a => a.playState === 'running').length; } catch (e) {}
   const d = new Date(), z = n => String(n).padStart(2, '0');
   return {
-    raf: P.raf || 0, mut: P.mut || 0, anim_ev: P.anim || 0, listeners: P.listeners || {},
+    raf: P.raf || 0, mut: P.mut || 0, anim_ev: P.anim || 0, trans_ev: P.trans || 0, anim_names: P.names || [],
+    listeners: P.listeners || {},
     now: d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + ' ' + z(d.getHours()) + ':'
       + z(d.getMinutes()) + ':' + z(d.getSeconds()),
     scroll_y: Math.round(window.scrollY || 0), vh: innerHeight,
@@ -115,7 +121,17 @@ _FILL_JS = r"""
              tel: '13800000000', url: 'https://example.com', color: '#3366cc',
              'datetime-local': '2026-01-15T09:30'}[type];
   if (type === 'file') return 'skip';
-  set.call(el, v !== undefined ? v : '测试 Test 12'); fire(); return 'fill';
+  if (v !== undefined) { set.call(el, v); fire(); return 'fill'; }
+  // type=text 的输入框按它自己声明的线索推断该填什么: inputmode / pattern / 占位符的样子
+  const mode = (el.getAttribute('inputmode') || '').toLowerCase(), ph = (el.placeholder || '').trim();
+  const pat = el.getAttribute('pattern') || '';
+  let val = '测试 Test 12';
+  if (mode === 'decimal' || mode === 'numeric' || /^[\d\s.,:%+\-¥$€£]+$/.test(ph) || /^[\\d\[\]0-9.*+?{},()\-]+$/.test(pat)) val = '12';
+  else if (mode === 'email' || /@/.test(ph)) val = 'test@example.com';
+  else if (mode === 'tel') val = '13800000000';
+  else if (mode === 'url' || /^https?:/i.test(ph)) val = 'https://example.com';
+  if (el.maxLength > 0) val = val.slice(0, el.maxLength);
+  set.call(el, val); fire(); return 'fill';
 }
 """
 
@@ -161,6 +177,10 @@ def _is_blank(gray: np.ndarray, text: str) -> bool:
 
 def _remote(url: str) -> bool:
     return url.split(":", 1)[0].lower() in ("http", "https", "ws", "wss", "ftp")
+
+
+# 注意: 本模块所有截图都带 caret="initial"。Playwright 默认会在截图时给每个输入框临时写内联样式来隐藏光标,
+# 这些写入会被页面里的变更计数当成「页面自己在改 DOM」, 带表单的页面就全成了「无法判定操作有没有反应」。
 
 
 def _reveal(page, doc_h: int, vh: int):
@@ -231,10 +251,10 @@ def inspect_page(pool, entry: Path, out_dir: Path, viewport: dict, full_png: Pat
             # ---- 动效: 连拍 ----
             s0 = page.evaluate(_STATE_JS)
             t_cap = time.monotonic()
-            pngs = [page.screenshot(type="png")]
+            pngs = [page.screenshot(type="png", caret="initial")]
             for gap in settings.PROBE_FRAME_GAPS_MS:
                 page.wait_for_timeout(gap)
-                pngs.append(page.screenshot(type="png"))
+                pngs.append(page.screenshot(type="png", caret="initial"))
             cap_s = max(0.05, time.monotonic() - t_cap)
             s1 = page.evaluate(_STATE_JS)
             rep["shot_at"] = {"f0": s0.get("now"), "burst_end": s1.get("now")}
@@ -254,6 +274,8 @@ def inspect_page(pool, entry: Path, out_dir: Path, viewport: dict, full_png: Pat
                              "moving": max(fracs) >= settings.PROBE_MOTION_EPS,
                              "running_animations": s1["anims"], "raf_per_s": round((s1["raf"] - s0["raf"]) / cap_s, 1),
                              "dom_mutations_per_s": round(base_mut, 1), "canvas": s1["canvas"], "svg": s1["svg"]}
+            rep["effects"] = {"animations": s1.get("anim_ev", 0), "transitions": s1.get("trans_ev", 0),
+                              "names": s1.get("anim_names") or [], "at_load": s1.get("anim_ev", 0)}
             rep["blank"] = _is_blank(grays[0], s1["text"])
             rep["layout"] = {"overflow_x": s1["sw"] > s1["cw"] + 2, "scroll_w": s1["sw"], "client_w": s1["cw"],
                              "doc_h": s1["sh"], "nodes": s1["nodes"], "text_len": len(s1["text"]), "title": s1["title"]}
@@ -269,23 +291,25 @@ def inspect_page(pool, entry: Path, out_dir: Path, viewport: dict, full_png: Pat
                 cap = min(int(_ce.SCORE_MAX_HEIGHT * w / _ce.SCORE_WIDTH), _ce.SHOT_MAX_TEXTURE)
                 if s1["sh"] > cap:
                     page.screenshot(path=str(full_png), full_page=True,
-                                    clip={"x": 0, "y": 0, "width": w, "height": cap}, timeout=config.SHOT_TIMEOUT)
+                                    clip={"x": 0, "y": 0, "width": w, "height": cap}, timeout=config.SHOT_TIMEOUT, caret="initial")
                 else:
-                    page.screenshot(path=str(full_png), full_page=True, timeout=config.SHOT_TIMEOUT)
+                    page.screenshot(path=str(full_png), full_page=True, timeout=config.SHOT_TIMEOUT, caret="initial")
                 rep["shots"]["full"] = str(full_png)
             # ---- 交互 ----
             rep["interactions"] = _interact(page, rep, base_mut, rep["motion"]["moving"])
             # ---- 操作之后: 再连拍一小段。很多动效/计时要先点「开始」才有, 只看空闲状态会把它们判成「不会动」 ----
             if any(i["kind"] != "field" for i in rep["interactions"]):
                 with suppress(Exception):
-                    post = [page.screenshot(type="png")]
+                    post = [page.screenshot(type="png", caret="initial")]
                     for gap in settings.PROBE_POST_GAPS_MS:
                         page.wait_for_timeout(gap)
-                        post.append(page.screenshot(type="png"))
+                        post.append(page.screenshot(type="png", caret="initial"))
                     s2 = page.evaluate(_STATE_JS)
                     pg = [_gray(x) for x in post]
                     pf = [round(frame_diff(a, b)[0], 5) for a, b in zip(pg, pg[1:])]
                     added, gone = _text_delta(s1["text"], s2["text"])
+                    rep["effects"].update(animations=s2.get("anim_ev", 0), transitions=s2.get("trans_ev", 0),
+                                          names=s2.get("anim_names") or [])
                     rep["post"] = {"frame_diffs": pf, "moving": max(pf) >= settings.PROBE_MOTION_EPS,
                                    "running_animations": s2["anims"], "text_added": added, "text_removed": gone}
                     rep["shot_at"]["after"] = s2.get("now")
@@ -293,7 +317,7 @@ def inspect_page(pool, entry: Path, out_dir: Path, viewport: dict, full_png: Pat
                     rep["shots"]["after"] = str(out_dir / "after.png")
             elif rep["interactions"]:
                 with suppress(Exception):
-                    (out_dir / "after.png").write_bytes(page.screenshot(type="png"))
+                    (out_dir / "after.png").write_bytes(page.screenshot(type="png", caret="initial"))
                     rep["shots"]["after"] = str(out_dir / "after.png")
             page.close()
     except Exception as exc:
@@ -313,7 +337,7 @@ def inspect_page(pool, entry: Path, out_dir: Path, viewport: dict, full_png: Pat
             page.goto(uri, wait_until="load", timeout=config.SHOT_TIMEOUT)
             page.wait_for_timeout(1100)          # 等入场动画走完再截: 半透明的中间帧会被当成对比度不足
             ms = page.evaluate(_STATE_JS)
-            page.screenshot(path=str(out_dir / "mobile.png"), type="png")
+            page.screenshot(path=str(out_dir / "mobile.png"), type="png", caret="initial")
             rep["shots"]["mobile"] = str(out_dir / "mobile.png")
             rep["mobile"] = {"overflow_x": ms["sw"] > ms["cw"] + 2, "scroll_w": ms["sw"], "client_w": ms["cw"],
                              "errors": [e for e in merr if e not in rep["errors"]][:5]}
@@ -338,11 +362,13 @@ def _interact(page, rep: dict, base_mut: float, moving: bool) -> list:
     win = 0.38                                   # 每次操作后的观察窗口(秒)
     base_raf = float((rep.get("motion") or {}).get("raf_per_s") or 0)
 
-    def observe(do):
+    looks = [0]                                  # 已做过几次「再看一眼」
+
+    def observe(do, linger=False):
         e0 = len(rep["errors"])
         try:
             st0 = page.evaluate(_STATE_JS)
-            shot0 = _gray(page.screenshot(type="png")) if static else None
+            shot0 = _gray(page.screenshot(type="png", caret="initial")) if static else None
             do()
             page.wait_for_timeout(int(win * 1000))
             st1 = page.evaluate(_STATE_JS)
@@ -353,16 +379,27 @@ def _interact(page, rep: dict, base_mut: float, moving: bool) -> list:
                             or (st1["raf"] - st0["raf"]) > base_raf * win * 1.5 + 4)
             pix = None
             if static:
-                pix = frame_diff(shot0, _gray(page.screenshot(type="png")))[0]
+                pix = frame_diff(shot0, _gray(page.screenshot(type="png", caret="initial")))[0]
                 responded = bool(d_mut > 0 or text_changed or pix >= settings.PROBE_MOTION_EPS)
             else:
                 if base_mut < 0.5:        # 只有画面在动、DOM 本身是静的: DOM/文字一变即可归因于这次操作
                     responded = True if (d_mut > 0 or text_changed) else None
                 else:                     # DOM 也在自发变化: 明显超出基线才算
                     responded = True if d_mut > base_mut * win * 3 + 3 else None
-            return {"responded": responded, "dom_mutations": d_mut, "text_changed": text_changed, "animated": animated,
-                    "pixel_change": None if pix is None else round(pix, 5),
-                    "new_errors": rep["errors"][e0:][:3]}
+            res = {"responded": responded, "dom_mutations": d_mut, "text_changed": text_changed, "animated": animated,
+                   "pixel_change": None if pix is None else round(pix, 5)}
+            # 再看一眼: 原本静止的页面, 点完之后隔 1 秒多画面还在自己变(计时开始走、游戏开始跑) → sustained。
+            # 只在整串操作结束后才看就晚了 —— 后面的按钮可能已经把它暂停或重置
+            if linger and static and looks[0] < settings.PROBE_LINGER_CLICKS:
+                looks[0] += 1
+                g1, t1 = _gray(page.screenshot(type="png", caret="initial")), st1["text"]
+                page.wait_for_timeout(settings.PROBE_LINGER_MS)
+                st2 = page.evaluate(_STATE_JS)
+                if frame_diff(g1, _gray(page.screenshot(type="png", caret="initial")))[0] >= settings.PROBE_MOTION_EPS or st2["text"] != t1:
+                    res["sustained"] = True
+                    res["then_added"], res["then_removed"] = _text_delta(t1, st2["text"], 4)
+            res["new_errors"] = rep["errors"][e0:][:3]
+            return res
         except Exception as exc:
             return {"responded": False, "failed": f"{type(exc).__name__}: {str(exc)[:120]}",
                     "new_errors": rep["errors"][e0:][:3]}
@@ -380,7 +417,7 @@ def _interact(page, rep: dict, base_mut: float, moving: bool) -> list:
                 loc.click(timeout=1200)
             except Exception:
                 loc.evaluate("el => el.click()", timeout=1200)
-        res = observe(do)
+        res = observe(do, linger=True)
         out.append(dict({"kind": c["kind"], "tag": c["tag"], "label": c["label"], "action": "click"}, **res))
     lst = set(rep.get("listeners") or ())
     if lst & {"keydown", "keyup", "keypress"}:
@@ -405,8 +442,9 @@ def facts(rep: dict) -> dict:
     mot = rep.get("motion") or {}
     idle_none = (bool(mot) and not mot.get("moving") and not mot.get("running_animations")
                  and (mot.get("raf_per_s") or 0) < 2)
-    # 操作之后出现的动效: 操作后的连拍在动, 或某次操作引出了动画/过渡
-    after = bool((rep.get("post") or {}).get("moving")) or any(i.get("animated") for i in inter)
+    # 操作之后出现的动效: 操作后的连拍在动, 或某次操作引出了动画 / 让画面持续变化
+    after = bool((rep.get("post") or {}).get("moving")) or any(i.get("animated") or i.get("sustained") for i in inter)
+    eff = rep.get("effects") or {}
     return {
         "errors": bool(rep.get("errors")),
         "blank": bool(rep.get("blank")),
@@ -418,6 +456,8 @@ def facts(rep: dict) -> dict:
         "motion_none": idle_none and not after,
         "motion_seen": bool(mot.get("moving")),
         "motion_after": after,
+        # 「从头到尾没有任何动效」: 没启动过关键帧动画, 也没发生过过渡, 画面空闲和操作后都不动
+        "effects_none": bool(mot) and idle_none and not after and not eff.get("animations") and not eff.get("transitions"),
         "interactive_n": len(inter),
         "responded_n": sum(1 for i in inter if i.get("responded") is True),
         "dead_n": sum(1 for i in inter if i.get("responded") is False),

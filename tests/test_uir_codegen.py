@@ -45,12 +45,21 @@ section{height:900px;display:grid;place-items:center}
 <section><h1>首屏</h1></section><section><div class="r"></div></section><section><div class="r"></div></section>
 <script>const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting)e.target.classList.add('on')}));
 document.querySelectorAll('.r').forEach(e=>io.observe(e))</script></body></html>"""
-# 空闲时静止, 点了按钮才开始按秒走数
+# 空闲时静止, 点了按钮才开始按秒走数; 后面还有会把它停掉并归零的按钮
 STARTS = """<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;background:#fff">
-<p id="t" style="font:80px monospace">25:00</p><button id="go">开始</button><script>let s=1500,h=0;
-document.getElementById('go').onclick=()=>{if(h)return;h=setInterval(()=>{s--;
-document.getElementById('t').textContent=String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')},1000)}
-</script></body></html>"""
+<p id="t" style="font:80px monospace">25:00</p><button id="go">开始</button><button id="rs">重置</button><script>
+let s=1500,h=0;const show=()=>{document.getElementById('t').textContent=
+String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')};
+document.getElementById('go').onclick=()=>{if(h)return;h=setInterval(()=>{s--;show()},1000)};
+document.getElementById('rs').onclick=()=>{clearInterval(h);h=0;s=1500;show()}</script></body></html>"""
+# 只有一次性的入场动画; 金额框是 type=text + inputmode=decimal, 填了非数字就报错
+ENTRANCE = """<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{margin:0;background:#fff}
+.card{width:300px;height:200px;background:#1f2937;animation:rise .3s both}
+@keyframes rise{from{opacity:0;transform:translateY(20px)}}</style></head><body><div class="card"></div>
+<input id="amt" type="text" inputmode="decimal" placeholder="0.00"><button id="add">添加</button><ul id="l"></ul>
+<script>document.getElementById('add').onclick=()=>{const v=Number(document.getElementById('amt').value);
+if(!isFinite(v)||v<=0)return;const li=document.createElement('li');li.textContent='金额 '+v;
+document.getElementById('l').appendChild(li)}</script></body></html>"""
 
 
 class Pure(unittest.TestCase):
@@ -137,6 +146,29 @@ class Pure(unittest.TestCase):
         self.assertTrue(codegen.actionable(["报错"], d))
         d = codegen.score(self.BRIEF, self._rev(("yes", "yes", "partial")), self._rep())
         self.assertTrue(codegen.actionable([], d))
+        # 验收模型说「现有材料无法确认」: 计半分, 显示为部分满足, 但不当成修复目标
+        rev = codegen.normalize_review({"items": [{"id": "c1", "verdict": "yes"}, {"id": "c2", "verdict": "yes"},
+                                                  {"id": "c3", "verdict": "unsure", "evidence": "要多步操作"}],
+                                        "design": {"score": 8}}, self.BRIEF)
+        d = codegen.score(self.BRIEF, dict(rev, mode="vision"), self._rep())
+        item = next(i for i in d["items"] if i["id"] == "c3")
+        self.assertEqual((item["verdict"], item["soft"]), ("partial", True))
+        self.assertAlmostEqual(d["coverage"], 4.5 / 5, places=3)
+        self.assertFalse(codegen.actionable([], d))
+
+    def test_one_shot_effect_items(self):
+        brief = {"checklist": [{"id": "c1", "text": "卡片入场动画", "type": "effect", "must": False}]}
+        rev = {"items": {"c1": {"verdict": "yes", "evidence": "e"}}, "design_score": 8, "issues": [], "mode": "vision"}
+        idle_still = {"moving": False, "running_animations": 0, "raf_per_s": 0, "max_frac": 0.0}
+        # 加载时启动过关键帧动画: 连拍拍不到也不能说没有
+        ran = self._rep(motion=idle_still, effects={"animations": 2, "transitions": 0, "names": ["rise"], "at_load": 2})
+        self.assertEqual(codegen.score(brief, rev, ran)["items"][0]["verdict"], "yes")
+        self.assertIn("rise", codegen.probe_digest(dict(ran, viewport={"width": 1280, "height": 800})))
+        # 全程没有任何动画或过渡: 证伪
+        never = self._rep(motion=idle_still, effects={"animations": 0, "transitions": 0, "names": [], "at_load": 0})
+        item = codegen.score(brief, rev, never)["items"][0]
+        self.assertEqual(item["verdict"], "no")
+        self.assertTrue(item["gate"])
 
     def test_extract_json_tolerates_trailing_content(self):
         from core.uir import llm
@@ -248,10 +280,25 @@ class Probe(unittest.TestCase):
     def test_motion_that_starts_after_operation(self):
         rep, f, _ = self._inspect("starts", STARTS)
         self.assertFalse(f["motion_seen"])                      # 空闲时确实没动
-        self.assertTrue(rep["post"]["moving"])                  # 点了「开始」之后跨过 1 秒, 读数变了
-        self.assertTrue(f["motion_after"] and not f["motion_none"])
-        self.assertIn("25:00", rep["post"]["text_removed"])
         self.assertIn("操作完之后", codegen.probe_digest(rep))
+        # 「开始」之后隔 1 秒多再看, 读数自己在走 —— 即使后面的「重置」又把它停了, 这条证据也留下了
+        go = next(i for i in rep["interactions"] if i["label"] == "开始")
+        self.assertTrue(go.get("sustained"))
+        self.assertTrue(go["then_added"])
+        self.assertFalse(rep["post"]["moving"])                 # 整串操作结束时已被重置, 只看最后会误判成「不会走」
+        self.assertTrue(f["motion_after"] and not f["motion_none"])
+        self.assertIn("仍在自己变化", codegen.probe_digest(rep))
+
+    def test_entrance_animation_and_typed_fill(self):
+        rep, f, _ = self._inspect("entrance", ENTRANCE)
+        self.assertGreaterEqual(rep["effects"]["at_load"], 1)
+        self.assertIn("rise", rep["effects"]["names"])
+        self.assertFalse(f["effects_none"])
+        self.assertTrue(f["motion_none"])                       # 持续动效确实没有: 入场动画不算「一直在动」
+        # 金额框按 inputmode 填了数字, 所以「添加」真的加进了一条
+        self.assertIn("金额 12", rep["text"] + " ".join(rep["post"]["text_added"]) + " "
+                      + " ".join(i.get("label", "") for i in rep["interactions"]))
+        self.assertTrue(next(i for i in rep["interactions"] if i["label"] == "添加")["responded"])
 
     def test_keyboard_listener(self):
         rep, f, _ = self._inspect("keys", KEYS)

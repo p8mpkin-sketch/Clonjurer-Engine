@@ -62,6 +62,8 @@ PROBE_DIFF_THRESHOLD = 14         # 灰度差超过此值的像素计为「变�
 PROBE_MOTION_EPS = 0.0004         # 变化像素占比低于此值视为静止
 PROBE_MAX_INTERACT = 8
 PROBE_REVEAL_STEPS = 14           # 整页截图前逐屏滚动的最多步数(触发滚动渐显 / 懒加载)
+PROBE_LINGER_CLICKS = 4            # 静止页面上前几次点击之后多等一会儿, 看画面是否自己继续变
+PROBE_LINGER_MS = 1150
 PROBE_POST_GAPS_MS = (450, 1150)  # 操作完之后再连拍的间隔: 第二档跨过 1 秒, 能看到按秒走的计时
 PROBE_MOBILE_VIEWPORT = {"width": 390, "height": 844}
 

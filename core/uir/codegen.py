@@ -21,7 +21,7 @@ from pathlib import Path
 from core.uir import llm, probe, settings
 
 SCORING = "req-fit-v1"
-ITEM_TYPES = ("content", "visual", "motion", "interaction")
+ITEM_TYPES = ("content", "visual", "motion", "effect", "interaction")
 
 PLAN_SYSTEM = (
     "你是资深产品设计师兼前端架构师。用户会用一两句话描述想要的网页, 你要把它扩写成一份任务书: "
@@ -38,7 +38,8 @@ PLAN_SYSTEM = (
     "验收项规则:\n"
     "1. 每条必须是打开页面后能直接观察或操作验证的具体事实, 不写空话(「体验良好」这类不算)。\n"
     "2. type 取值: content(页面上有什么内容/元素) / visual(外观、形状、配色、布局) / "
-    "motion(无需用户操作、页面加载后自动持续发生的动效) / interaction(用户操作后页面的反应, 含操作触发的动画)。"
+    "motion(无需用户操作、页面加载后自动出现并且持续或循环进行的动效) / effect(一次性的短动效: 入场动画、"
+    "状态切换时的过渡) / interaction(用户操作后页面的反应, 含操作之后才开始的计时与动画)。"
     "interaction 只用于要用户动手(点击、输入、按键、拖动)才能验证的条目; 靠打开页面验证不了的要求"
     "(跟随系统偏好设置、离线可用、数据持久化这类)归 content。\n"
     "3. must=true 只给用户原话明确要求或直接蕴含的条目; 你补充的质量要求 must=false。\n"
@@ -82,7 +83,9 @@ REVIEW_SYSTEM = (
     "自动体检数据。请逐条判断验收项是否满足, 并评价设计质量。只输出一个 JSON 对象, 不要 markdown。\n"
     "规则:\n"
     "1. 只依据截图里实际看到的内容和体检数据下结论, 不要因为「应该是这样」就判满足; 每条 evidence 写你看到的具体依据。\n"
-    "2. verdict 取值: yes(明确满足) / partial(部分满足, 或满足但有明显瑕疵, 或现有材料无法确认) / no(没有实现, 或与需求不符)。\n"
+    "2. verdict 取值: yes(明确满足) / partial(部分满足, 或满足但有明显瑕疵) / no(有证据表明没有实现, 或与需求不符) / "
+    "unsure(现有截图和体检数据既不能证明满足, 也不能证明不满足 —— 例如要走完多步操作才能看到的结果)。"
+    "不要把 unsure 的情况判成 no; 也不要因为拿不准就判 yes。\n"
     "3. 体检数据是确定性测量, 与你的观感冲突时以体检数据为准(例如相邻帧变化占比为 0 说明画面没有在动)。\n"
     "4. 设计质量 design.score 为 0~10 的数: 5 是能用但平庸, 8 以上要求有专业设计水准。布局错乱、元素重叠、文字溢出或被裁切、"
     "对比度不足、大片无意义空白、手机宽度下不可用, 都要扣分并写进 issues。\n"
@@ -90,7 +93,7 @@ REVIEW_SYSTEM = (
     "以「静置后的整页」为准。整页图在截取前已自动逐屏滚动过一遍, 仍然空白的区域才是真的没有内容。\n"
     "6. 涉及时间、日期、计时的条目, 用体检数据里给出的截图时刻去核对画面上的读数。\n"
     "7. issues 只列真正需要修改的问题, 按严重程度从高到低, 每条写清现象(problem)和修改方向(fix), 最多 6 条; 没有问题给空数组。\n"
-    "输出格式: {\"items\":[{\"id\":\"c1\",\"verdict\":\"yes|partial|no\",\"evidence\":\"...\"}],"
+    "输出格式: {\"items\":[{\"id\":\"c1\",\"verdict\":\"yes|partial|no|unsure\",\"evidence\":\"...\"}],"
     "\"design\":{\"score\":0,\"comment\":\"...\"},"
     "\"issues\":[{\"severity\":\"high|mid|low\",\"problem\":\"...\",\"fix\":\"...\"}],\"summary\":\"一句话总评\"}"
 )
@@ -378,6 +381,11 @@ def probe_digest(rep: dict) -> str:
                      f"{mot.get('frame_diffs')}" + (f", 变化集中在视口的归一化区域 {mot['bbox']}(x0,y0,x1,y1)" if mot.get("bbox") else "")
                      + f"; 运行中的 CSS/WAAPI 动画 {mot.get('running_animations')} 个; requestAnimationFrame 约 "
                      f"{mot.get('raf_per_s')} 次/秒; canvas {mot.get('canvas')} 个, svg {mot.get('svg')} 个")
+    eff = rep.get("effects")
+    if eff:
+        lines.append(f"动效事件(从加载到全部操作结束): 启动过关键帧动画 {eff.get('animations', 0)} 次"
+                     + (f"(其中加载阶段 {eff.get('at_load', 0)} 次; 动画名: {', '.join(eff['names'])})" if eff.get("names") else "")
+                     + f", 发生过渡 {eff.get('transitions', 0)} 次。一次性的入场动画在连拍开始前可能已经结束, 以这里的事件计数为准")
     shot_at = rep.get("shot_at") or {}
     if shot_at.get("f0"):
         lines.append(f"截图时刻(运行页面的浏览器本地时间): 加载后首帧 {shot_at['f0']}"
@@ -394,6 +402,9 @@ def probe_digest(rep: dict) -> str:
                 lines.append(f"  - {i['action']} {what if i['kind'] in ('click', 'canvas') else i['label']}: {word[i.get('responded')]}"
                              + (", 文字变化" if i.get("text_changed") else "")
                              + (", 引出了动画" if i.get("animated") else "")
+                             + ((", 之后 1 秒多画面仍在自己变化"
+                                 + (f"(新出现: {' / '.join(i['then_added'])})" if i.get("then_added") else ""))
+                                if i.get("sustained") else "")
                              + (f", 报错 {i['new_errors']}" if i.get("new_errors") else ""))
         post = rep.get("post")
         if post:
@@ -451,7 +462,7 @@ def normalize_review(obj: dict, brief: dict) -> dict:
     for raw in (obj.get("items") or []) if isinstance(obj, dict) else []:
         if isinstance(raw, dict) and str(raw.get("id")) in ids:
             v = str(raw.get("verdict") or "").strip().lower()
-            if v in ("yes", "partial", "no"):
+            if v in ("yes", "partial", "no", "unsure"):
                 items[str(raw["id"])] = {"verdict": v, "evidence": str(raw.get("evidence") or "").strip()[:300]}
     if not items:
         raise ValueError("验收结果没有任何有效条目")
@@ -510,7 +521,7 @@ def score(brief: dict, rev: dict, rep: dict) -> dict:
     """需求符合度 req-fit-v1。rev=None 表示未经模型验收(只有体检硬证据)。
 
     硬证据闸门(只在体检能证伪时覆盖模型说法): motion 项在「空闲和操作后都确定没在动」时判 no, 有动画但连拍
-    无可见变化时最多 partial; interaction 项在页面没有任何可交互元素、或所有可交互元素都没反应时判 no;
+    无可见变化时最多 partial; effect 项在全程没有启动过任何动画或过渡时判 no; interaction 项在页面没有任何可交互元素、或所有可交互元素都没反应时判 no;
     文本验收(没看图)时 visual 项最多 partial。空闲静止但操作后会动的页面体检证伪不了, 交给验收模型按截图判断。
     封顶: 运行报错/空白/卡死 ≤40; 任一用户明确要求的条目为 no ≤60; 未经模型验收 ≤70。"""
     f = probe.facts(rep)
@@ -521,16 +532,21 @@ def score(brief: dict, rev: dict, rep: dict) -> dict:
         got = verdicts.get(it["id"]) or {}
         verdict, gate = got.get("verdict"), None
         soft = False        # soft: 判不满分是因为「现有证据确认不了」, 不是页面有已知缺陷 —— 不拿去让模型修
+        if verdict == "unsure":
+            verdict, gate, soft = "partial", "现有截图和体检数据无法确认", True
         if it["type"] == "motion":
             if f["motion_none"]:
-                verdict, gate = "no", "体检: 空闲时连拍各帧完全相同、没有运行中的动画, 逐个操作之后也没有动起来"
+                verdict, gate, soft = "no", "体检: 空闲时连拍各帧完全相同、没有运行中的动画, 逐个操作之后也没有动起来", False
             elif not f["motion_seen"] and not f["motion_after"] and verdict == "yes":
                 verdict, gate, soft = "partial", "体检: 有动画在运行, 但连拍画面没有可见变化", True
+        elif it["type"] == "effect":
+            if f["effects_none"]:
+                verdict, gate, soft = "no", "体检: 从加载到全部操作结束, 没有启动过任何动画或过渡", False
         elif it["type"] == "interaction":
             if f["interactive_n"] == 0:
-                verdict, gate = "no", "体检: 页面上没有任何可交互元素, 也没有键盘/指针监听"
+                verdict, gate, soft = "no", "体检: 页面上没有任何可交互元素, 也没有键盘/指针监听", False
             elif f["dead_n"] and not f["responded_n"] and not f["unknown_n"]:
-                verdict, gate = "no", "体检: 所有可交互元素操作后都没有反应"
+                verdict, gate, soft = "no", "体检: 所有可交互元素操作后都没有反应", False
         elif it["type"] == "visual" and text_only and verdict == "yes":
             verdict, gate, soft = "partial", "本轮没有看图验收, 外观类条目无法确认", True
         value = _VALUE.get(verdict, 0.5 if rev is None else 0.0)
