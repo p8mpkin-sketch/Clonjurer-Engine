@@ -391,6 +391,8 @@ class GenerateEngine:
                         + f"; 预算 {budget}s / 最多 {max_rounds} 轮 / 目标 {target_score}")
         out = shotcode.run(keep, hint, self.ws, self.pool, ai_cfg, judge_cfg, self.log, self._stage,
                            deadline, target_score, max_rounds, on_brief=self._set_title)
+        if (self.ws / "gen_diff.png").is_file():            # 与原图的差异图: 任务详情「差异」视图用
+            shutil.copyfile(self.ws / "gen_diff.png", self.ws / "diff_preview.png")
         best = out["best"]
         report = {"kind": "screenshot", "target": "html_css", "track": "code", "tier": "llm-code",
                   "scoring": shotcode.SCORING, "rounds": out["rounds"], "calls": out["calls"], "brief": out["brief"],

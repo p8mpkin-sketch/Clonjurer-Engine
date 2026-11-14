@@ -711,3 +711,34 @@ html body label.tracking-\[0\.16em\],html body div.tracking-\[0\.16em\]{letter-s
 .fit-drawer-body .fit-list,.fit-drawer-body .fit-note{padding-left:18px;padding-right:18px}
 .fit-drawer-body .fit-tokens{margin-left:18px;margin-right:18px}
 @media (max-width:640px){.dash-title{font-size:24px}.dash-title-sub{display:block;margin-left:0}.fit-bar{padding:9px 14px}.fit-stats-end{margin-left:0}}
+.head-menu{position:absolute;right:0;top:38px;min-width:190px;padding:4px;border-radius:10px;border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow-pop,0 8px 24px rgba(0,0,0,.18))}
+.head-menu > button{width:100%;display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;font-size:13px;color:var(--fg-2);text-align:left}
+.head-menu > button:hover{background:rgba(127,127,127,.09);color:var(--fg)}
+.head-menu small{font-size:11.5px;color:var(--fg-3)}
+.run-tech{margin-top:8px;font-size:12px;color:var(--fg-3)}
+.run-tech summary{cursor:pointer}
+.run-tech pre{margin-top:6px;white-space:pre-wrap;word-break:break-all;font-size:11.5px;max-height:160px;overflow:auto;padding:8px;border:1px solid var(--line);border-radius:8px}
+.gain-list{list-style:none;margin:0;padding:0;counter-reset:g}
+.gain-list li{counter-increment:g;position:relative;padding:12px 0 12px 34px;border-top:1px solid var(--line)}
+.gain-list li::before{content:counter(g);position:absolute;left:0;top:12px;width:22px;height:22px;border-radius:50%;border:1px solid var(--line);font-size:12px;line-height:20px;text-align:center;color:var(--fg-3)}
+.gain-list b{display:block;font-size:14px;font-weight:600;color:var(--fg)}
+.gain-list span{display:block;margin-top:3px;font-size:12.5px;line-height:1.6;color:var(--fg-3)}
+.sys-dot.bad{background:rgb(var(--bad-500,239 68 68))}
+.gen-example{display:block;width:100%;text-align:left;padding:9px 12px;border:1px solid var(--line);border-radius:10px;font-size:12.5px;line-height:1.55;color:var(--fg-2);background:transparent;transition:border-color .15s,color .15s}
+.gen-example:hover{border-color:var(--line-strong);color:var(--fg)}
+.gen-help{position:relative;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;border:1px solid var(--line);font-size:12px;color:var(--fg-3);cursor:help}
+.gen-help-pop{display:none;position:absolute;right:0;top:26px;z-index:30;width:300px;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--surface);
+  box-shadow:var(--shadow-pop,0 8px 24px rgba(0,0,0,.18));font-size:12px;line-height:1.6;color:var(--fg-2);text-align:left}
+.gen-help:hover .gen-help-pop,.gen-help:focus .gen-help-pop{display:block}
+/* 手机: 底部导航替代左侧图标栏 */
+.m-tabbar{display:none}
+@media (max-width:640px){
+  nav.sidebar{display:none!important}
+  .m-tabbar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:45;height:58px;padding:0 4px env(safe-area-inset-bottom);
+    background:var(--surface);border-top:1px solid var(--line)}
+  .m-tabbar button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:10.5px;color:var(--fg-3)}
+  .m-tabbar button.on{color:var(--fg)}
+  #app main, #app .flex-1.min-h-0.overflow-y-auto{padding-bottom:64px}
+  .task-head{gap:8px!important}
+  .task-head .flex-1{display:none}
+}

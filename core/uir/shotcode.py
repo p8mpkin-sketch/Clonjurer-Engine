@@ -443,6 +443,8 @@ class ShotProfile(codegen.Profile):
         rep["fidelity"] = {k: sim.get(k) for k in ("score", "structure", "edge", "text", "text_recall", "height_ratio")}
         rep["fidelity"]["hints"] = render.region_hints(ref, fid, sim, top=6)
         rep.setdefault("shots", {})["fid"] = str(fid)
+        if (rdir / "diff.png").is_file():
+            rep["shots"]["diff"] = str(rdir / "diff.png")
         # 平板
         tab = rdir / "tablet.png"
         with pool.context(viewport=dict(TABLET)) as ctx:

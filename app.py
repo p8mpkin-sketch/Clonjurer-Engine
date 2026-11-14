@@ -35,6 +35,7 @@ import json
 import secrets
 import os
 import base64
+import html
 import re
 import shutil
 import subprocess
@@ -565,7 +566,38 @@ def list_tasks():
         task["stats"] = _parse_json(task.pop("stats_json", "") or "{}")
         ws = _workspace_of(task)
         task["has_cloned_preview"] = (ws / "cloned_preview.png").is_file()
+        task["title"] = _display_title(task, ws)
     return jsonify({"tasks": tasks})
+
+
+_TITLE_CACHE: dict = {}
+_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
+
+
+def _display_title(task: dict, ws: Path) -> str:
+    """任务显示名: 生成任务 = 任务记录里的标题(domain 列); 克隆任务 = 克隆页的 <title>(按文件修改时间缓存),
+    取不到时退回域名。列表里同一域名的多个任务据此能分清是哪个页面。"""
+    if str(task.get("target_url") or "").startswith("uir:generate:"):
+        return task.get("domain") or ""
+    page = ws / "index.html"
+    try:
+        mt = page.stat().st_mtime
+    except OSError:
+        return ""
+    hit = _TITLE_CACHE.get(task["id"])
+    if hit and hit[0] == mt:
+        return hit[1]
+    title = ""
+    try:
+        with open(page, "rb") as fh:
+            head = fh.read(65536).decode("utf-8", errors="replace")
+        m = _TITLE_RE.search(head)
+        if m:
+            title = html.unescape(re.sub(r"\s+", " ", m.group(1))).strip()[:80]
+    except OSError:
+        pass
+    _TITLE_CACHE[task["id"]] = (mt, title)
+    return title
 
 
 @app.get("/api/tasks/<int:task_id>")
@@ -579,6 +611,7 @@ def task_detail(task_id):
     task["has_cloned_preview"] = (ws / "cloned_preview.png").is_file()
     task["has_diff_preview"] = (ws / "diff_preview.png").is_file()
     task["has_ai_report"] = (ws / "ai_repair_report.json").is_file()
+    task["title"] = _display_title(task, ws)
     return jsonify({"task": task})
 
 
