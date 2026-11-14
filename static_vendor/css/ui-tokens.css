@@ -800,3 +800,8 @@ html body label.tracking-\[0\.16em\],html body div.tracking-\[0\.16em\]{letter-s
 .dash-more button b{font-weight:600;color:var(--fg)}
 .dash-more button:hover{border-color:var(--line-strong);color:var(--fg-2)}
 @media (max-width:640px){.dash-steps{grid-template-columns:1fr}}
+
+/* ===== 2026-11-15 第四轮: 资源与接口页对齐设计系统(抬小字号 / 中性化霓虹色) ===== */
+.insp-scope .text-\[8\.5px\],.insp-scope .text-\[9px\],.insp-scope .text-\[9\.5px\]{font-size:11px}
+.insp-scope .text-\[10px\]{font-size:11.5px}
+.insp-scope .text-cyan-400,.insp-scope .text-indigo-400,.insp-scope .text-indigo-400\/80{color:var(--a)}

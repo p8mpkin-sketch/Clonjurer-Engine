@@ -15,7 +15,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 <!-- 顶级字体体系: Inter / Plus Jakarta Sans / JetBrains Mono / Noto Sans SC -->
 <link href="/vendor/fonts/fonts.css" rel="stylesheet">
 <!-- UI 改版 P0 规范层: 字号/对比度/焦点/语义色(只换样式) -->
-<link href="/vendor/css/ui-tokens.css?v=21" rel="stylesheet">
+<link href="/vendor/css/ui-tokens.css?v=22" rel="stylesheet">
 
 <script src="/vendor/js/lucide.subset.js?v=7"></script>
 <script>
@@ -2515,7 +2515,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         </div>
 
         <!-- ============ Tab 3: Mock API 与静态资产审查器 ============ -->
-        <div v-show="activeTab==='inspector'" class="h-full flex flex-col gap-3">
+        <div v-show="activeTab==='inspector'" class="insp-scope h-full flex flex-col gap-3">
           <div v-if="!selectedTask" class="flex-1 flex flex-col items-center justify-center gap-3 text-slate-600">
             <i data-lucide="file-search" class="w-10 h-10 opacity-40"></i>
             <div class="text-xs">在任务矩阵点击【审查资产与API】选择一个任务</div>
