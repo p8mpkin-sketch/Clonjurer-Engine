@@ -629,3 +629,24 @@ html body input[type="range"]{accent-color:var(--ink)}
 /* 小标题不再拉宽字距 */
 html body label.tracking-\[0\.16em\],html body div.tracking-\[0\.16em\]{letter-spacing:0;font-size:13px;font-weight:600;color:var(--fg-2)}
 .mt-btn.h-auto{height:auto}
+
+/* 界面生成: 需求验收清单(任务详情, 页签上方的可折叠条) */
+.fit-panel{flex:none;border-bottom:1px solid var(--line);background:var(--surface);font-size:13px;color:var(--fg-2);max-height:46vh;overflow-y:auto}
+.fit-panel > summary{display:flex;align-items:center;flex-wrap:wrap;gap:6px 14px;padding:11px 20px;cursor:pointer;list-style:none;user-select:none}
+.fit-panel > summary::-webkit-details-marker{display:none}
+.fit-panel > summary::before{content:"";width:6px;height:6px;border-right:1.5px solid var(--fg-3);border-bottom:1.5px solid var(--fg-3);transform:rotate(-45deg);transition:transform .15s ease;margin-right:2px}
+.fit-panel[open] > summary::before{transform:rotate(45deg)}
+.fit-panel > summary b{font-size:14px;font-weight:600;color:var(--fg)}
+.fit-meta{font-size:12px;color:var(--fg-3)}
+.fit-note{margin:0;padding:0 20px 10px 34px;font-size:12.5px;line-height:1.6;color:var(--fg-3)}
+.fit-note.warn{color:rgb(var(--warn-600))}
+.fit-list{list-style:none;margin:0;padding:0 20px 12px 34px;display:flex;flex-direction:column}
+.fit-list li{display:grid;grid-template-columns:58px minmax(0,1fr);column-gap:12px;padding:8px 0;border-top:1px solid var(--line)}
+.fit-mark{grid-row:1 / span 2;align-self:start;font-size:12px;font-weight:600;line-height:20px;color:var(--fg-3)}
+.fit-list li.yes .fit-mark{color:rgb(var(--ok-500))}
+.fit-list li.partial .fit-mark{color:rgb(var(--warn-500))}
+.fit-list li.no .fit-mark{color:rgb(var(--bad-500))}
+.fit-text{color:var(--fg);line-height:20px}
+.fit-text em{font-style:normal;font-size:11px;color:var(--fg-3);border:1px solid var(--line);border-radius:4px;padding:0 5px;margin-left:8px;white-space:nowrap}
+.fit-why{font-size:12px;line-height:1.55;color:var(--fg-3)}
+@media (max-width:640px){.fit-panel > summary{padding:10px 14px}.fit-list,.fit-note{padding-left:14px;padding-right:14px}.fit-list li{grid-template-columns:48px minmax(0,1fr)}}

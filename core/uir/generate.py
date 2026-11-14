@@ -125,6 +125,8 @@ class GenerateEngine:
                            score=render.score_against_reference, pool=self.pool)
         kind = self.spec.get("kind") or "description"
         target_name = self.spec.get("target") or "html_css"
+        if settings.use_code_track(kind, target_name, self.spec):
+            return self._execute_code(ai_cfg, budget, target_score, max_rounds, deadline)
         adapter, target = get_input(kind), get_output(target_name)
         self.log("GEN", f"适配器 {kind} → 目标 {target_name}; 预算 {budget}s / {max_rounds} 轮 / 目标分 {target_score}"
                         + ("" if ai_cfg else "; 未配置大模型 Key, 走确定性 Tier 0"))
@@ -272,6 +274,10 @@ class GenerateEngine:
 
         if best is None:
             raise RuntimeError("没有任何一轮产出有效结果")
+        return self._finalize(report, best, kind, target_name)
+
+    def _finalize(self, report: dict, best: dict, kind: str, target_name: str) -> dict:
+        """打包产物 + 写报告 + 落库(UIR 轨与代码直写轨共用)。"""
         self._stage("打包产物", 90)
         detail = best["detail"]
         (self.ws / "similarity_detail.json").write_text(json.dumps(detail, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -279,7 +285,8 @@ class GenerateEngine:
         site_meta = {"task_id": self.task_id, "domain": "generated", "upstream": "", "routes": pages_map,
                      "proxy_enabled": False, "similarity": best["score"], "similarity_detail": detail,
                      "fidelity_score": None, "frames": [], "pattern": "UIR-GENERATE",
-                     "generate": {"kind": kind, "target": target_name, "tier": report["tier"]}}
+                     "generate": {"kind": kind, "target": target_name, "tier": report["tier"],
+                                  "track": report.get("track", "uir"), "scoring": report["scoring"]}}
         (self.ws / "site.json").write_text(json.dumps(site_meta, ensure_ascii=False, indent=2), encoding="utf-8")
         if pages_map:
             zip_path = flask_generator.generate_project(self.task_id, "", self.ws, pages_map, [], False,
@@ -311,6 +318,36 @@ class GenerateEngine:
         with suppress(Exception):
             self.db.increment_completed(self.db.get_task(self.task_id)["batch_id"])
         return report
+
+    def _execute_code(self, ai_cfg, budget: int, target_score: float, max_rounds: int, deadline: float) -> dict:
+        """代码直写轨(core/uir/codegen.py): 文字需求 → 模型写可运行网页 → 体检 → 验收 → 修复。"""
+        from core.uir import codegen
+        if not ai_cfg:
+            # 不再用关键词模板顶替: 交付一张与需求无关的页面比明确报错更糟
+            raise RuntimeError("界面生成需要大模型, 当前没有可用的模型 Key。请在「系统设置 → AI 供应商」配置, "
+                               "或在提交时填写任务级 Key 后重试")
+        judge_cfg = llm.resolve_ai_cfg(self.cfg, role="judge") or ai_cfg
+        desc = (self.spec.get("description") or "").strip()
+        vp = dict(self.spec.get("viewport") or settings.GEN_DEFAULT_VIEWPORT)
+        for stale in ("uir.json", "original_preview.png", "original_text.txt", "diff_preview.png"):
+            with suppress(Exception):
+                (self.ws / stale).unlink()
+        shutil.rmtree(self.ws / "gen_probe", ignore_errors=True)
+        self.log("GEN", f"代码直写轨: 模型 {ai_cfg['model']}"
+                        + (f", 验收模型 {judge_cfg['model']}" if judge_cfg["model"] != ai_cfg["model"] else "")
+                        + f"; 预算 {budget}s / 最多 {max_rounds} 轮 / 目标 {target_score}")
+        out = codegen.run(desc, self.ws, self.pool, ai_cfg, judge_cfg, vp, self.log, self._stage,
+                          deadline, target_score, max_rounds)
+        best = out["best"]
+        report = {"kind": "description", "target": "html_css", "track": "code", "tier": "llm-code",
+                  "scoring": codegen.SCORING, "rounds": out["rounds"], "calls": out["calls"], "brief": out["brief"],
+                  "final_score": None, "target_score": target_score, "budget": budget,
+                  "ai_model": ai_cfg["model"], "judge_model": judge_cfg["model"], "reference_text": "none",
+                  "llm_seconds": round(sum(c["elapsed"] for c in out["calls"]), 1),
+                  "tokens": {"in": sum(c.get("in", 0) for c in out["calls"]), "out": sum(c.get("out", 0) for c in out["calls"])},
+                  "remaining_defects": best["defects"]}
+        return self._finalize(report, {"score": best["score"], "detail": best["detail"], "round": best["round"],
+                                       "uir_stats": {}}, "description", "html_css")
 
     def _build_binaries(self, build_kind: str) -> dict:
         """apk: flutter_app → release APK; desktop: electron_app → 宿主平台包 + Windows x64 包。

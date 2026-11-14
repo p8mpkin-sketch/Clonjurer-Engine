@@ -25,15 +25,55 @@ class DeadlineExceeded(RuntimeError):
     """模型调用超过墙钟上限(含重试/升档)。"""
 
 
-def resolve_ai_cfg(task_cfg: dict = None):
-    """任务级 > 环境/配置默认; 无 Key 返回 None(与 ClonerEngine._ai_config 同语义)。"""
+def _read_env_file(path: str) -> dict:
+    """解析仓库外的 KEY=VALUE 文件(可带 export / 引号), 只取 CLONER_AI_* 项; 文件不存在返回空。"""
+    out = {}
+    if not path:
+        return out
+    try:
+        text = Path(path).expanduser().read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return out
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        k = k.replace("export ", "").strip()
+        v = v.strip().strip("'\"")
+        if k.startswith("CLONER_AI_") and v:
+            out[k] = v
+    return out
+
+
+def resolve_ai_cfg(task_cfg: dict = None, role: str = ""):
+    """任务级 > 环境/配置默认(含设置中心) > 仓库外 Key 文件; 无 Key 返回 None。
+
+    Key 文件(settings.GEN_AI_ENV_FILE, 默认 ~/.clonjurer_ai.env)只在生成侧读取: 服务进程没带环境变量启动时
+    界面生成仍能拿到模型, 又不改变克隆管线「有 Key 才启用的可选能力」的行为。
+    role="judge": 验收裁判可单独配模型(CLONER_AI_JUDGE_MODEL / _KEY / _BASE_URL), 未配则与主模型相同。"""
+    from core.uir import settings
     task_cfg = task_cfg or {}
-    base_url = (task_cfg.get("ai_base_url") or "").strip() or config.AI_API_BASE_URL
+    filed = _read_env_file(getattr(settings, "GEN_AI_ENV_FILE", ""))
     api_key = (task_cfg.get("ai_api_key") or "").strip() or config.AI_API_KEY
-    model = (task_cfg.get("ai_model") or "").strip() or config.AI_MODEL
+    if api_key:
+        base_url = (task_cfg.get("ai_base_url") or "").strip() or config.AI_API_BASE_URL
+        model = (task_cfg.get("ai_model") or "").strip() or config.AI_MODEL
+    else:
+        api_key = filed.get("CLONER_AI_KEY", "")
+        base_url = filed.get("CLONER_AI_BASE_URL") or config.AI_API_BASE_URL
+        model = filed.get("CLONER_AI_MODEL") or config.AI_MODEL
     if not api_key:
         return None
-    return {"base_url": base_url.rstrip("/"), "api_key": api_key, "model": model}
+    cfg = {"base_url": base_url.rstrip("/"), "api_key": api_key, "model": model}
+    if role == "judge":
+        import os
+        pick = lambda k: (os.environ.get(k) or filed.get(k) or "").strip()  # noqa: E731
+        if pick("CLONER_AI_JUDGE_MODEL"):
+            cfg = {"base_url": (pick("CLONER_AI_JUDGE_BASE_URL") or cfg["base_url"]).rstrip("/"),
+                   "api_key": pick("CLONER_AI_JUDGE_KEY") or cfg["api_key"],
+                   "model": pick("CLONER_AI_JUDGE_MODEL")}
+    return cfg
 
 
 MAX_TILES = 6          # 超长页最多切几段送模型(再长的尾部不读, 与评分覆盖区一致)
@@ -92,20 +132,7 @@ def extract_json(text: str) -> dict:
     return obj
 
 
-def chat_json(ai_cfg: dict, system: str, user_text: str, images=(),
-              temperature: float = 0.2, timeout: int = None, max_tokens: int = None, parts=(),
-              deadline: float = None, thinking: bool = True) -> dict:
-    """同步调用, 返回解析后的 JSON 对象; 失败抛 RuntimeError。
-
-    deadline(time.monotonic() 绝对时刻)是整次调用(含重试与升档)的**墙钟上限**: 部分 OpenAI 兼容上游
-    在长生成期间持续发 keep-alive 空行, requests 的读超时永远不触发(实测单请求挂起 30 分钟以上),
-    所以响应体按流读取, 每收到一块就核对墙钟, 超时即断开并抛 DeadlineExceeded。
-
-    thinking=False: 抄录/逐块填充这类机械任务关闭推理模型的思考(请求带 thinking.type=disabled);
-    上游不认该字段(HTTP 400)时自动去掉重发, 并按 base_url 记住, 之后不再带。
-
-    预算阶梯 (b, 2b, 4b): 内容为空且思考 token 吃光预算 → 升档; 内容非空但 finish_reason=length
-    且 JSON 解析失败(UIR 节点树上百节点时 JSON 很长, 被截断) → 同样升档重试, 而不是直接回落。"""
+def _build_content(user_text: str, images=(), parts=()) -> list:
     content = [{"type": "text", "text": user_text}] + list(parts or ())   # parts: 已编码好的图片 part(切段并行读图用)
     notes = []
     for p in images or ():
@@ -120,6 +147,11 @@ def chat_json(ai_cfg: dict, system: str, user_text: str, images=(),
     if notes:
         content[0]["text"] = user_text + "\n\n" + "\n".join(notes)
 
+    return content
+
+
+def _transport(ai_cfg: dict, system: str, content: list, temperature: float, timeout, deadline, thinking: bool):
+    """返回 (call, left): call(budget) 发一次请求(含瞬时网络错误重试)并返回上游 JSON; left() 为剩余墙钟。"""
     if deadline is None:
         deadline = time.monotonic() + float(getattr(config, "AI_CALL_WALL_LIMIT", 180))
 
@@ -180,6 +212,25 @@ def chat_json(ai_cfg: dict, system: str, user_text: str, images=(),
         except ValueError:
             raise RuntimeError(f"上游返回非 JSON(HTTP {resp.status_code}): {body[:160]!r}")
 
+    return _call, _left
+
+
+def chat_json(ai_cfg: dict, system: str, user_text: str, images=(),
+              temperature: float = 0.2, timeout: int = None, max_tokens: int = None, parts=(),
+              deadline: float = None, thinking: bool = True, usage_out: dict = None) -> dict:
+    """同步调用, 返回解析后的 JSON 对象; 失败抛 RuntimeError。usage_out 给出时写入上游 usage(用量统计)。
+
+    deadline(time.monotonic() 绝对时刻)是整次调用(含重试与升档)的**墙钟上限**: 部分 OpenAI 兼容上游
+    在长生成期间持续发 keep-alive 空行, requests 的读超时永远不触发(实测单请求挂起 30 分钟以上),
+    所以响应体按流读取, 每收到一块就核对墙钟, 超时即断开并抛 DeadlineExceeded。
+
+    thinking=False: 抄录/逐块填充这类机械任务关闭推理模型的思考(请求带 thinking.type=disabled);
+    上游不认该字段(HTTP 400)时自动去掉重发, 并按 base_url 记住, 之后不再带。
+
+    预算阶梯 (b, 2b, 4b): 内容为空且思考 token 吃光预算 → 升档; 内容非空但 finish_reason=length
+    且 JSON 解析失败(UIR 节点树上百节点时 JSON 很长, 被截断) → 同样升档重试, 而不是直接回落。"""
+    content = _build_content(user_text, images, parts)
+    _call, _left = _transport(ai_cfg, system, content, temperature, timeout, deadline, thinking)
     base = int(max_tokens or config.AI_PATCH_MAX_TOKENS)
     text, last_err = "", None
     for budget in (base, base * 2, base * 4):
@@ -192,7 +243,10 @@ def chat_json(ai_cfg: dict, system: str, user_text: str, images=(),
         usage = payload.get("usage") or {}
         if text:
             try:
-                return extract_json(text)
+                obj = extract_json(text)
+                if usage_out is not None:
+                    usage_out.update(usage)
+                return obj
             except (ValueError, RuntimeError) as exc:
                 if finish == "length":
                     last_err = RuntimeError(f"输出被截断(max_tokens={budget}, finish_reason=length), 已升档重试")
@@ -205,3 +259,37 @@ def chat_json(ai_cfg: dict, system: str, user_text: str, images=(),
             continue
         raise RuntimeError(f"上游返回空内容(finish_reason={finish}, usage={usage})")
     raise last_err or RuntimeError("上游返回空内容")
+
+
+def chat_text(ai_cfg: dict, system: str, user_text: str, images=(), temperature: float = 0.2,
+              timeout: int = None, max_tokens: int = None, parts=(), deadline: float = None,
+              thinking: bool = True, complete=None) -> dict:
+    """同 chat_json 的传输与墙钟语义, 但返回原始文本: {"text","finish","usage","elapsed","budget"}。
+
+    用于模型直接写代码(整页 HTML)这类非 JSON 产出。预算阶梯 (b, 2b): 内容为空且思考吃光预算, 或
+    finish_reason=length 且 complete(text) 判定产物不完整 → 升档重试一次; 仍被截断则原样返回, 由调用方处理。"""
+    content = _build_content(user_text, images, parts)
+    _call, _left = _transport(ai_cfg, system, content, temperature, timeout, deadline, thinking)
+    base = int(max_tokens or config.AI_PATCH_MAX_TOKENS)
+    t0 = time.monotonic()
+    out, last_err = None, None
+    for budget in (base, base * 2):
+        if _left() <= 1:
+            break
+        payload = _call(budget)
+        choice = (payload.get("choices") or [{}])[0]
+        text = ((choice.get("message") or {}).get("content") or "").strip()
+        finish = choice.get("finish_reason")
+        usage = payload.get("usage") or {}
+        out = {"text": text, "finish": finish, "usage": usage, "budget": budget}
+        if text and (finish != "length" or (complete and complete(text))):
+            break
+        if finish == "length":
+            last_err = RuntimeError(f"输出被截断(max_tokens={budget})")
+            continue
+        if not text:
+            raise RuntimeError(f"上游返回空内容(finish_reason={finish}, usage={usage})")
+    if out is None or not out["text"]:
+        raise last_err or DeadlineExceeded("调用墙钟上限已到")
+    out["elapsed"] = round(time.monotonic() - t0, 2)
+    return out
