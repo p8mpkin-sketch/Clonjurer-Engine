@@ -56,7 +56,7 @@ document.getElementById('rs').onclick=()=>{clearInterval(h);h=0;s=1500;show()}</
 CRAMPED = """<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{margin:0;height:100vh;background:#fff}
 main{position:absolute;top:50%;left:0;right:0;transform:translateY(-10%);text-align:center}
 h1{margin:0;font:48px sans-serif}p{margin:8px 0;font:16px sans-serif}
-.tip{position:fixed;bottom:228px;left:0;right:0;text-align:center;font:14px sans-serif}</style></head><body>
+.tip{position:fixed;bottom:218px;left:0;right:0;text-align:center;font:14px/16px sans-serif}</style></head><body>
 <main><h1>标题文字</h1><p>副标题说明文字</p></main><div class="tip">底部提示文字</div></body></html>"""
 # 心电线(实心描边)横穿标题; 第二段标题下有不透明底板挡住线条; 第三段只有淡网格穿过 —— 只有第一段算压字
 STROKED = """<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{margin:0;background:#0b0f14;color:#eee}

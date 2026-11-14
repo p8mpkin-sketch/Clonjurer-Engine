@@ -178,21 +178,26 @@ _OVERLAP_JS = r"""
     for (const b of boxes) {
       if (svg && svg.contains(b.el)) continue;
       if (b.x1 < gb.left || b.x0 > gb.right || b.y1 < gb.top || b.y0 > gb.bottom) continue;
+      // 行框中段(去掉上下各 15% 行距)按约 2px 一行取样: 细线(描边 2~4px)横穿文字时, 稀疏取样会从两行之间漏过
       let st = 0, fi = 0, n = 0;
-      for (let r = 1; r <= 3; r++) for (let c = 1; c <= 7; c++) {
-        const x = b.x0 + (b.x1 - b.x0) * c / 8, y = b.y0 + (b.y1 - b.y0) * r / 4;
+      const top = b.y0 + (b.y1 - b.y0) * 0.15, bot = b.y1 - (b.y1 - b.y0) * 0.15;
+      const rows = Math.max(3, Math.min(24, Math.round((bot - top) / 2)));
+      const hitCols = new Set();
+      for (let r = 0; r <= rows; r++) for (let c = 1; c <= 7; c++) {
+        const x = b.x0 + (b.x1 - b.x0) * c / 8, y = top + (bot - top) * r / rows;
         const pt = new DOMPoint(x, y).matrixTransform(inv);
         n++;
         try {
-          if (pa.so >= 0.2 && g.isPointInStroke(pt)) { if (!covered(g, x, y)) st++; }
+          if (pa.so >= 0.2 && g.isPointInStroke(pt)) { if (!covered(g, x, y)) { st++; hitCols.add(c); } }
           else if (pa.fo >= 0.5 && g.isPointInFill(pt)) { if (!covered(g, x, y)) fi++; }
         } catch (e) {}
       }
-      if (st >= 2 || (fi >= 3 && fi < n - 2)) {
+      // 线条: 至少两列都被穿过; 色块: 盖住一部分取样点(全盖住是底板, 不算)
+      if (hitCols.size >= 2 || (fi >= n * 0.1 && fi < n * 0.85)) {
         const key = b.t + '|' + g.tagName;
         if (seen.has(key)) continue;
         seen.add(key);
-        out.push([b.t, '图形 <' + g.tagName + '>' + (st >= 2 ? ' 的线条' : ' 的色块')]);
+        out.push([b.t, '图形 <' + g.tagName + '>' + (hitCols.size >= 2 ? ' 的线条' : ' 的色块')]);
         if (out.length >= 6) break;
       }
     }

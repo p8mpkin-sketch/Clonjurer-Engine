@@ -116,7 +116,12 @@ class ChatJsonBranches(unittest.TestCase):
             self.assertEqual(llm.chat_json(self.cfg, "s", "u", images=[p]), {"seen": 1})
 
     def test_resolve_cfg(self):
-        self.assertIsNone(llm.resolve_ai_cfg({"ai_api_key": ""}) if not llm.config.AI_API_KEY else None)
+        # 无 Key 的判定与本机环境隔离: 不读真实的环境变量和仓库外 Key 文件(开发机上常配了 Key)
+        from unittest import mock
+        from core.uir import settings as gen_settings
+        with mock.patch.object(llm.config, "AI_API_KEY", ""), \
+                mock.patch.object(gen_settings, "GEN_AI_ENV_FILE", "/nonexistent/clonjurer_ai.env"):
+            self.assertIsNone(llm.resolve_ai_cfg({"ai_api_key": ""}))
         cfg = llm.resolve_ai_cfg({"ai_api_key": "k", "ai_base_url": "http://x/v1/", "ai_model": "mm"})
         self.assertEqual(cfg, {"base_url": "http://x/v1", "api_key": "k", "model": "mm"})
 
