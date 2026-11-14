@@ -206,6 +206,14 @@ def _box(v, w, h):
     return [x0, y0, x1, y1] if x1 - x0 >= 4 and y1 - y0 >= 4 else None
 
 
+def _acc(total: dict, part: dict):
+    """把一次调用的 usage 累加进 total(llm.chat_json 的 usage_out 是覆盖写)。"""
+    if total is None:
+        return
+    for k in ("prompt_tokens", "completion_tokens"):
+        total[k] = int(total.get(k) or 0) + int(part.get(k) or 0)
+
+
 def prepare(src: Path, ws: Path, ai_cfg: dict, deadline: float, log, usage: dict = None) -> dict:
     """原始截图 → 参考图(CSS 像素、去外框) + 位图素材。返回 {ref, css_w, css_h, dpr, crop, assets:[...]}。
 
@@ -224,8 +232,9 @@ def prepare(src: Path, ws: Path, ai_cfg: dict, deadline: float, log, usage: dict
     try:
         parts = llm.image_parts(tmp, 1280, max_tiles=2, tile_h=1600)[0]
         frame = llm.chat_json(ai_cfg, FRAME_SYSTEM, FRAME_USER.format(w=cw, h=ch), parts=parts, temperature=0,
-                              max_tokens=4096, thinking=False, json_mode=True, usage_out=usage,
+                              max_tokens=4096, thinking=False, json_mode=True, usage_out=(u := {}),
                               deadline=min(deadline, time.monotonic() + 60))
+        _acc(usage, u)
         # 模型看到的是按宽缩放到 ≤1280 的图, 坐标按它说的尺寸系换回 CSS 像素(它被告知的是 CSS 尺寸, 多数照此回答)
         images = [i for i in (frame.get("images") or []) if isinstance(i, dict)]
     except Exception as exc:
@@ -252,7 +261,8 @@ def prepare(src: Path, ws: Path, ai_cfg: dict, deadline: float, log, usage: dict
                 strip.save(sp)
                 obj = llm.chat_json(ai_cfg, FRAME_SYSTEM, CHROME_USER.format(w=strip.size[0], h=strip.size[1]),
                                     parts=[llm._image_part(sp, 1600)], temperature=0, max_tokens=256, thinking=False,
-                                    json_mode=True, usage_out=usage, deadline=min(deadline, time.monotonic() + 40))
+                                    json_mode=True, usage_out=(u := {}), deadline=min(deadline, time.monotonic() + 40))
+                _acc(usage, u)
                 n = int(obj.get("line") or 0)
                 if 1 <= n <= len(cands):
                     top = cands[n - 1]
@@ -336,7 +346,8 @@ class ShotProfile(codegen.Profile):
 
     # ---- 读图 ----
     def plan(self, ai_cfg, desc, deadline, usage):
-        self.prep = prepare(self.src, self.ws, ai_cfg, deadline, self.log, usage)
+        pre = {}
+        self.prep = prepare(self.src, self.ws, ai_cfg, deadline, self.log, pre)
         ref = Path(self.prep["ref"])
         user = (f"截图尺寸 {self.prep['css_w']}×{self.prep['css_h']}(CSS 像素)。"
                 + (f"\n用户补充要求: {self.hint}" if self.hint else "\n用户没有补充要求, 照截图还原。")
@@ -350,6 +361,8 @@ class ShotProfile(codegen.Profile):
             return b
         brief = codegen._json_call(ai_cfg, READ_SYSTEM, user, deadline, norm, usage, parts=_ref_parts(ref),
                                    temperature=0.2, max_tokens=8192)
+        if usage is not None:
+            _acc(usage, pre)
         return self._decorate(brief)
 
     def _decorate(self, brief):
@@ -512,10 +525,10 @@ class ShotProfile(codegen.Profile):
 
 
 def run(src: Path, hint: str, ws: Path, pool, ai_cfg: dict, judge_cfg: dict, log, stage,
-        deadline: float, target_score: float, max_rounds: int) -> dict:
+        deadline: float, target_score: float, max_rounds: int, on_brief=None) -> dict:
     prof = ShotProfile(ws, src, hint, log)
     out = codegen.run(hint or "照截图还原界面", ws, pool, ai_cfg, judge_cfg, dict(settings.GEN_DEFAULT_VIEWPORT), log, stage,
-                      deadline, target_score, max_rounds, profile=prof)
+                      deadline, target_score, max_rounds, profile=prof, on_brief=on_brief)
     out["prep"] = {k: prof.prep.get(k) for k in ("css_w", "css_h", "dpr", "crop", "src_size")}
     out["assets"] = prof.prep.get("assets") or []
     return out

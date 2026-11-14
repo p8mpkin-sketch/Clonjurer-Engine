@@ -97,9 +97,12 @@ def _downscale_copy(image_path: Path, max_edge: int) -> bytes:
             return buf.read()
 
 
+USAGE_SINK = None   # (ws, model, step, usage) → None; 由 app 启动时注册, 记 token 流水
+
+
 def _chat_vision(ai_cfg: dict, original: Path, cloned: Path,
                  html_summary: str, detail: dict, hints: str = "",
-                 diff_image: Path = None) -> dict:
+                 diff_image: Path = None, usage_out: list = None) -> dict:
     """调用 OpenAI 兼容多模态接口; 返回解析后的补丁 dict。
 
     hints: 像素差分区域线索(region_hints); diff_image: 差异热力图(可选第 3 张图)。"""
@@ -148,8 +151,10 @@ def _chat_vision(ai_cfg: dict, original: Path, cloned: Path,
     # max_tokens 梯度: 推理模型的思考 token 计入补全预算, 预算太小会被
     # reasoning 全额吃掉(finish_reason=length 且 content 为空), 必须升档重试
     text, last_err = "", None
+    _usage_acc = usage_out if usage_out is not None else []
     for budget in (config.AI_PATCH_MAX_TOKENS, config.AI_PATCH_MAX_TOKENS * 2):
         payload = _call(budget)
+        _usage_acc.append(payload.get("usage") or {})
         choice = (payload.get("choices") or [{}])[0]
         text = ((choice.get("message") or {}).get("content") or "").strip()
         if text:
@@ -267,6 +272,17 @@ def _restore(snap: dict):
             path.write_bytes(data)
 
 
+def _sink_usage(ws, ai_cfg, round_no, used):
+    if USAGE_SINK is None or not used:
+        return
+    tot = {"prompt_tokens": sum(int(u.get("prompt_tokens") or 0) for u in used),
+           "completion_tokens": sum(int(u.get("completion_tokens") or 0) for u in used)}
+    try:
+        USAGE_SINK(ws, ai_cfg.get("model") or "", f"视觉修复第 {round_no} 轮", tot)
+    except Exception:
+        pass
+
+
 def run_vision_repair(ws: Path, ai_cfg: dict, detail: dict, log,
                       render_and_score, page_file: Path = None,
                       region_cells=None) -> dict:
@@ -284,15 +300,18 @@ def run_vision_repair(ws: Path, ai_cfg: dict, detail: dict, log,
         log("AI-VISION", f"第 {round_no}/{config.AI_REPAIR_MAX_ROUNDS} 轮: "
                          f"提交双图、差异热力图与差分线索给大模型分析")
         hints = region_hints(region_cells, detail or {})
+        used = []
         try:
             patch = _chat_vision(ai_cfg, ws / "original_preview.png",
                                  ws / "cloned_preview.png",
                                  _html_summary(ws, page_file), detail or {},
-                                 hints=hints, diff_image=ws / "diff_preview.png")
+                                 hints=hints, diff_image=ws / "diff_preview.png", usage_out=used)
         except Exception as exc:
+            _sink_usage(ws, ai_cfg, round_no, used)
             log("AI-VISION", f"大模型调用失败: {type(exc).__name__}: {str(exc)[:200]}")
             report["rounds"].append({"round": round_no, "error": str(exc)[:300]})
             break
+        _sink_usage(ws, ai_cfg, round_no, used)
         diagnosis = str(patch.get("diagnosis") or "")[:500]
         log("AI-VISION", f"诊断: {diagnosis or '(未提供)'}")
         snap = _snapshot(ws, page_file)

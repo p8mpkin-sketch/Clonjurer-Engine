@@ -15,7 +15,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 <!-- 顶级字体体系: Inter / Plus Jakarta Sans / JetBrains Mono / Noto Sans SC -->
 <link href="/vendor/fonts/fonts.css" rel="stylesheet">
 <!-- UI 改版 P0 规范层: 字号/对比度/焦点/语义色(只换样式) -->
-<link href="/vendor/css/ui-tokens.css?v=15" rel="stylesheet">
+<link href="/vendor/css/ui-tokens.css?v=16" rel="stylesheet">
 
 <script src="/vendor/js/lucide.subset.js?v=3"></script>
 <script>
@@ -703,6 +703,21 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           </li>
         </ol>
         <div v-else class="dash-feed-empty">还没有克隆记录。在上面粘贴一个网址试试。</div>
+        <div class="dash-sec-head tok-head">
+          <h2 class="dash-rail-title">模型用量<span class="tok-sub">近 30 天 · [[ fmtTokens(tokenUsage.tokens_in + tokenUsage.tokens_out) ]] token</span></h2>
+        </div>
+        <div class="tok-seg" role="tablist" aria-label="用量分组">
+          <button v-for="g in [['day','按天'],['project','按项目'],['model','按模型']]" :key="g[0]" type="button" role="tab"
+            :aria-selected="tokenUsage.group === g[0]" @click="loadTokenUsage(g[0])">[[ g[1] ]]</button>
+        </div>
+        <ol v-if="tokenUsage.rows.length" class="tok-list">
+          <li v-for="r in tokenUsage.rows.slice(0, 8)" :key="r.key">
+            <div class="tok-row"><span class="tok-label">[[ r.label || '未知' ]]</span><span class="tok-num tnums">[[ fmtTokens(r.tokens_in + r.tokens_out) ]]</span></div>
+            <div class="tok-bar"><i :style="{ width: tokenBar(r) }"></i></div>
+            <div class="tok-meta tnums">[[ r.tasks ]] 个任务 · 输入 [[ fmtTokens(r.tokens_in) ]] · 输出 [[ fmtTokens(r.tokens_out) ]]<template v-if="r.ai_repair"> · 修复 [[ fmtTokens(r.ai_repair) ]]</template></div>
+          </li>
+        </ol>
+        <div v-else class="dash-feed-empty">[[ tokenUsage.loaded ? '近 30 天还没有模型调用。' : '加载中…' ]]</div>
       </aside>
       </div>
     </div>
@@ -2155,10 +2170,20 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <!-- 界面生成: 需求验收清单(需求符合度的逐条依据) -->
       <details v-if="view==='task' && selectedTask && fitDetail(selectedTask)" class="fit-panel" :open="selectedTask.similarity_score < 85">
         <summary>
-          <b>验收清单</b>
-          <span class="tnums">[[ fitDetail(selectedTask).items.filter(i => i.verdict === 'yes').length ]] / [[ fitDetail(selectedTask).items.length ]] 条满足</span>
-          <span class="fit-meta tnums"><template v-if="fitDetail(selectedTask).fidelity && fitDetail(selectedTask).fidelity.score != null">原图相似度 [[ Math.round(fitDetail(selectedTask).fidelity.score) ]] · </template>达成率 [[ Math.round(fitDetail(selectedTask).coverage * 100) ]]% · 运行健康 [[ Math.round(fitDetail(selectedTask).health * 100) ]]% · 设计 [[ (fitDetail(selectedTask).design * 10).toFixed(1) ]]</span>
-          <span class="fit-meta tnums ml-auto" v-if="fitGen(selectedTask)">[[ fitGen(selectedTask).rounds.length ]] 轮 · 模型用时 [[ fmtDur(fitGen(selectedTask).llm_seconds) ]] · [[ fitGen(selectedTask).ai_model ]]</span>
+          <span class="fit-title">验收清单</span>
+          <span class="fit-count tnums">[[ fitDetail(selectedTask).items.filter(i => i.verdict === 'yes').length ]]<i>/</i>[[ fitDetail(selectedTask).items.length ]] 满足</span>
+          <span class="fit-stats tnums">
+            <span v-if="fitDetail(selectedTask).fidelity && fitDetail(selectedTask).fidelity.score != null">原图相似度 <b>[[ Math.round(fitDetail(selectedTask).fidelity.score) ]]</b></span>
+            <span>达成率 <b>[[ Math.round(fitDetail(selectedTask).coverage * 100) ]]%</b></span>
+            <span>运行健康 <b>[[ Math.round(fitDetail(selectedTask).health * 100) ]]%</b></span>
+            <span>设计 <b>[[ (fitDetail(selectedTask).design * 10).toFixed(1) ]]</b></span>
+          </span>
+          <span class="fit-stats fit-stats-end tnums">
+            <span v-if="fitGen(selectedTask)">[[ fitGen(selectedTask).rounds.length ]] 轮</span>
+            <span v-if="fitGen(selectedTask)">模型用时 [[ fmtDur(fitGen(selectedTask).llm_seconds) ]]</span>
+            <span v-if="taskTokens.id === selectedTask.id && taskTokens.total">Token <b>[[ fmtTokens(taskTokens.total) ]]</b></span>
+            <span v-if="fitGen(selectedTask)">[[ fitGen(selectedTask).ai_model ]]</span>
+          </span>
         </summary>
         <p v-if="fitGen(selectedTask) && fitGen(selectedTask).brief && fitGen(selectedTask).brief.summary" class="fit-note">[[ fitGen(selectedTask).kind === 'screenshot' ? '截图理解' : '需求理解' ]]：[[ fitGen(selectedTask).brief.summary ]]</p>
         <ul class="fit-list">
@@ -2171,6 +2196,13 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         <p v-for="c in fitDetail(selectedTask).caps" :key="c.reason" class="fit-note warn">分数封顶 [[ c.max ]]：[[ c.reason ]]</p>
         <p v-if="fitDetail(selectedTask).review_mode !== 'vision'" class="fit-note warn">[[ fitDetail(selectedTask).review_mode === 'text' ? '当前模型未通过看图自检，本次验收只依据页面源码和浏览器体检数据，外观类条目可信度较低。' : '本次未经模型验收，分数只依据浏览器体检数据。' ]]</p>
         <p v-for="(d, i) in (fitGen(selectedTask) ? fitGen(selectedTask).remaining_defects || [] : [])" :key="'d' + i" class="fit-note warn">仍存在：[[ d ]]</p>
+        <div v-if="taskTokens.id === selectedTask.id && taskTokens.rows.length" class="fit-tokens">
+          <div class="fit-tokens-head">Token 用量<span class="tnums">输入 [[ fmtTokens(taskTokens.tokens_in) ]] · 输出 [[ fmtTokens(taskTokens.tokens_out) ]] · 合计 [[ fmtTokens(taskTokens.total) ]]</span></div>
+          <table class="tnums">
+            <thead><tr><th>步骤</th><th>模型</th><th>输入</th><th>输出</th></tr></thead>
+            <tbody><tr v-for="(r, i) in taskTokens.rows" :key="i"><td>[[ r.step || r.kind ]]</td><td>[[ r.model ]]</td><td>[[ r.tokens_in.toLocaleString() ]]</td><td>[[ r.tokens_out.toLocaleString() ]]</td></tr></tbody>
+          </table>
+        </div>
       </details>
 
       <!-- Tabs -->
@@ -2249,7 +2281,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           </div>
 
           <div class="grid grid-cols-[repeat(auto-fill,minmax(360px,1fr))] gap-5">
-            <div v-for="task in filteredTasks" :key="task.id" class="fade-in panel rounded-xl p-4 flex flex-col gap-3 hover:border-white/[0.16]">
+            <div v-for="task in filteredTasks" :key="task.id" class="fade-in panel rounded-xl p-4 flex flex-col gap-3 hover:border-white/[0.16]"
+              :class="{ 'task-hl': task.id === highlightTaskId }">
 
               <!-- Header: 复选框 + 序号/域名/创建时间 + 状态徽章 + 评分胶囊 -->
               <div class="flex items-start gap-2.5">
@@ -3467,6 +3500,9 @@ const __vueApp = createApp({
       gen: { kind: 'description', description: '', viewport: 'laptop', target: 'html_css', package: '',
              targetScore: 85, maxRounds: 4, timeBudget: 240, file: null, preview: '', submitting: false, error: '',
              hint: '', drag: false, fileInfo: '' },
+      taskTokens: { id: null, rows: [], tokens_in: 0, tokens_out: 0, total: 0 },
+      tokenUsage: { group: 'day', rows: [], tokens_in: 0, tokens_out: 0, loaded: false },
+      highlightTaskId: null,
       opsKpis: { tracker_total: 0, links_total: 0, clicks_total: 0,
                  scheduler_running: 0, scheduler_pending: 0, scheduler_paused: false },
       matrixView: 'grid', projectPill: '', groupByDomain: false,
@@ -3801,6 +3837,10 @@ const __vueApp = createApp({
     urlCount() { return this.urlsText.split('\n').map(s => s.trim()).filter(s => s && !s.startsWith('#')).length; },
     filteredTasks() {
       let base = this.oldFilteredTasks;
+      if (this.highlightTaskId != null) {          // 刚新建的任务置顶
+        const k = base.findIndex(t => t.id === this.highlightTaskId);
+        if (k > 0) base = [base[k]].concat(base.slice(0, k), base.slice(k + 1));
+      }
       if (this.groupByDomain) {
         const seen = {};
         base = base.filter(t => {
@@ -5447,6 +5487,8 @@ const __vueApp = createApp({
     },
     openTaskDetail(task) {
       this.selectedTaskId = task.id;
+      this.taskTokens = { id: null, rows: [], tokens_in: 0, tokens_out: 0, total: 0 };
+      if (this.isGenTask(task) || (task.stats && task.stats.generate)) this.loadTaskTokens(task.id);
       this.previewTaskId = task.id;
       this.activeTab = 'sandbox';
       this.view = 'task';
@@ -5882,6 +5924,28 @@ const __vueApp = createApp({
       });
     },
     isGenTask(t) { return !!t && String(t.target_url || '').startsWith('uir:generate:'); },
+    fmtTokens(n) { n = Number(n || 0); return n >= 1e8 ? (n / 1e8).toFixed(2) + ' 亿' : n >= 1e4 ? (n / 1e4).toFixed(1) + ' 万' : n.toLocaleString(); },
+    async loadTaskTokens(id) {
+      try {
+        const r = await fetch('/api/tasks/' + id + '/tokens');
+        if (!r.ok) return;
+        const d = await r.json();
+        if (this.selectedTaskId === id) this.taskTokens = Object.assign({ id }, d);
+      } catch (e) { /* 忽略 */ }
+    },
+    async loadTokenUsage(group) {
+      if (group) this.tokenUsage.group = group;
+      try {
+        const r = await fetch('/api/usage/tokens?group=' + this.tokenUsage.group + '&days=30');
+        if (!r.ok) return;
+        const d = await r.json();
+        this.tokenUsage = Object.assign({}, this.tokenUsage, { rows: d.rows || [], tokens_in: d.tokens_in, tokens_out: d.tokens_out, loaded: true });
+      } catch (e) { /* 忽略 */ }
+    },
+    tokenBar(r) {
+      const max = Math.max(1, ...this.tokenUsage.rows.map(x => x.tokens_in + x.tokens_out));
+      return Math.max(2, Math.round((r.tokens_in + r.tokens_out) / max * 100)) + '%';
+    },
     isReqFit(t) { return !!t && !!t.stats && t.stats.scoring === 'req-fit-v1'; },
     scoreLabel(t) { return this.isReqFit(t) ? '需求符合度' : '还原度'; },
     fitDetail(t) { const d = t && t.stats && t.stats.similarity_detail; return d && Array.isArray(d.items) ? d : null; },
@@ -6011,9 +6075,11 @@ const __vueApp = createApp({
         const data = await r.json();
         if (!r.ok) { this.gen.error = data.error || '提交失败'; this.toast('❌ ' + this.gen.error); return; }
         // 立即反馈: 先提示并切到任务列表, 列表与统计在后台刷新, 不让界面等两次全量请求
+        // 提交即反馈并直接打开新任务详情(能看到代码实时写入); 返回任务中心时新任务置顶高亮, 不套批次筛选
         this.toast('✅ 生成任务 #' + data.task_id + ' 已入队 (' + data.kind + ' → ' + data.target + ')');
-        this.currentBatchId = data.batch_id; this.statusFilter = ''; this.activeTab = 'matrix'; this.view = 'tasks';
-        this.refreshTasks(); this.refreshTelemetry();
+        this.currentBatchId = ''; this.statusFilter = ''; this.searchQ = ''; this.highlightTaskId = data.task_id;
+        this.activeTab = 'sandbox'; this.view = 'task';
+        this.refreshTasks().then(() => this.openTaskById(data.task_id)); this.refreshTelemetry();
       } catch (e) { this.gen.error = '网络错误: ' + e; }
       finally { this.gen.submitting = false; }
     },
@@ -6425,6 +6491,7 @@ const __vueApp = createApp({
     if (window.innerWidth < 900) this.navCollapsed = true;
     try { this.themeMode = localStorage.getItem('cloner-theme') || 'system'; } catch (e) {}
     this.archiveResume();
+    this.loadTokenUsage();
     this.loadAuth();
   },
   beforeUnmount() {

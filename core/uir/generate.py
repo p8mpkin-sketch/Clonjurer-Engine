@@ -280,8 +280,21 @@ class GenerateEngine:
             raise RuntimeError("没有任何一轮产出有效结果")
         return self._finalize(report, best, kind, target_name)
 
+    def _set_title(self, brief: dict):
+        """任务书里的页面标题作为任务名落库(任务卡、详情页头、各处下拉都显示它, 不再是 generated)。"""
+        title = task_title(brief, self.spec)
+        if title:
+            self.db.update_task(self.task_id, domain=title)
+
+    def _record_tokens(self, report: dict):
+        rows = token_rows(report)
+        if rows and hasattr(self.db, "replace_token_usage"):
+            with suppress(Exception):
+                self.db.replace_token_usage(self.task_id, "generate", rows)
+
     def _finalize(self, report: dict, best: dict, kind: str, target_name: str) -> dict:
         """打包产物 + 写报告 + 落库(UIR 轨与代码直写轨共用)。"""
+        self._record_tokens(report)
         self._stage("打包产物", 90)
         detail = best["detail"]
         (self.ws / "similarity_detail.json").write_text(json.dumps(detail, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -341,7 +354,7 @@ class GenerateEngine:
                         + (f", 验收模型 {judge_cfg['model']}" if judge_cfg["model"] != ai_cfg["model"] else "")
                         + f"; 预算 {budget}s / 最多 {max_rounds} 轮 / 目标 {target_score}")
         out = codegen.run(desc, self.ws, self.pool, ai_cfg, judge_cfg, vp, self.log, self._stage,
-                          deadline, target_score, max_rounds)
+                          deadline, target_score, max_rounds, on_brief=self._set_title)
         best = out["best"]
         report = {"kind": "description", "target": "html_css", "track": "code", "tier": "llm-code",
                   "scoring": codegen.SCORING, "rounds": out["rounds"], "calls": out["calls"], "brief": out["brief"],
@@ -377,7 +390,7 @@ class GenerateEngine:
                         + (f"; 补充要求: {hint[:80]}" if hint else "")
                         + f"; 预算 {budget}s / 最多 {max_rounds} 轮 / 目标 {target_score}")
         out = shotcode.run(keep, hint, self.ws, self.pool, ai_cfg, judge_cfg, self.log, self._stage,
-                           deadline, target_score, max_rounds)
+                           deadline, target_score, max_rounds, on_brief=self._set_title)
         best = out["best"]
         report = {"kind": "screenshot", "target": "html_css", "track": "code", "tier": "llm-code",
                   "scoring": shotcode.SCORING, "rounds": out["rounds"], "calls": out["calls"], "brief": out["brief"],
@@ -437,6 +450,29 @@ class GenerateEngine:
         if result.get("gap"):
             self.log("BUILD", f"缺口: {result['gap']}")
         return result
+
+
+def task_title(brief: dict, spec: dict) -> str:
+    """生成任务的显示名: 任务书 title → 需求原话前 24 字 → 「界面截图」。"""
+    t = str((brief or {}).get("title") or "").strip()
+    if not t or (brief or {}).get("fallback"):
+        t = str((spec or {}).get("description") or "").strip()[:24] or t
+    return (t or ("界面截图" if (spec or {}).get("kind") == "screenshot" else "生成页面"))[:60]
+
+
+_STEP_NAMES = {"plan": "规划/读图", "write": "写页面", "repair": "修复", "review": "验收"}
+
+
+def token_rows(report: dict) -> list:
+    """generate_report.json 的 calls → token 流水行(验收用的是验收模型)。"""
+    out = []
+    for c in (report or {}).get("calls") or []:
+        if not (c.get("in") or c.get("out")):
+            continue
+        model = report.get("judge_model") if c.get("step") == "review" else report.get("ai_model")
+        out.append({"model": model or report.get("ai_model") or "", "step": _STEP_NAMES.get(c.get("step"), c.get("step") or ""),
+                    "in": c.get("in") or 0, "out": c.get("out") or 0})
+    return out
 
 
 def run_generation_task(task: dict, db, bus, pool):

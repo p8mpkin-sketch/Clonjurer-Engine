@@ -42,7 +42,7 @@ import threading
 import time
 import zipfile
 from contextlib import suppress
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -848,6 +848,33 @@ def task_file(task_id):
     return jsonify({"path": rel, "size": size, "content": content})
 
 
+@app.get("/api/tasks/<int:task_id>/tokens")
+def task_tokens(task_id):
+    """本任务的大模型 token 流水(界面生成各步 / AI 视觉修复各轮)与合计。"""
+    _task_or_404(task_id)
+    rows = db.task_token_usage(task_id)
+    tin = sum(r["tokens_in"] for r in rows)
+    tout = sum(r["tokens_out"] for r in rows)
+    return jsonify({"rows": rows, "tokens_in": tin, "tokens_out": tout, "total": tin + tout,
+                    "models": sorted({r["model"] for r in rows if r["model"]})})
+
+
+@app.get("/api/usage/tokens")
+def usage_tokens():
+    """token 用量汇总: ?group=day|project|model &days=30(0 为全部)。数据来自 token_usage 流水。"""
+    group = request.args.get("group", "day")
+    if group not in ("day", "project", "model"):
+        return jsonify({"error": "group 仅支持 day/project/model"}), 400
+    try:
+        days = max(0, min(3650, int(request.args.get("days", 30))))
+    except ValueError:
+        days = 30
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S") if days else ""
+    rows = db.token_usage_summary(_cur_ws(), group, since)
+    return jsonify({"group": group, "days": days, "rows": rows,
+                    "tokens_in": sum(r["tokens_in"] for r in rows), "tokens_out": sum(r["tokens_out"] for r in rows)})
+
+
 @app.get("/api/tasks/<int:task_id>/live_code")
 def task_live_code(task_id):
     """界面生成: 模型正在写的代码(增量)。?epoch=&since=&think_since= 为客户端已收到的位置;
@@ -1200,7 +1227,7 @@ def api_v4_generate():
     blocked = _quota_block(_cur_ws(), "clone", 1)
     if blocked:
         return blocked
-    batch_id = db.create_batch(name, [(target_url, "generated")], cfg, project_id,
+    batch_id = db.create_batch(name, [(target_url, label[:60] or "生成页面")], cfg, project_id,
                                created_by=(_current_user() or {}).get("username", ""),
                                workspace_id=_cur_ws())
     task = db.list_tasks(batch_id=batch_id, limit=1, workspace_id=_cur_ws())
@@ -3126,9 +3153,47 @@ def v4_docker_task_action(task_id, action):
     return resp
 
 
+def _backfill_generate_meta():
+    """老的生成任务: 任务名还是 generated 的按任务书标题回填; token 流水按 generate_report.json 的 calls 回填(幂等)。"""
+    from core.uir.generate import task_title, token_rows
+    try:
+        rows = db._conn.execute(
+            "SELECT t.id, t.domain, t.workspace_path, b.name AS batch_name, b.config_json FROM clone_tasks t"
+            " JOIN batch_jobs b ON t.batch_id = b.id WHERE t.target_url LIKE 'uir:generate:%'").fetchall()
+    except Exception:
+        return
+    have = {r[0] for r in db._conn.execute("SELECT DISTINCT task_id FROM token_usage WHERE kind = 'generate'").fetchall()}
+    for r in rows:
+        ws = Path(r["workspace_path"] or "")
+        rep = {}
+        with suppress(Exception):
+            rep = json.loads((ws / "generate_report.json").read_text(encoding="utf-8"))
+        if (r["domain"] or "") in ("", "generated"):
+            spec = (_parse_json(r["config_json"] or "{}").get("gen") or {})
+            title = task_title(rep.get("brief") or {}, spec) if rep.get("brief") else ""
+            if not title:
+                title = (r["batch_name"] or "").replace("生成 · ", "").strip()[:60] or task_title({}, spec)
+            db.update_task(r["id"], domain=title)
+        if r["id"] not in have and rep.get("calls"):
+            with suppress(Exception):
+                db.replace_token_usage(r["id"], "generate", token_rows(rep))
+
+
+def _record_repair_tokens(ws, model, step, usage):
+    """AI 视觉修复每轮的 token 记账(ai_vision_repair.USAGE_SINK); 工作区目录名即任务号。"""
+    name = Path(ws).name
+    if name.isdigit():
+        db.add_token_usage(int(name), "ai_repair", model, step, (usage or {}).get("prompt_tokens") or 0,
+                           (usage or {}).get("completion_tokens") or 0)
+
+
 def _boot():
     db.ensure_default_project()
     _apply_saved_settings()
+    from core import ai_vision_repair
+    ai_vision_repair.USAGE_SINK = _record_repair_tokens
+    with suppress(Exception):
+        _backfill_generate_meta()
     scheduler.start()
     threading.Thread(target=_audit_retention_worker, daemon=True,
                      name="audit-retention").start()

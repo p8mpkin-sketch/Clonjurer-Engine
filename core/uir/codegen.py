@@ -711,18 +711,19 @@ class Profile:
 
 
 def run(desc: str, ws: Path, pool, ai_cfg: dict, judge_cfg: dict, viewport: dict, log, stage,
-        deadline: float, target_score: float, max_rounds: int, profile: Profile = None) -> dict:
-    """见 _run。模型写代码的过程实时写进 livecode 通道(任务卡/详情页展示用), 结束即关闭。"""
+        deadline: float, target_score: float, max_rounds: int, profile: Profile = None, on_brief=None) -> dict:
+    """见 _run。模型写代码的过程实时写进 livecode 通道(任务卡/详情页展示用), 结束即关闭。
+    on_brief(brief): 任务书定稿后回调一次(任务标题落库用), 回调出错不影响生成。"""
     live = livecode.Channel(ws)
     try:
         return _run(desc, ws, pool, ai_cfg, judge_cfg, viewport, log, stage, deadline, target_score, max_rounds, live,
-                    profile or Profile())
+                    profile or Profile(), on_brief)
     finally:
         live.close()
 
 
 def _run(desc: str, ws: Path, pool, ai_cfg: dict, judge_cfg: dict, viewport: dict, log, stage,
-         deadline: float, target_score: float, max_rounds: int, live, prof: Profile) -> dict:
+         deadline: float, target_score: float, max_rounds: int, live, prof: Profile, on_brief=None) -> dict:
     """跑完一次代码直写生成。产物写入 ws(index.html / cloned_preview.png / cloned_text.txt / brief.json / gen_probe/),
     返回 {"brief","rounds","calls","best":{"score","detail","round"}}; 没有任何可用产物时抛 CodegenError。"""
     left = lambda: deadline - time.monotonic()  # noqa: E731
@@ -745,6 +746,11 @@ def _run(desc: str, ws: Path, pool, ai_cfg: dict, judge_cfg: dict, viewport: dic
         note("plan", t0, usage, error=f"{type(exc).__name__}: {str(exc)[:160]}")
         log("GEN", f"需求规划失败, 以用户原话为任务书继续: {type(exc).__name__}: {str(exc)[:160]}")
     (ws / "brief.json").write_text(json.dumps(brief, ensure_ascii=False, indent=2), encoding="utf-8")
+    if on_brief:
+        try:
+            on_brief(brief)
+        except Exception:
+            pass
     if brief.get("summary"):
         log("GEN", f"需求理解: {brief['summary']}")
     if brief.get("concept"):

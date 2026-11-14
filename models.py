@@ -217,6 +217,23 @@ CREATE TABLE IF NOT EXISTS usage_events (
 
 CREATE INDEX IF NOT EXISTS idx_usage_ws_time ON usage_events(workspace_id, kind, at);
 
+-- 大模型 token 用量流水(界面生成各步 / AI 视觉修复各轮): 任务详情的分步明细与按天/按项目汇总都从这里算
+CREATE TABLE IF NOT EXISTS token_usage (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id INTEGER NOT NULL DEFAULT 1,
+    project_id   INTEGER,
+    task_id      INTEGER,
+    kind         TEXT    NOT NULL,
+    model        TEXT    NOT NULL DEFAULT '',
+    step         TEXT    NOT NULL DEFAULT '',
+    tokens_in    INTEGER NOT NULL DEFAULT 0,
+    tokens_out   INTEGER NOT NULL DEFAULT 0,
+    at           TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_token_ws_time ON token_usage(workspace_id, at);
+CREATE INDEX IF NOT EXISTS idx_token_task ON token_usage(task_id);
+
 CREATE TABLE IF NOT EXISTS users (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     username       TEXT    NOT NULL UNIQUE,
@@ -1030,6 +1047,65 @@ class Database:
                 "INSERT INTO usage_events (workspace_id, kind, amount, task_id, at)"
                 " VALUES (?, ?, ?, ?, ?)", (workspace_id, kind, amount, task_id, _now()))
             self._conn.commit()
+
+    # ---- token 用量 ----
+    def _task_scope(self, task_id):
+        row = self._conn.execute(
+            "SELECT b.workspace_id AS ws, b.project_id AS pj FROM clone_tasks t JOIN batch_jobs b ON t.batch_id = b.id"
+            " WHERE t.id = ?", (task_id,)).fetchone()
+        return (row["ws"] or 1, row["pj"]) if row else (1, None)
+
+    def replace_token_usage(self, task_id: int, kind: str, rows: list, at: str = None):
+        """一个任务某类(generate / ai_repair)的 token 流水整体替换(幂等: 回填与重建重复写不会累加)。
+        rows: [{"model","step","in","out"}]。"""
+        with self._lock:
+            ws, pj = self._task_scope(task_id)
+            self._conn.execute("DELETE FROM token_usage WHERE task_id = ? AND kind = ?", (task_id, kind))
+            for r in rows:
+                self._conn.execute(
+                    "INSERT INTO token_usage (workspace_id, project_id, task_id, kind, model, step, tokens_in, tokens_out, at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (ws, pj, task_id, kind, str(r.get("model") or "")[:80], str(r.get("step") or "")[:40],
+                     int(r.get("in") or 0), int(r.get("out") or 0), at or _now()))
+            self._conn.commit()
+
+    def add_token_usage(self, task_id: int, kind: str, model: str, step: str, tokens_in: int, tokens_out: int):
+        with self._lock:
+            ws, pj = self._task_scope(task_id) if task_id else (1, None)
+            self._conn.execute(
+                "INSERT INTO token_usage (workspace_id, project_id, task_id, kind, model, step, tokens_in, tokens_out, at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (ws, pj, task_id, kind, (model or "")[:80], (step or "")[:40], int(tokens_in or 0), int(tokens_out or 0), _now()))
+            self._conn.commit()
+
+    def task_token_usage(self, task_id: int) -> list:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT kind, model, step, tokens_in, tokens_out, at FROM token_usage WHERE task_id = ? ORDER BY id",
+                (task_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def token_usage_summary(self, workspace_id: int, group: str = "day", since: str = "") -> list:
+        """按天(day) / 按项目(project) / 按模型(model) 汇总。返回 [{key, label, tasks, tokens_in, tokens_out}]。"""
+        key = {"day": "substr(datetime(u.at, 'localtime'), 1, 10)", "project": "COALESCE(u.project_id, 0)", "model": "u.model"}[group]
+        sql = (f"SELECT {key} AS k, COUNT(DISTINCT u.task_id) AS tasks, SUM(u.tokens_in) AS tin, SUM(u.tokens_out) AS tout,"
+               " SUM(CASE WHEN u.kind = 'generate' THEN u.tokens_in + u.tokens_out ELSE 0 END) AS gen,"
+               " SUM(CASE WHEN u.kind = 'ai_repair' THEN u.tokens_in + u.tokens_out ELSE 0 END) AS rep"
+               " FROM token_usage u WHERE u.workspace_id = ?" + (" AND u.at >= ?" if since else "")
+               + " GROUP BY k ORDER BY k DESC")
+        with self._lock:
+            rows = self._conn.execute(sql, (workspace_id, since) if since else (workspace_id,)).fetchall()
+            names = {}
+            if group == "project":
+                names = {r["id"]: r["name"] for r in self._conn.execute("SELECT id, name FROM projects").fetchall()}
+        out = []
+        for r in rows:
+            label = r["k"]
+            if group == "project":
+                label = names.get(r["k"]) or "默认项目"
+            out.append({"key": r["k"], "label": label, "tasks": r["tasks"], "tokens_in": r["tin"] or 0,
+                        "tokens_out": r["tout"] or 0, "generate": r["gen"] or 0, "ai_repair": r["rep"] or 0})
+        return out
 
     def usage_since(self, workspace_id: int, kind: str, since: str) -> int:
         with self._lock:
