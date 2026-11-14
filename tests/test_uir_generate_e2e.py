@@ -146,7 +146,7 @@ class GenerateEndToEnd(unittest.TestCase):
     def test_screenshot_with_model(self):
         self._key(True)
         _FakeLLM.mode, _FakeLLM.calls = "ok", []
-        task, rep, lines = self._run({"kind": "screenshot", "image_path": str(self.shot), "time_budget": 60})
+        task, rep, lines = self._run({"kind": "screenshot", "image_path": str(self.shot), "track": "uir", "time_budget": 60})
         self.assertEqual(task["status"], "completed")
         self.assertEqual(rep["reference_text"], "model-read")
         self.assertGreaterEqual(len(rep["rounds"]), 1)
@@ -159,7 +159,7 @@ class GenerateEndToEnd(unittest.TestCase):
         _FakeLLM.mode = "error"
         vision._READ_CACHE.clear()          # 同一截图的读图结果会被缓存
         try:
-            task, rep, lines = self._run({"kind": "screenshot", "image_path": str(self.shot), "time_budget": 40})
+            task, rep, lines = self._run({"kind": "screenshot", "image_path": str(self.shot), "track": "uir", "time_budget": 40})
         finally:
             _FakeLLM.mode = "ok"
         self.assertEqual(task["status"], "completed")
@@ -186,7 +186,7 @@ class GenerateEndToEnd(unittest.TestCase):
 
     def test_free_mode_invalid_uir_falls_back(self):
         self._key(True)
-        task, rep, lines = self._run({"kind": "screenshot", "image_path": str(self.shot),
+        task, rep, lines = self._run({"kind": "screenshot", "image_path": str(self.shot), "track": "uir",
                                       "time_budget": 40, "llm_mode": "free", "max_rounds": 2})
         self.assertEqual(task["status"], "completed")
 
