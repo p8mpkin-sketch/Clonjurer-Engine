@@ -1186,7 +1186,7 @@ def api_v4_generate():
            "ai_api_key": str(form.get("ai_api_key") or "").strip()[:4096],
            "ai_base_url": str(form.get("ai_base_url") or "").strip()[:4096],
            "ai_model": str(form.get("ai_model") or "").strip()[:200]}
-    if gen_settings.use_code_track(kind, target, spec):
+    if kind == "description" and gen_settings.use_code_track(kind, target, spec):
         from core.uir import llm as uir_llm
         if not uir_llm.resolve_ai_cfg(cfg):
             # 文字需求只能由模型来写; 没有模型时在提交处就说清楚, 不再入队后交付一张无关的模板页

@@ -1,0 +1,57 @@
+{
+  "_doc": "截图 → 代码直写轨用例。source: upload=仓库外的原始上传文件(gen_inputs/…); workspace=克隆任务的原站截图, 取顶部 crop_h 像素(用户贴图通常是一到两屏); archetype=原型页渲染; mobile_ws=克隆页在手机视口(390×844, 3 倍)下的截图; page_mobile=本地页面文件在手机视口(3 倍)下的截图。输入在首次运行时生成到 runs/shot_inputs/, 不入库。tuned 用于调参, holdout 不参与调参。",
+  "tuned": [
+    {
+      "id": "s577_mall",
+      "source": "upload",
+      "path": "gen_inputs/1794676802539_49442.png",
+      "note": "浏览器整窗 Retina 截图, 积分商城"
+    },
+    {
+      "id": "s_login",
+      "source": "archetype",
+      "arch": "login"
+    },
+    {
+      "id": "s_dashboard",
+      "source": "archetype",
+      "arch": "dashboard"
+    },
+    {
+      "id": "s_ant",
+      "source": "workspace",
+      "ws": 560,
+      "crop_h": 1300,
+      "note": "ant.design 首页"
+    }
+  ],
+  "holdout": [
+    {
+      "id": "h_apple",
+      "source": "workspace",
+      "ws": 557,
+      "crop_h": 1400,
+      "note": "apple.com.cn"
+    },
+    {
+      "id": "h_douban",
+      "source": "workspace",
+      "ws": 547,
+      "crop_h": 1300,
+      "note": "douban.com"
+    },
+    {
+      "id": "h_runoob",
+      "source": "workspace",
+      "ws": 558,
+      "crop_h": 1300,
+      "note": "runoob.com 教程站"
+    },
+    {
+      "id": "h_phone",
+      "source": "page_mobile",
+      "path": "engine_bench/gen_cases/runs/code_r7_tuned/cafe/index.html",
+      "note": "手机 3 倍截图(咖啡店首页, 文字轨产出)"
+    }
+  ]
+}

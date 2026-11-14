@@ -671,18 +671,58 @@ def _tokens(usage: dict) -> dict:
     return {"in": int(usage.get("prompt_tokens") or 0), "out": int(usage.get("completion_tokens") or 0)}
 
 
+class Profile:
+    """一条代码直写轨的各步实现。默认是文字需求轨; 截图轨(shotcode.ShotProfile)覆盖其中几步,
+    共用同一个 写页面 → 体检 → 验收 → 修复 的循环。"""
+    plan_stage = "理解需求"
+    review_stage = "对照需求验收"
+    score_label = "需求符合度"
+
+    def plan(self, ai_cfg, desc, deadline, usage):
+        return plan(ai_cfg, desc, deadline, usage)
+
+    def fallback(self, desc):
+        return fallback_plan(desc)
+
+    def write(self, ai_cfg, desc, brief, deadline, note="", on_delta=None):
+        return write_page(ai_cfg, desc, brief, deadline, note=note, on_delta=on_delta)
+
+    def repair(self, ai_cfg, desc, brief, html, problems, deadline, shot=None, stalled=False, on_delta=None):
+        return repair_page(ai_cfg, desc, brief, html, problems, deadline, shot=shot, stalled=stalled, on_delta=on_delta)
+
+    def after_probe(self, pool, ws, rep, rdir, log):
+        """体检之后的附加测量(截图轨: 原图宽度下的还原度、平板宽度)。写进 rep。"""
+
+    def defects(self, rep):
+        return probe.hard_defects(rep)
+
+    def review(self, ai_cfg, desc, brief, rep, html, deadline, usage):
+        return review(ai_cfg, desc, brief, rep, html, deadline, usage)
+
+    def score(self, brief, rev, rep):
+        return score(brief, rev, rep)
+
+    def problems(self, defects, detail, rep):
+        return problem_list(defects, detail)
+
+    def preview_png(self, rep, rdir):
+        """任务预览图(cloned_preview.png)用哪张: 默认是体检的整页图。"""
+        return rdir / "full.png"
+
+
 def run(desc: str, ws: Path, pool, ai_cfg: dict, judge_cfg: dict, viewport: dict, log, stage,
-        deadline: float, target_score: float, max_rounds: int) -> dict:
+        deadline: float, target_score: float, max_rounds: int, profile: Profile = None) -> dict:
     """见 _run。模型写代码的过程实时写进 livecode 通道(任务卡/详情页展示用), 结束即关闭。"""
     live = livecode.Channel(ws)
     try:
-        return _run(desc, ws, pool, ai_cfg, judge_cfg, viewport, log, stage, deadline, target_score, max_rounds, live)
+        return _run(desc, ws, pool, ai_cfg, judge_cfg, viewport, log, stage, deadline, target_score, max_rounds, live,
+                    profile or Profile())
     finally:
         live.close()
 
 
 def _run(desc: str, ws: Path, pool, ai_cfg: dict, judge_cfg: dict, viewport: dict, log, stage,
-         deadline: float, target_score: float, max_rounds: int, live) -> dict:
+         deadline: float, target_score: float, max_rounds: int, live, prof: Profile) -> dict:
     """跑完一次代码直写生成。产物写入 ws(index.html / cloned_preview.png / cloned_text.txt / brief.json / gen_probe/),
     返回 {"brief","rounds","calls","best":{"score","detail","round"}}; 没有任何可用产物时抛 CodegenError。"""
     left = lambda: deadline - time.monotonic()  # noqa: E731
@@ -695,13 +735,13 @@ def _run(desc: str, ws: Path, pool, ai_cfg: dict, judge_cfg: dict, viewport: dic
         return rec
 
     # ---- 规划 ----
-    stage("理解需求", 8)
+    stage(prof.plan_stage, 8)
     t0, usage = time.monotonic(), {}
     try:
-        brief = plan(ai_cfg, desc, wall(settings.CODE_PLAN_WALL), usage)
+        brief = prof.plan(ai_cfg, desc, wall(settings.CODE_PLAN_WALL), usage)
         note("plan", t0, usage)
     except Exception as exc:
-        brief = fallback_plan(desc)
+        brief = prof.fallback(desc)
         note("plan", t0, usage, error=f"{type(exc).__name__}: {str(exc)[:160]}")
         log("GEN", f"需求规划失败, 以用户原话为任务书继续: {type(exc).__name__}: {str(exc)[:160]}")
     (ws / "brief.json").write_text(json.dumps(brief, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -731,14 +771,14 @@ def _run(desc: str, ws: Path, pool, ai_cfg: dict, judge_cfg: dict, viewport: dic
         try:
             if action == "write":
                 live.begin("编写页面")
-                html, meta = write_page(ai_cfg, desc, brief, wall(settings.CODE_WRITE_WALL),
+                html, meta = prof.write(ai_cfg, desc, brief, wall(settings.CODE_WRITE_WALL),
                                         note="上一次输出不完整, 请精简实现, 确保一次输出完整文档。" if rounds else "",
                                         on_delta=live.feed)
             else:
-                problems = problem_list(best["defects"], best["detail"])
+                problems = prof.problems(best["defects"], best["detail"], best["rep"])
                 log("GEN", f"修复目标 {len(problems)} 项: " + " | ".join(p[:60] for p in problems[:4]))
                 live.begin(f"修复第 {rnd - 1} 轮" + (" · 整页重写" if stalled else ""))
-                html, meta = repair_page(ai_cfg, desc, brief, best["html"], problems, wall(settings.CODE_WRITE_WALL),
+                html, meta = prof.repair(ai_cfg, desc, brief, best["html"], problems, wall(settings.CODE_WRITE_WALL),
                                          shot=(best["rep"].get("shots") or {}).get("f0"), stalled=stalled,
                                          on_delta=live.feed)
             live.done()
@@ -761,7 +801,11 @@ def _run(desc: str, ws: Path, pool, ai_cfg: dict, judge_cfg: dict, viewport: dic
         (ws / "index.html").write_text(html, encoding="utf-8")
         rdir = probe_dir / f"r{rnd}"
         rep = probe.inspect_page(pool, ws / "index.html", rdir, viewport, full_png=rdir / "full.png", log=log)
-        defects = probe.hard_defects(rep)
+        try:
+            prof.after_probe(pool, ws, rep, rdir, log)
+        except Exception as exc:                 # 附加测量失败不影响主流程
+            log("PROBE", f"附加测量失败: {type(exc).__name__}: {str(exc)[:160]}")
+        defects = prof.defects(rep)
         f = probe.facts(rep)
         mot = rep.get("motion") or {}
         log("PROBE", f"体检 {rep['elapsed']}s: 报错 {len(rep['errors'])}, 外网请求 {len(rep['external'])}, "
@@ -772,19 +816,19 @@ def _run(desc: str, ws: Path, pool, ai_cfg: dict, judge_cfg: dict, viewport: dic
         if blocking and rnd < max_rounds and left() > settings.CODE_MIN_REPAIR_LEFT:
             log("GEN", "存在运行硬伤, 跳过模型验收直接进入修复")
         elif left() > 8:
-            stage("对照需求验收", min(88, 28 + rnd * 18))
+            stage(prof.review_stage, min(88, 28 + rnd * 18))
             t0, usage = time.monotonic(), {}
             try:
-                rev = review(judge_cfg or ai_cfg, desc, brief, rep, html, wall(settings.CODE_REVIEW_WALL), usage)
+                rev = prof.review(judge_cfg or ai_cfg, desc, brief, rep, html, wall(settings.CODE_REVIEW_WALL), usage)
                 note("review", t0, usage, mode=rev["mode"])
                 if rev.get("fallback"):
                     log("GEN", f"本轮改用文本验收: {rev['fallback']}")
             except Exception as exc:
                 note("review", t0, usage, error=f"{type(exc).__name__}: {str(exc)[:160]}")
                 log("GEN", f"模型验收失败, 仅按体检硬证据计分: {type(exc).__name__}: {str(exc)[:160]}")
-        detail = score(brief, rev, rep)
+        detail = prof.score(brief, rev, rep)
         yes = sum(1 for i in detail["items"] if i["verdict"] == "yes")
-        log("SIMILARITY", f"第 {rnd} 轮需求符合度 {detail['score']} (清单 {yes}/{len(detail['items'])} 满足, "
+        log("SIMILARITY", f"第 {rnd} 轮{prof.score_label} {detail['score']} (清单 {yes}/{len(detail['items'])} 满足, "
                           f"达成率 {detail['coverage']}, 健康度 {detail['health']}, 设计 {detail['design']}, "
                           f"验收方式 {detail['review_mode']})"
                           + ("; 封顶: " + ", ".join(c["reason"] for c in detail["caps"]) if detail["caps"] else ""))
@@ -817,7 +861,7 @@ def _run(desc: str, ws: Path, pool, ai_cfg: dict, judge_cfg: dict, viewport: dic
         raise CodegenError("模型没有产出可用的网页" + (f": {errs[-1]}" if errs else ""))
     # ---- 落盘最优版本 ----
     (ws / "index.html").write_text(best["html"], encoding="utf-8")
-    full = best["dir"] / "full.png"
+    full = prof.preview_png(best["rep"], best["dir"])
     if full.is_file():
         (ws / "cloned_preview.png").write_bytes(full.read_bytes())
     (ws / "cloned_text.txt").write_text(best["rep"].get("text") or "", encoding="utf-8")

@@ -71,5 +71,6 @@ PROBE_SHORT_VIEWPORT = {"width": 1280, "height": 600}   # 矮窗口(查文字重
 
 
 def use_code_track(kind: str, target: str, spec: dict = None) -> bool:
-    """文字描述 → 网页 走代码直写轨; spec.track="uir" 可强制回到 UIR 原型轨(基准回环 / 无模型的离线测试用)。"""
-    return kind == "description" and target == "html_css" and (spec or {}).get("track") != "uir"
+    """文字描述 / 界面截图 → 网页 走代码直写轨; spec.track="uir" 可强制回到 UIR 原型轨(基准回环 / 无模型的离线测试用)。
+    截图轨没有模型时由调用方回落到 UIR 确定性版面分析(见 generate._execute)。"""
+    return kind in ("description", "screenshot") and target == "html_css" and (spec or {}).get("track") != "uir"

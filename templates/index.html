@@ -251,6 +251,16 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
   .lc-big{height:340px;margin-top:12px}
   .lc-big .lc-body{font-size:12.5px}
   @media (prefers-reduced-motion: reduce){.lc-scan,.lc-dot,.lc-cursor{animation:none}.lc-rain{display:none}}
+  .shot-drop{position:relative;display:flex;align-items:center;justify-content:center;min-height:120px;max-height:260px;
+      border:1.5px dashed rgba(148,163,184,.35);border-radius:12px;background:rgba(2,6,23,.45);cursor:pointer;overflow:hidden;transition:border-color .15s,background .15s}
+  [data-theme="light"] .shot-drop{background:#f6f6f7;border-color:#cfcfd4}
+  .shot-drop:hover,.shot-drop:focus{border-color:rgba(129,140,248,.8);outline:none}
+  .shot-drop.on{border-color:#818cf8;background:rgba(99,102,241,.12)}
+  .shot-drop.has{border-style:solid}
+  .shot-drop img{max-width:100%;max-height:256px;object-fit:contain;display:block}
+  .shot-drop-tip{display:flex;flex-direction:column;align-items:center;gap:4px;color:var(--fg-3);font-size:11px;padding:18px;text-align:center}
+  .shot-drop-tip b{font-size:12.5px;color:var(--fg-2);font-weight:600}
+  .shot-drop-x{position:absolute;top:6px;right:6px;width:24px;height:24px;border-radius:50%;background:rgba(0,0,0,.65);color:#fff;font-size:15px;line-height:22px}
 </style>
 <!-- Tailwind 预编译(tools/build_css.sh): 原 451KB 运行时 JS 每次打开都在浏览器里扫描 DOM 生成样式;
      放在 head 最后, 与运行时注入的位置一致, 层叠顺序不变 -->
@@ -2754,10 +2764,21 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <textarea v-model="gen.description" rows="6" maxlength="4000" placeholder="例如: 做一个番茄钟, 25 分钟专注 5 分钟休息, 可以开始、暂停、重置, 配色安静一些"
                 class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500 resize-none"></textarea>
             </div>
-            <div v-show="gen.kind==='screenshot'" class="space-y-1.5">
-              <label class="text-[10px] text-slate-500">界面截图(PNG/JPG, ≤12MB; 参考图即该截图, 评分口径与克隆侧一致)</label>
-              <input type="file" accept="image/*" @change="handleGenFile" class="block w-full text-[11px] text-slate-400 file:mr-3 file:px-3 file:py-1.5 file:rounded-md file:border-0 file:bg-indigo-500/20 file:text-indigo-200">
-              <img v-if="gen.preview" :src="gen.preview" class="mt-2 max-h-48 rounded-lg border border-white/[0.08] object-contain bg-slate-950/60">
+            <div v-show="gen.kind==='screenshot'" class="space-y-2">
+              <label class="text-[10px] text-slate-500">界面截图(PNG/JPG/WebP, ≤12MB; 浏览器整窗截图会自动去掉地址栏等外框, Retina 截图自动按倍率换算)</label>
+              <div class="shot-drop" :class="{ on: gen.drag, has: gen.preview }" tabindex="0"
+                @click="$refs.genFile.click()" @keydown.enter.prevent="$refs.genFile.click()"
+                @dragover.prevent="gen.drag = true" @dragleave.prevent="gen.drag = false" @drop.prevent="onGenDrop">
+                <img v-if="gen.preview" :src="gen.preview" alt="截图预览">
+                <div v-else class="shot-drop-tip"><i data-lucide="image-plus" class="w-5 h-5"></i>
+                  <b>⌘V / Ctrl+V 粘贴截图</b><span>或拖入图片、点击选择文件</span></div>
+                <button v-if="gen.preview" type="button" class="shot-drop-x" title="移除截图" @click.stop="clearGenFile">×</button>
+              </div>
+              <div v-if="gen.fileInfo" class="text-[10px] text-slate-500 tnums">[[ gen.fileInfo ]]</div>
+              <input ref="genFile" type="file" accept="image/*" @change="handleGenFile" class="hidden">
+              <label class="text-[10px] text-slate-500 block pt-1">补充要求(可选: 想在截图基础上改什么、加什么; 不填就按截图还原)</label>
+              <textarea v-model="gen.hint" rows="3" maxlength="2000" placeholder="例如: 配色换成深色; 右侧加一个购物车按钮; 商品卡片做成 3 列"
+                class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500 resize-none"></textarea>
             </div>
             <div class="grid grid-cols-2 gap-3">
               <div class="space-y-1"><label class="text-[10px] text-slate-500">渲染视口</label>
@@ -2804,7 +2825,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             </ol>
             <p><b class="text-slate-200">需求符合度</b> = 60% 清单达成率 + 20% 运行健康度 + 20% 设计质量。有运行报错最高 40，有明确要求未满足最高 60。它与克隆任务的「还原度」不是一个口径。</p>
             <div class="text-xs font-semibold text-slate-300 pt-2">截图怎么生成</div>
-            <p>截图先归一化为界面树(UIR)，再渲染成 HTML / CSS 或 Flutter；与参考截图做像素评分，口径同克隆任务。</p>
+            <ol class="list-decimal pl-5 space-y-1.5"><li><b class="text-slate-200">读取截图</b>：自动换算 Retina 倍率、去掉浏览器地址栏等外框；模型读出布局、配色、字号和全部文字，照片 / 商品图 / 头像裁出来作为素材。</li><li><b class="text-slate-200">编写页面</b>：模型看着原图写响应式网页，文字、按钮、卡片都是真代码；补充要求优先于截图。</li><li><b class="text-slate-200">三端体检</b>：原图宽度下与原图逐像素比对，并检查平板 768、手机 390 是否溢出、重叠、报错。</li><li><b class="text-slate-200">对照原图验收与修复</b>：原图与产出并排给模型核对，差异大的地方再修一到两轮。</li></ol><p class="mt-2"><b class="text-slate-200">还原度</b> = 40% 原图相似度 + 30% 清单达成 + 15% 三端健康度 + 15% 设计。未配置模型时退回确定性版面分析(效果有限)。</p>
             <div class="text-xs font-semibold text-slate-300 pt-2">边界</div>
             <p>仅重建界面外观与交互意图; 不做任何站点 / 应用特判; 移动端(L2)只处理自有 / 授权安装包的公开资源。</p>
           </div>
@@ -3444,7 +3465,8 @@ const __vueApp = createApp({
       ],
       schedulerBatches: [],
       gen: { kind: 'description', description: '', viewport: 'laptop', target: 'html_css', package: '',
-             targetScore: 85, maxRounds: 4, timeBudget: 240, file: null, preview: '', submitting: false, error: '' },
+             targetScore: 85, maxRounds: 4, timeBudget: 240, file: null, preview: '', submitting: false, error: '',
+             hint: '', drag: false, fileInfo: '' },
       opsKpis: { tracker_total: 0, links_total: 0, clicks_total: 0,
                  scheduler_running: 0, scheduler_pending: 0, scheduler_paused: false },
       matrixView: 'grid', projectPill: '', groupByDomain: false,
@@ -5914,27 +5936,73 @@ const __vueApp = createApp({
     },
     handleGenFile(ev) {
       const file = ev.target.files && ev.target.files[0];
-      this.gen.file = file || null; this.gen.preview = '';
+      this.setGenImage(file || null);
+      ev.target.value = '';
+    },
+    onGenDrop(ev) {
+      this.gen.drag = false;
+      const f = Array.from((ev.dataTransfer && ev.dataTransfer.files) || []).find(x => /^image\//.test(x.type));
+      if (f) this.setGenImage(f); else this.toast('请拖入图片文件');
+    },
+    clearGenFile() { this.setGenImage(null); },
+    // 预览用 ObjectURL(不把几 MB 的 data URL 放进响应式状态); 文件对象不做响应式代理
+    setGenImage(file) {
+      if (this._genUrl) { URL.revokeObjectURL(this._genUrl); this._genUrl = ''; }
+      this.gen.file = file ? Vue.markRaw(file) : null;
+      this.gen.preview = ''; this.gen.fileInfo = '';
       if (!file) return;
-      const reader = new FileReader();
-      reader.onload = () => { this.gen.preview = String(reader.result || ''); };
-      reader.readAsDataURL(file);
+      if (file.size > 12 * 1024 * 1024) { this.gen.file = null; this.toast('截图超过 12MB'); return; }
+      this._genUrl = URL.createObjectURL(file);
+      this.gen.preview = this._genUrl;
+      this.gen.kind = 'screenshot';
+      const img = new Image();
+      img.onload = () => { this.gen.fileInfo = img.naturalWidth + ' × ' + img.naturalHeight + ' 像素 · ' + (file.size / 1048576).toFixed(1) + ' MB'; };
+      img.src = this._genUrl;
+    },
+    // 全局粘贴: 在「界面生成」页任意位置粘贴图片即作为截图输入; 文字描述页里已经写了文字的, 文字转为截图的补充要求
+    onGlobalPaste(ev) {
+      if (this.view !== 'generate') return;
+      const items = Array.from((ev.clipboardData && ev.clipboardData.items) || []);
+      const it = items.find(x => x.kind === 'file' && /^image\//.test(x.type));
+      if (!it) return;
+      const f = it.getAsFile();
+      if (!f) return;
+      ev.preventDefault();
+      if (this.gen.kind === 'description' && this.gen.description.trim() && !this.gen.hint.trim()) this.gen.hint = this.gen.description.trim();
+      const named = new File([f], 'pasted-' + Date.now() + '.' + ((f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')), { type: f.type });
+      this.setGenImage(named);
+      this.toast('已粘贴截图');
+    },
+    // 上传前压缩: 尺寸不变(倍率换算要用原始像素宽), 超过 2.5MB 的 PNG 转成高质量 JPEG, 上传量通常降到 1/4~1/6
+    async genUploadBlob(file) {
+      if (!file || file.size <= 2.5 * 1024 * 1024 || !/png|bmp|tiff/i.test(file.type) || !window.createImageBitmap) return file;
+      try {
+        const bmp = await createImageBitmap(file);
+        const cv = document.createElement('canvas');
+        cv.width = bmp.width; cv.height = bmp.height;
+        const ctx = cv.getContext('2d');
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+        ctx.drawImage(bmp, 0, 0);
+        const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.92));
+        return blob && blob.size < file.size ? new File([blob], 'screenshot.jpg', { type: 'image/jpeg' }) : file;
+      } catch (e) { return file; }
     },
     async submitGenerate() {
       this.gen.error = '';
       if (this.gen.kind === 'description' && !this.gen.description.trim()) { this.gen.error = '请输入页面描述'; return; }
-      if (this.gen.kind === 'screenshot' && !this.gen.file) { this.gen.error = '请选择界面截图'; return; }
+      if (this.gen.kind === 'screenshot' && !this.gen.file) { this.gen.error = '请粘贴、拖入或选择界面截图'; return; }
       this.gen.submitting = true;
       try {
         const fd = new FormData();
-        fd.append('kind', this.gen.kind); fd.append('description', this.gen.description);
+        fd.append('kind', this.gen.kind);
+        fd.append('description', this.gen.kind === 'screenshot' ? this.gen.hint.trim() : this.gen.description);
         fd.append('viewport', this.gen.viewport); fd.append('target', this.gen.target);
         // 交付形态: Flutter 原生界面直接构建 APK; HTML/CSS 产物与克隆任务一样装进应用壳
         if (this.gen.package === 'apk' && this.gen.target === 'flutter') fd.append('build', 'apk');
         else if (this.gen.package) fd.append('package', this.gen.package);
         fd.append('target_score', this.gen.targetScore); fd.append('max_rounds', this.gen.maxRounds);
         fd.append('time_budget', this.gen.timeBudget);
-        if (this.gen.file) fd.append('image', this.gen.file);
+        if (this.gen.kind === 'screenshot' && this.gen.file) fd.append('image', await this.genUploadBlob(this.gen.file));
         if (this.form.aiKey) fd.append('ai_api_key', this.form.aiKey);
         if (this.form.aiModel) fd.append('ai_model', this.form.aiModel);
         if (this.form.aiBaseUrl) fd.append('ai_base_url', this.form.aiBaseUrl);
@@ -5942,9 +6010,10 @@ const __vueApp = createApp({
         const r = await fetch('/api/v4/generate', { method: 'POST', body: fd });
         const data = await r.json();
         if (!r.ok) { this.gen.error = data.error || '提交失败'; this.toast('❌ ' + this.gen.error); return; }
-        this.currentBatchId = data.batch_id; this.statusFilter = ''; this.activeTab = 'matrix'; this.view = 'tasks';
-        await this.refreshTasks(); await this.refreshTelemetry();
+        // 立即反馈: 先提示并切到任务列表, 列表与统计在后台刷新, 不让界面等两次全量请求
         this.toast('✅ 生成任务 #' + data.task_id + ' 已入队 (' + data.kind + ' → ' + data.target + ')');
+        this.currentBatchId = data.batch_id; this.statusFilter = ''; this.activeTab = 'matrix'; this.view = 'tasks';
+        this.refreshTasks(); this.refreshTelemetry();
       } catch (e) { this.gen.error = '网络错误: ' + e; }
       finally { this.gen.submitting = false; }
     },
@@ -6350,6 +6419,8 @@ const __vueApp = createApp({
     },
   },
   mounted() {
+    this._onPaste = (e) => this.onGlobalPaste(e);
+    window.addEventListener('paste', this._onPaste);
     // 窄屏(手机/小平板)默认折叠侧栏, 内容区不被 240px 侧栏挤成一列竖排
     if (window.innerWidth < 900) this.navCollapsed = true;
     try { this.themeMode = localStorage.getItem('cloner-theme') || 'system'; } catch (e) {}
@@ -6357,6 +6428,7 @@ const __vueApp = createApp({
     this.loadAuth();
   },
   beforeUnmount() {
+    window.removeEventListener('paste', this._onPaste);
     clearInterval(this._taskTimer);
     clearInterval(this._teleTimer);
     if (this._es) this._es.close();

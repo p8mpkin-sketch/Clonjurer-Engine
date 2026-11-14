@@ -126,7 +126,11 @@ class GenerateEngine:
         kind = self.spec.get("kind") or "description"
         target_name = self.spec.get("target") or "html_css"
         if settings.use_code_track(kind, target_name, self.spec):
-            return self._execute_code(ai_cfg, budget, target_score, max_rounds, deadline)
+            if kind == "description":
+                return self._execute_code(ai_cfg, budget, target_score, max_rounds, deadline)
+            if ai_cfg:
+                return self._execute_shot(ai_cfg, budget, target_score, max_rounds, deadline)
+            self.log("GEN", "截图生成: 未配置大模型 Key, 回落到确定性版面分析(效果有限, 建议配置 Key)")
         adapter, target = get_input(kind), get_output(target_name)
         self.log("GEN", f"适配器 {kind} → 目标 {target_name}; 预算 {budget}s / {max_rounds} 轮 / 目标分 {target_score}"
                         + ("" if ai_cfg else "; 未配置大模型 Key, 走确定性 Tier 0"))
@@ -348,6 +352,43 @@ class GenerateEngine:
                   "remaining_defects": best["defects"]}
         return self._finalize(report, {"score": best["score"], "detail": best["detail"], "round": best["round"],
                                        "uir_stats": {}}, "description", "html_css")
+
+    def _execute_shot(self, ai_cfg, budget: int, target_score: float, max_rounds: int, deadline: float) -> dict:
+        """截图代码直写轨(core/uir/shotcode.py): 读图 → 写响应式页面 → 体检(三端) + 原图相似度 → 对照原图验收 → 修复。"""
+        from core.uir import shotcode
+        judge_cfg = llm.resolve_ai_cfg(self.cfg, role="judge") or ai_cfg
+        src = Path(self.spec.get("image_path") or "")
+        if not src.is_file():
+            keep = self.ws / "original_upload.png"
+            if keep.is_file():
+                src = keep
+            else:
+                raise FileNotFoundError("截图输入缺失")
+        keep = self.ws / "original_upload.png"            # 原始上传另存: original_preview.png 会被换成去外框的 CSS 尺寸参考图
+        if src != keep:
+            shutil.copyfile(src, keep)
+        for stale in ("uir.json", "original_text.txt", "diff_preview.png"):
+            with suppress(Exception):
+                (self.ws / stale).unlink()
+        shutil.rmtree(self.ws / "gen_probe", ignore_errors=True)
+        hint = (self.spec.get("description") or "").strip()
+        self.log("GEN", f"截图代码直写轨: 模型 {ai_cfg['model']}"
+                        + (f", 验收模型 {judge_cfg['model']}" if judge_cfg["model"] != ai_cfg["model"] else "")
+                        + (f"; 补充要求: {hint[:80]}" if hint else "")
+                        + f"; 预算 {budget}s / 最多 {max_rounds} 轮 / 目标 {target_score}")
+        out = shotcode.run(keep, hint, self.ws, self.pool, ai_cfg, judge_cfg, self.log, self._stage,
+                           deadline, target_score, max_rounds)
+        best = out["best"]
+        report = {"kind": "screenshot", "target": "html_css", "track": "code", "tier": "llm-code",
+                  "scoring": shotcode.SCORING, "rounds": out["rounds"], "calls": out["calls"], "brief": out["brief"],
+                  "source": out["prep"], "assets": out["assets"],
+                  "final_score": None, "target_score": target_score, "budget": budget,
+                  "ai_model": ai_cfg["model"], "judge_model": judge_cfg["model"], "reference_text": "model-read",
+                  "llm_seconds": round(sum(c["elapsed"] for c in out["calls"]), 1),
+                  "tokens": {"in": sum(c.get("in", 0) for c in out["calls"]), "out": sum(c.get("out", 0) for c in out["calls"])},
+                  "remaining_defects": best["defects"]}
+        return self._finalize(report, {"score": best["score"], "detail": best["detail"], "round": best["round"],
+                                       "uir_stats": {}}, "screenshot", "html_css")
 
     def _build_binaries(self, build_kind: str) -> dict:
         """apk: flutter_app → release APK; desktop: electron_app → 宿主平台包 + Windows x64 包。
