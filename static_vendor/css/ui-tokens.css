@@ -573,6 +573,20 @@ html body .proj-sort select option{background:var(--surface);color:var(--fg)}
   .run-step .sec{display:none}
   .spark{display:none}
 }
+@media (max-width:900px){
+  .create-stack{flex-direction:column;overflow-y:auto}
+  .cfg-wrap{flex-direction:column;align-items:stretch}
+  .cfg-nav{width:100%;position:static;display:flex;gap:6px;overflow-x:auto}
+  .cfg-nav > *{margin-top:0 !important}
+  .cfg-nav > button{width:auto;flex:none;white-space:nowrap}
+  .cfg-nav-label{display:none}
+  .cfg-wrap > :not(.cfg-nav){min-width:0;width:100%}
+  .cfg-bar{white-space:nowrap}
+  .cfg-bar > span{display:none}
+  .create-stack > .create-main{width:100% !important;height:auto;overflow:visible;border-right:0;flex:none}
+  .create-stack > .create-main > *{overflow:visible !important;max-height:none !important;flex:none}
+  .create-stack > .create-side{flex:none;overflow:visible;padding-left:16px;padding-right:16px}
+}
 @media (max-width:600px){
   .mt-row.dp-row{grid-template-columns:minmax(0,1fr) auto}
   .mt-row.dp-row.mt-row-head{display:none}

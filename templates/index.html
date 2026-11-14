@@ -734,13 +734,13 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <h2 class="font-display text-[28px] leading-tight text-slate-100">短链任务</h2>
             <p class="text-[13px] text-slate-500 mt-1.5">每个短链任务聚合一组短链(SL-序号)· 支持多服务批量生成 · 一键复制与导出</p>
           </div>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 flex-wrap max-w-full">
             <div class="relative">
               <i data-lucide="search" class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-600"></i>
               <input v-model="links.q" @input="loadLinks" placeholder="搜索任务名 / 目标 / 备注"
                 class="w-[240px] rounded-lg bg-slate-950/70 border border-white/[0.08] pl-8 pr-3 py-2 text-[11px] text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500/60">
             </div>
-            <button @click="openLinkCreate" class="flex items-center gap-1.5 px-3 py-2 rounded-xl ui-primary text-[11px] font-semibold text-white shadow-lg transition-all">
+            <button @click="openLinkCreate" class="shrink-0 whitespace-nowrap flex items-center gap-1.5 px-3 py-2 rounded-xl ui-primary text-[11px] font-semibold text-white shadow-lg transition-all">
               <i data-lucide="plus" class="w-3.5 h-3.5"></i>新建短链任务
             </button>
           </div>
@@ -751,7 +751,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <div class="p-4 space-y-3">
             <div class="flex items-center gap-2 flex-wrap">
               <span class="text-[10px] text-slate-500 tracking-[0.16em] font-semibold shrink-0">快捷短链 QUICK SHORTener</span>
-              <div class="flex-1 flex items-center gap-2 min-w-[420px]">
+              <div class="flex-1 flex items-center gap-2 flex-wrap" style="min-width:min(420px,100%)">
                 <input v-model="linksQuick.url" spellcheck="false" placeholder="粘贴长链接, 回车生成短链"
                   @keydown.enter="quickGenLink()"
                   class="flex-1 rounded-lg bg-slate-950/80 border border-white/[0.08] px-3 py-2 text-xs font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500/60">
@@ -1485,7 +1485,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <div v-show="adminTab==='audit'" class="rounded-2xl border border-white/[0.07] bg-slate-900/70 backdrop-blur-xl overflow-hidden">
         <div class="flex items-center justify-between px-5 py-3.5 border-b border-white/[0.06] gap-3 flex-wrap">
           <div class="text-xs font-semibold text-slate-300 flex items-center gap-2"><i data-lucide="scroll-text" class="w-4 h-4 text-amber-400"></i>审计日志</div>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 flex-wrap max-w-full">
             <input v-model="audit.q" @input="auditThrottled" placeholder="搜索用户 / 详情 / IP…" class="bg-slate-950/80 border border-white/[0.08] rounded-lg px-3 py-1.5 text-[11px] text-slate-300 w-48 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500">
             <a href="/api/v4/admin/audit/export" title="导出 CSV(最近500条)"
               class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-white/[0.08] text-[10.5px] text-slate-400 hover:text-slate-100 transition-all">
@@ -1520,10 +1520,10 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       </div>
 
       <!-- 系统设置 -->
-      <div v-show="adminTab==='settings'" class="flex gap-4 items-start">
+      <div v-show="adminTab==='settings'" class="cfg-wrap flex gap-4 items-start">
         <!-- 左侧分类锚点 -->
-        <div class="w-[180px] shrink-0 sticky top-0 space-y-1">
-          <div class="text-[9.5px] text-slate-600 px-2 pb-1 tracking-[0.18em] font-semibold">设置分类</div>
+        <div class="cfg-nav w-[180px] shrink-0 sticky top-0 space-y-1">
+          <div class="cfg-nav-label text-[9.5px] text-slate-600 px-2 pb-1 tracking-[0.18em] font-semibold">设置分类</div>
           <button v-for="c in [['cfg-api','API 密钥与模型','key-round'],['cfg-proxy','代理池与缓存','database'],['cfg-auth','鉴权与会话','shield-check'],['cfg-limits','并发与限制','gauge']]" :key="c[0]"
             @click="cfgAnchor(c[0])"
             class="w-full flex items-center gap-2 px-3 py-2 rounded-xl border text-[11px] transition-all text-left"
@@ -1638,7 +1638,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       </div>
 
       <!-- 底部固定悬浮操作栏(设置 Tab) -->
-      <div v-if="adminTab==='settings' && view==='admin'" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-4 py-2.5 rounded-2xl border border-white/[0.10] bg-slate-900/95 backdrop-blur-xl shadow-2xl">
+      <div v-if="adminTab==='settings' && view==='admin'" class="cfg-bar fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-4 py-2.5 rounded-2xl border border-white/[0.10] bg-slate-900/95 backdrop-blur-xl shadow-2xl">
         <button @click="refreshing=true; (adminTab==='users' ? loadUsers() : adminTab==='audit' ? loadAudit() : loadSettings)().then(() => { refreshing = false; iconRefresh(); })"
           class="w-8 h-8 flex items-center justify-center rounded-lg border border-white/[0.08] text-slate-400 hover:text-slate-100 transition-all" title="刷新当前设置">
           <i data-lucide="refresh-cw" class="w-3.5 h-3.5" :class="refreshing ? 'animate-spin' : ''"></i>
@@ -1717,10 +1717,10 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
     </div>
   </div>
 
-  <div v-show="view==='create' || view==='tasks' || view==='task'" class="flex flex-1 min-h-0">
+  <div v-show="view==='create' || view==='tasks' || view==='task'" class="flex flex-1 min-h-0" :class="view==='create' ? 'create-stack' : ''">
 
     <!-- ======================= 新建克隆(独立向导页) ======================= -->
-    <aside v-show="view==='create'" :class="view==='create' ? 'w-[600px]' : 'w-[380px]'" class="shrink-0 border-r border-white/[0.07] flex flex-col h-full overflow-hidden">
+    <aside v-show="view==='create'" :class="view==='create' ? 'w-[600px]' : 'w-[380px]'" class="create-main shrink-0 border-r border-white/[0.07] flex flex-col h-full overflow-hidden">
 
       <!-- Hero 任务输入区 -->
       <section class="shrink-0 px-6 pt-8 pb-3">
@@ -1938,7 +1938,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
     </aside>
 
     <!-- ======================= 工作台右侧: 浏览器池监控 + 引导 ======================= -->
-    <aside v-show="view==='create'" class="flex-1 min-h-0 overflow-y-auto custom-scroll px-8 pb-8 space-y-5">
+    <aside v-show="view==='create'" class="create-side flex-1 min-h-0 overflow-y-auto custom-scroll px-8 pb-8 space-y-5">
       <div class="pt-[86px] max-w-[440px]">
         <h2 class="text-[13px] font-medium text-slate-400 mb-3">运行环境</h2>
       <div class="grid grid-cols-1 gap-4">
@@ -2811,7 +2811,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <span class="ml-2 font-mono text-[10px] text-slate-500 truncate">
                 [[ mockGen.entry ? (mockGen.form.method + ' ' + mockGen.form.path) : 'mock-preview.json' ]]
               </span>
-              <div class="ml-auto flex items-center gap-1.5">
+              <div class="ml-auto flex items-center gap-1.5 flex-wrap max-w-full">
                 <button @click="copyMockJson" :disabled="!mockGen.entry" title="一键复制"
                   class="flex items-center gap-1 px-2 py-1 rounded-md border border-white/[0.08] text-[9.5px] text-slate-400 hover:text-slate-100 disabled:opacity-40 transition-all">
                   <i data-lucide="copy" class="w-3 h-3"></i>复制
@@ -2927,7 +2927,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         <div class="rounded-xl border border-white/[0.07] bg-slate-900/70 backdrop-blur-xl overflow-hidden">
           <div class="flex items-center justify-between gap-2 flex-wrap px-4 py-3 border-b border-white/[0.06]">
             <div class="text-xs font-semibold text-slate-300">上报数据表 <span class="text-[10px] text-slate-500 font-normal">logs/tracker.log · 最新在前 · 点击行展开 Payload</span></div>
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 flex-wrap max-w-full">
               <div class="relative">
                 <i data-lucide="search" class="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-slate-600"></i>
                 <input v-model="trackerSearch" placeholder="搜索事件 / 字段 / 任务号"
@@ -3065,6 +3065,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <div class="flex-1 flex flex-col gap-1"><label for="sc-proj">放进项目</label>
               <select id="sc-proj" v-model="schedModal.project_id" class="mt-select"><option value="">默认项目</option><option v-for="p in projects" :key="p.id" :value="p.id">[[ p.name ]]</option></select></div>
           </div>
+          <div v-if="schedTzNote" class="text-[12px] text-slate-500">[[ schedTzNote ]]</div>
           <div v-if="schedModal.error" class="text-[12px] text-rose-400">[[ schedModal.error ]]</div>
           <div class="flex justify-end gap-2 pt-2">
             <button type="button" class="mt-btn" @click="schedModal.open=false">取消</button>
@@ -3346,7 +3347,7 @@ const __vueApp = createApp({
               browser: { active: 0, max: 4 }, procs: { count: 0, rss_mb: 0, cpu: 0 }, host: { load_pct: 0, cpus: 0, disk: {} },
               scheduler: { paused: false }, median_s: 0 },
       liveHist: [],
-      schedules: [], schedLoaded: false,
+      schedules: [], schedLoaded: false, schedTz: '',
       schedModal: { open: false, id: null, name: '', urls: '', freq: 'daily', time: '09:00', minute: 0, weekday: 0, project_id: '', enabled: true, busy: false, error: '' },
       aiJobs: [], aiSel: new Set(), aiQ: '', aiSort: 'score_asc', aiView: 'cloned',
       deployModal: { open: false, q: '', task_id: null, mode: '', ttl_hours: 24, bind: '127.0.0.1', busy: false, error: '' },
@@ -3489,6 +3490,12 @@ const __vueApp = createApp({
     };
   },
   computed: {
+    schedTzNote() {   // 服务器与浏览器不在同一时区时提醒: 定时按服务器时间执行
+      const m = /^([+-])(\d\d)(\d\d)$/.exec(this.schedTz || '');
+      if (!m) return '';
+      const srv = (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3]));
+      return srv === -new Date().getTimezoneOffset() ? '' : '按服务器时间执行（UTC' + m[1] + m[2] + ':' + m[3] + '）';
+    },
     liveById() { const m = {}; (this.live.tasks || []).forEach(t => { m[t.id] = t; }); return m; },
     liveBusy() { return (this.live.workers || []).filter(w => w.busy).length; },
     liveSpark() {
@@ -3856,6 +3863,10 @@ const __vueApp = createApp({
       const want = ['dashboard', 'tasks', 'task', 'browserpool', 'scheduler'].includes(this.view)
         || (this.live.tasks || []).length > 0 || (this.telemetry.queue && this.telemetry.queue.running > 0);
       if (want) this.loadLive();
+      if (this.view === 'scheduler' && !this.schedModal.open) {   // 运行记录跟着批次进度走: 有在跑的 4 秒一刷, 否则 20 秒
+        const busy = this.schedules.some(sc => (sc.runs || []).some(r => (r.pending || 0) + (r.running || 0) > 0));
+        if (!this._schedAt || Date.now() - this._schedAt > (busy ? 4000 : 20000)) { this._schedAt = Date.now(); this.loadSchedules(); }
+      }
       if (this.view === 'ai' && (this.aiJobs.some(j => j.state === 'running') || !this._aiJobsAt || Date.now() - this._aiJobsAt > 10000)) this.loadAiJobs();
       if ((this.view === 'docker' && (this.docker.list.some(c => c.status === 'starting') || !this._dockAt || Date.now() - this._dockAt > 8000))
           || (this.view === 'task' && this.docker.list.some(c => c.status === 'starting'))) { this._dockAt = Date.now(); this.loadDocker(); }
@@ -3911,7 +3922,7 @@ const __vueApp = createApp({
     async loadSchedules() {
       try {
         const r = await fetch('/api/v4/schedules');
-        if (r.ok) { this.schedules = (await r.json()).schedules || []; this.schedLoaded = true; this.iconRefresh(); }
+        if (r.ok) { const d = await r.json(); this.schedules = d.schedules || []; this.schedTz = d.tz || ''; this.schedLoaded = true; this.iconRefresh(); }
       } catch (e) { /* 下次再取 */ }
     },
     openSchedModal(sc) {
@@ -4180,6 +4191,7 @@ const __vueApp = createApp({
       this.clearCache();
     },
     async loadCfgLimits() {
+      if (!this.isPlatformAdmin()) return;
       try {
         const r = await fetch('/api/v4/admin/config-limits');
         if (!r.ok) return;
@@ -4365,6 +4377,7 @@ const __vueApp = createApp({
       if (Date.now() - this.storageAt > 60000) this.loadStorage();
     },
     async loadStorage() {
+      if (!this.isPlatformAdmin()) return;
       this.storageAt = Date.now();
       try {
         const r = await fetch('/api/v4/admin/storage');

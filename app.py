@@ -1243,6 +1243,7 @@ def v4_theme_put():
 # AI 实验室: 交互式视觉修复(playground)
 # ---------------------------------------------------------------------------
 _ai_jobs: dict = {}   # task_id -> 视觉修复进度(内存, 平台重启即清)
+_ai_jobs_lock = threading.Lock()
 
 
 @app.get("/api/v4/ai/jobs")
@@ -1282,13 +1283,19 @@ def v4_ai_playground_repair():
     if not key:
         return jsonify({"error": "未配置大模型 API Key(系统设置 → AI 供应商)"}), 400
     prompt = str(data.get("prompt") or "").strip()[:2000]
-    job = _ai_jobs.get(task_id)
-    if job and job.get("state") == "running":
-        return jsonify({"error": "这个任务正在修复中"}), 409
-    job = {"task_id": task_id, "domain": task.get("domain") or "", "state": "running",
-           "started": time.time(), "ended": None, "before": task.get("similarity_score"),
-           "after": None, "log": [], "prompt": prompt[:120], "workspace_id": task.get("workspace_id")}
-    _ai_jobs[task_id] = job
+    with _ai_jobs_lock:   # 查重与登记须原子: 双击不会起两个修复线程改同一份工程
+        job = _ai_jobs.get(task_id)
+        if job and job.get("state") == "running":
+            return jsonify({"error": "这个任务正在修复中"}), 409
+        now = time.time()
+        for tid, old in list(_ai_jobs.items()):   # 结束超过 1 小时的不再保留
+            if old["state"] != "running" and now - (old.get("ended") or now) > 3600:
+                _ai_jobs.pop(tid, None)
+        job = {"task_id": task_id, "domain": task.get("domain") or "", "state": "running",
+               "started": now, "ended": None, "before": task.get("similarity_score"),
+               "after": None, "log": [], "prompt": prompt[:120],
+               "workspace_id": task.get("workspace_id")}
+        _ai_jobs[task_id] = job
 
     def _say(stage, msg):
         bus.publish(task_id, stage, msg)
@@ -1474,6 +1481,9 @@ def v4_project_delete(project_id):
             task = db.get_task(tid)
             if task is None:
                 continue
+            if db.get_docker(tid):   # 先下线部署(容器/本机进程), 否则会留下没人管的站点和端口
+                with suppress(Exception):
+                    deployer.destroy(tid)
             ws = _workspace_of(task)
             shutil.rmtree(ws, ignore_errors=True)
             if task.get("zip_path"):
@@ -2370,14 +2380,15 @@ def v4_live():
                             "elapsed_s": round(time.time() - runs[tid]["started"], 1)})
     pending = db.list_tasks(status="pending", workspace_id=wid, limit=200)
     pending.sort(key=lambda t: t["id"])
+    queue = db.queue_counts(wid)
     return jsonify({
         "now": time.time(),
         "workers": workers,
         "tasks": tasks,
         "pending": [{"id": t["id"], "domain": t.get("domain") or "", "batch_name": t.get("batch_name") or ""}
                     for t in pending[:12]],
-        "pending_total": len(pending),
-        "queue": db.queue_counts(wid),
+        "pending_total": max(len(pending), int(queue.get("pending") or 0)),
+        "queue": queue,
         "throughput": db.throughput(wid, 60),
         "median_s": total,
         "browser": pool.stats(),
@@ -2442,11 +2453,18 @@ def _schedule_ticker():
     while True:
         time.sleep(20)
         try:
-            for sc in db.due_schedules(time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())):
+            due = db.due_schedules(time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()))
+        except Exception:  # noqa: BLE001 — 后台线程不得退出
+            continue
+        for sc in due:
+            try:
                 _fire_schedule(sc, sc.get("created_by") or "定时任务")
-        except Exception as exc:  # noqa: BLE001 — 后台线程不得退出
-            with suppress(Exception):
-                bus.publish(None, "ERROR", f"定时任务触发失败: {exc}", "ERROR")
+            except Exception as exc:  # noqa: BLE001 — 一个出错不拖累其他, 且推到下一次(不每 20 秒重试)
+                with suppress(Exception):
+                    db.update_schedule(sc["id"], next_run_at=sched_rules.next_run(
+                        sc["freq"], sc["hour"], sc["minute"], sc["weekday"]))
+                    bus.publish(None, "SCHED", f"定时任务「{sc['name']}」触发失败: {exc}", "ERROR",
+                                workspace_id=sc["workspace_id"])
 
 
 def _schedule_body(data: dict, partial: bool = False) -> tuple:
@@ -2838,13 +2856,15 @@ def v4_docker_task_action(task_id, action):
                   ttl_hours=body.get("ttl_hours", 24),
                   bind=body.get("bind", "127.0.0.1"),
                   mem_limit=body.get("mem_limit", "512m"),
-                  port=int(body.get("port") or 0))
+                  port=int(body["port"]) if str(body.get("port") or "").isdigit() else 0)
         if not body.get("async"):
             return _deploy_call(deployer.deploy, task_id, **kw)
         try:   # 异步: 参数错误立刻返回; 之后列表按 step 显示 准备工程 → 启动 → 健康检查
             deployer.precheck(task_id, kw["mode"], kw["ttl_hours"], kw["bind"], kw["mem_limit"])
         except DeployError as e:
             return jsonify({"error": str(e)}), 400
+        if deployer.step(task_id):
+            return jsonify({"error": "这个站点正在部署中"}), 409
         deployer.mark_starting(task_id, kw["mode"])
 
         def _bg():
@@ -2852,10 +2872,10 @@ def v4_docker_task_action(task_id, action):
             try:
                 deployer.deploy(task_id, **kw)
                 bus.publish(task_id, "DEPLOY", f"部署完成, 用时 {time.time() - t0:.1f}s")
-            except DeployError as e:
+            except Exception as e:  # noqa: BLE001 — 后台线程兜底
                 bus.publish(task_id, "DEPLOY", f"部署失败: {str(e)[:200]}", "ERROR")
-            except Exception as e:  # noqa: BLE001
-                db.upsert_docker(task_id, status="failed", last_error=str(e)[:600])
+                if (db.get_docker(task_id) or {}).get("status") == "starting":
+                    db.upsert_docker(task_id, status="failed", last_error=str(e)[:600])   # 不留「启动中」
         threading.Thread(target=_bg, daemon=True, name=f"deploy-{task_id}").start()
         return jsonify({"deploy": deployer.get(task_id), "async": True}), 202
     if action == "start":

@@ -473,7 +473,7 @@ class DockerDeployer:
         timings["start"] = round(time.time() - t1, 2)
         t2 = time.time()
         self._steps[task_id] = "健康检查"
-        healthy = self._health(port, HEALTH_TIMEOUT_S)
+        healthy = self._health(port, HEALTH_TIMEOUT_S) and self._alive(pid)   # 端口通但进程没了 = 别人占了端口
         timings["health"] = round(time.time() - t2, 2)
         if not healthy:
             self._kill(pid)
@@ -651,12 +651,23 @@ def _ttl_left_choice(rec: dict) -> int:
 _ROOT = Path(__file__).resolve().parents[1]
 
 
+_SECRET_ENV = ("KEY", "SECRET", "TOKEN", "PASSWORD", "PASSWD", "CREDENTIAL")
+
+
+def _site_env() -> dict:
+    """克隆站进程的环境变量: 去掉平台自己的配置与任何密钥类变量, 站点进程不该读到它们。"""
+    env = {k: v for k, v in os.environ.items()
+           if not k.upper().startswith("CLONER_") and not any(m in k.upper() for m in _SECRET_ENV)}
+    env["PYTHONUNBUFFERED"] = "1"
+    return env
+
+
 def _spawn_process(app_dir: Path, bind: str, port: int, log: Path) -> int:
     with open(log, "w", encoding="utf-8") as fh:
         p = subprocess.Popen(  # noqa: S603 — 参数固定, 无 shell
             [sys.executable, "-m", "core.deploy_runner", str(app_dir.resolve()), bind, str(int(port))],
             cwd=str(_ROOT), stdout=fh, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-            start_new_session=True, env={**os.environ, "PYTHONUNBUFFERED": "1"})
+            start_new_session=True, env=_site_env())
     return p.pid
 
 
