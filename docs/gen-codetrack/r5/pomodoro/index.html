@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>番茄钟 · 专注与休息</title>
+<style>
+  :root{
+    --paper:#F4EDE4;
+    --paper-2:#EFE6DA;
+    --tomato:#C8402F;
+    --tomato-deep:#A32E20;
+    --leaf:#6E8B5B;
+    --leaf-deep:#546E44;
+    --ink:#2B2622;
+    --ink-soft:#6B6157;
+    --track:#D9CFC2;
+    --white:#FFFFFF;
+    --accent:var(--tomato);
+    --accent-deep:var(--tomato-deep);
+    --glow:rgba(200,64,47,0.20);
+    --ease:cubic-bezier(0.4,0,0.2,1);
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;}
+  body{
+    font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Serif SC",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    background:var(--paper);
+    color:var(--ink);
+    min-height:100vh;
+    min-height:100dvh;
+    overflow-x:hidden;
+    display:flex;
+    flex-direction:column;
+    align-items:stretch;
+    position:relative;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* ---------- 背景氛围层 ---------- */
+  .bg-layer{
+    position:fixed;
+    inset:0;
+    z-index:0;
+    pointer-events:none;
+    overflow:hidden;
+  }
+  .glow{
+    position:absolute;
+    left:50%;
+    top:46%;
+    width:min(110vh,900px);
+    height:min(110vh,900px);
+    transform:translate(-50%,-50%);
+    border-radius:50%;
+    background:radial-gradient(circle at 50% 50%, var(--glow) 0%, rgba(200,64,47,0.06) 42%, rgba(200,64,47,0) 68%);
+    transition:background 600ms var(--ease);
+    filter:blur(6px);
+    animation:glowBreathe 9s ease-in-out infinite;
+  }
+  @keyframes glowBreathe{
+    0%,100%{transform:translate(-50%,-50%) scale(1);opacity:.9;}
+    50%{transform:translate(-50%,-50%) scale(1.06);opacity:1;}
+  }
+  .noise{
+    position:absolute;
+    inset:0;
+    opacity:0.5;
+    mix-blend-mode:multiply;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='180' height='180' filter='url(%23n)' opacity='0.055'/></svg>");
+    background-size:180px 180px;
+  }
+  .vignette{
+    position:absolute;
+    inset:0;
+    background:radial-gradient(ellipse at 50% 42%, rgba(255,255,255,0) 40%, rgba(180,160,140,0.16) 100%);
+  }
+
+  /* ---------- 布局 ---------- */
+  .shell{
+    position:relative;
+    z-index:1;
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:space-between;
+    padding:clamp(16px,3vh,34px) clamp(16px,4vw,48px) clamp(14px,2.6vh,28px);
+    gap:clamp(10px,2vh,22px);
+    width:100%;
+    max-width:1100px;
+    margin:0 auto;
+  }
+
+  /* 顶部 */
+  .top{
+    width:100%;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:16px;
+  }
+  .brand{
+    display:flex;
+    align-items:center;
+    gap:11px;
+  }
+  .brand-mark{
+    width:26px;height:26px;
+    flex:0 0 auto;
+    position:relative;
+  }
+  .brand-mark svg{display:block;width:100%;height:100%;}
+  .brand-title{
+    font-family:"Songti SC","Noto Serif SC",Georgia,"Times New Roman",serif;
+    font-size:clamp(17px,2.2vw,22px);
+    font-weight:600;
+    letter-spacing:0.06em;
+    color:var(--ink);
+  }
+  .brand-sub{
+    font-size:11px;
+    letter-spacing:0.22em;
+    color:var(--ink-soft);
+    text-transform:uppercase;
+    margin-top:2px;
+  }
+  .clock-tag{
+    font-family:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+    font-size:12px;
+    letter-spacing:0.1em;
+    color:var(--ink-soft);
+    border:1px solid var(--track);
+    border-radius:999px;
+    padding:6px 13px;
+    background:rgba(255,255,255,0.42);
+    white-space:nowrap;
+  }
+
+  /* 主体 */
+  .stage{
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:clamp(14px,2.6vh,30px);
+    width:100%;
+    min-height:0;
+  }
+
+  .dial-wrap{
+    position:relative;
+    width:min(62vh,520px);
+    width:min(62dvh,520px,86vw);
+    aspect-ratio:1/1;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    flex:0 0 auto;
+  }
+  .dial{
+    position:absolute;
+    inset:0;
+    width:100%;
+    height:100%;
+    display:block;
+    overflow:visible;
+  }
+  .dial-shadow{
+    filter:drop-shadow(0 18px 30px rgba(90,60,45,0.16));
+  }
+  .track{
+    fill:none;
+    stroke:var(--track);
+    stroke-linecap:round;
+    transition:stroke 600ms var(--ease);
+  }
+  .track-inner{
+    fill:none;
+    stroke:rgba(217,207,194,0.45);
+    stroke-linecap:round;
+  }
+  .progress{
+    fill:none;
+    stroke:var(--accent);
+    stroke-linecap:round;
+    transition:stroke 600ms var(--ease);
+    filter:drop-shadow(0 0 6px rgba(200,64,47,0.28));
+  }
+  .progress.leaf{filter:drop-shadow(0 0 6px rgba(110,139,91,0.30));}
+  .tip-dot{
+    fill:var(--accent);
+    stroke:var(--paper);
+    stroke-width:3;
+    transition:fill 600ms var(--ease);
+    filter:drop-shadow(0 2px 5px rgba(90,60,45,0.35));
+  }
+  .tip-leaf{
+    fill:var(--accent);
+    transition:fill 600ms var(--ease);
+  }
+  .tick{
+    stroke:rgba(107,97,87,0.22);
+    stroke-width:1.5;
+    stroke-linecap:round;
+  }
+  .tick.major{stroke:rgba(107,97,87,0.4);stroke-width:2;}
+
+  .dial-face{
+    position:absolute;
+    inset:9.5%;
+    border-radius:50%;
+    background:
+      radial-gradient(circle at 36% 28%, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.55) 26%, rgba(255,255,255,0.12) 52%, rgba(255,255,255,0) 70%),
+      radial-gradient(circle at 50% 78%, rgba(217,207,194,0.30) 0%, rgba(244,237,228,0) 62%),
+      linear-gradient(160deg, #FCF8F2 0%, #F6EFE5 46%, #EDE3D6 100%);
+    box-shadow:
+      inset 0 2px 3px rgba(255,255,255,0.9),
+      inset 0 -10px 22px rgba(170,148,124,0.16),
+      0 1px 0 rgba(255,255,255,0.7);
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:clamp(4px,1.1vh,12px);
+    padding:8%;
+    transition:box-shadow 600ms var(--ease);
+  }
+  .dial-face::after{
+    content:"";
+    position:absolute;
+    inset:0;
+    border-radius:50%;
+    border:1px solid rgba(217,207,194,0.85);
+    pointer-events:none;
+  }
+  .state-label{
+    font-size:clamp(10px,1.5vw,13px);
+    letter-spacing:0.28em;
+    text-transform:uppercase;
+    font-weight:600;
+    color:var(--accent);
+    transition:color 600ms var(--ease), opacity 180ms ease-out, transform 180ms ease-out;
+    display:flex;
+    align-items:center;
+    gap:8px;
+    white-space:nowrap;
+  }
+  .state-label .dot{
+    width:6px;height:6px;border-radius:50%;
+    background:var(--accent);
+    transition:background 600ms var(--ease);
+    animation:pulseDot 2.4s ease-in-out infinite;
+  }
+  @keyframes pulseDot{
+    0%,100%{opacity:.45;transform:scale(.85);}
+    50%{opacity:1;transform:scale(1.15);}
+  }
+  .state-label.swap{opacity:0;transform:translateY(-5px);}
+
+  .time{
+    font-family:ui-monospace,"SFMono-Regular",Menlo,Consolas,"Liberation Mono",monospace;
+    font-size:clamp(58px,13.5vw,124px);
+    font-size:clamp(58px,min(13.5vw,17vh),124px);
+    font-weight:500;
+    letter-spacing:-0.02em;
+    line-height:0.98;
+    color:var(--ink);
+    font-variant-numeric:tabular-nums;
+    font-feature-settings:"tnum" 1;
+    transition:color 600ms var(--ease);
+    display:flex;
+    align-items:baseline;
+    justify-content:center;
+    transform-origin:center;
+    will-change:transform;
+  }
+  .time .colon{
+    display:inline-block;
+    width:0.44em;
+    text-align:center;
+    transform:translateY(-0.04em);
+    color:var(--ink);
+    opacity:0.75;
+    transition:color 600ms var(--ease);
+  }
+  .time .grp{display:inline-block;width:2ch;text-align:center;}
+  .time.final{
+    color:var(--tomato);
+    animation:breathe 2.6s ease-in-out infinite;
+  }
+  .time.final .colon{color:var(--tomato);}
+  @keyframes breathe{
+    0%,100%{opacity:1;transform:scale(1);}
+    50%{opacity:0.62;transform:scale(1.018);}
+  }
+  .time.pulse{animation:endPulse 400ms ease-in-out 1;}
+  @keyframes endPulse{
+    0%{transform:scale(1);}
+    50%{transform:scale(1.06);}
+    100%{transform:scale(1);}
+  }
+
+  .rounds{
+    display:flex;
+    align-items:center;
+    gap:7px;
+    margin-top:clamp(2px,0.8vh,8px);
+    height:14px;
+  }
+  .round-dot{
+    width:11px;height:11px;
+    border-radius:50%;
+    background:transparent;
+    border:1.5px solid var(--track);
+    position:relative;
+    transition:background 380ms var(--ease), border-color 380ms var(--ease), transform 380ms var(--ease), box-shadow 380ms var(--ease);
+  }
+  .round-dot.on{
+    background:var(--tomato);
+    border-color:var(--tomato-deep);
+    box-shadow:inset -2px -2px 3px rgba(0,0,0,0.16), inset 2px 2px 3px rgba(255,255,255,0.42);
+    transform:scale(1.06);
+  }
+  .round-dot.on::after{
+    content:"";
+    position:absolute;
+    left:50%;top:-3px;
+    width:5px;height:4px;
+    transform:translateX(-50%) rotate(-18deg);
+    background:var(--leaf);
+    border-radius:60% 10% 60% 10%;
+    opacity:.9;
+  }
+  .round-dot.just{animation:dotPop 520ms var(--ease);}
+  @keyframes dotPop{
+    0%{transform:scale(0.4);}
+    55%{transform:scale(1.4);}
+    100%{transform:scale(1.06);}
+  }
+  .rounds-label{
+    font-size:11px;
+    letter-spacing:0.16em;
+    color:var(--ink-soft);
+    margin-left:6px;
+    font-variant-numeric:tabular-nums;
+    white-space:nowrap;
+  }
+
+  /* 按钮 */
+  .controls{
+    display:flex;
+    gap:clamp(8px,1.4vw,14px);
+    width:min(100%,560px);
+    justify-content:center;
+  }
+  .btn{
+    flex:1 1 0;
+    min-width:0;
+    position:relative;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:9px;
+    padding:clamp(11px,1.6vh,15px) clamp(8px,1.6vw,18px);
+    font-family:inherit;
+    font-size:clamp(13px,1.5vw,15px);
+    font-weight:600;
+    letter-spacing:0.04em;
+    border-radius:13px;
+    border:1px solid transparent;
+    cursor:pointer;
+    user-select:none;
+    -webkit-tap-highlight-color:transparent;
+    transition:transform 140ms ease-out, box-shadow 180ms ease-out, background 180ms var(--ease), border-color 180ms var(--ease), color 180ms var(--ease);
+    white-space:nowrap;
+    overflow:hidden;
+  }
+  .btn:active{transform:translateY(1px) scale(0.985);}
+  .btn:focus-visible{outline:2px solid var(--accent);outline-offset:3px;}
+  .btn-primary{
+    background:linear-gradient(168deg, var(--accent) 0%, var(--accent-deep) 100%);
+    color:#FFF7F2;
+    box-shadow:0 8px 18px -8px rgba(163,46,32,0.7), inset 0 1px 0 rgba(255,255,255,0.28), inset 0 -2px 0 rgba(0,0,0,0.12);
+    transition:transform 140ms ease-out, box-shadow 180ms ease-out, background 600ms var(--ease);
+  }
+  .btn-primary:hover{box-shadow:0 12px 24px -10px rgba(163,46,32,0.8), inset 0 1px 0 rgba(255,255,255,0.32), inset 0 -2px 0 rgba(0,0,0,0.12);}
+  .btn-ghost{
+    background:linear-gradient(170deg, rgba(255,255,255,0.92) 0%, rgba(246,239,229,0.92) 100%);
+    color:var(--ink);
+    border-color:var(--track);
+    box-shadow:0 4px 12px -8px rgba(90,60,45,0.5), inset 0 1px 0 rgba(255,255,255,0.9);
+  }
+  .btn-ghost:hover{
+    border-color:#C6B9A8;
+    background:linear-gradient(170deg,#FFFFFF 0%, #F8F2E9 100%);
+  }
+  .btn .kbd{
+    font-family:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+    font-size:10px;
+    line-height:1;
+    padding:3px 5px;
+    border-radius:4px;
+    letter-spacing:0.04em;
+    opacity:0.85;
+    flex:0 0 auto;
+  }
+  .btn-primary .kbd{
+    background:rgba(255,255,255,0.18);
+    border:1px solid rgba(255,255,255,0.3);
+    color:#FFF1EA;
+  }
+  .btn-ghost .kbd{
+    background:rgba(217,207,194,0.5);
+    border:1px solid rgba(198,185,168,0.7);
+    color:var(--ink-soft);
+  }
+  .btn-icon{
+    width:15px;height:15px;flex:0 0 auto;
+    display:block;
+  }
+  .btn .lbl{overflow:hidden;text-overflow:ellipsis;}
+  .swap-icon{transition:transform 600ms var(--ease);}
+  .btn-swap:hover .swap-icon{transform:rotate(180deg);}
+
+  /* 底部 */
+  .bottom{
+    width:100%;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+    padding-top:clamp(4px,1vh,10px);
+    border-top:1px solid rgba(217,207,194,0.75);
+  }
+  .hint{
+    font-size:11.5px;
+    letter-spacing:0.04em;
+    color:var(--ink-soft);
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+    line-height:1.7;
+  }
+  .hint .k{
+    font-family:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+    font-size:10.5px;
+    padding:2px 6px;
+    border-radius:4px;
+    background:rgba(255,255,255,0.7);
+    border:1px solid var(--track);
+    color:var(--ink);
+    margin-right:3px;
+    display:inline-block;
+  }
+  .sound-toggle{
+    display:flex;
+    align-items:center;
+    gap:7px;
+    font-family:inherit;
+    font-size:11.5px;
+    letter-spacing:0.06em;
+    color:var(--ink-soft);
+    background:rgba(255,255,255,0.55);
+    border:1px solid var(--track);
+    border-radius:999px;
+    padding:6px 12px;
+    cursor:pointer;
+    transition:color 180ms ease, border-color 180ms ease, background 180ms ease;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .sound-toggle:hover{color:var(--ink);border-color:#C6B9A8;background:#fff;}
+  .sound-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+  .sound-toggle svg{width:13px;height:13px;display:block;}
+  .sound-toggle .off-mark{display:none;}
+  .sound-toggle.muted .off-mark{display:block;}
+  .sound-toggle.muted .on-mark{display:none;}
+  .sound-toggle.muted{color:#A79C8F;}
+
+  /* 页面内提示条 */
+  .toast{
+    position:fixed;
+    left:50%;
+    bottom:clamp(18px,4vh,44px);
+    transform:translate(-50%,20px);
+    z-index:20;
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:12px 20px;
+    border-radius:999px;
+    background:linear-gradient(170deg,#FFFFFF 0%,#F7F0E6 100%);
+    border:1px solid var(--track);
+    box-shadow:0 16px 34px -16px rgba(90,60,45,0.55), inset 0 1px 0 #fff;
+    font-size:13px;
+    font-weight:600;
+    letter-spacing:0.05em;
+    color:var(--ink);
+    opacity:0;
+    pointer-events:none;
+    transition:opacity 260ms var(--ease), transform 320ms var(--ease);
+    max-width:calc(100vw - 32px);
+  }
+  .toast.show{opacity:1;transform:translate(-50%,0);}
+  .toast .t-dot{
+    width:9px;height:9px;border-radius:50%;
+    background:var(--accent);
+    flex:0 0 auto;
+    box-shadow:0 0 0 3px rgba(200,64,47,0.16);
+  }
+
+  /* 响应式 */
+  @media (max-width:640px){
+    .shell{padding:14px 16px 16px;gap:10px;}
+    .brand-sub{display:none;}
+    .clock-tag{font-size:10.5px;padding:5px 10px;letter-spacing:0.06em;}
+    .dial-wrap{width:min(78vw,min(52dvh,400px));}
+    .controls{gap:7px;}
+    .btn{padding:12px 6px;font-size:12.5px;gap:5px;border-radius:11px;}
+    .btn .kbd{display:none;}
+    .btn-icon{width:13px;height:13px;}
+    .bottom{justify-content:center;text-align:center;}
+    .hint{justify-content:center;font-size:11px;gap:6px;}
+  }
+  @media (max-width:400px){
+    .round-dot{width:9px;height:9px;}
+    .btn .lbl{font-size:12px;}
+  }
+  @media (max-height:680px) and (min-width:641px){
+    .dial-wrap{width:min(54dvh,440px);}
+    .shell{padding-top:12px;padding-bottom:12px;gap:8px;}
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    .glow{animation:none;}
+    .state-label .dot{animation:none;opacity:.9;}
+    .time.final{animation:none;opacity:.85;}
+    .time.pulse{animation:none;}
+    .round-dot.just{animation:none;}
+    .btn-swap:hover .swap-icon{transform:none;}
+    *{transition-duration:120ms !important;}
+  }
+</style>
+</head>
+<body>
+
+<div class="bg-layer" aria-hidden="true">
+  <div class="glow" id="glow"></div>
+  <div class="vignette"></div>
+  <div class="noise"></div>
+</div>
+
+<div class="shell">
+  <header class="top">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32">
+          <defs>
+            <radialGradient id="bmGrad" cx="36%" cy="30%" r="78%">
+              <stop offset="0%" stop-color="#E4634F"/>
+              <stop offset="58%" stop-color="#C8402F"/>
+              <stop offset="100%" stop-color="#9C2C1E"/>
+            </radialGradient>
+          </defs>
+          <circle cx="16" cy="18" r="11.5" fill="url(#bmGrad)"/>
+          <ellipse cx="12" cy="13.5" rx="3.6" ry="2.4" fill="#fff" opacity="0.34" transform="rotate(-28 12 13.5)"/>
+          <path d="M16 7.2c-2.6-2-5.4-1.6-6.6-.4 1.9.2 3.1.9 3.9 1.7-1.6-.4-3.2-.2-4.2.6 1.9.5 3.3 1.3 4.2 2.1h5.4c.9-.8 2.3-1.6 4.2-2.1-1-.8-2.6-1-4.2-.6.8-.8 2-1.5 3.9-1.7-1.2-1.2-4-1.6-6.6.4z" fill="#6E8B5B"/>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-title">番茄钟</div>
+        <div class="brand-sub">Focus · Rest</div>
+      </div>
+    </div>
+    <div class="clock-tag" id="clockTag">就绪 · 25 分钟专注</div>
+  </header>
+
+  <main class="stage">
+    <div class="dial-wrap">
+      <svg class="dial dial-shadow" id="dial" viewBox="0 0 400 400" role="img" aria-label="环形倒计时进度">
+        <g id="ticks"></g>
+        <circle class="track-inner" cx="200" cy="200" r="176" stroke-width="1.5" stroke-dasharray="2 8" opacity="0.7"/>
+        <circle class="track" id="trackRing" cx="200" cy="200" r="158" stroke-width="16"/>
+        <circle class="progress" id="progressRing" cx="200" cy="200" r="158" stroke-width="16"
+                transform="rotate(-90 200 200)" stroke-dasharray="992.743" stroke-dashoffset="0"/>
+        <g id="tipGroup">
+          <circle class="tip-dot" id="tipDot" cx="200" cy="42" r="9"/>
+          <path class="tip-leaf" id="tipLeaf" d="M200 33.5c-2.6-2.4-5.6-2.2-7-1 2 .2 3.3.9 4.2 1.7-1.7-.4-3.4-.2-4.5.6 2 .5 3.5 1.3 4.4 2.1h5.8c.9-.8 2.4-1.6 4.4-2.1-1.1-.8-2.8-1-4.5-.6.9-.8 2.2-1.5 4.2-1.7-1.4-1.2-4.4-1.4-7 1z"/>
+        </g>
+      </svg>
+
+      <div class="dial-face">
+        <div class="state-label" id="stateLabel"><span class="dot"></span><span id="stateText">专注</span></div>
+        <div class="time" id="timeDisplay" aria-live="off">
+          <span class="grp" id="mm">25</span><span class="colon">:</span><span class="grp" id="ss">00</span>
+        </div>
+        <div class="rounds" id="rounds" aria-label="已完成的番茄数">
+          <span class="round-dot" data-i="0"></span>
+          <span class="round-dot" data-i="1"></span>
+          <span class="round-dot" data-i="2"></span>
+          <span class="round-dot" data-i="3"></span>
+          <span class="rounds-label" id="roundsLabel">0 / 4</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button class="btn btn-primary" id="btnStart" type="button" aria-label="开始计时">
+        <svg class="btn-icon" id="startIcon" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M4 2.6v10.8c0 .5.55.8.98.55l8.4-5.4a.65.65 0 0 0 0-1.1l-8.4-5.4A.65.65 0 0 0 4 2.6z" fill="currentColor"/>
+        </svg>
+        <span class="lbl" id="startLabel">开始</span>
+        <span class="kbd">Space</span>
+      </button>
+
+      <button class="btn btn-ghost" id="btnReset" type="button" aria-label="重置计时">
+        <svg class="btn-icon" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M8 2.2a5.8 5.8 0 1 0 5.55 7.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+          <path d="M8 2.2 5.6 4.4 8 6.6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="lbl">重置</span>
+        <span class="kbd">R</span>
+      </button>
+
+      <button class="btn btn-ghost btn-swap" id="btnSwap" type="button" aria-label="切换专注与休息">
+        <svg class="btn-icon swap-icon" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M2.4 5.6h9.2M9.2 3.2l2.4 2.4-2.4 2.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M13.6 10.4H4.4M6.8 8l-2.4 2.4L6.8 12.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="lbl" id="swapLabel">休息</span>
+      </button>
+    </div>
+  </main>
+
+  <footer class="bottom">
+    <div class="hint">
+      <span><span class="k">Space</span>开始 / 暂停</span>
+      <span><span class="k">R</span>重置</span>
+      <span>点击按钮或使用键盘操作</span>
+    </div>
+    <button class="sound-toggle" id="btnSound" type="button" aria-pressed="true">
+      <svg class="on-mark" viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M2.5 6h2.2L8 3.2v9.6L4.7 10H2.5z" fill="currentColor"/>
+        <path d="M10.4 5.6a3.2 3.2 0 0 1 0 4.8M12.2 3.8a5.8 5.8 0 0 1 0 8.4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+      </svg>
+      <svg class="off-mark" viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M2.5 6h2.2L8 3.2v9.6L4.7 10H2.5z" fill="currentColor"/>
+        <path d="M10.6 6.2l3.2 3.6M13.8 6.2l-3.2 3.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+      </svg>
+      <span id="soundLabel">提示音开</span>
+    </button>
+  </footer>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite">
+  <span class="t-dot"></span><span id="toastText">专注结束</span>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var FOCUS_MS = 25 * 60 * 1000;
+  var REST_MS  = 5 * 60 * 1000;
+  var RING_R   = 158;
+  var CIRC     = 2 * Math.PI * RING_R;
+  var ROUNDS_TOTAL = 4;
+
+  var state = {
+    mode: "focus",
+    remaining: FOCUS_MS,
+    running: false,
+    completed: 0,
+    soundOn: true
+  };
+
+  var lastTs = 0;
+  var rafId = null;
+  var endTimer = null;
+  var toastTimer = null;
+  var audioCtx = null;
+
+  var el = {
+    glow: document.getElementById("glow"),
+    clockTag: document.getElementById("clockTag"),
+    dial: document.getElementById("dial"),
+    ticks: document.getElementById("ticks"),
+    progress: document.getElementById("progressRing"),
+    tipDot: document.getElementById("tipDot"),
+    tipLeaf: document.getElementById("tipLeaf"),
+    tipGroup: document.getElementById("tipGroup"),
+    stateLabel: document.getElementById("stateLabel"),
+    stateText: document.getElementById("stateText"),
+    time: document.getElementById("timeDisplay"),
+    mm: document.getElementById("mm"),
+    ss: document.getElementById("ss"),
+    rounds: document.getElementById("rounds"),
+    roundsLabel: document.getElementById("roundsLabel"),
+    btnStart: document.getElementById("btnStart"),
+    startLabel: document.getElementById("startLabel"),
+    startIcon: document.getElementById("startIcon"),
+    btnReset: document.getElementById("btnReset"),
+    btnSwap: document.getElementById("btnSwap"),
+    swapLabel: document.getElementById("swapLabel"),
+    btnSound: document.getElementById("btnSound"),
+    soundLabel: document.getElementById("soundLabel"),
+    toast: document.getElementById("toast"),
+    toastText: document.getElementById("toastText")
+  };
+
+  var dots = Array.prototype.slice.call(el.rounds.querySelectorAll(".round-dot"));
+
+  /* ---------- 刻度 ---------- */
+  (function buildTicks(){
+    var NS = "http://www.w3.org/2000/svg";
+    var frag = document.createDocumentFragment();
+    for (var i = 0; i < 60; i++){
+      var major = i % 5 === 0;
+      var angle = (i / 60) * Math.PI * 2 - Math.PI / 2;
+      var r1 = 138;
+      var r2 = major ? 128 : 132;
+      var line = document.createElementNS(NS, "line");
+      line.setAttribute("x1", (200 + Math.cos(angle) * r1).toFixed(2));
+      line.setAttribute("y1", (200 + Math.sin(angle) * r1).toFixed(2));
+      line.setAttribute("x2", (200 + Math.cos(angle) * r2).toFixed(2));
+      line.setAttribute("y2", (200 + Math.sin(angle) * r2).toFixed(2));
+      line.setAttribute("class", major ? "tick major" : "tick");
+      frag.appendChild(line);
+    }
+    el.ticks.appendChild(frag);
+  })();
+
+  /* ---------- 主题 ---------- */
+  function applyTheme(){
+    var isFocus = state.mode === "focus";
+    var accent = isFocus ? "#C8402F" : "#6E8B5B";
+    var accentDeep = isFocus ? "#A32E20" : "#546E44";
+    var glowColor = isFocus ? "rgba(200,64,47,0.20)" : "rgba(110,139,91,0.20)";
+    var glowMid = isFocus ? "rgba(200,64,47,0.06)" : "rgba(110,139,91,0.06)";
+    var glowEnd = isFocus ? "rgba(200,64,47,0)" : "rgba(110,139,91,0)";
+
+    document.documentElement.style.setProperty("--accent", accent);
+    document.documentElement.style.setProperty("--accent-deep", accentDeep);
+    el.glow.style.background = "radial-gradient(circle at 50% 50%, " + glowColor + " 0%, " + glowMid + " 42%, " + glowEnd + " 68%)";
+    el.progress.classList.toggle("leaf", !isFocus);
+    el.stateText.textContent = isFocus ? "专注" : "休息";
+    el.swapLabel.textContent = isFocus ? "休息" : "专注";
+    el.btnSwap.setAttribute("aria-label", isFocus ? "切换到休息" : "切换到专注");
+    el.clockTag.textContent = state.running
+      ? (isFocus ? "专注进行中 · 25 分钟" : "休息进行中 · 5 分钟")
+      : (isFocus ? "就绪 · 25 分钟专注" : "就绪 · 5 分钟休息");
+    updateFinalState();
+  }
+
+  /* ---------- 渲染 ---------- */
+  function pad(n){ return n < 10 ? "0" + n : String(n); }
+
+  function render(){
+    var total = state.mode === "focus" ? FOCUS_MS : REST_MS;
+    var rem = Math.max(0, state.remaining);
+    var secs = Math.ceil(rem / 1000);
+    var mm = Math.floor(secs / 60);
+    var ss = secs % 60;
+
+    el.mm.textContent = pad(mm);
+    el.ss.textContent = pad(ss);
+
+    var ratio = total > 0 ? Math.min(1, Math.max(0, rem / total)) : 0;
+    var offset = CIRC * (1 - ratio);
+    el.progress.setAttribute("stroke-dashoffset", offset.toFixed(2));
+
+    var angle = -Math.PI / 2 + ratio * Math.PI * 2;
+    var cx = 200 + Math.cos(angle) * RING_R;
+    var cy = 200 + Math.sin(angle) * RING_R;
+    el.tipDot.setAttribute("cx", cx.toFixed(2));
+    el.tipDot.setAttribute("cy", cy.toFixed(2));
+    el.tipLeaf.setAttribute("transform", "translate(" + (cx - 200).toFixed(2) + "," + (cy - 200).toFixed(2) + ")");
+
+    updateFinalState();
+  }
+
+  function updateFinalState(){
+    var isFinal = state.mode === "focus" && state.remaining <= 60000 && state.remaining > 0;
+    if (isFinal){
+      if (!el.time.classList.contains("final")) el.time.classList.add("final");
+    } else {
+      el.time.classList.remove("final");
+    }
+  }
+
+  function renderRounds(){
+    dots.forEach(function(d, i){
+      d.classList.toggle("on", i < state.completed);
+    });
+    el.roundsLabel.textContent = Math.min(state.completed, ROUNDS_TOTAL) + " / " + ROUNDS_TOTAL;
+  }
+
+  /* ---------- 计时循环 ---------- */
+  function loop(ts){
+    if (!state.running) return;
+    if (!lastTs) lastTs = ts;
+    var dt = ts - lastTs;
+    lastTs = ts;
+    if (dt > 0){
+      state.remaining -= dt;
+      if (state.remaining <= 0){
+        state.remaining = 0;
+        render();
+        finish();
+        return;
+      }
+      render();
+    }
+    rafId = requestAnimationFrame(loop);
+  }
+
+  function startLoop(){
+    cancelAnimationFrame(rafId);
+    lastTs = 0;
+    rafId = requestAnimationFrame(loop);
+  }
+
+  function stopLoop(){
+    cancelAnimationFrame(rafId);
+    rafId = null;
+    lastTs = 0;
+  }
+
+  /* ---------- 控制 ---------- */
+  function setRunning(on){
+    if (on && state.remaining <= 0) return;
+    state.running = on;
+    if (on){
+      startLoop();
+    } else {
+      stopLoop();
+    }
+    updateStartButton();
+    applyTheme();
+  }
+
+  function updateStartButton(){
+    if (state.running){
+      el.startLabel.textContent = "暂停";
+      el.btnStart.setAttribute("aria-label", "暂停计时");
+      el.startIcon.innerHTML = '<rect x="3.6" y="2.8" width="3.4" height="10.4" rx="1.1" fill="currentColor"/><rect x="9" y="2.8" width="3.4" height="10.4" rx="1.1" fill="currentColor"/>';
+    } else {
+      el.startLabel.textContent = state.remaining < (state.mode === "focus" ? FOCUS_MS : REST_MS) ? "继续" : "开始";
+      el.btnStart.setAttribute("aria-label", "开始计时");
+      el.startIcon.innerHTML = '<path d="M4 2.6v10.8c0 .5.55.8.98.55l8.4-5.4a.65.65 0 0 0 0-1.1l-8.4-5.4A.65.65 0 0 0 4 2.6z" fill="currentColor"/>';
+    }
+  }
+
+  function toggleRun(){
+    if (state.running){
+      setRunning(false);
+    } else {
+      if (state.remaining <= 0){
+        state.remaining = state.mode === "focus" ? FOCUS_MS : REST_MS;
+        render();
+      }
+      setRunning(true);
+    }
+  }
+
+  function reset(){
+    stopLoop();
+    state.running = false;
+    state.remaining = state.mode === "focus" ? FOCUS_MS : REST_MS;
+    render();
+    updateStartButton();
+    applyTheme();
+    hideToast();
+  }
+
+  function switchMode(){
+    stopLoop();
+    state.running = false;
+    state.mode = state.mode === "focus" ? "rest" : "focus";
+    state.remaining = state.mode === "focus" ? FOCUS_MS : REST_MS;
+    el.stateLabel.classList.add("swap");
+    window.setTimeout(function(){ el.stateLabel.classList.remove("swap"); }, 180);
+    render();
+    updateStartButton();
+    applyTheme();
+    hideToast();
+  }
+
+  /* ---------- 结束 ---------- */
+  function finish(){
+    stopLoop();
+    state.running = false;
+    var wasFocus = state.mode === "focus";
+
+    if (wasFocus){
+      if (state.completed < ROUNDS_TOTAL){
+        state.completed += 1;
+        renderRounds();
+        var d = dots[state.completed - 1];
+        if (d){
+          d.classList.remove("just");
+          void d.offsetWidth;
+          d.classList.add("just");
+        }
+      } else {
+        state.completed = 0;
+        renderRounds();
+      }
+    }
+
+    el.time.classList.remove("pulse");
+    void el.time.offsetWidth;
+    el.time.classList.add("pulse");
+
+    playChime(wasFocus);
+
+    showToast(wasFocus ? "专注结束 · 点亮第 " + state.completed + " 颗番茄" : "休息结束 · 回到专注");
+
+    updateStartButton();
+    applyTheme();
+    render();
+
+    window.clearTimeout(endTimer);
+    endTimer = window.setTimeout(function(){
+      el.time.classList.remove("pulse");
+    }, 460);
+  }
+
+  /* ---------- 提示条 ---------- */
+  function showToast(text){
+    el.toastText.textContent = text;
+    el.toast.classList.add("show");
+    window.clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(hideToast, 3600);
+  }
+  function hideToast(){
+    el.toast.classList.remove("show");
+  }
+
+  /* ---------- 音效 ---------- */
+  function ensureAudio(){
+    if (!state.soundOn) return null;
+    try {
+      if (!audioCtx){
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return null;
+        audioCtx = new AC();
+      }
+      if (audioCtx.state === "suspended") audioCtx.resume();
+      return audioCtx;
+    } catch (e){
+      return null;
+    }
+  }
+
+  function playChime(isFocus){
+    var ctx = ensureAudio();
+    if (!ctx) return;
+    try {
+      var now = ctx.currentTime;
+      var freqs = isFocus ? [523.25, 783.99] : [659.25, 493.88];
+      freqs.forEach(function(f, i){
+        var t0 = now + i * 0.17;
+        var osc = ctx.createOscillator();
+        var gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(f, t0);
+        gain.gain.setValueAtTime(0.0001, t0);
+        gain.gain.exponentialRampToValueAtTime(0.16, t0 + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.42);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(t0);
+        osc.stop(t0 + 0.46);
+      });
+    } catch (e){ /* 静默失败 */ }
+  }
+
+  /* ---------- 事件 ---------- */
+  el.btnStart.addEventListener("click", function(){
+    ensureAudio();
+    toggleRun();
+  });
+
+  el.btnReset.addEventListener("click", function(){
+    reset();
+  });
+
+  el.btnSwap.addEventListener("click", function(){
+    ensureAudio();
+    switchMode();
+  });
+
+  el.btnSound.addEventListener("click", function(){
+    state.soundOn = !state.soundOn;
+    el.btnSound.classList.toggle("muted", !state.soundOn);
+    el.btnSound.setAttribute("aria-pressed", String(state.soundOn));
+    el.soundLabel.textContent = state.soundOn ? "提示音开" : "提示音关";
+    if (state.soundOn) playChime(true);
+  });
+
+  document.addEventListener("keydown", function(e){
+    var tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : "";
+    if (tag === "input" || tag === "textarea" || (e.target && e.target.isContentEditable)) return;
+
+    if (e.code === "Space" || e.key === " " || e.key === "Spacebar"){
+      e.preventDefault();
+      ensureAudio();
+      toggleRun();
+    } else if (e.key === "r" || e.key === "R"){
+      e.preventDefault();
+      reset();
+    }
+  });
+
+  /* ---------- 初始化 ---------- */
+  render();
+  renderRounds();
+  updateStartButton();
+  applyTheme();
+
+  window.addEventListener("resize", function(){
+    render();
+  });
+})();
+</script>
+</body>
+</html>

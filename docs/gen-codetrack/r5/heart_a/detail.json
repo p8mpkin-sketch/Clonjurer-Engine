@@ -1,0 +1,158 @@
+{
+  "score": 91.4,
+  "scoring": "req-fit-v1",
+  "raw": 91.4,
+  "coverage": 0.923,
+  "health": 1.0,
+  "design": 0.8,
+  "caps": [],
+  "items": [
+    {
+      "id": "c1",
+      "text": "页面中央有一颗爱心图形，占据视口高度约 40%~50%，不是缩在角落的小图标",
+      "type": "content",
+      "must": true,
+      "verdict": "yes",
+      "evidence": "桌面截图中爱心位于视口中央，高度约 350px/900px ≈ 39%~40%，宽度居中，不是角落小图标；手机端同样居中且占比合理。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c2",
+      "text": "爱心自动持续跳动，节奏有明显快慢起伏（收缩快、舒张慢），不是匀速缩放",
+      "type": "motion",
+      "must": true,
+      "verdict": "yes",
+      "evidence": "图1到图2爱心尺寸明显变化（图2略大），体检数据显示 7 个动画含 beat/beatFast，相邻帧变化占比 0.0097~0.0157 持续变化；文案写明「收缩急促，舒张悠长」，画面呈现非匀速缩放。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c3",
+      "text": "爱心有体积感：可见渐变填充、高光与柔和投影，不是纯色平面形状",
+      "type": "visual",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "爱心可见左上高光斑、右下暗部与柔和外发光/投影，填充为渐变红，非纯色平面。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c4",
+      "text": "爱心周围有随每次收缩向外扩散并淡出的脉冲环，且与心跳同拍",
+      "type": "motion",
+      "must": false,
+      "verdict": "partial",
+      "evidence": "图1、图2中爱心外圈有淡淡的圆形环线，图4中可见虚线圆环；但静置帧里环的扩散与淡出过程不明显，难以确认每次收缩都有一圈向外扩散并淡出的脉冲环，仅能确认存在环状装饰。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c5",
+      "text": "页面下方有一条心电波形，波形尖峰与爱心收缩时刻对齐并持续推进",
+      "type": "motion",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "页面底部有 ECG·II 波形条，图1、图2、图3中尖峰位置随时间右移（图1尖峰在右侧，图2尖峰分布变化，图3尖峰在中间偏右），说明波形持续推进；尖峰与心跳同拍可从图4加速后尖峰变密佐证。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c6",
+      "text": "页面显示 BPM 读数与累计跳动次数，数字随每次搏动递增",
+      "type": "content",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "右上角显示 BPM 38次/分 与 累计跳动 1次→2次（图1→图2），图4变为 57次/分、5次，数字随搏动递增。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c7",
+      "text": "鼠标悬停在爱心上时，心跳节奏变快且脉冲环变亮，移开后恢复原节奏",
+      "type": "interaction",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "图4为自动操作后截图，状态由「窦性节律」变为「节律加快」，BPM 由 38 升至 57，爱心外圈出现更亮的虚线环；说明悬停/交互会加速心跳并增强环亮度。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c8",
+      "text": "点击爱心时爱心瞬间放大并出现一圈更亮的脉冲环，随后回到正常跳动",
+      "type": "interaction",
+      "must": false,
+      "verdict": "partial",
+      "evidence": "体检数据记录点击后引出了 shockOut 动画且文字变化（累计跳动增加），但截图未捕捉到点击瞬间的放大与更亮脉冲环，只能确认点击有响应，无法从画面确认「瞬间放大+更亮环」的视觉效果。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c9",
+      "text": "页面为深色背景，爱心主色为暖红，整体配色不超过 6 种主色且无紫色渐变或霓虹发光",
+      "type": "visual",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "背景为深黑红渐变，爱心为暖红/粉红，文字为米白与暗红，整体配色克制，无紫色渐变或霓虹发光。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c10",
+      "text": "页面内容撑满整个视口，标题、爱心、波形与读数分布合理，无大片空白",
+      "type": "visual",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "桌面端标题在左上、读数在右上、爱心居中、波形贴底，内容撑满 1440×900 视口，无横向溢出；手机端 390px 下各区块纵向排列，无溢出。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c11",
+      "text": "页面不依赖外部网络资源，断网打开仍能正常显示与跳动",
+      "type": "content",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "体检数据显示外网资源请求为 0，运行时报错无，页面正常显示与跳动。",
+      "gate": null,
+      "soft": false
+    }
+  ],
+  "review_mode": "vision",
+  "summary": "",
+  "design_comment": "整体完成度高：深色心电监测风格统一，爱心有高光与体积感，ECG 波形、BPM、累计跳动与状态文案形成完整的「监测仪」叙事，交互反馈（节律加快、状态切换）也有呼应。扣分点在于脉冲环的扩散淡出在静置帧中不够明显，点击重击的视觉冲击未被截图证实，手机端底部提示条略显拥挤。",
+  "issues": [
+    {
+      "severity": "mid",
+      "problem": "脉冲环在静置截图中几乎不可见，只有淡淡的圆环线，难以确认「随每次收缩向外扩散并淡出」的效果",
+      "fix": "加大脉冲环的初始透明度与扩散半径，并延长淡出时间，使每次收缩都能看到一圈明显外扩的环"
+    },
+    {
+      "severity": "low",
+      "problem": "点击重击的瞬间放大与更亮脉冲环未被截图捕捉，视觉反馈强度存疑",
+      "fix": "提高 shockOut 动画的缩放幅度与环亮度，并适当延长持续时间，确保点击瞬间有清晰可辨的冲击感"
+    },
+    {
+      "severity": "low",
+      "problem": "手机端底部提示条（悬停/点击/空格）与 RHYTHM 文字挤在一行，空间局促",
+      "fix": "手机宽度下将提示条改为两行或缩小字号，与 RHYTHM 标签分行排列"
+    }
+  ],
+  "facts": {
+    "errors": false,
+    "blank": false,
+    "frozen": false,
+    "external": false,
+    "overflow_desktop": false,
+    "overflow_mobile": false,
+    "motion_none": false,
+    "motion_seen": true,
+    "motion_after": true,
+    "effects_none": false,
+    "interactive_n": 2,
+    "responded_n": 0,
+    "dead_n": 0,
+    "unknown_n": 2
+  },
+  "warnings": []
+}
