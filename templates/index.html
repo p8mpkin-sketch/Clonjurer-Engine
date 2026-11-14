@@ -2967,7 +2967,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <!-- 左: Schema / 字段规则配置区 -->
           <div class="rounded-2xl border border-white/[0.07] bg-slate-900/70 backdrop-blur-xl p-4 space-y-4">
             <div class="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-              <i data-lucide="braces" class="w-4 h-4 text-emerald-400"></i>Schema / 字段规则配置
+              <i data-lucide="braces" class="w-4 h-4 text-emerald-400"></i>字段规则配置
             </div>
             <div class="space-y-1.5">
               <label class="text-[10px] text-slate-500">业务场景描述(关键词决定字段: 商品 / 订单 / 用户 / 文章)</label>
@@ -3808,19 +3808,19 @@ const __vueApp = createApp({
     activeTitle() {
       const m = {
         dashboard: ['首页', '粘贴网址开始克隆, 查看进行中的任务与项目'],
-        create: ['新建克隆', '批量目标站点 · 引擎选项 · 仿真交互配置'],
-        tasks: ['任务', '批量克隆与任务看板'],
-        task: ['任务详情', '沙盒预览 / API 与资产审查 / 部署蓝图'],
-        browserpool: ['浏览器池', '工位 · 排队 · 资源'],
+        create: ['新建克隆', '一次克隆一个或多个网址，可调引擎选项'],
+        tasks: ['任务', '所有克隆与生成任务'],
+        task: ['任务详情', '预览、对比、下载与部署'],
+        browserpool: ['浏览器池', '渲染工位、排队与资源占用'],
         ai: ['视觉修复', '对照原站修细节'],
-        mockgen: ['Mock 数据', '克隆站接口 Mock 编排'],
+        mockgen: ['Mock 数据', '给克隆站的接口造模拟数据，离线也能显示'],
         tracker: ['表单捕获追踪', 'Form Tracker · 埋点配置总览与上报实时流'],
-        links: ['短链管理', 'Link Shortener · 多服务短链生成与跳转统计'],
+        links: ['短链管理', '生成短链接并统计点击'],
         generate: ['界面生成', '截图或文字描述 → 可运行网站'],
-        scheduler: ['定时任务', 'Scheduler · 批次队列与执行状态'],
-        docker: ['部署', '把克隆站跑起来'],
-        remote: ['远程一键部署', 'Remote Deploy · SSH 推送 VPS 运行'],
-        admin: ['团队与设置', 'Team · 成员 / 用量 / 审计'],
+        scheduler: ['定时任务', '按时间自动重新克隆，盯住网站变化'],
+        docker: ['部署', '把克隆好的网站在本机跑起来，拿到访问地址'],
+        remote: ['远程一键部署', '推送到你自己的服务器运行'],
+        admin: ['团队与设置', '成员、用量与操作记录'],
       };
       const t = m[this.view] || ['Clonjurer', ''];
       return { title: t[0], sub: t[1] };
