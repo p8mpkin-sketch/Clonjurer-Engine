@@ -9,7 +9,7 @@
   write    任务书 → 单文件 HTML(CSS/JS 内联, 不引用外网)
   probe    core/uir/probe.py 真实运行取证(报错 / 帧差 / 交互 / 响应式)
   review   验收清单 + 关键帧截图 + 体检事实 → 逐条 yes/partial/no + 设计分 + 问题清单
-  score    需求符合度 req-fit-v1: 0.6×清单达成率 + 0.2×运行健康度 + 0.2×设计质量, 硬证据优先于模型说法
+  score    需求符合度 req-fit-v2: 0.35×确定条目达成率(按确定比例向 0.7 收缩) + 0.25×运行健康度 + 0.4×设计(5~10 拉伸到 0~1), 硬证据优先于模型说法
   repair   未达标: 当前代码 + 问题清单(+截图) → 修复后的完整 HTML; 只保留分数更高的版本
 """
 import json
@@ -20,7 +20,7 @@ from pathlib import Path
 
 from core.uir import livecode, llm, probe, settings
 
-SCORING = "req-fit-v1"
+SCORING = "req-fit-v2"
 ITEM_TYPES = ("content", "visual", "motion", "effect", "interaction")
 
 PLAN_SYSTEM = (
@@ -604,7 +604,7 @@ _VALUE = {"yes": 1.0, "partial": 0.5, "no": 0.0}
 
 
 def score(brief: dict, rev: dict, rep: dict) -> dict:
-    """需求符合度 req-fit-v1。rev=None 表示未经模型验收(只有体检硬证据)。
+    """需求符合度 req-fit-v2。rev=None 表示未经模型验收(只有体检硬证据)。
 
     硬证据闸门(只在体检能证伪时覆盖模型说法): motion 项在「空闲和操作后都确定没在动」时判 no, 有动画但连拍
     无可见变化时最多 partial; effect 项在全程没有启动过任何动画或过渡时判 no; interaction 项在页面没有任何可交互元素、或所有可交互元素都没反应时判 no;
@@ -642,22 +642,36 @@ def score(brief: dict, rev: dict, rep: dict) -> dict:
         must_no = must_no or (it["must"] and verdict == "no")
         rows.append(dict(it, verdict=verdict or "unknown", evidence=got.get("evidence", ""), gate=gate, soft=soft))
     coverage = vsum / wsum if wsum else 0.0
+    # req-fit-v2(按 22 个产出的人工打分校准, 见 docs/gen-ui2/SCORING.md):
+    # 1) 证据确认不了的条目(soft: unsure / 截图看不出)不按半分计入 —— 旧口径下工具类页面(交互多、截图难证)系统性偏低,
+    #    展示类页面系统性偏高; 改为只按「确定」的条目算达成率, 确定的比例低时向中性 0.7 收缩
+    # 2) 设计分拉开: 验收模型的设计分集中在 7~8, 原样计入区分不出好坏; 5 分以下记 0, 10 分记满
+    # 3) 有 high 级问题封顶 85; 没有经过模型验收封顶 60
+    dw = sum(w for w, r in ((2.0 if r["must"] else 1.0, r) for r in rows) if not r["soft"] and r["verdict"] in _VALUE)
+    dv = sum((2.0 if r["must"] else 1.0) * _VALUE[r["verdict"]] for r in rows if not r["soft"] and r["verdict"] in _VALUE)
+    conf = dw / wsum if wsum else 0.0
+    sure_cov = (dv / dw) if dw else 0.7
+    fit = conf * sure_cov + (1 - conf) * 0.7
     alive = not f["frozen"]
     health = (0.25 * (alive and not f["errors"]) + 0.25 * (alive and not f["blank"]) + 0.2 * (not f["external"])
               + 0.1 * (not f["overflow_desktop"]) + 0.1 * (not f["overflow_mobile"]) + 0.1 * (not f["overlap"]))
     dscore = (rev or {}).get("design_score")
     design = 0.5 if dscore is None else dscore / 10.0
-    raw = 100.0 * (0.6 * coverage + 0.2 * health + 0.2 * design)
+    design_adj = max(0.0, min(1.0, (design - 0.5) / 0.5))
+    raw = 100.0 * (0.35 * fit + 0.25 * health + 0.40 * design_adj)
     caps = []
     if f["errors"] or f["blank"] or f["frozen"]:
         caps.append(("运行报错 / 空白 / 卡死", 40.0))
     if must_no:
         caps.append(("有用户明确要求的条目未满足", 60.0))
     if rev is None:
-        caps.append(("未经模型验收", 70.0))
+        caps.append(("未经模型验收", 60.0))
+    if any(i.get("severity") == "high" for i in (rev or {}).get("issues") or []):
+        caps.append(("验收发现严重问题", 85.0))
     final = min([raw] + [c for _, c in caps])
     return {"score": round(final, 1), "scoring": SCORING, "raw": round(raw, 1),
-            "coverage": round(coverage, 3), "health": round(health, 3), "design": round(design, 3),
+            "coverage": round(coverage, 3), "fit": round(fit, 3), "confidence": round(conf, 3),
+            "health": round(health, 3), "design": round(design, 3),
             "caps": [{"reason": r, "max": c} for r, c in caps if raw > c],
             "items": rows, "review_mode": (rev or {}).get("mode", "none"),
             "summary": (rev or {}).get("summary", ""), "design_comment": (rev or {}).get("design_comment", ""),

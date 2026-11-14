@@ -2097,7 +2097,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       </div>
       <!-- 任务详情头: 左=是谁/状态/还原度, 右=一个主操作(部署或访问) + 次要操作 -->
       <div v-if="view==='task' && selectedTask" class="task-head shrink-0 flex flex-wrap items-center gap-3 px-4 py-3 border-b border-white/[0.07] bg-slate-900/60">
-        <button @click="goModule('tasks')" aria-label="返回任务列表" class="flex items-center justify-center w-8 h-8 rounded-lg border border-white/[0.10] text-slate-400 hover:text-white transition-all">
+        <button @click="activeTab = 'matrix'; goModule('tasks')" aria-label="返回任务列表" class="flex items-center justify-center w-8 h-8 rounded-lg border border-white/[0.10] text-slate-400 hover:text-white transition-all">
           <i data-lucide="arrow-left" class="w-4 h-4"></i>
         </button>
         <span class="w-6 h-6 rounded-md inline-flex items-center justify-center text-[10px] font-bold text-white shrink-0" v-html="favBadge(selectedTask)"></span>
@@ -2856,7 +2856,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <li><b class="text-slate-200">对照验收</b>：模型看着运行截图逐条判定清单；体检的硬证据优先于模型的说法。</li>
               <li><b class="text-slate-200">定向修复</b>：没达标就带着问题清单让模型修改，只保留分数更高的版本，达到目标分或用完预算即停。</li>
             </ol>
-            <p><b class="text-slate-200">需求符合度</b> = 60% 清单达成率 + 20% 运行健康度 + 20% 设计质量。有运行报错最高 40，有明确要求未满足最高 60。它与克隆任务的「还原度」不是一个口径。</p>
+            <p><b class="text-slate-200">需求符合度</b> = 35% 清单达成率(只算能确认的条目) + 25% 运行健康度 + 40% 设计质量。有运行报错最高 40，有明确要求未满足最高 60，验收发现严重问题最高 85。它与克隆任务的「还原度」不是一个口径。</p>
             <div class="text-xs font-semibold text-slate-300 pt-2">截图怎么生成</div>
             <ol class="list-decimal pl-5 space-y-1.5"><li><b class="text-slate-200">读取截图</b>：自动换算 Retina 倍率、去掉浏览器地址栏等外框；模型读出布局、配色、字号和全部文字，照片 / 商品图 / 头像裁出来作为素材。</li><li><b class="text-slate-200">编写页面</b>：模型看着原图写响应式网页，文字、按钮、卡片都是真代码；补充要求优先于截图。</li><li><b class="text-slate-200">三端体检</b>：原图宽度下与原图逐像素比对，并检查平板 768、手机 390 是否溢出、重叠、报错。</li><li><b class="text-slate-200">对照原图验收与修复</b>：原图与产出并排给模型核对，差异大的地方再修一到两轮。</li></ol><p class="mt-2"><b class="text-slate-200">还原度</b> = 40% 原图相似度 + 30% 清单达成 + 15% 三端健康度 + 15% 设计。未配置模型时退回确定性版面分析(效果有限)。</p>
             <div class="text-xs font-semibold text-slate-300 pt-2">边界</div>
@@ -3498,7 +3498,7 @@ const __vueApp = createApp({
       ],
       schedulerBatches: [],
       gen: { kind: 'description', description: '', viewport: 'laptop', target: 'html_css', package: '',
-             targetScore: 85, maxRounds: 4, timeBudget: 240, file: null, preview: '', submitting: false, error: '',
+             targetScore: 80, maxRounds: 4, timeBudget: 240, file: null, preview: '', submitting: false, error: '',
              hint: '', drag: false, fileInfo: '' },
       taskTokens: { id: null, rows: [], tokens_in: 0, tokens_out: 0, total: 0 },
       tokenUsage: { group: 'day', rows: [], tokens_in: 0, tokens_out: 0, loaded: false },
@@ -5946,7 +5946,7 @@ const __vueApp = createApp({
       const max = Math.max(1, ...this.tokenUsage.rows.map(x => x.tokens_in + x.tokens_out));
       return Math.max(2, Math.round((r.tokens_in + r.tokens_out) / max * 100)) + '%';
     },
-    isReqFit(t) { return !!t && !!t.stats && t.stats.scoring === 'req-fit-v1'; },
+    isReqFit(t) { return !!t && !!t.stats && String(t.stats.scoring || '').startsWith('req-fit'); },
     scoreLabel(t) { return this.isReqFit(t) ? '需求符合度' : '还原度'; },
     fitDetail(t) { const d = t && t.stats && t.stats.similarity_detail; return d && Array.isArray(d.items) ? d : null; },
     fitGen(t) { const g = t && t.stats && t.stats.generate; return g && Array.isArray(g.rounds) ? g : null; },

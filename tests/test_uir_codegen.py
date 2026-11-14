@@ -129,8 +129,9 @@ class Pure(unittest.TestCase):
 
     def test_score_full_and_weights(self):
         d = codegen.score(self.BRIEF, self._rev(), self._rep())
-        self.assertEqual(d["scoring"], "req-fit-v1")
-        self.assertAlmostEqual(d["score"], 100 * (0.6 + 0.2 + 0.2 * 0.8), places=1)
+        self.assertEqual(d["scoring"], "req-fit-v2")
+        # req-fit-v2: 0.35×达成 + 0.25×健康 + 0.4×设计(8 分 → (0.8-0.5)/0.5 = 0.6)
+        self.assertAlmostEqual(d["score"], 100 * (0.35 + 0.25 + 0.4 * 0.6), places=1)
         # 用户明确要求的条目权重是补充条目的 2 倍
         d = codegen.score(self.BRIEF, self._rev(("yes", "yes", "no")), self._rep())
         self.assertAlmostEqual(d["coverage"], 4 / 5, places=3)
@@ -513,10 +514,10 @@ class EndToEnd(unittest.TestCase):
         task, rep, lines, ws, err = self._run(vision=True)
         self.assertIsNone(err)
         self.assertEqual(task["status"], "completed")
-        self.assertEqual((rep["track"], rep["scoring"]), ("code", "req-fit-v1"))
+        self.assertEqual((rep["track"], rep["scoring"]), ("code", "req-fit-v2"))
         self.assertEqual([c[0] for c in _FakeLLM.calls], ["plan", "write", "review"])   # 一次达标只有 3 次调用
         self.assertTrue(_FakeLLM.calls[-1][1])                  # 验收带了截图
-        self.assertGreaterEqual(task["similarity_score"], 85)
+        self.assertGreaterEqual(task["similarity_score"], 80)
         detail = json.loads((ws / "similarity_detail.json").read_text(encoding="utf-8"))
         self.assertEqual([i["verdict"] for i in detail["items"]], ["yes", "yes", "yes"])
         self.assertEqual(detail["review_mode"], "vision")
@@ -537,7 +538,7 @@ class EndToEnd(unittest.TestCase):
         self.assertTrue(rep["rounds"][1]["kept"])
         self.assertEqual(rep["best_round"], 2)
         # 假上游的看图自检不通过 → 文本验收: 外观类条目只能判 partial, 分数相应低一档; 没有可修的目标所以不再迭代
-        self.assertTrue(80 <= task["similarity_score"] < 85)
+        self.assertTrue(70 <= task["similarity_score"] < 84)
         self.assertNotIn("undefinedFunctionCall", (ws / "index.html").read_text(encoding="utf-8"))
         # 报告如实标注
         self.assertEqual(rep["rounds"][1]["review_mode"], "text")
@@ -549,14 +550,14 @@ class EndToEnd(unittest.TestCase):
         self.assertIsNone(err)
         self.assertEqual(next(c for c in rep["calls"] if c["step"] == "repair")["mode"], "patch")
         self.assertNotIn("undefinedFunctionCall", (ws / "index.html").read_text(encoding="utf-8"))
-        self.assertGreaterEqual(task["similarity_score"], 80)
+        self.assertGreaterEqual(task["similarity_score"], 75)          # 假上游看图自检不过 → 文本验收, 外观项确认不了
         # 修改块对不上原文: 这一轮作废, 下一轮改为整页重写
         task, rep, lines, ws, err = self._run({"write": "broken", "repair": "badpatch"})
         self.assertIsNone(err)
         steps = [c[0] for c in _FakeLLM.calls]
         self.assertIn("repair_full", steps)
         self.assertLess(steps.index("repair"), steps.index("repair_full"))
-        self.assertGreaterEqual(task["similarity_score"], 80)
+        self.assertGreaterEqual(task["similarity_score"], 75)
 
     def test_static_page_fails_motion_item_despite_model(self):
         # 模型写了不会动的页面, 验收模型却全判满足: 帧差硬证据把动效项判回 no, 触发修复
@@ -564,7 +565,7 @@ class EndToEnd(unittest.TestCase):
         self.assertIsNone(err)
         self.assertLessEqual(rep["rounds"][0]["score"], 60)
         self.assertEqual(rep["rounds"][1]["action"], "repair")
-        self.assertGreaterEqual(task["similarity_score"], 85)
+        self.assertGreaterEqual(task["similarity_score"], 80)
 
     def test_no_key_fails_loudly_instead_of_template(self):
         task, rep, lines, ws, err = self._run(key=False)
