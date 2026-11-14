@@ -68,10 +68,13 @@ def build(out_path: Path, tasks: list, batches: dict, projects: dict, *,
           instance_id: str, workspace_of, label: str = "", exported_by: str = "") -> dict:
     """tasks: db 任务行; batches/projects: id -> 行; workspace_of(task) -> 工作空间目录。
     写出 out_path, 返回 manifest。"""
-    man = {"format": FORMAT, "version": VERSION, "label": label,
+    man_projects: list = []
+    man_batches: list = []
+    man_tasks: list = []
+    man: dict = {"format": FORMAT, "version": VERSION, "label": label,
            "exported_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
            "exported_by": exported_by, "instance": instance_id,
-           "projects": [], "batches": [], "tasks": []}
+           "projects": man_projects, "batches": man_batches, "tasks": man_tasks}
     seen_p, seen_b = {}, {}
     with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
         for n, task in enumerate(tasks, 1):
@@ -80,7 +83,7 @@ def build(out_path: Path, tasks: list, batches: dict, projects: dict, *,
             if pid not in seen_p:
                 p = projects.get(pid) or {}
                 seen_p[pid] = f"p{len(seen_p) + 1}"
-                man["projects"].append({"key": seen_p[pid], "name": p.get("name") or "导入的项目",
+                man_projects.append({"key": seen_p[pid], "name": p.get("name") or "导入的项目",
                                         "description": p.get("description") or "",
                                         "color": p.get("color") or "#6366f1"})
             bid = task["batch_id"]
@@ -90,7 +93,7 @@ def build(out_path: Path, tasks: list, batches: dict, projects: dict, *,
                     cfg = json.loads(b.get("config_json") or "{}")
                 except ValueError:
                     cfg = {}
-                man["batches"].append({"key": seen_b[bid], "project": seen_p[pid],
+                man_batches.append({"key": seen_b[bid], "project": seen_p[pid],
                                        "name": b.get("name") or "", "created_at": b.get("created_at") or "",
                                        "created_by": b.get("created_by") or "", "config": _clean_config(cfg)})
             try:
@@ -109,7 +112,7 @@ def build(out_path: Path, tasks: list, batches: dict, projects: dict, *,
                     zf.write(f, prefix + rel, compress_type=ctype)
                     files += 1
                     size += f.stat().st_size
-            man["tasks"].append({
+            man_tasks.append({
                 "key": str(n), "uid": uid, "src_id": task["id"], "batch": seen_b[bid],
                 "target_url": task.get("target_url") or "", "domain": task.get("domain") or "",
                 "status": task.get("status") or "", "progress": task.get("progress") or 0,
