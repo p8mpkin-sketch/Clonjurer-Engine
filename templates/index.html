@@ -17,7 +17,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 <!-- UI 改版 P0 规范层: 字号/对比度/焦点/语义色(只换样式) -->
 <link href="/vendor/css/ui-tokens.css?v=15" rel="stylesheet">
 
-<script src="/vendor/js/lucide.subset.js?v=2"></script>
+<script src="/vendor/js/lucide.subset.js?v=3"></script>
 <script>
 /* Lucide 非破坏性 shim: 官方 createIcons 会把 <i data-lucide> 整节点替换为 <svg>,
    Vue 记录的 vnode 锚点随之失效, 任务列表轮询触发 patch 时报
@@ -264,7 +264,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 </style>
 <!-- Tailwind 预编译(tools/build_css.sh): 原 451KB 运行时 JS 每次打开都在浏览器里扫描 DOM 生成样式;
      放在 head 最后, 与运行时注入的位置一致, 层叠顺序不变 -->
-<link href="/vendor/css/app.css?v=5" rel="stylesheet">
+<link href="/vendor/css/app.css?v=6" rel="stylesheet">
 </head>
 <body class="h-screen overflow-hidden font-sans antialiased">
 
@@ -2153,14 +2153,14 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       </div>
 
       <!-- 界面生成: 需求验收清单(需求符合度的逐条依据) -->
-      <details v-if="view==='task' && selectedTask && isReqFit(selectedTask) && fitDetail(selectedTask)" class="fit-panel" :open="selectedTask.similarity_score < 85">
+      <details v-if="view==='task' && selectedTask && fitDetail(selectedTask)" class="fit-panel" :open="selectedTask.similarity_score < 85">
         <summary>
           <b>验收清单</b>
           <span class="tnums">[[ fitDetail(selectedTask).items.filter(i => i.verdict === 'yes').length ]] / [[ fitDetail(selectedTask).items.length ]] 条满足</span>
-          <span class="fit-meta tnums">达成率 [[ Math.round(fitDetail(selectedTask).coverage * 100) ]]% · 运行健康 [[ Math.round(fitDetail(selectedTask).health * 100) ]]% · 设计 [[ (fitDetail(selectedTask).design * 10).toFixed(1) ]]</span>
+          <span class="fit-meta tnums"><template v-if="fitDetail(selectedTask).fidelity && fitDetail(selectedTask).fidelity.score != null">原图相似度 [[ Math.round(fitDetail(selectedTask).fidelity.score) ]] · </template>达成率 [[ Math.round(fitDetail(selectedTask).coverage * 100) ]]% · 运行健康 [[ Math.round(fitDetail(selectedTask).health * 100) ]]% · 设计 [[ (fitDetail(selectedTask).design * 10).toFixed(1) ]]</span>
           <span class="fit-meta tnums ml-auto" v-if="fitGen(selectedTask)">[[ fitGen(selectedTask).rounds.length ]] 轮 · 模型用时 [[ fmtDur(fitGen(selectedTask).llm_seconds) ]] · [[ fitGen(selectedTask).ai_model ]]</span>
         </summary>
-        <p v-if="fitGen(selectedTask) && fitGen(selectedTask).brief && fitGen(selectedTask).brief.summary" class="fit-note">需求理解：[[ fitGen(selectedTask).brief.summary ]]</p>
+        <p v-if="fitGen(selectedTask) && fitGen(selectedTask).brief && fitGen(selectedTask).brief.summary" class="fit-note">[[ fitGen(selectedTask).kind === 'screenshot' ? '截图理解' : '需求理解' ]]：[[ fitGen(selectedTask).brief.summary ]]</p>
         <ul class="fit-list">
           <li v-for="it in fitDetail(selectedTask).items" :key="it.id" :class="it.verdict">
             <span class="fit-mark">[[ ({yes: '满足', partial: '部分', no: '未满足'})[it.verdict] || '未验收' ]]</span>

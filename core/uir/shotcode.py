@@ -151,6 +151,17 @@ def chrome_candidates(img, frac: float = 0.18) -> list:
     return [grp[-1] for grp in out][:8]
 
 
+def content_fraction(img) -> float:
+    """裁出的小图里与其边框中位色明显不同的像素占比。框准了的头像/图标占比高; 框偏了只裁到背景和一条边的占比低。"""
+    import numpy as np
+    a = np.asarray(img.convert("RGB"), dtype=np.int16)
+    if a.shape[0] < 3 or a.shape[1] < 3:
+        return 0.0
+    border = np.concatenate([a[0], a[-1], a[:, 0], a[:, -1]])
+    bg = np.median(border, axis=0)
+    return float((np.abs(a - bg).max(axis=2) > 30).mean())
+
+
 def snap_box(gray, box, frac: float = 0.12, min_r: int = 6, min_snap_scale: float = 1.0):
     """把模型给的近似框吸附到附近最强的边缘: 每条边在 ±max(min_r, 边长×frac) 内找跨该边灰度差最大的线。
     找不到明显的边(最大值不到该范围中位数的 2 倍)就保持原位。坐标与 gray 同一像素系。"""
@@ -278,9 +289,11 @@ def prepare(src: Path, ws: Path, ai_cfg: dict, deadline: float, log, usage: dict
             continue
         if cx0 + bw <= 0 or cy0 + bh <= 0 or cx0 >= ref.size[0] or cy0 >= ref.size[1]:
             continue                                      # 在外框里(浏览器扩展图标之类)
+        piece = orig.crop((int(x0), int(y0), int(x1), int(y1)))
+        if min(bw, bh) < 48 and content_fraction(piece) < 0.45:
+            continue                                      # 小图框偏了(只裁到背景和半个头像): 不如让页面画占位
         adir.mkdir(parents=True, exist_ok=True)
         name = f"img_{len(assets) + 1:02d}.jpg"
-        piece = orig.crop((int(x0), int(y0), int(x1), int(y1)))
         piece.save(adir / name, quality=88)
         assets.append({"file": f"assets/{name}", "what": str(it.get("what") or "")[:60],
                        "x": round(cx0), "y": round(cy0), "w": round(bw), "h": round(bh)})

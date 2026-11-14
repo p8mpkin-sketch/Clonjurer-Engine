@@ -33,6 +33,14 @@ class ShotPrepTest(unittest.TestCase):
         # 小图不吸附, 原样返回
         self.assertEqual(shotcode.snap_box(g, [10, 10, 40, 40]), [10, 10, 40, 40])
 
+    def test_content_fraction(self):
+        good = Image.new("RGB", (40, 40), "#ffffff")
+        ImageDraw.Draw(good).ellipse([2, 2, 38, 38], fill="#3a7bd5")         # 框准的圆形头像
+        bad = Image.new("RGB", (40, 40), "#ffffff")
+        ImageDraw.Draw(bad).rectangle([34, 0, 40, 40], fill="#3a7bd5")      # 框偏了只带到一条边
+        self.assertGreater(shotcode.content_fraction(good), 0.45)
+        self.assertLess(shotcode.content_fraction(bad), 0.45)
+
 
 if __name__ == "__main__":
     unittest.main()
