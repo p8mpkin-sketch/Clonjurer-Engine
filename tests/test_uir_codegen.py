@@ -58,6 +58,17 @@ main{position:absolute;top:50%;left:0;right:0;transform:translateY(-10%);text-al
 h1{margin:0;font:48px sans-serif}p{margin:8px 0;font:16px sans-serif}
 .tip{position:fixed;bottom:228px;left:0;right:0;text-align:center;font:14px sans-serif}</style></head><body>
 <main><h1>标题文字</h1><p>副标题说明文字</p></main><div class="tip">底部提示文字</div></body></html>"""
+# 心电线(实心描边)横穿标题; 第二段标题下有不透明底板挡住线条; 第三段只有淡网格穿过 —— 只有第一段算压字
+STROKED = """<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{margin:0;background:#0b0f14;color:#eee}
+section{position:relative;height:260px}svg{position:absolute;inset:0;width:100%;height:100%}
+h2{position:relative;margin:0;padding-top:100px;text-align:center;font:40px sans-serif}
+.plate{display:inline-block;background:#0b0f14;padding:0 12px}</style></head><body>
+<section><svg viewBox="0 0 1280 260" preserveAspectRatio="none"><path d="M0 125 H1280" stroke="#e11d48" stroke-width="4" fill="none"/></svg>
+<h2>心率实时监测</h2></section>
+<section><svg viewBox="0 0 1280 260" preserveAspectRatio="none"><path d="M0 125 H1280" stroke="#e11d48" stroke-width="4" fill="none"/></svg>
+<h2><span class="plate">底板上的标题</span></h2></section>
+<section><svg viewBox="0 0 1280 260" preserveAspectRatio="none"><path d="M0 125 H1280" stroke="#fff" stroke-opacity=".08" stroke-width="1" fill="none"/></svg>
+<h2>淡网格上的标题</h2></section></body></html>"""
 # 只有一次性的入场动画; 金额框是 type=text + inputmode=decimal, 填了非数字就报错
 ENTRANCE = """<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{margin:0;background:#fff}
 .card{width:300px;height:200px;background:#1f2937;animation:rise .3s both}
@@ -341,6 +352,15 @@ class Probe(unittest.TestCase):
         self.assertTrue(any("文字互相重叠" in d for d in defects))
         _, f, _ = self._inspect("moving_ok", MOVING)
         self.assertEqual(f["overlap"], 0)
+
+    def test_svg_stroke_through_text(self):
+        rep, f, defects = self._inspect("stroked", STROKED)
+        pairs = rep["overlap"].get("desktop") or []
+        hit = {a for a, b in pairs if b.startswith("图形 <")}
+        self.assertIn("心率实时监测", hit)
+        self.assertNotIn("底板上的标题", hit)
+        self.assertNotIn("淡网格上的标题", hit)
+        self.assertTrue(any("文字被图形压住" in d and "心率实时监测" in d for d in defects))
 
     def test_keyboard_listener(self):
         rep, f, _ = self._inspect("keys", KEYS)

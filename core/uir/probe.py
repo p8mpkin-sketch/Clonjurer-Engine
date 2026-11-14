@@ -104,6 +104,7 @@ _STATE_JS = r"""
 """
 
 # 可见文字互相压住: 逐个文本节点取行框, 不同元素(互不包含)的行框交叠超过较小者的 30% 记一对。
+# 另查 SVG 图形压字: 描边穿过文字行框 / 实心填充只盖住文字一部分, 且该处没有不透明元素叠在图形上面。
 # 跳过整体不透明度 < 0.3 或字色透明度 < 0.3 的文字(有意做成水印 / 背景大字的装饰)。
 _OVERLAP_JS = r"""
 () => {
@@ -133,6 +134,69 @@ _OVERLAP_JS = r"""
     }
   }
   const out = [], seen = new Set();
+  // 线条 / 图形压字: SVG 图形的描边穿过文字, 或填充只盖住文字的一部分(整块盖住是文字的底板, 不算)。
+  // 用浏览器自己的命中测试(isPointInStroke / isPointInFill)在文字行框里取点, 不靠外接框估算
+  const shapes = [...document.querySelectorAll('svg path, svg circle, svg ellipse, svg line, svg polyline, svg polygon, svg rect')]
+    .filter(g => typeof g.isPointInStroke === 'function' && !g.closest('defs, clipPath, mask, pattern, symbol, marker'))
+    .slice(0, 400);
+  const paint = g => {
+    const s = getComputedStyle(g);
+    let o = parseFloat(s.opacity || '1');
+    for (let e = g.parentElement; e && e.nodeType === 1; e = e.parentElement) {
+      const es = getComputedStyle(e);
+      if (es.display === 'none' || es.visibility === 'hidden') return null;
+      o *= parseFloat(es.opacity || '1');
+    }
+    const sw = parseFloat(s.strokeWidth || '0');
+    const so = s.stroke && s.stroke !== 'none' && sw > 0 ? o * parseFloat(s.strokeOpacity || '1') * alphaOf(s.stroke) : 0;
+    const fo = s.fill && s.fill !== 'none' ? o * parseFloat(s.fillOpacity || '1') * (s.fill.startsWith('url') ? 1 : alphaOf(s.fill)) : 0;
+    return {so, fo};
+  };
+  // 取样点上若有不透明的元素(文字的底板等)叠在图形上面, 图形在这里其实被挡住了, 不算压字
+  const covered = (g, x, y) => {
+    const pe = g.style.pointerEvents;
+    g.style.pointerEvents = 'visiblePainted';
+    const list = document.elementsFromPoint(x, y);
+    g.style.pointerEvents = pe;
+    const k = list.indexOf(g);
+    if (k < 0) return true;                       // 被裁掉 / 在视口外: 看不见
+    for (let i = 0; i < k; i++) {
+      const e = list[i];
+      if (e.contains(g)) continue;
+      const s = getComputedStyle(e);
+      if (alphaOf(s.backgroundColor) >= 0.6 || (s.backgroundImage && s.backgroundImage !== 'none')) return true;
+    }
+    return false;
+  };
+  for (const g of shapes) {
+    if (out.length >= 6) break;
+    const pa = paint(g);
+    if (!pa || (pa.so < 0.2 && pa.fo < 0.2)) continue;
+    const gb = g.getBoundingClientRect(), m = g.getScreenCTM && g.getScreenCTM();
+    if (!m || gb.width + gb.height < 2) continue;
+    const inv = m.inverse(), svg = g.ownerSVGElement;
+    for (const b of boxes) {
+      if (svg && svg.contains(b.el)) continue;
+      if (b.x1 < gb.left || b.x0 > gb.right || b.y1 < gb.top || b.y0 > gb.bottom) continue;
+      let st = 0, fi = 0, n = 0;
+      for (let r = 1; r <= 3; r++) for (let c = 1; c <= 7; c++) {
+        const x = b.x0 + (b.x1 - b.x0) * c / 8, y = b.y0 + (b.y1 - b.y0) * r / 4;
+        const pt = new DOMPoint(x, y).matrixTransform(inv);
+        n++;
+        try {
+          if (pa.so >= 0.2 && g.isPointInStroke(pt)) { if (!covered(g, x, y)) st++; }
+          else if (pa.fo >= 0.5 && g.isPointInFill(pt)) { if (!covered(g, x, y)) fi++; }
+        } catch (e) {}
+      }
+      if (st >= 2 || (fi >= 3 && fi < n - 2)) {
+        const key = b.t + '|' + g.tagName;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push([b.t, '图形 <' + g.tagName + '>' + (st >= 2 ? ' 的线条' : ' 的色块')]);
+        if (out.length >= 6) break;
+      }
+    }
+  }
   for (let i = 0; i < boxes.length && out.length < 6; i++) for (let j = i + 1; j < boxes.length && out.length < 6; j++) {
     const a = boxes[i], b = boxes[j];
     if (a.el === b.el || a.el.contains(b.el) || b.el.contains(a.el)) continue;
@@ -560,7 +624,10 @@ def hard_defects(rep: dict) -> list:
     where = {"desktop": "桌面视口", "mobile": "手机宽度 390px", "short": "矮窗口 1280×600"}
     for k, pairs in (rep.get("overlap") or {}).items():
         for a, b in (pairs or [])[:2]:
-            out.append(f"{where.get(k, k)}下文字互相重叠:「{a}」与「{b}」压在一起(检查绝对定位 / 固定在底部的元素, 留出间距或改为随内容排布)")
+            if b.startswith("图形 <"):
+                out.append(f"{where.get(k, k)}下文字被图形压住:「{a}」上穿过了{b}(给文字加底板、把图形移开或调低它在文字处的不透明度)")
+            else:
+                out.append(f"{where.get(k, k)}下文字互相重叠:「{a}」与「{b}」压在一起(检查绝对定位 / 固定在底部的元素, 留出间距或改为随内容排布)")
     # 个别按钮点了没变化未必是缺陷(初始状态下的「重置」「暂停」本就无事可做), 只有全部可交互元素都没反应才算硬伤;
     # 其余情况作为事实交给验收模型判断(见 dead_controls)
     if f["dead_n"] and not f["responded_n"] and not f["unknown_n"]:
