@@ -28,7 +28,7 @@ STORED_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif", ".woff", ".wof
                ".zip", ".gz", ".br", ".mp4", ".webm", ".mp3", ".ico"}
 KEEP_STATUS = ("completed", "partial", "failed")
 
-MAX_TASKS = 500
+MAX_TASKS = 5000           # 单个存档记录数上限(本机实例已 570 条, 「打包全部」须放得下)
 MAX_FILES = 300_000
 MAX_BYTES = 20 * 1024 ** 3      # 解压后总量上限 20 GiB
 MAX_RATIO = 200                  # 单文件压缩比上限(防 zip 炸弹)
