@@ -111,7 +111,9 @@ REVIEW_SYSTEM = (
     "不要把 unsure 的情况判成 no; 也不要因为拿不准就判 yes。\n"
     "3. 体检数据是确定性测量, 与你的观感冲突时以体检数据为准(例如相邻帧变化占比为 0 说明画面没有在动)。\n"
     "4. 先核对主体图形有没有画对: 形状完整、比例协调、该对称处对称、没有错位或残缺(有「主体特写」图时以特写为准)。"
-    "画错了, 描述该图形的条目判 no, 并作为 high 级 issue 写清哪里画错。\n"
+    "画错了, 描述该图形的条目判 no, 并作为 high 级 issue 写清哪里画错。再核对附属元素: 光环、阴影、波纹、轨道这类"
+    "围绕主体的装饰, 中心要与主体对齐; 主体内部的高光与暗部要顺着形体过渡, 不能是边缘生硬、看起来像贴上去的色块。"
+    "有偏差就作为 high 或 mid 级 issue 写清楚, 并相应压低设计分。\n"
     "5. 设计质量 design.score 为 0~10 的数, 以「顶尖设计师拿到同一句需求会交出的作品」为 9 分的参照: "
     "只做到字面要求、画面单薄(单一主体加一行字, 没有氛围层次, 对用户操作没有任何呼应)最多 6 分; "
     "有层次、有节奏、有细节但仍有明显瑕疵是 7~8 分。布局错乱、元素重叠、文字溢出或被裁切、对比度不足、"
@@ -452,6 +454,10 @@ def probe_digest(rep: dict) -> str:
         lines.append("交互探测: 页面上没有找到按钮、输入框、可点击区域, 也没有注册键盘/指针监听")
     if rep.get("listeners"):
         lines.append("页面注册的事件监听: " + ", ".join(rep["listeners"]))
+    ov = rep.get("overlap") or {}
+    if any(ov.values()):
+        lines.append("文字重叠(确定性测量): " + "; ".join(
+            f"{k}: " + ", ".join(f"「{a}」×「{b}」" for a, b in v) for k, v in ov.items() if v))
     lines.append(f"布局: 桌面视口 {rep.get('viewport', {}).get('width')}×{rep.get('viewport', {}).get('height')}px "
                  f"横向溢出 {'是' if lay.get('overflow_x') else '否'}; "
                  f"手机 390px 横向溢出 {'是' if mob.get('overflow_x') else '否'}; 页面总高 {lay.get('doc_h')}px")
@@ -633,8 +639,8 @@ def score(brief: dict, rev: dict, rep: dict) -> dict:
         rows.append(dict(it, verdict=verdict or "unknown", evidence=got.get("evidence", ""), gate=gate, soft=soft))
     coverage = vsum / wsum if wsum else 0.0
     alive = not f["frozen"]
-    health = (0.25 * (alive and not f["errors"]) + 0.25 * (alive and not f["blank"]) + 0.25 * (not f["external"])
-              + 0.125 * (not f["overflow_desktop"]) + 0.125 * (not f["overflow_mobile"]))
+    health = (0.25 * (alive and not f["errors"]) + 0.25 * (alive and not f["blank"]) + 0.2 * (not f["external"])
+              + 0.1 * (not f["overflow_desktop"]) + 0.1 * (not f["overflow_mobile"]) + 0.1 * (not f["overlap"]))
     dscore = (rev or {}).get("design_score")
     design = 0.5 if dscore is None else dscore / 10.0
     raw = 100.0 * (0.6 * coverage + 0.2 * health + 0.2 * design)

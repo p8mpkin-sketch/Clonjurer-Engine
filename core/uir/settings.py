@@ -67,6 +67,7 @@ PROBE_LINGER_CLICKS = 4            # 静止页面上前几次点击之后多等�
 PROBE_LINGER_MS = 1150
 PROBE_POST_GAPS_MS = (450, 1150)  # 操作完之后再连拍的间隔: 第二档跨过 1 秒, 能看到按秒走的计时
 PROBE_MOBILE_VIEWPORT = {"width": 390, "height": 844}
+PROBE_SHORT_VIEWPORT = {"width": 1280, "height": 600}   # 矮窗口(查文字重叠)
 
 
 def use_code_track(kind: str, target: str, spec: dict = None) -> bool:

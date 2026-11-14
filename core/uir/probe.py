@@ -103,6 +103,52 @@ _STATE_JS = r"""
 }
 """
 
+# 可见文字互相压住: 逐个文本节点取行框, 不同元素(互不包含)的行框交叠超过较小者的 30% 记一对。
+# 跳过整体不透明度 < 0.3 或字色透明度 < 0.3 的文字(有意做成水印 / 背景大字的装饰)。
+_OVERLAP_JS = r"""
+() => {
+  const boxes = [], walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT);
+  const alphaOf = c => { const m = /rgba?\(([^)]+)\)/.exec(c || ''); if (!m) return 1;
+    const p = m[1].split(/[ ,\/]+/).filter(Boolean); return p.length > 3 ? parseFloat(p[3]) : 1; };
+  const visible = el => {
+    let o = 1;
+    for (let e = el; e && e.nodeType === 1; e = e.parentElement) {
+      const s = getComputedStyle(e);
+      if (s.display === 'none' || s.visibility === 'hidden') return false;
+      o *= parseFloat(s.opacity || '1');
+      if (o < 0.3) return false;
+    }
+    return alphaOf(getComputedStyle(el).color) >= 0.3;
+  };
+  let n;
+  while ((n = walker.nextNode()) && boxes.length < 500) {
+    const t = n.textContent.trim();
+    if (!t) continue;
+    const el = n.parentElement;
+    if (!el || ['SCRIPT', 'STYLE', 'NOSCRIPT', 'TITLE'].includes(el.tagName) || !visible(el)) continue;
+    const r = document.createRange(); r.selectNodeContents(n);
+    for (const b of r.getClientRects()) {
+      if (b.width < 2 || b.height < 2 || b.bottom < 0 || b.right < 0 || b.top > innerHeight || b.left > innerWidth) continue;
+      boxes.push({el, t: t.slice(0, 24), x0: b.left, y0: b.top, x1: b.right, y1: b.bottom});
+    }
+  }
+  const out = [], seen = new Set();
+  for (let i = 0; i < boxes.length && out.length < 6; i++) for (let j = i + 1; j < boxes.length && out.length < 6; j++) {
+    const a = boxes[i], b = boxes[j];
+    if (a.el === b.el || a.el.contains(b.el) || b.el.contains(a.el)) continue;
+    const w = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0), h = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
+    if (w <= 0 || h <= 0) continue;
+    const small = Math.min((a.x1 - a.x0) * (a.y1 - a.y0), (b.x1 - b.x0) * (b.y1 - b.y0));
+    if (small < 40 || w * h < small * 0.3) continue;
+    const key = a.t + '|' + b.t;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push([a.t, b.t]);
+  }
+  return out;
+}
+"""
+
 _FILL_JS = r"""
 (id) => {
   const el = document.querySelector('[data-probe-id="' + id + '"]');
@@ -214,7 +260,8 @@ def inspect_page(pool, entry: Path, out_dir: Path, viewport: dict, full_png: Pat
     vp = {"width": int(viewport.get("width") or 1440), "height": int(viewport.get("height") or 900)}
     uri = entry.resolve().as_uri()
     rep: dict = {"errors": [], "external": [], "dialogs": 0, "frozen": False, "blank": False,
-           "motion": {}, "layout": {}, "interactions": [], "mobile": {}, "shots": {}, "viewport": vp}
+           "motion": {}, "layout": {}, "interactions": [], "mobile": {}, "shots": {}, "viewport": vp,
+           "overlap": {}}
 
     def _wire(ctx, page, errors, external):
         def on_route(route):
@@ -258,6 +305,8 @@ def inspect_page(pool, entry: Path, out_dir: Path, viewport: dict, full_png: Pat
             cap_s = max(0.05, time.monotonic() - t_cap)
             s1 = page.evaluate(_STATE_JS)
             rep["shot_at"] = {"f0": s0.get("now"), "burst_end": s1.get("now")}
+            with suppress(Exception):
+                rep["overlap"]["desktop"] = page.evaluate(_OVERLAP_JS)
             grays = [_gray(p) for p in pngs]
             fracs, box = [], None
             for a, b in zip(grays, grays[1:]):
@@ -341,9 +390,22 @@ def inspect_page(pool, entry: Path, out_dir: Path, viewport: dict, full_png: Pat
             rep["shots"]["mobile"] = str(out_dir / "mobile.png")
             rep["mobile"] = {"overflow_x": ms["sw"] > ms["cw"] + 2, "scroll_w": ms["sw"], "client_w": ms["cw"],
                              "errors": [e for e in merr if e not in rep["errors"]][:5]}
+            with suppress(Exception):
+                rep["overlap"]["mobile"] = page.evaluate(_OVERLAP_JS)
             page.close()
     except Exception as exc:
         rep["mobile"] = {"overflow_x": None, "errors": [f"手机宽度加载失败({type(exc).__name__})"]}
+    # ---- 矮窗口: 笔记本浏览器去掉工具栏后常只有 600px 高, 贴底与居中的元素最容易在这里叠在一起 ----
+    try:
+        with pool.context(viewport=dict(settings.PROBE_SHORT_VIEWPORT)) as ctx:
+            page = ctx.new_page()
+            _wire(ctx, page, [], [])
+            page.goto(uri, wait_until="load", timeout=config.SHOT_TIMEOUT)
+            page.wait_for_timeout(1100)
+            rep["overlap"]["short"] = page.evaluate(_OVERLAP_JS)
+            page.close()
+    except Exception:
+        pass
     rep["elapsed"] = round(time.monotonic() - t0, 2)
     return rep
 
@@ -452,6 +514,7 @@ def facts(rep: dict) -> dict:
         "external": bool(rep.get("external")),
         "overflow_desktop": bool((rep.get("layout") or {}).get("overflow_x")),
         "overflow_mobile": bool((rep.get("mobile") or {}).get("overflow_x")),
+        "overlap": sum(len(v or []) for v in (rep.get("overlap") or {}).values()),
         # 「确定没在动」: 空闲时帧差为零、没有运行中的动画、没有持续的 rAF 循环, 并且把能操作的都操作一遍之后也没有动起来
         "motion_none": idle_none and not after,
         "motion_seen": bool(mot.get("moving")),
@@ -494,6 +557,10 @@ def hard_defects(rep: dict) -> list:
         out.append(f"手机宽度(390px)下出现横向滚动条(内容宽 {m.get('scroll_w')}px)")
     for e in ((rep.get("mobile") or {}).get("errors") or [])[:2]:
         out.append(f"手机宽度下报错: {e}")
+    where = {"desktop": "桌面视口", "mobile": "手机宽度 390px", "short": "矮窗口 1280×600"}
+    for k, pairs in (rep.get("overlap") or {}).items():
+        for a, b in (pairs or [])[:2]:
+            out.append(f"{where.get(k, k)}下文字互相重叠:「{a}」与「{b}」压在一起(检查绝对定位 / 固定在底部的元素, 留出间距或改为随内容排布)")
     # 个别按钮点了没变化未必是缺陷(初始状态下的「重置」「暂停」本就无事可做), 只有全部可交互元素都没反应才算硬伤;
     # 其余情况作为事实交给验收模型判断(见 dead_controls)
     if f["dead_n"] and not f["responded_n"] and not f["unknown_n"]:

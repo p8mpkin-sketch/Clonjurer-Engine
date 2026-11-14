@@ -52,6 +52,12 @@ let s=1500,h=0;const show=()=>{document.getElementById('t').textContent=
 String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')};
 document.getElementById('go').onclick=()=>{if(h)return;h=setInterval(()=>{s--;show()},1000)};
 document.getElementById('rs').onclick=()=>{clearInterval(h);h=0;s=1500;show()}</script></body></html>"""
+# 居中标题 + 贴底提示: 窗口够高时不重叠, 600px 高时提示压到副标题上
+CRAMPED = """<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{margin:0;height:100vh;background:#fff}
+main{position:absolute;top:50%;left:0;right:0;transform:translateY(-10%);text-align:center}
+h1{margin:0;font:48px sans-serif}p{margin:8px 0;font:16px sans-serif}
+.tip{position:fixed;bottom:228px;left:0;right:0;text-align:center;font:14px sans-serif}</style></head><body>
+<main><h1>标题文字</h1><p>副标题说明文字</p></main><div class="tip">底部提示文字</div></body></html>"""
 # 只有一次性的入场动画; 金额框是 type=text + inputmode=decimal, 填了非数字就报错
 ENTRANCE = """<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{margin:0;background:#fff}
 .card{width:300px;height:200px;background:#1f2937;animation:rise .3s both}
@@ -326,6 +332,15 @@ class Probe(unittest.TestCase):
         self.assertIn("金额 12", rep["text"] + " ".join(rep["post"]["text_added"]) + " "
                       + " ".join(i.get("label", "") for i in rep["interactions"]))
         self.assertTrue(next(i for i in rep["interactions"] if i["label"] == "添加")["responded"])
+
+    def test_text_overlap_in_short_window(self):
+        rep, f, defects = self._inspect("cramped", CRAMPED)
+        self.assertFalse(rep["overlap"].get("desktop"))         # 900 高: 不重叠
+        self.assertTrue(rep["overlap"].get("short"))            # 600 高: 提示压到副标题上
+        self.assertTrue(f["overlap"])
+        self.assertTrue(any("文字互相重叠" in d for d in defects))
+        _, f, _ = self._inspect("moving_ok", MOVING)
+        self.assertEqual(f["overlap"], 0)
 
     def test_keyboard_listener(self):
         rep, f, _ = self._inspect("keys", KEYS)
