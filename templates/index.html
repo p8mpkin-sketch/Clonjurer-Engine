@@ -2378,8 +2378,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <span v-if="previewScale < 0.995 && ['single','compare','overlay'].includes(previewMode)" class="text-[12px] text-slate-500 tnums whitespace-nowrap" title="页面按真实宽度排版, 容器不够宽时整体等比缩小显示">按 [[ Math.round(previewScale * 100) ]]% 显示</span>
             <div v-if="previewMode==='compare' && previewTask && taskKind(previewTask) === 'clone'" class="fade-in">
               <div class="ui-seg" role="group">
-              <button @click="origView='live'" :aria-pressed="origView==='live'">原站实时</button>
-              <button @click="origView='shot'" :aria-pressed="origView==='shot'">原站截图</button>
+              <button @click="origView='shot'" :aria-pressed="origView==='shot'" title="克隆时拍下的原站整页截图, 评分就是拿它比的">原站截图</button>
+              <button @click="origView='live'" :aria-pressed="origView==='live'" title="直接加载原站; 很多网站禁止被嵌入, 会显示空白">原站实时</button>
             </div>
             </div>
             <div class="flex-1"></div>
@@ -2449,12 +2449,13 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             </div>
             <div class="flex-1 min-h-0 relative overflow-auto custom-scroll bg-slate-950/60">
               <pv-scale :width="previewNominal" @scale="previewScale = $event">
-                <div class="relative" :style="{ width: '100%', height: overlayHeight + 'px' }">
+                <div class="relative w-full">
                   <iframe :src="'/preview/' + previewTask.id + '/'" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
-                    class="w-full h-full border-0 bg-white"></iframe>
+                    class="absolute inset-0 w-full h-full border-0 bg-white"></iframe>
                   <img :src="origShotUrl" alt="原站截图叠加层"
-                    class="absolute top-0 left-0 w-full h-full pointer-events-none object-fill border-r-2 border-fuchsia-400"
+                    class="relative block w-full h-auto pointer-events-none"
                     :style="{clipPath: 'inset(0 ' + (100 - overlayPos) + '% 0 0)'}">
+                  <div class="absolute top-0 bottom-0 w-[2px] bg-fuchsia-400 pointer-events-none" :style="{ left: overlayPos + '%' }"></div>
                 </div>
               </pv-scale>
             </div>
@@ -3616,7 +3617,7 @@ const __vueApp = createApp({
       selectedTaskId: null, previewTaskId: null,
       selectedIds: new Set(), batchBusy: false,
       previewMode: 'single', previewWidth: 'full',
-      origView: 'live', overlayPos: 50, overlayHeight: 1200, previewScale: 1,
+      origView: 'shot', overlayPos: 50, overlayHeight: 1200, previewScale: 1,
       compareModal: false, compareData: { original: '', cloned: '', diff: '', rightMode: 'cloned', score: null },
       hotpatch: { open: false, css: '', saving: false },
       mockEntries: [], mockIndex: -1, mockBody: '', mockSaving: false, mockMsg: '',
@@ -5909,16 +5910,12 @@ const __vueApp = createApp({
       URL.revokeObjectURL(a.href);
       this.toast('✅ 已导出 .json');
     },
+    // 首页快速克隆: 只提交首页输入框里的网址(不再把「新建克隆」页里残留的网址一并带上)
     heroSubmit() {
       let u = this.heroUrl.trim();
-      if (u) {
-        if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
-        const cur = this.urlsText.trim();
-        if (!cur.split('\n').map(s => s.trim()).includes(u)) {
-          this.urlsText = cur ? cur + '\n' + u : u;
-        }
-      }
-      this.submit();
+      if (!u) return;
+      if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+      this.submit([u]).then(ok => { if (ok) this.heroUrl = ''; });
     },
     async poolRestart() {
       if (this.poolRestarting) return;
@@ -6093,9 +6090,9 @@ const __vueApp = createApp({
         package: this.form.package,
       };
     },
-    async submit() {
-      const urls = this.urlsText.split('\n').map(s => s.trim()).filter(s => s && !s.startsWith('#'));
-      if (!urls.length) { this.submitError = '请输入至少一个 URL'; return; }
+    async submit(only) {
+      const urls = Array.isArray(only) ? only : this.urlsText.split('\n').map(s => s.trim()).filter(s => s && !s.startsWith('#'));
+      if (!urls.length) { this.submitError = '请输入至少一个 URL'; return false; }
       this.submitting = true; this.submitError = '';
       try {
         const r = await fetch('/api/batches', {
@@ -6104,15 +6101,23 @@ const __vueApp = createApp({
             project_id: this.currentProjectId !== '' && this.currentProjectId !== null ? Number(this.currentProjectId) : null }),
         });
         const data = await r.json();
-        if (!r.ok) { this.submitError = data.error || '提交失败'; this.toast('❌ ' + (data.error || '提交失败')); return; }
-        this.currentBatchId = data.batch_id;
-        this.statusFilter = '';
-        this.activeTab = 'matrix';
-        this.view = 'tasks';
+        if (!r.ok) { this.submitError = data.error || '提交失败'; this.toast('❌ ' + (data.error || '提交失败')); return false; }
+        if (!Array.isArray(only)) this.urlsText = '';
+        this.statusFilter = ''; this.searchQ = ''; this.taskSort = 'recent';
         await this.refreshTasks();
-        await this.refreshTelemetry();
-        this.toast('✅ 批次 #' + data.batch_id + ' 创建成功, ' + data.accepted + ' 个任务已开始运行');
-      } catch (e) { this.submitError = '网络错误: ' + e; }
+        this.refreshTelemetry();
+        // 一个网址: 直接打开它的详情(看进度, 完成后就是预览对比); 多个: 任务列表只看这一批
+        const mine = this.tasks.filter(t => t.batch_id === data.batch_id);
+        if (mine.length === 1) {
+          this.currentBatchId = ''; this.highlightTaskId = mine[0].id;
+          this.toast('✅ 已开始克隆');
+          this.openTaskById(mine[0].id);
+        } else {
+          this.currentBatchId = data.batch_id; this.activeTab = 'matrix'; this.view = 'tasks';
+          this.toast('✅ ' + data.accepted + ' 个网址已开始克隆');
+        }
+        return true;
+      } catch (e) { this.submitError = '网络错误: ' + e; return false; }
       finally { this.submitting = false; }
     },
     handleGenFile(ev) {
