@@ -15,7 +15,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 <!-- 顶级字体体系: Inter / Plus Jakarta Sans / JetBrains Mono / Noto Sans SC -->
 <link href="/vendor/fonts/fonts.css" rel="stylesheet">
 <!-- UI 改版 P0 规范层: 字号/对比度/焦点/语义色(只换样式) -->
-<link href="/vendor/css/ui-tokens.css?v=8" rel="stylesheet">
+<link href="/vendor/css/ui-tokens.css?v=10" rel="stylesheet">
 
 <script src="/vendor/js/lucide.subset.js?v=2"></script>
 <script>
@@ -419,27 +419,9 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         <div class="dash-kpi"><div class="dash-kpi-label">正在运行</div><div class="dash-kpi-num">[[ countUp.running ]]<span v-if="countUp.running" class="dash-live"></span></div></div>
       </section>
 
-      <!-- 最近完成: 真实截图, 让首页有内容可看 -->
-      <section v-if="dashRecent.length" class="mt-14">
-        <div class="dash-sec-head">
-          <h2 class="dash-sec-title">最近完成</h2>
-          <button @click="currentProjectId=''; goModule('tasks')" class="dash-link">全部任务<i data-lucide="arrow-right" class="w-3.5 h-3.5"></i></button>
-        </div>
-        <div class="dash-recent">
-          <button v-for="t in dashRecent" :key="t.id" @click="openTaskDetail(t)" class="dash-shot" :title="t.target_url">
-            <div class="dash-shot-img">
-              <img v-if="!thumbErrs.has(t.id)" :src="thumbUrl(t)" @error="thumbFail(t.id)" loading="lazy" decoding="async" alt="">
-            </div>
-            <div class="dash-shot-meta">
-              <span class="truncate">[[ t.domain ]]</span>
-              <span class="dash-shot-score">[[ Number(t.similarity_score).toFixed(1) ]]</span>
-            </div>
-          </button>
-        </div>
-      </section>
-
-      <!-- 项目 -->
-      <section class="mt-14">
+      <div class="dash-body">
+      <!-- 项目: 首页主体, 唯一带缩略图的区块 -->
+      <section class="dash-main">
         <div class="dash-sec-head">
           <div class="flex items-baseline gap-3">
             <h2 class="dash-sec-title">项目</h2>
@@ -575,6 +557,29 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           没有符合条件的项目。<button type="button" class="dash-link" @click="projectQ=''; projFilter='all'">清除筛选</button>
         </div>
       </section>
+      <!-- 最近动态: 纯文字时间线, 与项目卡片区分主次 -->
+      <aside class="dash-rail" aria-label="最近动态">
+        <div class="dash-sec-head">
+          <h2 class="dash-rail-title">最近动态</h2>
+          <button @click="currentProjectId=''; goModule('tasks')" class="dash-link text-[13px]">全部任务<i data-lucide="arrow-right" class="w-3.5 h-3.5"></i></button>
+        </div>
+        <ol v-if="dashActivity.length" class="dash-feed">
+          <li v-for="t in dashActivity" :key="t.id">
+            <button type="button" class="dash-feed-row" @click="openTaskDetail(t)" :title="t.target_url">
+              <span class="dash-feed-dot" :class="'is-' + (t.status === 'completed' ? 'ok' : (t.status === 'failed' ? 'bad' : 'run'))"></span>
+              <span class="dash-feed-text">
+                <span class="dash-feed-domain">[[ t.domain || t.target_url ]]</span>
+                <span class="dash-feed-sub">[[ dashTaskProject(t) ]] · [[ relTime(t.updated_at || t.created_at) ]]</span>
+              </span>
+              <span v-if="t.status === 'completed' && t.similarity_score != null" class="dash-feed-score">[[ Number(t.similarity_score).toFixed(1) ]]</span>
+              <span v-else-if="t.status === 'failed'" class="dash-feed-tag is-bad">失败</span>
+              <span v-else class="dash-feed-tag">[[ t.status === 'pending' ? '排队中' : '进行中' ]]</span>
+            </button>
+          </li>
+        </ol>
+        <div v-else class="dash-feed-empty">还没有克隆记录。在上面粘贴一个网址试试。</div>
+      </aside>
+      </div>
     </div>
 
     <!-- 新建项目弹窗 -->
@@ -3700,8 +3705,8 @@ const __vueApp = createApp({
       const d = this.dashDone; if (!d.length) return '—';
       return (d.reduce((a, t) => a + Number(t.similarity_score), 0) / d.length).toFixed(1);
     },
-    dashRecent() {
-      return this.dashDone.slice().sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || ''))).slice(0, 4);
+    dashActivity() {
+      return this.tasks.slice().sort((a, b) => String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || ''))).slice(0, 8);
     },
     batchProject() { const m = {}; for (const b of this.batches) m[b.id] = b.project_id; return m; },
     metricCards() {
@@ -4174,6 +4179,11 @@ const __vueApp = createApp({
       this.thumbErrs = new Set([...this.thumbErrs, id]);
     },
     setProjView(v) { this.projView = v; try { localStorage.setItem('cloner-proj-view', v); } catch (e) {} this.$nextTick(() => this.iconRefresh && this.iconRefresh()); },
+    dashTaskProject(t) {
+      const pid = this.batchProject[t.batch_id];
+      const p = this.projects.find(x => x.id === pid);
+      return p ? p.name : '未分组';
+    },
     relTime(ts) {
       if (!ts) return '—';
       const t = new Date(String(ts).replace(' ', 'T') + (/[zZ]|[+-]\d\d:?\d\d$/.test(ts) ? '' : 'Z')).getTime();

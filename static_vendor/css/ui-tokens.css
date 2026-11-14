@@ -270,3 +270,40 @@ html body .proj-sort select option{background:var(--surface);color:var(--fg)}
   .proj-bar > div.ml-auto > .relative{flex:1 1 100%}
   .proj-bar > div.ml-auto > .proj-sort{flex:1}
 }
+
+/* ---------- 15. 首页主体: 项目(主) + 最近动态(次, 纯文字) ---------- */
+.dash{max-width:1240px}
+.dash-hero{max-width:760px}
+.dash-body{margin-top:56px;display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:56px;align-items:start}
+.dash-main{min-width:0}
+.dash-main .dash-projects{grid-template-columns:repeat(2,minmax(0,1fr))}
+.dash-rail{position:sticky;top:24px;padding-left:28px;border-left:1px solid var(--line)}
+.dash-rail .dash-sec-head{min-height:32px}
+.dash-rail-title{font-size:13px;font-weight:600;color:var(--fg-2);letter-spacing:.02em}
+.dash-feed{list-style:none;margin:4px 0 0;padding:0}
+.dash-feed li + li{border-top:1px solid var(--line)}
+.dash-feed-row{width:100%;display:flex;align-items:center;gap:12px;padding:12px 0;text-align:left;color:var(--fg-2);transition:color .15s}
+.dash-feed-row:hover{color:var(--fg)}
+.dash-feed-row:hover .dash-feed-domain{text-decoration:underline;text-decoration-color:var(--line-strong);text-underline-offset:3px}
+.dash-feed-dot{width:6px;height:6px;border-radius:99px;flex:none;background:var(--fg-3)}
+.dash-feed-dot.is-ok{background:rgb(var(--ok-500))}
+.dash-feed-dot.is-bad{background:rgb(var(--bad-500))}
+.dash-feed-dot.is-run{background:rgb(var(--warn-500));animation:dash-live 1.6s ease-in-out infinite}
+.dash-feed-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.dash-feed-domain{font-size:14px;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dash-feed-sub{font-size:12px;color:var(--fg-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dash-feed-score{font-family:'Instrument Serif',Georgia,serif;font-size:22px;line-height:1;color:var(--fg);font-variant-numeric:tabular-nums}
+.dash-feed-tag{font-size:12px;color:var(--fg-3)}
+.dash-feed-tag.is-bad{color:rgb(var(--bad-500))}
+.dash-feed-empty{padding:16px 0;font-size:13px;color:var(--fg-3)}
+@media (max-width:1180px){
+  .dash-body{grid-template-columns:minmax(0,1fr);gap:48px}
+  .dash-rail{position:static;padding-left:0;border-left:0;order:2}
+  .dash-main .dash-projects{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media (max-width:1024px){.dash-main .dash-projects{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:640px){.dash-main .dash-projects{grid-template-columns:minmax(0,1fr)}.dash-body{margin-top:40px}}
+@media (min-width:1181px){
+  .dash-main .proj-row{grid-template-columns:64px minmax(0,2.6fr) 72px 44px minmax(110px,1fr) 84px 32px;gap:16px}
+  .dash-main .proj-thumb{width:64px;height:40px}
+}
