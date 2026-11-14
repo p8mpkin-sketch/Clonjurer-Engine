@@ -922,6 +922,20 @@ def usage_tokens():
                     "tokens_in": sum(r["tokens_in"] for r in rows), "tokens_out": sum(r["tokens_out"] for r in rows)})
 
 
+@app.get("/api/tasks/<int:task_id>/diff_regions")
+def task_diff_regions(task_id):
+    """差异视图的结论与差别区域(确定性计算, 带缓存): {area_pct, regions:[{x,y,w,h}(比例)], verdict}。"""
+    from core import diff_regions
+    task = _task_or_404(task_id)
+    try:
+        data = diff_regions.for_workspace(_workspace_of(task))
+    except Exception as exc:
+        return jsonify({"error": f"计算失败: {type(exc).__name__}"}), 500
+    if data is None:
+        return jsonify({"error": "这个任务没有可比较的截图"}), 404
+    return jsonify(data)
+
+
 @app.get("/api/tasks/<int:task_id>/live_code")
 def task_live_code(task_id):
     """界面生成: 模型正在写的代码(增量)。?epoch=&since=&think_since= 为客户端已收到的位置;
@@ -2916,8 +2930,22 @@ def download_zip(task_id):
             db.update_task(task_id, zip_path=str(zip_path))
         except Exception as exc:
             return jsonify({"error": f"ZIP 重建失败: {exc}"}), 500
-    return send_file(zip_path, as_attachment=True,
-                     download_name=f"clone_{task['domain'] or 'site'}_{task_id}.zip")
+    return send_file(zip_path, as_attachment=True, download_name=_download_name(task, _workspace_of(task)))
+
+
+_UNSAFE_NAME = re.compile(r'[\\/:*?"<>|\x00-\x1f]+')
+
+
+def _download_name(task: dict, ws: Path) -> str:
+    """下载文件名: 页面标题(没有时用 域名+路径) + 任务号, 去掉文件名非法字符, 控制长度。"""
+    title = _display_title(task, ws)
+    if not title:
+        u = urlsplit(task.get("target_url") or "")
+        host = u.netloc or task.get("domain") or "site"
+        title = host + (u.path.rstrip("/").replace("/", "_") if u.path and u.path != "/" else "")
+    name = _UNSAFE_NAME.sub("_", title)
+    name = re.sub(r"[\s_]+", " ", name).strip(" ._")[:60] or "site"
+    return f"{name} #{task['id']}.zip"
 
 
 @app.get("/api/export_all")

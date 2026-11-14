@@ -772,7 +772,7 @@ def _run(desc: str, ws: Path, pool, ai_cfg: dict, judge_cfg: dict, viewport: dic
     if brief.get("highlights"):
         log("GEN", "亮点: " + "; ".join(brief["highlights"]))
     log("GEN", f"验收清单 {len(brief['checklist'])} 条: " + "; ".join(
-        f"{i['id']}[{i['type']}{'*' if i['must'] else ''}] {i['text'][:40]}" for i in brief["checklist"]))
+        f"{i['text'][:40]}" for i in brief["checklist"]))
 
     best: dict = {}
     rounds: list = []
