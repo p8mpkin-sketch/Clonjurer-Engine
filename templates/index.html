@@ -15,7 +15,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 <!-- 顶级字体体系: Inter / Plus Jakarta Sans / JetBrains Mono / Noto Sans SC -->
 <link href="/vendor/fonts/fonts.css" rel="stylesheet">
 <!-- UI 改版 P0 规范层: 字号/对比度/焦点/语义色(只换样式) -->
-<link href="/vendor/css/ui-tokens.css?v=4" rel="stylesheet">
+<link href="/vendor/css/ui-tokens.css?v=8" rel="stylesheet">
 
 <script src="/vendor/js/lucide.subset.js?v=2"></script>
 <script>
@@ -217,7 +217,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 </style>
 <!-- Tailwind 预编译(tools/build_css.sh): 原 451KB 运行时 JS 每次打开都在浏览器里扫描 DOM 生成样式;
      放在 head 最后, 与运行时注入的位置一致, 层叠顺序不变 -->
-<link href="/vendor/css/app.css?v=3" rel="stylesheet">
+<link href="/vendor/css/app.css?v=5" rel="stylesheet">
 </head>
 <body class="h-screen overflow-hidden font-sans antialiased">
 
@@ -441,62 +441,138 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <!-- 项目 -->
       <section class="mt-14">
         <div class="dash-sec-head">
-          <h2 class="dash-sec-title">项目</h2>
-          <div class="flex items-center gap-2">
-            <div class="relative hidden sm:block">
-              <i data-lucide="search" class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500"></i>
-              <input v-model="projectQ" placeholder="搜索项目" class="w-48 h-8 rounded-lg bg-transparent border border-white/[0.1] pl-8 pr-3 text-[13px] text-slate-200">
-            </div>
-            <button @click="openProjectModal()" class="h-8 px-3 rounded-lg border border-white/[0.1] hover:border-white/[0.2] text-[13px] text-slate-200 flex items-center gap-1.5 transition-colors">
-              <i data-lucide="plus" class="w-3.5 h-3.5"></i>新建项目
+          <div class="flex items-baseline gap-3">
+            <h2 class="dash-sec-title">项目</h2>
+            <span class="text-[13px] text-slate-500 tnums">[[ dashProjects.length ]] 个</span>
+          </div>
+          <button @click="openProjectModal()" class="h-8 px-3 rounded-lg ui-primary text-[13px] flex items-center gap-1.5">
+            <i data-lucide="plus" class="w-3.5 h-3.5"></i>新建项目
+          </button>
+        </div>
+        <!-- 工具条: 筛选 · 搜索 · 排序 · 视图 -->
+        <div class="proj-bar">
+          <div class="ui-seg" role="group" aria-label="筛选项目">
+            <button v-for="f in projFilters" :key="f.id" type="button" :aria-pressed="projFilter===f.id ? 'true' : 'false'" @click="projFilter=f.id">
+              [[ f.label ]]<span class="proj-bar-count">[[ f.count ]]</span>
             </button>
           </div>
-        </div>
-        <div class="dash-projects">
-          <div v-for="p in filteredProjects" :key="p.id" class="dash-proj" @click="enterProject(p)">
-            <div class="dash-proj-mosaic">
-              <template v-if="projThumbs(p).length">
-                <img v-for="t in projThumbs(p)" :key="t.id" :src="thumbUrl(t)" @error="thumbFail(t.id)" loading="lazy" alt="">
-              </template>
-              <div v-else class="dash-proj-empty"><i data-lucide="folder" class="w-5 h-5"></i><span>还没有完成的克隆</span></div>
+          <div class="flex items-center gap-2 ml-auto">
+            <div class="relative">
+              <i data-lucide="search" class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500"></i>
+              <input v-model="projectQ" placeholder="搜索项目" aria-label="搜索项目" class="proj-input w-44 pl-8">
             </div>
-            <div class="p-5">
+            <label class="proj-sort">
+              <span class="hidden sm:inline">排序</span>
+              <select v-model="projSort" aria-label="排序方式">
+                <option value="recent">最近更新</option>
+                <option value="score">平均还原度</option>
+                <option value="tasks">任务数</option>
+                <option value="name">名称</option>
+              </select>
+            </label>
+            <div class="ui-seg" role="group" aria-label="视图">
+              <button type="button" :aria-pressed="projView==='grid' ? 'true' : 'false'" @click="setProjView('grid')" title="网格" aria-label="网格视图"><i data-lucide="layout-grid" class="w-4 h-4"></i></button>
+              <button type="button" :aria-pressed="projView==='list' ? 'true' : 'false'" @click="setProjView('list')" title="列表" aria-label="列表视图"><i data-lucide="list" class="w-4 h-4"></i></button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 网格 -->
+        <div v-if="projView==='grid'" class="dash-projects">
+          <div v-for="p in dashProjects" :key="p.id" class="dash-proj" @click="enterProject(p)">
+            <div class="dash-proj-mosaic">
+              <template v-if="projMeta[p.id].thumbs.length">
+                <img v-for="t in projMeta[p.id].thumbs" :key="t.id" :src="thumbUrl(t)" @error="thumbFail(t.id)" loading="lazy" alt="">
+              </template>
+              <div v-else class="dash-proj-empty"><i data-lucide="image" class="w-5 h-5"></i><span>还没有完成的克隆</span></div>
+              <span v-if="p.running_cnt" class="proj-live"><span></span>[[ p.running_cnt ]] 个运行中</span>
+            </div>
+            <div class="px-5 pt-4 pb-5">
               <div class="flex items-center gap-2">
                 <span class="w-2 h-2 rounded-full shrink-0" :style="{ background: p.color }"></span>
                 <span class="text-[15px] font-medium text-slate-100 truncate">[[ p.name ]]</span>
-                <div class="relative ml-auto shrink-0">
-                  <button @click.stop="projectMenu = (projectMenu===p.id ? null : p.id)" title="项目操作" aria-label="项目操作"
-                    class="w-7 h-7 flex items-center justify-center rounded-md text-slate-500 hover:text-slate-100 hover:bg-white/[0.06] transition-colors">
-                    <i data-lucide="more-horizontal" class="w-4 h-4"></i>
-                  </button>
-                  <div v-if="projectMenu===p.id" @click.stop="projectMenu=null" class="fixed inset-0 z-[60]"></div>
-                  <div v-if="projectMenu===p.id" class="absolute right-0 top-8 z-[61] w-48 rounded-lg border border-white/[0.08] bg-slate-900 p-1" style="box-shadow:var(--shadow-pop)">
-                    <button @click.stop="openRenameModal(p); projectMenu=null" class="w-full flex items-center gap-2 px-2.5 h-8 rounded-md text-[13px] text-slate-300 hover:bg-white/[0.05] hover:text-slate-100">
-                      <i data-lucide="pencil" class="w-4 h-4"></i>修改名称和描述</button>
-                    <button @click.stop="exportProject(p); projectMenu=null" class="w-full flex items-center gap-2 px-2.5 h-8 rounded-md text-[13px] text-slate-300 hover:bg-white/[0.05] hover:text-slate-100">
-                      <i data-lucide="package" class="w-4 h-4"></i>导出项目 ZIP</button>
-                    <button v-if="p.id !== defaultProjectId" @click.stop="deleteProject(p); projectMenu=null" class="w-full flex items-center gap-2 px-2.5 h-8 rounded-md text-[13px] text-rose-400 hover:bg-rose-500/10">
-                      <i data-lucide="trash-2" class="w-4 h-4"></i>删除项目</button>
+                <button @click.stop="projectMenu = (projectMenu===p.id ? null : p.id)" title="项目操作" aria-label="项目操作"
+                  class="ml-auto w-7 h-7 flex items-center justify-center rounded-md text-slate-500 hover:text-slate-100 hover:bg-white/[0.06] transition-colors shrink-0">
+                  <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                </button>
+              </div>
+              <p class="text-[13px] text-slate-500 mt-1 truncate">[[ p.description || '暂无描述' ]]</p>
+              <div class="flex items-end gap-5 mt-5">
+                <div class="shrink-0">
+                  <div class="dash-proj-score" :class="p.avg_score == null ? 'text-slate-600' : ''">[[ p.avg_score != null ? p.avg_score.toFixed(1) : '—' ]]</div>
+                  <div class="text-[12px] text-slate-500 mt-0.5">平均还原度</div>
+                </div>
+                <div class="flex-1 min-w-0 pb-1">
+                  <div class="proj-rate"><span :style="{ width: projMeta[p.id].rate + '%' }"></span><i v-if="p.fail_cnt" :style="{ width: projMeta[p.id].failRate + '%' }"></i></div>
+                  <div class="flex justify-between mt-1.5 text-[12px] text-slate-500 tnums">
+                    <span>[[ p.ok_cnt ]]/[[ p.task_cnt ]] 成功</span><span v-if="p.fail_cnt" class="text-rose-400">[[ p.fail_cnt ]] 失败</span>
                   </div>
                 </div>
               </div>
-              <p class="text-[13px] text-slate-500 mt-1 truncate">[[ p.description || '暂无描述' ]]</p>
-              <div class="flex items-end justify-between mt-5">
-                <div>
-                  <div class="text-[12px] text-slate-500">平均还原度</div>
-                  <div class="dash-proj-score" :class="p.avg_score == null ? 'text-slate-600' : ''">[[ p.avg_score != null ? p.avg_score.toFixed(1) : '—' ]]</div>
-                </div>
-                <div class="text-right text-[12px] text-slate-500 leading-relaxed tnums">
-                  <div>[[ p.task_cnt ]] 个任务 · [[ p.batch_cnt ]] 批</div>
-                  <div><span class="text-emerald-400">[[ p.ok_cnt ]] 成功</span><template v-if="p.fail_cnt"> · <span class="text-rose-400">[[ p.fail_cnt ]] 失败</span></template></div>
-                </div>
+              <div class="proj-foot">
+                <span>[[ relTime(projMeta[p.id].last) ]]更新</span><span>[[ p.batch_cnt ]] 个批次</span>
               </div>
             </div>
+            <div v-if="projectMenu===p.id" @click.stop="projectMenu=null" class="fixed inset-0 z-[60]"></div>
+            <div v-if="projectMenu===p.id" @click.stop class="proj-menu" style="top:calc(148px + 44px)">
+              <button @click.stop="openRenameModal(p); projectMenu=null"><i data-lucide="pencil" class="w-4 h-4"></i>修改名称和描述</button>
+              <button @click.stop="exportProject(p); projectMenu=null"><i data-lucide="package" class="w-4 h-4"></i>导出项目 ZIP</button>
+              <button v-if="p.id !== defaultProjectId" @click.stop="deleteProject(p); projectMenu=null" class="danger"><i data-lucide="trash-2" class="w-4 h-4"></i>删除项目</button>
+            </div>
           </div>
-          <button @click="openProjectModal()" class="dash-proj dash-proj-new">
+          <button v-if="!projectQ && projFilter==='all'" @click="openProjectModal()" class="dash-proj dash-proj-new">
             <i data-lucide="plus" class="w-5 h-5"></i><span>新建项目</span>
             <small>按客户或用途分组管理克隆任务</small>
           </button>
+        </div>
+
+        <!-- 列表 -->
+        <div v-else class="proj-table" role="table" aria-label="项目列表">
+          <div class="proj-row proj-head" role="row">
+            <span></span>
+            <button type="button" @click="projSort='name'" :class="projSort==='name' ? 'on' : ''">项目</button>
+            <button type="button" @click="projSort='score'" :class="projSort==='score' ? 'on' : ''" class="text-right">平均还原度</button>
+            <button type="button" @click="projSort='tasks'" :class="projSort==='tasks' ? 'on' : ''" class="text-right hide-sm">任务</button>
+            <span class="hide-sm">成功率</span>
+            <button type="button" @click="projSort='recent'" :class="projSort==='recent' ? 'on' : ''" class="hide-sm">最近更新</button>
+            <span></span>
+          </div>
+          <div v-for="p in dashProjects" :key="p.id" class="proj-row" role="row" @click="enterProject(p)">
+            <div class="proj-thumb">
+              <img v-if="projMeta[p.id].thumbs.length" :src="thumbUrl(projMeta[p.id].thumbs[0])" loading="lazy" alt="">
+              <i v-else data-lucide="image" class="w-4 h-4"></i>
+            </div>
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="w-1.5 h-1.5 rounded-full shrink-0" :style="{ background: p.color }"></span>
+                <span class="text-[14px] font-medium text-slate-100 truncate">[[ p.name ]]</span>
+                <span v-if="p.running_cnt" class="proj-live inline"><span></span>[[ p.running_cnt ]]</span>
+              </div>
+              <div class="text-[12px] text-slate-500 truncate mt-0.5">[[ p.description || '暂无描述' ]]</div>
+            </div>
+            <div class="text-right serif-num text-[24px] leading-none" :class="p.avg_score == null ? 'text-slate-600' : 'text-slate-100'">[[ p.avg_score != null ? p.avg_score.toFixed(1) : '—' ]]</div>
+            <div class="text-right text-[13px] text-slate-300 tnums hide-sm">[[ p.task_cnt ]]</div>
+            <div class="hide-sm">
+              <div class="proj-rate"><span :style="{ width: projMeta[p.id].rate + '%' }"></span><i v-if="p.fail_cnt" :style="{ width: projMeta[p.id].failRate + '%' }"></i></div>
+              <div class="text-[12px] text-slate-500 mt-1 tnums">[[ projMeta[p.id].rate ]]%<template v-if="p.fail_cnt"> · <span class="text-rose-400">[[ p.fail_cnt ]] 失败</span></template></div>
+            </div>
+            <div class="text-[13px] text-slate-400 hide-sm">[[ relTime(projMeta[p.id].last) ]]</div>
+            <div class="relative flex justify-end">
+              <button @click.stop="projectMenu = (projectMenu===p.id ? null : p.id)" title="项目操作" aria-label="项目操作"
+                class="w-7 h-7 flex items-center justify-center rounded-md text-slate-500 hover:text-slate-100 hover:bg-white/[0.06] transition-colors">
+                <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+              </button>
+              <div v-if="projectMenu===p.id" @click.stop="projectMenu=null" class="fixed inset-0 z-[60]"></div>
+              <div v-if="projectMenu===p.id" @click.stop class="proj-menu" style="top:32px">
+                <button @click.stop="openRenameModal(p); projectMenu=null"><i data-lucide="pencil" class="w-4 h-4"></i>修改名称和描述</button>
+                <button @click.stop="exportProject(p); projectMenu=null"><i data-lucide="package" class="w-4 h-4"></i>导出项目 ZIP</button>
+                <button v-if="p.id !== defaultProjectId" @click.stop="deleteProject(p); projectMenu=null" class="danger"><i data-lucide="trash-2" class="w-4 h-4"></i>删除项目</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div v-if="!dashProjects.length && (projectQ || projFilter!=='all')" class="proj-none">
+          没有符合条件的项目。<button type="button" class="dash-link" @click="projectQ=''; projFilter='all'">清除筛选</button>
         </div>
       </section>
     </div>
@@ -581,8 +657,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         </div>
         <div class="flex items-center justify-between flex-wrap gap-3">
           <div>
-            <h2 class="font-display text-lg font-bold text-slate-100">短链任务</h2>
-            <p class="text-[11px] text-slate-500 mt-0.5">每个短链任务聚合一组短链(SL-序号)· 支持多服务批量生成 · 一键复制与导出</p>
+            <h2 class="font-display text-[28px] leading-tight text-slate-100">短链任务</h2>
+            <p class="text-[13px] text-slate-500 mt-1.5">每个短链任务聚合一组短链(SL-序号)· 支持多服务批量生成 · 一键复制与导出</p>
           </div>
           <div class="flex items-center gap-2">
             <div class="relative">
@@ -834,8 +910,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
     <div class="max-w-[1300px] mx-auto px-6 py-6 space-y-5">
       <div class="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 class="font-display text-lg font-bold text-slate-100">部署</h2>
-          <p class="text-[11px] text-slate-500 mt-0.5">用 Docker 一键启动克隆站，约 1 秒可访问；不用了一键销毁，不留容器和镜像。默认 24 小时后自动销毁。</p>
+          <h2 class="font-display text-[28px] leading-tight text-slate-100">部署</h2>
+          <p class="text-[13px] text-slate-500 mt-1.5">用 Docker 一键启动克隆站，约 1 秒可访问；不用了一键销毁，不留容器和镜像。默认 24 小时后自动销毁。</p>
         </div>
         <div class="flex items-center gap-2">
           <span class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px]"
@@ -1034,8 +1110,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
     <div class="max-w-[1300px] mx-auto px-6 py-6 space-y-5">
       <div class="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 class="font-display text-lg font-bold text-slate-100">远程部署</h2>
-          <p class="text-[11px] text-slate-500 mt-0.5">SSH 一键部署已完成的 Clone 工程到 VPS · 打包/上传/依赖/启动/健康检查全自动 · 凭据加密存储</p>
+          <h2 class="font-display text-[28px] leading-tight text-slate-100">远程部署</h2>
+          <p class="text-[13px] text-slate-500 mt-1.5">SSH 一键部署已完成的 Clone 工程到 VPS · 打包/上传/依赖/启动/健康检查全自动 · 凭据加密存储</p>
         </div>
         <div class="flex items-center gap-2">
           <div class="relative">
@@ -1288,8 +1364,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
     <div class="max-w-[1300px] mx-auto px-6 py-6 space-y-5">
       <div class="flex items-center justify-between">
         <div>
-          <h2 class="font-display text-lg font-bold text-slate-100">AI 实验室</h2>
-          <p class="text-[11px] text-slate-500 mt-0.5">视觉闭环修复 · Mock 智能润色 · 大模型供应商状态</p>
+          <h2 class="font-display text-[28px] leading-tight text-slate-100">AI 实验室</h2>
+          <p class="text-[13px] text-slate-500 mt-1.5">视觉闭环修复 · Mock 智能润色 · 大模型供应商状态</p>
         </div>
         <div class="flex items-center gap-2">
           <button @click="refreshing=true; refreshTasks().then(()=>refreshing=false)"
@@ -1345,7 +1421,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <span class="text-[10px] text-slate-500">对比画布</span>
               <div class="flex bg-slate-950/90 p-0.5 rounded-lg border border-white/[0.06]">
                 <button @click="splitRight='cloned'"
-                  :class="splitRight==='cloned' ? 'bg-indigo-500/20 text-indigo-200' : 'text-slate-500 hover:text-slate-300'"
+                  :class="splitRight==='cloned' ? 'bg-slate-500/15 text-slate-50' : 'text-slate-500 hover:text-slate-300'"
                   class="text-[10px] px-2.5 py-1 rounded-md transition-all">修复后预览</button>
                 <button @click="splitRight='diff'"
                   :class="splitRight==='diff' ? 'bg-rose-500/20 text-rose-200' : 'text-slate-500 hover:text-slate-300'"
@@ -1405,7 +1481,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <div class="flex items-center gap-2">
             <span class="text-[10px] text-slate-500">点击卡片选中单个; 勾选可批量</span>
             <button @click="aiBatchMode=!aiBatchMode"
-              :class="aiBatchMode ? 'bg-fuchsia-500/20 text-fuchsia-200 border-fuchsia-400/50' : 'text-slate-400 border-white/[0.08]'"
+              :class="aiBatchMode ? 'bg-slate-500/10 text-slate-50 border-slate-400' : 'text-slate-400 border-white/[0.08]'"
               class="px-2.5 py-1.5 rounded-lg border text-[10.5px] transition-all">[[ aiBatchMode ? '✓ 批量模式' : '批量模式' ]]</button>
             <button v-if="aiBatchMode && aiBatchIds.size" @click="startBatchRepair" :disabled="aiBatchBusy"
               class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg ui-primary text-[10.5px] font-semibold text-white disabled:opacity-50 transition-all">
@@ -1438,7 +1514,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <span class="text-[9.5px] font-mono font-bold text-fuchsia-300 shrink-0">#[[ t.id ]]</span>
               <span class="text-[9px] text-slate-600 tnums shrink-0">[[ (t.created_at || "").slice(5, 11) ]]</span>
               <span class="text-[10px] font-mono tnums px-1.5 py-0.5 rounded border"
-                :class="(t.similarity_score||0) >= 95 ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : (t.similarity_score||0) >= 80 ? 'border-sky-500/40 text-sky-300' : 'border-amber-500/40 text-amber-300'">[[ t.similarity_score ?? '—' ]]</span>
+                :class="(t.similarity_score||0) >= 95 ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : (t.similarity_score||0) >= 80 ? 'border-slate-400 text-slate-50' : 'border-amber-500/40 text-amber-300'">[[ t.similarity_score ?? '—' ]]</span>
             </div>
             <div class="flex items-center gap-1.5 mt-2.5">
               <button @click.stop="openAiLab(t); openAiReport()" :disabled="aiReport.loading"
@@ -1460,12 +1536,12 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
     <div class="max-w-[1300px] mx-auto px-6 py-6 space-y-4">
       <div class="flex items-center justify-between">
         <div>
-          <h2 class="font-display text-lg font-bold text-slate-100">管理中心</h2>
-          <p class="text-[11px] text-slate-500 mt-0.5">用户与角色 · 审计日志 · 系统设置</p>
+          <h2 class="font-display text-[28px] leading-tight text-slate-100">管理中心</h2>
+          <p class="text-[13px] text-slate-500 mt-1.5">用户与角色 · 审计日志 · 系统设置</p>
         </div>
         <div class="flex items-center gap-1 p-0.5 rounded-xl border border-white/[0.07] bg-slate-950/60">
           <button v-for="t in adminTabs" :key="t.id" @click="adminTab=t.id"
-            :class="adminTab===t.id ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40' : 'text-slate-500 border-transparent hover:text-slate-300'"
+            :class="adminTab===t.id ? 'bg-slate-500/10 text-slate-50 border-slate-400' : 'text-slate-500 border-transparent hover:text-slate-300'"
             class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[11px] transition-all">
             <i :data-lucide="t.icon" class="w-3.5 h-3.5"></i>[[ t.label ]]
           </button>
@@ -1550,7 +1626,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <button v-for="c in [['cfg-api','API 密钥与模型','key-round'],['cfg-proxy','代理池与缓存','database'],['cfg-auth','鉴权与会话','shield-check'],['cfg-limits','并发与限制','gauge']]" :key="c[0]"
             @click="cfgAnchor(c[0])"
             class="w-full flex items-center gap-2 px-3 py-2 rounded-xl border text-[11px] transition-all text-left"
-            :class="cfgActive===c[0] ? 'bg-indigo-500/15 text-indigo-200 border-indigo-500/40' : 'text-slate-500 border-transparent hover:text-slate-200 hover:bg-white/[0.03]'">
+            :class="cfgActive===c[0] ? 'bg-slate-500/10 text-slate-50 border-slate-400' : 'text-slate-500 border-transparent hover:text-slate-200 hover:bg-white/[0.03]'">
             <i :data-lucide="c[2]" class="w-3.5 h-3.5 shrink-0"></i>[[ c[1] ]]
           </button>
         </div>
@@ -1566,7 +1642,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <label class="text-[11px] text-slate-400 mb-1.5 block">Provider 预设</label>
               <div class="flex flex-wrap gap-1.5">
                 <button v-for="p in settings.providers" :key="p.id" @click="pickProvider(p)"
-                  :class="settings.base_url === p.base_url && p.base_url ? 'bg-indigo-500/20 text-indigo-200 border-indigo-400/50' : 'bg-slate-950/70 text-slate-400 border-white/[0.08] hover:text-slate-200'"
+                  :class="settings.base_url === p.base_url && p.base_url ? 'bg-slate-500/10 text-slate-50 border-slate-400' : 'bg-slate-950/70 text-slate-400 border-white/[0.08] hover:text-slate-200'"
                   class="px-2.5 py-1 rounded-lg border text-[10.5px] transition-all">[[ p.name ]]</button>
               </div>
               <div v-if="settings.providerNote" class="text-[9.5px] text-slate-500 mt-1">[[ settings.providerNote ]]</div>
@@ -1692,7 +1768,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <div><label class="text-[11px] text-slate-400 mb-1 block">角色</label>
               <div class="grid grid-cols-3 gap-2">
                 <button v-for="r in ['viewer','operator','admin']" :key="r" @click="userModal.role=r"
-                  :class="userModal.role===r ? 'border-indigo-500/60 bg-indigo-500/15 text-indigo-300' : 'border-white/[0.08] text-slate-500 hover:text-slate-300'"
+                  :class="userModal.role===r ? 'border-slate-400 bg-slate-500/10 text-slate-50' : 'border-white/[0.08] text-slate-500 hover:text-slate-300'"
                   class="py-2 rounded-lg border text-[11px] transition-all">[[ roleText(r) ]]</button>
               </div></div>
             <div v-if="userModal.error" class="px-3 py-2 rounded-lg border border-rose-500/30 bg-rose-500/10 text-[11px] text-rose-300">[[ userModal.error ]]</div>
@@ -1709,11 +1785,13 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
   <div v-show="view==='create' || view==='tasks' || view==='task'" class="flex flex-1 min-h-0">
 
     <!-- ======================= 新建克隆(独立向导页) ======================= -->
-    <aside v-show="view==='create'" :class="view==='create' ? 'w-[560px]' : 'w-[380px]'" class="shrink-0 border-r border-white/[0.07] bg-slate-950/70 backdrop-blur-2xl flex flex-col h-full overflow-hidden">
+    <aside v-show="view==='create'" :class="view==='create' ? 'w-[600px]' : 'w-[380px]'" class="shrink-0 border-r border-white/[0.07] flex flex-col h-full overflow-hidden">
 
       <!-- Hero 任务输入区 -->
-      <section class="shrink-0 p-4 pb-3">
-        <div class="rounded-2xl border border-white/[0.08] bg-indigo-500/[0.06] p-4 space-y-3">
+      <section class="shrink-0 px-6 pt-8 pb-3">
+        <h1 class="font-display text-[30px] leading-tight text-slate-100">新建克隆</h1>
+        <p class="text-[13px] text-slate-500 mt-1 mb-5">填好网址和交付形态就能开始，其余设置都有合理的默认值。</p>
+        <div class="rounded-xl border border-white/[0.1] bg-slate-900 p-4 space-y-3">
           <label class="text-[11px] font-semibold text-slate-300 flex items-center gap-1.5">
             <i data-lucide="zap" class="w-3.5 h-3.5 text-indigo-400"></i>目标站点
             <span class="text-[9.5px] text-slate-500 font-normal">· 每行一个, 单次最多 50 个</span>
@@ -1736,7 +1814,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <span class="tracking-normal font-normal text-slate-600">· 任务完成后自动构建, 在任务卡片下载</span></div>
             <div class="grid grid-cols-3 gap-2">
               <button v-for="d in deliveries" :key="d.id" @click="form.package=d.id" :title="d.hint"
-                :class="form.package===d.id ? 'border-indigo-500/40 bg-indigo-500/[0.10] text-indigo-200' : 'border-white/[0.06] bg-slate-950/50 text-slate-400 hover:border-white/[0.12] hover:text-slate-300'"
+                :class="form.package===d.id ? 'border-slate-400 bg-slate-500/10 text-slate-50' : 'border-white/[0.06] bg-slate-950/50 text-slate-400 hover:border-white/[0.12] hover:text-slate-300'"
                 class="rounded-xl border px-2.5 py-2 text-left transition-all">
                 <div class="flex items-center gap-1.5 text-[10.5px] font-medium"><i :data-lucide="d.icon" class="w-3.5 h-3.5"></i>[[ d.label ]]</div>
                 <div class="text-[9px] text-slate-500 mt-0.5 leading-snug">[[ d.sub ]]</div>
@@ -1780,14 +1858,14 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <label class="text-[10px] text-slate-500 tracking-[0.16em] font-semibold">抓取设置</label>
           <div class="grid grid-cols-3 gap-2">
             <div class="rounded-xl border p-2.5 space-y-2 transition-all"
-              :class="form.mode==='crawler' ? 'border-indigo-500/40 bg-indigo-500/[0.06]' : 'border-white/[0.06] bg-slate-950/50'">
+              :class="form.mode==='crawler' ? 'border-slate-400 bg-slate-500/[0.06]' : 'border-white/[0.06] bg-slate-950/50'">
               <div class="text-[10.5px] font-medium text-slate-300">抓取深度</div>
               <div class="flex flex-col gap-1">
                 <button @click="form.mode='single'"
-                  :class="form.mode==='single' ? 'bg-indigo-500/20 text-indigo-200 border-indigo-500/40' : 'text-slate-500 border-white/[0.06] hover:text-slate-300'"
+                  :class="form.mode==='single' ? 'bg-slate-500/10 text-slate-50 border-slate-400' : 'text-slate-500 border-white/[0.06] hover:text-slate-300'"
                   class="text-[10px] px-2 py-1.5 rounded-lg border transition-all text-left">单页极速</button>
                 <button @click="form.mode='crawler'"
-                  :class="form.mode==='crawler' ? 'bg-indigo-500/20 text-indigo-200 border-indigo-500/40' : 'text-slate-500 border-white/[0.06] hover:text-slate-300'"
+                  :class="form.mode==='crawler' ? 'bg-slate-500/10 text-slate-50 border-slate-400' : 'text-slate-500 border-white/[0.06] hover:text-slate-300'"
                   class="text-[10px] px-2 py-1.5 rounded-lg border transition-all text-left">同域深入</button>
               </div>
               <div v-if="form.mode==='crawler'" class="flex items-center gap-1.5 fade-in">
@@ -1807,7 +1885,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <div class="rounded-xl border border-white/[0.06] bg-slate-950/50 p-2.5 space-y-1.5">
               <div class="text-[10.5px] font-medium text-slate-300">设备视口</div>
               <button v-for="vp in viewports" :key="vp.id" @click="form.viewport=vp.id"
-                :class="form.viewport===vp.id ? 'bg-indigo-500/20 text-indigo-200 border-indigo-500/40' : 'text-slate-500 border-white/[0.06] hover:text-slate-300'"
+                :class="form.viewport===vp.id ? 'bg-slate-500/10 text-slate-50 border-slate-400' : 'text-slate-500 border-white/[0.06] hover:text-slate-300'"
                 class="w-full text-[10px] px-2 py-1 rounded-lg border transition-all text-left flex items-center justify-between">
                 <span>[[ vp.label ]]</span><span class="font-mono opacity-60 tnums">[[ vp.size ]]</span>
               </button>
@@ -1821,7 +1899,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <div class="grid grid-cols-3 gap-2">
             <div v-for="tg in toggles" :key="tg.key" @click="form[tg.key]=!form[tg.key]"
               class="rounded-xl border p-2.5 cursor-pointer transition-all select-none"
-              :class="form[tg.key] ? 'border-indigo-500/40 bg-indigo-500/[0.07]' : 'border-white/[0.06] bg-slate-950/50 hover:border-white/[0.12]'"
+              :class="form[tg.key] ? 'border-slate-400 bg-slate-500/[0.06]' : 'border-white/[0.06] bg-slate-950/50 hover:border-white/[0.12]'"
               :title="tg.hint">
               <div class="flex items-center justify-between gap-1.5">
                 <div class="text-[10.5px] font-medium leading-tight" :class="form[tg.key] ? 'text-indigo-200' : 'text-slate-400'">[[ tg.label ]]</div>
@@ -1925,13 +2003,10 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
     </aside>
 
     <!-- ======================= 工作台右侧: 浏览器池监控 + 引导 ======================= -->
-    <aside v-show="view==='create'" class="flex-1 min-h-0 overflow-y-auto custom-scroll p-6 space-y-5">
-      <div>
-        <h2 class="font-display text-lg font-bold text-slate-100">克隆工作台</h2>
-        <p class="text-[11px] text-slate-500 mt-0.5">粘贴目标 URL → 一键克隆 → 任务矩阵跟踪四段流水线 → 生成 Flask 工程</p>
-      </div>
-
-      <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+    <aside v-show="view==='create'" class="flex-1 min-h-0 overflow-y-auto custom-scroll px-8 pb-8 space-y-5">
+      <div class="pt-[86px] max-w-[440px]">
+        <h2 class="text-[13px] font-medium text-slate-400 mb-3">运行环境</h2>
+      <div class="grid grid-cols-1 gap-4">
         <!-- 浏览器池监控卡片 -->
         <div class="rounded-2xl border border-white/[0.07] bg-slate-900/70 backdrop-blur-xl p-5">
           <div class="flex items-center justify-between mb-4">
@@ -1985,16 +2060,6 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           </div>
         </div>
 
-        <!-- 快速上手 -->
-        <div class="rounded-2xl border border-white/[0.07] bg-slate-900/70 backdrop-blur-xl p-5 space-y-3">
-          <div class="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-            <i data-lucide="compass" class="w-3.5 h-3.5 text-indigo-400"></i>三步上手
-          </div>
-          <div class="space-y-2.5 text-[11px] leading-relaxed">
-            <div class="flex gap-2.5"><span class="w-5 h-5 rounded-lg bg-indigo-500/15 text-indigo-300 flex items-center justify-center text-[10px] font-bold shrink-0">1</span><span class="text-slate-400">在左侧输入目标 URL(自动补全 <span class="font-mono text-slate-500">https://</span>), 点击<span class="text-indigo-300">立即克隆</span>; 批量站点展开「高级克隆配置」粘贴清单。</span></div>
-            <div class="flex gap-2.5"><span class="w-5 h-5 rounded-lg bg-indigo-500/15 text-indigo-300 flex items-center justify-center text-[10px] font-bold shrink-0">2</span><span class="text-slate-400">任务矩阵实时跟踪四段流水线: 浏览器池渲染 → 资源智能抓取 → 路由与模板生成 → 打包完成。</span></div>
-            <div class="flex gap-2.5"><span class="w-5 h-5 rounded-lg bg-indigo-500/15 text-indigo-300 flex items-center justify-center text-[10px] font-bold shrink-0">3</span><span class="text-slate-400">完成后在任务详情<span class="text-indigo-300">沙盒预览</span>验证还原度, 一键下载 Flask 工程或推送到 Docker / 远程 VPS。</span></div>
-          </div>
         </div>
       </div>
     </aside>
@@ -2002,7 +2067,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
     <!-- ======================= 中间主视口 ======================= -->
     <main v-show="view==='tasks' || view==='task'" class="flex-1 min-w-0 flex flex-col">
       <!-- 项目上下文横幅(进入项目空间后) -->
-      <div v-if="currentProject" class="shrink-0 flex items-center gap-3 px-4 py-2 border-b border-white/[0.07]" :style="{ background: 'linear-gradient(90deg,' + currentProject.color + '22,transparent 70%)' }">
+      <div v-if="currentProject" class="shrink-0 flex items-center gap-3 px-4 py-2 border-b border-white/[0.07]" >
         <div class="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" :style="{ background: currentProject.color + '2e', border: '1px solid ' + currentProject.color + '66' }">
           <i data-lucide="folder-open" class="w-3.5 h-3.5" :style="{ color: currentProject.color }"></i>
         </div>
@@ -2072,7 +2137,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <template v-for="(st, i) in pipeline4(selectedTask)" :key="st.label">
             <div class="flex items-center gap-2.5 shrink-0">
               <div class="w-8 h-8 rounded-full flex items-center justify-center border-2 transition-all duration-300"
-                :class="{ done: 'border-emerald-400 bg-emerald-500/15', active: 'border-indigo-400 bg-indigo-500/15 ', failed: 'border-rose-400 bg-rose-500/20', pending: 'border-slate-700 bg-slate-900/60' }[st.state]">
+                :class="{ done: 'border-emerald-400 bg-emerald-500/15', active: 'border-slate-400 bg-slate-500/10 ', failed: 'border-rose-400 bg-rose-500/20', pending: 'border-slate-700 bg-slate-900/60' }[st.state]">
                 <i v-if="st.state==='done'" data-lucide="check" class="w-4 h-4 text-emerald-300"></i>
                 <i v-else-if="st.state==='failed'" data-lucide="x" class="w-4 h-4 text-rose-300"></i>
                 <span v-else class="text-[10px] font-mono tnums" :class="st.state==='active' ? 'text-indigo-300' : 'text-slate-600'">[[ i+1 ]]</span>
@@ -2289,7 +2354,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 
           <div v-else-if="previewMode==='single'" class="flex-1 min-h-0 panel rounded-xl overflow-hidden p-2">
             <iframe :src="'/preview/' + previewTask.id + '/'" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
-              class="sandbox-frame mx-auto block rounded-lg shadow-2xl" :style="{width: previewWidthStyle}"></iframe>
+              class="sandbox-frame mx-auto block rounded-lg ring-1 ring-black/5" :style="{width: previewWidthStyle}"></iframe>
           </div>
 
           <div v-else-if="previewMode==='compare'" class="flex-1 min-h-0 grid grid-cols-2 gap-3">
@@ -2297,16 +2362,16 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <div class="text-[10px] font-mono text-slate-500 px-1 pb-1.5 flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-sky-400"></span>原站 [[ previewTask.domain ]][[ origView==='live' ? ' · 实时' : ' · 截图' ]]</div>
               <div class="flex-1 min-h-0 overflow-auto custom-scroll">
                 <iframe v-if="origView==='live'" :src="previewTask.target_url" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
-                  class="sandbox-frame mx-auto block rounded-lg shadow-2xl" :style="{width: previewWidthStyle}"></iframe>
+                  class="sandbox-frame mx-auto block rounded-lg ring-1 ring-black/5" :style="{width: previewWidthStyle}"></iframe>
                 <img v-else :src="origShotUrl" alt="原站全页截图"
-                  class="mx-auto block rounded-lg shadow-2xl bg-white" :style="{width: previewWidthStyle}">
+                  class="mx-auto block rounded-lg ring-1 ring-black/5 bg-white" :style="{width: previewWidthStyle}">
               </div>
             </div>
             <div class="flex flex-col min-h-0 panel rounded-xl overflow-hidden p-2" style="border-color:rgba(99,102,241,.3)">
               <div class="text-[10px] font-mono text-indigo-300 px-1 pb-1.5 flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-indigo-400 "></span>克隆站 /preview</div>
               <div class="flex-1 min-h-0 overflow-auto custom-scroll">
                 <iframe :src="'/preview/' + previewTask.id + '/'" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
-                  class="sandbox-frame mx-auto block rounded-lg shadow-2xl" :style="{width: previewWidthStyle}"></iframe>
+                  class="sandbox-frame mx-auto block rounded-lg ring-1 ring-black/5" :style="{width: previewWidthStyle}"></iframe>
               </div>
             </div>
           </div>
@@ -2349,7 +2414,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                   <i data-lucide="braces" class="w-3 h-3 text-cyan-400"></i>录制接口 ([[ mockEntries.length ]])
                 </div>
                 <button v-for="(m, i) in mockEntries" :key="i" @click="selectMock(i)"
-                  :class="mockIndex===i && !mockCreating ? 'bg-indigo-500/15 border-indigo-500/50' : 'bg-slate-950/50 border-transparent hover:border-white/10'"
+                  :class="mockIndex===i && !mockCreating ? 'bg-slate-500/10 border-slate-400' : 'bg-slate-950/50 border-transparent hover:border-white/10'"
                   class="w-full flex items-center gap-1.5 px-2 py-1.5 rounded-lg border text-left transition-all">
                   <span class="text-[8.5px] font-bold px-1 py-0.5 rounded font-mono"
                     :class="m.method==='GET' ? 'bg-emerald-400/15 text-emerald-300' : 'bg-amber-400/15 text-amber-300'">[[ m.method ]]</span>
@@ -2569,8 +2634,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <div class="max-w-[1300px] mx-auto px-6 py-6 space-y-5">
         <div class="flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <h2 class="font-display text-lg font-bold text-slate-100">浏览器池监控</h2>
-            <p class="text-[11px] text-slate-500 mt-0.5">Browser Pool · CAS Cache · 任务队列实时遥测 · 3s 自动刷新</p>
+            <h2 class="font-display text-[28px] leading-tight text-slate-100">浏览器池监控</h2>
+            <p class="text-[13px] text-slate-500 mt-1.5">Browser Pool · CAS Cache · 任务队列实时遥测 · 3s 自动刷新</p>
           </div>
           <button @click="refreshTelemetry(); iconRefresh()" class="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-white/[0.08] text-[11px] text-slate-400 hover:text-slate-100 transition-all">
             <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>刷新
@@ -2615,8 +2680,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <div class="max-w-[1400px] mx-auto px-6 py-6 space-y-4">
         <div class="flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <h2 class="font-display text-lg font-bold text-slate-100">界面生成(截图 / 描述 → 可运行网站)</h2>
-            <p class="text-[11px] text-slate-500 mt-0.5">通用 UI 重建引擎 L1 · 输入 → UIR 中间表示 → HTML/CSS → Playwright 渲染 → 评分 v3 质量循环(≥目标分即停) · 产物走统一预览/导出</p>
+            <h2 class="font-display text-[28px] leading-tight text-slate-100">界面生成</h2>
+            <p class="text-[13px] text-slate-500 mt-1.5">上传截图或写一段描述，生成可运行、可评分的网站；达到目标分即停。</p>
           </div>
           <div class="flex items-center gap-2 text-[11px] text-slate-400">
             <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-white/[0.08] bg-slate-950/60">
@@ -2628,9 +2693,9 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         <div class="grid grid-cols-1 xl:grid-cols-[440px_1fr] gap-4 items-start">
           <div class="rounded-2xl border border-white/[0.07] bg-slate-900/70 backdrop-blur-xl p-4 space-y-4">
             <div class="flex gap-1 p-1 rounded-lg bg-slate-950/70 border border-white/[0.06]">
-              <button @click="gen.kind='description'" :class="gen.kind==='description' ? 'bg-indigo-500/20 text-indigo-200 border-indigo-500/40' : 'text-slate-400 border-transparent'"
+              <button @click="gen.kind='description'" :class="gen.kind==='description' ? 'bg-slate-500/10 text-slate-50 border-slate-400' : 'text-slate-400 border-transparent'"
                 class="flex-1 px-3 py-1.5 rounded-md border text-[11px] transition-all">文字描述</button>
-              <button @click="gen.kind='screenshot'" :class="gen.kind==='screenshot' ? 'bg-indigo-500/20 text-indigo-200 border-indigo-500/40' : 'text-slate-400 border-transparent'"
+              <button @click="gen.kind='screenshot'" :class="gen.kind==='screenshot' ? 'bg-slate-500/10 text-slate-50 border-slate-400' : 'text-slate-400 border-transparent'"
                 class="flex-1 px-3 py-1.5 rounded-md border text-[11px] transition-all">界面截图</button>
             </div>
             <div v-show="gen.kind==='description'" class="space-y-1.5">
@@ -2657,7 +2722,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                 <div class="grid grid-cols-3 gap-2">
                   <button v-for="d in deliveries" :key="d.id" @click="gen.package=d.id" :title="d.hint"
                     :disabled="gen.target==='flutter' && d.id==='desktop'"
-                    :class="gen.package===d.id ? 'border-indigo-500/40 bg-indigo-500/[0.10] text-indigo-200' : 'border-white/[0.06] bg-slate-950/50 text-slate-400 hover:border-white/[0.12] hover:text-slate-300'"
+                    :class="gen.package===d.id ? 'border-slate-400 bg-slate-500/10 text-slate-50' : 'border-white/[0.06] bg-slate-950/50 text-slate-400 hover:border-white/[0.12] hover:text-slate-300'"
                     class="rounded-xl border px-2.5 py-2 text-left transition-all disabled:opacity-40 disabled:cursor-not-allowed">
                     <div class="flex items-center gap-1.5 text-[10.5px] font-medium"><i :data-lucide="d.icon" class="w-3.5 h-3.5"></i>[[ d.label ]]</div>
                     <div class="text-[9px] text-slate-500 mt-0.5 leading-snug">[[ gen.target==='flutter' && d.id==='apk' ? 'Flutter 原生界面 APK' : gen.target==='flutter' && d.id==='' ? 'Flutter 工程源码 ZIP' : d.sub ]]</div>
@@ -2695,8 +2760,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <div class="max-w-[1400px] mx-auto px-6 py-6 space-y-4">
         <div class="flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <h2 class="font-display text-lg font-bold text-slate-100">AI Mock 数据生成</h2>
-            <p class="text-[11px] text-slate-500 mt-0.5">AI Mock Generator · 业务场景 → 接口 Mock 响应 → 一键注入 Flask 模拟路由</p>
+            <h2 class="font-display text-[28px] leading-tight text-slate-100">AI Mock 数据生成</h2>
+            <p class="text-[13px] text-slate-500 mt-1.5">AI Mock Generator · 业务场景 → 接口 Mock 响应 → 一键注入 Flask 模拟路由</p>
           </div>
           <div class="flex items-center gap-2">
             <label class="text-[11px] text-slate-400">目标任务</label>
@@ -2826,8 +2891,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         </div>
         <div class="flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <h2 class="font-display text-lg font-bold text-slate-100">表单捕获追踪</h2>
-            <p class="text-[11px] text-slate-500 mt-0.5">Form Tracker · 各任务埋点配置总览 + 最近上报实时流(细粒度配置在任务详情「表单埋点推送」)</p>
+            <h2 class="font-display text-[28px] leading-tight text-slate-100">表单捕获追踪</h2>
+            <p class="text-[13px] text-slate-500 mt-1.5">Form Tracker · 各任务埋点配置总览 + 最近上报实时流(细粒度配置在任务详情「表单埋点推送」)</p>
           </div>
           <button @click="loadTrackerOverview(); iconRefresh()" class="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-white/[0.08] text-[11px] text-slate-400 hover:text-slate-100 transition-all">
             <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>刷新
@@ -2944,6 +3009,26 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
     <div v-show="view==='scheduler'" class="flex-1 min-h-0 overflow-y-auto custom-scroll">
       <div class="max-w-[1300px] mx-auto px-6 py-6 space-y-5">
         <div class="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h2 class="font-display text-[28px] leading-tight text-slate-100">定时任务与队列</h2>
+            <p class="text-[13px] text-slate-500 mt-1.5">Scheduler · 批次队列执行状态 · 3s 自动刷新</p>
+          </div>
+          <div class="flex items-center gap-2">
+          <button @click="toggleSchedulerPause()"
+            :class="opsKpis.scheduler_paused ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-amber-500/40 bg-amber-500/10 text-amber-300'"
+            class="flex items-center gap-1.5 px-3 py-2 rounded-xl border font-semibold text-[11px] transition-all">
+            <i :data-lucide="opsKpis.scheduler_paused ? 'play' : 'pause'" class="w-3.5 h-3.5"></i>
+            [[ opsKpis.scheduler_paused ? '恢复调度' : '暂停调度' ]]
+          </button>
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/[0.08] bg-slate-950/50 text-[10.5px] text-slate-400">
+              <span class="w-1.5 h-1.5 rounded-full" :class="telemetry.queue.running ? 'bg-amber-400 ' : 'bg-emerald-400'"></span>
+              调度器 [[ telemetry.queue.running ? '执行中' : '空闲' ]]
+            </span>
+            <button @click="goModule('tasks')" class="flex items-center gap-1.5 px-3 py-2 rounded-xl ui-primary text-[11px] font-semibold text-white transition-all">
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i>提交新批次
+            </button>
+          </div>
+        </div>
         <div class="grid grid-cols-2 xl:grid-cols-4 gap-3">
           <div class="metric-grad rounded-2xl border border-white/[0.06] p-4">
             <div class="flex items-center gap-2 text-[10px] text-slate-500"><i data-lucide="list-checks" class="w-3.5 h-3.5 text-amber-400"></i>运行中定时任务</div>
@@ -2961,26 +3046,6 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <div class="metric-grad rounded-2xl border border-white/[0.06] p-4">
             <div class="flex items-center gap-2 text-[10px] text-slate-500"><i data-lucide="mouse-pointer-click" class="w-3.5 h-3.5 text-sky-400"></i>总点击量</div>
             <div class="text-2xl font-bold text-slate-100 tnums mt-1">[[ opsKpis.clicks_total ]]</div>
-          </div>
-        </div>
-          <button @click="toggleSchedulerPause()"
-            :class="opsKpis.scheduler_paused ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-amber-500/40 bg-amber-500/10 text-amber-300'"
-            class="flex items-center gap-1.5 px-3 py-2 rounded-xl border font-semibold text-[11px] transition-all">
-            <i :data-lucide="opsKpis.scheduler_paused ? 'play' : 'pause'" class="w-3.5 h-3.5"></i>
-            [[ opsKpis.scheduler_paused ? '恢复调度' : '暂停调度' ]]
-          </button>
-          <div>
-            <h2 class="font-display text-lg font-bold text-slate-100">定时任务与队列</h2>
-            <p class="text-[11px] text-slate-500 mt-0.5">Scheduler · 批次队列执行状态 · 3s 自动刷新</p>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/[0.08] bg-slate-950/50 text-[10.5px] text-slate-400">
-              <span class="w-1.5 h-1.5 rounded-full" :class="telemetry.queue.running ? 'bg-amber-400 ' : 'bg-emerald-400'"></span>
-              调度器 [[ telemetry.queue.running ? '执行中' : '空闲' ]]
-            </span>
-            <button @click="goModule('tasks')" class="flex items-center gap-1.5 px-3 py-2 rounded-xl ui-primary text-[11px] font-semibold text-white transition-all">
-              <i data-lucide="plus" class="w-3.5 h-3.5"></i>提交新批次
-            </button>
           </div>
         </div>
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -3372,6 +3437,7 @@ const __vueApp = createApp({
       consoleLevel: 'all', consoleSearch: '',
       consoleState: 0, lastConsoleState: 1, sseOk: false,
       countUp: { projects: 0, tasks: 0, running: 0, done: 0 },
+      projView: (function(){ try { return localStorage.getItem('cloner-proj-view') || 'grid'; } catch (e) { return 'grid'; } })(), projSort: 'recent', projFilter: 'all',
       toastMsg: '', toastKind: 'info',
       tabs: [
         { id: 'matrix', label: '任务列表', icon: 'layout-grid' },
@@ -3438,13 +3504,14 @@ const __vueApp = createApp({
       const m = {
         dashboard: ['项目', '每个项目单独管理自己的批次、任务和部署'],
         create: ['新建克隆', '批量目标站点 · 引擎选项 · 仿真交互配置'],
-        tasks: ['网站克隆工作台 · 任务矩阵', 'Cloner Engine & Smart Downloader · 批量克隆与任务看板'],
+        tasks: ['任务', '批量克隆与任务看板'],
         task: ['任务详情', '沙盒预览 / API 与资产审查 / 部署蓝图'],
         browserpool: ['浏览器池监控', 'Browser Pool & CAS Cache & 队列实时遥测'],
         ai: ['AI 视觉修复', 'AI Vision Repair · 视觉闭环与批量修复队列'],
         mockgen: ['AI Mock 数据生成', 'AI Mock Generator · 克隆站接口 Mock 编排'],
         tracker: ['表单捕获追踪', 'Form Tracker · 埋点配置总览与上报实时流'],
         links: ['短链管理', 'Link Shortener · 多服务短链生成与跳转统计'],
+        generate: ['界面生成', '截图或文字描述 → 可运行网站'],
         scheduler: ['定时任务', 'Scheduler · 批次队列与执行状态'],
         docker: ['部署', '用 Docker 一键启动和销毁克隆站'],
         remote: ['远程一键部署', 'Remote Deploy · SSH 推送 VPS 运行'],
@@ -3579,6 +3646,42 @@ const __vueApp = createApp({
       if (!q) return this.projects;
       return this.projects.filter(p => p.name.toLowerCase().includes(q)
         || (p.description || '').toLowerCase().includes(q));
+    },
+    projMeta() {
+      const bp = this.batchProject, m = {};
+      for (const p of this.projects) m[p.id] = { thumbs: [], last: p.created_at || '' };
+      for (const t of this.tasks) {
+        const pid = bp[t.batch_id]; const e = m[pid]; if (!e) continue;
+        const u = String(t.updated_at || t.created_at || ''); if (u > e.last) e.last = u;
+        if (t.status === 'completed' && t.similarity_score != null && !this.thumbErrs.has(t.id) && e.thumbs.length < 3) e.thumbs.push(t);
+      }
+      for (const p of this.projects) {
+        const n = p.task_cnt || 0;
+        m[p.id].rate = n ? Math.round((p.ok_cnt || 0) / n * 100) : 0;
+        m[p.id].failRate = n ? Math.round((p.fail_cnt || 0) / n * 100) : 0;
+      }
+      return m;
+    },
+    projFilters() {
+      const ps = this.projects;
+      return [
+        { id: 'all', label: '全部', count: ps.length },
+        { id: 'running', label: '运行中', count: ps.filter(p => p.running_cnt).length },
+        { id: 'failed', label: '有失败', count: ps.filter(p => p.fail_cnt).length },
+      ];
+    },
+    dashProjects() {
+      let ps = this.filteredProjects.slice();
+      if (this.projFilter === 'running') ps = ps.filter(p => p.running_cnt);
+      if (this.projFilter === 'failed') ps = ps.filter(p => p.fail_cnt);
+      const meta = this.projMeta, key = this.projSort;
+      const cmp = {
+        recent: (a, b) => String(meta[b.id].last).localeCompare(String(meta[a.id].last)),
+        score: (a, b) => (b.avg_score ?? -1) - (a.avg_score ?? -1),
+        tasks: (a, b) => (b.task_cnt || 0) - (a.task_cnt || 0),
+        name: (a, b) => String(a.name).localeCompare(String(b.name), 'zh'),
+      }[key];
+      return cmp ? ps.sort(cmp) : ps;
     },
     themeIcon() { return this.themeMode === 'light' ? 'sun' : this.themeMode === 'dark' ? 'moon' : 'monitor'; },
     themeText() { return { light: '白天', dark: '暗黑', system: '系统' }[this.themeMode]; },
@@ -4070,6 +4173,18 @@ const __vueApp = createApp({
     thumbFail(id) {
       this.thumbErrs = new Set([...this.thumbErrs, id]);
     },
+    setProjView(v) { this.projView = v; try { localStorage.setItem('cloner-proj-view', v); } catch (e) {} this.$nextTick(() => this.iconRefresh && this.iconRefresh()); },
+    relTime(ts) {
+      if (!ts) return '—';
+      const t = new Date(String(ts).replace(' ', 'T') + (/[zZ]|[+-]\d\d:?\d\d$/.test(ts) ? '' : 'Z')).getTime();
+      if (isNaN(t)) return String(ts).slice(5, 10);
+      const s = (Date.now() - t) / 1000;
+      if (s < 60) return '刚刚';
+      if (s < 3600) return Math.floor(s / 60) + ' 分钟前';
+      if (s < 86400) return Math.floor(s / 3600) + ' 小时前';
+      if (s < 86400 * 7) return Math.floor(s / 86400) + ' 天前';
+      const d = new Date(t); return (d.getMonth() + 1) + ' 月 ' + d.getDate() + ' 日';
+    },
     projThumbs(p) {
       const bp = this.batchProject;
       return this.dashDone.filter(t => bp[t.batch_id] === p.id && !this.thumbErrs.has(t.id)).slice(0, 3);
@@ -4511,14 +4626,14 @@ const __vueApp = createApp({
     roleText(r) { return { admin: '管理员', operator: '操作员', viewer: '观察者' }[r] || r; },
     roleBadge(r) {
       return { admin: 'bg-rose-500/10 text-rose-300 border-rose-500/40',
-        operator: 'bg-indigo-500/10 text-indigo-300 border-indigo-500/40',
+        operator: 'bg-slate-500/10 text-slate-50 border-slate-400',
         viewer: 'bg-slate-600/30 text-slate-300 border-slate-500/40' }[r] || 'bg-slate-700/60 text-slate-300 border-slate-600/60';
     },
     auditBadge(a) {
       if (a.startsWith('login')) return 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30';
       if (a.startsWith('user') || a.startsWith('settings') || a.startsWith('project')) return 'bg-amber-500/10 text-amber-300 border-amber-500/30';
       if (a.startsWith('cache')) return 'bg-rose-500/10 text-rose-300 border-rose-500/30';
-      return 'bg-sky-500/10 text-sky-300 border-sky-500/30';
+      return 'bg-slate-500/10 text-slate-50 border-slate-400';
     },
     avgClass(v) { return v == null ? 'text-slate-500' : (v >= 95 ? 'text-emerald-300' : v >= 85 ? 'text-indigo-300' : 'text-amber-300'); },
     isAdmin() { return this.auth.user && this.auth.user.role === 'admin'; },
