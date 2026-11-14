@@ -2099,11 +2099,18 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         </button>
       </div>
 
-      <div class="flex-1 min-h-0 overflow-y-auto custom-scroll p-4">
+      <div class="flex-1 min-h-0 overflow-y-auto custom-scroll p-4 sm:px-8">
 
         <!-- ============ Tab 1: 批量任务矩阵看板 2.0 ============ -->
         <div v-show="activeTab==='matrix'" class="space-y-3">
-          <div class="flex items-center gap-1.5 flex-wrap mb-3">
+          <div v-if="view==='tasks'" class="flex items-end justify-between gap-4 flex-wrap pt-4 pb-3 px-1">
+            <div>
+              <h1 class="font-display text-[30px] leading-tight text-slate-100">[[ currentProject ? currentProject.name : '全部任务' ]]</h1>
+              <div class="mt-1 text-[13px] text-slate-500 tnums">[[ filteredTasks.length ]] 个任务<template v-if="dashDone.length"> · 平均还原度 <span class="serif-num text-[17px] text-slate-200">[[ dashAvg ]]</span></template></div>
+            </div>
+            <button @click="goModule('create')" class="ui-primary h-9 px-4 rounded-lg text-[13px] flex items-center gap-1.5"><i data-lucide="plus" class="w-4 h-4"></i>新建克隆</button>
+          </div>
+          <div class="flex items-center gap-1.5 flex-wrap mb-3 px-1">
             <button @click="projectPill=''; currentProjectId=''"
               :class="String(projectPill)==='' ? 'ui-chip-on font-medium' : 'bg-slate-950/60 text-slate-400 border-white/[0.08] hover:text-slate-200'"
               class="term-btn inline-flex items-center gap-1 border h-8 rounded-full px-3">全部任务 [[ tasks.length ]]</button>
