@@ -1,31 +1,53 @@
 /* =====================================================================
-   Clonjurer 平台前端 · 规范层 (UI 改版 P0)
-   只换样式, 不动结构与逻辑。规则用 "html body .类名" 提高特异性,
-   以覆盖 Tailwind 运行时稍后注入的同名工具类(不依赖加载顺序)。
-   规范: 字号阶梯 12/13/14/16/20/24/32, 正文最小 12px;
-         文字对比 ≥ 4.5:1, 控件边框 ≥ 3:1; 单一品牌色 indigo + 4 个语义色。
+   Clonjurer 平台前端 · 设计令牌与规范层
+   2026-11-14 视觉定稿: 简洁、克制、像工具而不像模板。
+   - 中性灰(深色主题近黑, 浅色主题白卡浅灰底) + 墨色实底主按钮(深色主题反白)
+   - 一个克制的钴蓝, 只用于选中/链接/焦点; 语义色只留 成功/警告/错误
+   - 不用渐变、发光、毛玻璃、极光底纹、emoji
+   色阶由 tools/css/tailwind.config.js 映射到下面的变量: 浅色主题把色阶反转,
+   所以 text-slate-300 在深色是浅灰字、在浅色自动变深灰字, 不需要逐条覆盖。
+   字号阶梯 12/13/14/16/20/24/32, 正文最小 12px; 文字对比 ≥ 4.5:1。
    ===================================================================== */
 
 :root{
-  --ui-brand:#4F46E5; --ui-brand-hover:#4338CA; --ui-brand-soft:rgba(99,102,241,.14);
-  --ui-ok:#34D399; --ui-warn:#FBBF24; --ui-bad:#F87171; --ui-info:#60A5FA;
-  --ui-fg-2:#B4BCCB;            /* 次要文字 (#050811 上约 10:1) */
-  --ui-fg-3:#8E99AD;            /* 辅助文字 (约 6.6:1) */
-  --ui-fg-4:#7A869B;            /* 最弱文字, 仍 ≥ 4.9:1 */
-  --ui-control:#4A5368;         /* 控件边框 (约 3.1:1) */
-  --ui-focus:0 0 0 2px var(--bg),0 0 0 4px #818CF8;
+  --n-50:250 250 250;--n-100:237 237 238;--n-200:218 218 221;--n-300:191 191 195;--n-400:163 163 168;--n-500:133 133 139;--n-600:111 111 117;--n-700:63 63 67;--n-800:44 44 47;--n-900:28 28 30;--n-950:19 19 20;
+  --a-50:238 242 252;--a-100:220 228 249;--a-200:191 205 243;--a-300:156 178 236;--a-400:125 151 226;--a-500:98 128 214;--a-600:75 104 196;--a-700:61 85 163;--a-800:51 70 131;--a-900:42 58 102;--a-950:26 35 64;
+  --ok-50:235 250 242;--ok-100:207 243 224;--ok-200:163 230 196;--ok-300:111 211 162;--ok-400:69 189 133;--ok-500:43 160 108;--ok-600:32 132 87;--ok-700:27 106 71;--ok-800:24 85 58;--ok-900:21 70 48;--ok-950:10 40 27;
+  --warn-50:255 248 235;--warn-100:254 236 199;--warn-200:253 216 141;--warn-300:246 194 89;--warn-400:235 169 53;--warn-500:209 140 28;--warn-600:173 111 18;--warn-700:138 85 18;--warn-800:111 68 20;--warn-900:92 57 20;--warn-950:51 30 7;
+  --bad-50:253 242 242;--bad-100:251 226 226;--bad-200:246 198 198;--bad-300:239 160 160;--bad-400:229 118 118;--bad-500:213 85 85;--bad-600:187 63 63;--bad-700:153 51 51;--bad-800:124 45 45;--bad-900:102 40 40;--bad-950:56 18 18;
+  --bg:#111112; --surface:#1c1c1e; --raised:#232326; --line:rgba(255,255,255,.08); --line-strong:rgba(255,255,255,.14);
+  --fg:#ededee; --fg-2:#bfbfc3; --fg-3:#8e8e94;
+  --ink:#ededee; --ink-hover:#ffffff; --on-ink:#111112;
+  --accent:#7d97e2; --accent-soft:rgba(98,128,214,.16);
+  --ui-brand:#4b68c4; --ui-ok:#45bd85; --ui-warn:#eba935; --ui-bad:#e57676; --ui-info:#7d97e2;
+  --ui-fg-2:var(--fg-2); --ui-fg-3:var(--fg-3); --ui-fg-4:#7d7d83; --ui-control:#4a4a4f;
+  --ui-focus:0 0 0 2px var(--bg),0 0 0 4px rgba(125,151,226,.7);
   --ui-font:'Inter','PingFang SC','Hiragino Sans GB','Noto Sans SC','Microsoft YaHei',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --radius:10px; --shadow-pop:0 12px 32px -8px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.06);
+  color-scheme:dark;
 }
 [data-theme="light"]{
-  --ui-fg-2:#334155; --ui-fg-3:#475569; --ui-fg-4:#5B6676;   /* 白底上 ≥ 5.6:1 */
-  --ui-control:#94A3B8;
-  --ui-ok:#047857; --ui-warn:#B45309; --ui-bad:#B91C1C; --ui-info:#1D4ED8;
+  --n-50:14 14 15;--n-100:28 28 30;--n-200:46 46 49;--n-300:63 63 67;--n-400:77 77 82;--n-500:102 102 107;--n-600:124 124 130;--n-700:208 208 212;--n-800:231 231 234;--n-900:251 251 251;--n-950:255 255 255;
+  --a-50:24 32 57;--a-100:34 48 97;--a-200:43 61 124;--a-300:52 74 152;--a-400:61 85 168;--a-500:74 102 194;--a-600:75 104 196;--a-700:195 208 242;--a-800:219 227 248;--a-900:237 241 252;--a-950:245 247 253;
+  --ok-50:8 42 28;--ok-100:15 59 41;--ok-200:19 74 52;--ok-300:23 98 65;--ok-400:27 111 74;--ok-500:32 133 90;--ok-600:32 132 87;--ok-700:181 230 204;--ok-800:211 241 225;--ok-900:233 248 240;--ok-950:243 251 247;
+  --warn-50:46 26 5;--warn-100:74 44 11;--warn-200:94 58 15;--warn-300:122 74 15;--warn-400:138 86 15;--warn-500:168 106 16;--warn-600:173 111 18;--warn-700:246 217 160;--warn-800:251 233 198;--warn-900:253 244 225;--warn-950:254 250 240;
+  --bad-50:58 16 16;--bad-100:92 29 29;--bad-200:116 36 36;--bad-300:143 42 42;--bad-400:163 48 48;--bad-500:191 60 60;--bad-600:187 63 63;--bad-700:241 193 193;--bad-800:248 220 220;--bad-900:252 239 239;--bad-950:253 246 246;
+  --bg:#f5f5f6; --surface:#ffffff; --raised:#ffffff; --line:#e4e4e7; --line-strong:#d0d0d4;
+  --fg:#1c1c1e; --fg-2:#3f3f43; --fg-3:#66666b;
+  --ink:#1c1c1e; --ink-hover:#000000; --on-ink:#ffffff;
+  --accent:#3d55a8; --accent-soft:rgba(74,102,194,.10);
+  --ui-brand:#3d55a8; --ui-ok:#1b6f4a; --ui-warn:#8a560f; --ui-bad:#a33030; --ui-info:#3d55a8;
+  --ui-fg-4:#6f6f75; --ui-control:#c4c4c9;
+  --ui-focus:0 0 0 2px #fff,0 0 0 4px rgba(61,85,168,.55);
+  --shadow-pop:0 12px 32px -10px rgba(16,16,20,.18),0 0 0 1px rgba(16,16,20,.06);
+  color-scheme:light;
 }
 
-html body{font-family:var(--ui-font);-webkit-font-smoothing:antialiased;
-  text-rendering:optimizeLegibility;font-feature-settings:"cv11","ss01"}
-html body .font-display{font-family:'Plus Jakarta Sans',var(--ui-font);letter-spacing:-.01em}
+html body{font-family:var(--ui-font);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
+  text-rendering:optimizeLegibility;font-feature-settings:"cv11","ss01";background:var(--bg);color:var(--fg)}
+html body .font-display{font-family:var(--ui-font);letter-spacing:-.011em}
 .tnums,.font-mono{font-variant-numeric:tabular-nums}
+::selection{background:rgba(98,128,214,.32)}
 
 /* ---------- 1. 字号: 最小 12px (原 7.5px~11.5px 共 13 种自定义字号) ---------- */
 html body .text-\[7\.5px\],html body .text-\[8px\],html body .text-\[8\.5px\],
@@ -34,50 +56,39 @@ html body .text-\[10\.5px\],html body .text-\[11px\],html body .text-\[11\.5px\]
 html body .text-xs{font-size:12px;line-height:1.5}
 html body .text-\[12px\],html body .text-\[12\.5px\]{font-size:13px;line-height:1.5}
 html body .text-\[13px\],html body .text-sm{font-size:14px;line-height:1.5}
-/* 原来靠缩小字号塞进一行的徽标/标签: 允许不换行省略, 不撑破布局 */
 html body .rounded-full.text-\[10px\],html body .rounded-md.text-\[10px\],
 html body .rounded-full.text-\[9\.5px\],html body .rounded-md.text-\[9\.5px\]{white-space:nowrap}
+/* 中文小标题不加字距(字距是英文大写小标题的做法, 用在中文上显得散) */
+html body [class*="tracking-[0."],html body .tracking-widest,html body .tracking-wider{letter-spacing:.02em}
+html body .uppercase{text-transform:none}
 
-/* ---------- 2. 文字对比度 (深色) ---------- */
-html:not([data-theme="light"]) body .text-slate-400{color:var(--ui-fg-2)}
-html:not([data-theme="light"]) body .text-slate-500{color:var(--ui-fg-3)}
-html:not([data-theme="light"]) body .text-slate-600,
-html:not([data-theme="light"]) body .text-slate-700{color:var(--ui-fg-4)}
-html:not([data-theme="light"]) body ::placeholder{color:#7A869B;opacity:1}
+/* ---------- 2. 主按钮: 墨色实底, 每个视图只出现一个 ---------- */
+html body .ui-primary{background:var(--ink);color:var(--on-ink);border:1px solid transparent;font-weight:500;
+  transition:background-color .15s,opacity .15s}
+html body .ui-primary:hover:not(:disabled){background:var(--ink-hover)}
+html body .ui-primary:disabled{opacity:.45}
+html body .ui-primary i,html body .ui-primary svg{color:inherit}
+/* 选中的筛选胶囊/分段 = 墨色反白 */
+html body .ui-chip-on{background:var(--ink)!important;color:var(--on-ink)!important;border-color:var(--ink)!important}
 
-/* ---------- 3. 文字对比度 (浅色): 浅色 300/400 色阶在白底上只有 1.5~2.6:1 ---------- */
-[data-theme="light"] body .text-slate-300{color:var(--ui-fg-2)}
-[data-theme="light"] body .text-slate-400,[data-theme="light"] body .text-slate-500{color:var(--ui-fg-3)}
-[data-theme="light"] body .text-slate-600{color:var(--ui-fg-4)}
-[data-theme="light"] body .text-emerald-300,[data-theme="light"] body .text-emerald-400,
-[data-theme="light"] body .text-green-300,[data-theme="light"] body .text-green-400{color:var(--ui-ok)}
-[data-theme="light"] body .text-amber-300,[data-theme="light"] body .text-amber-400,
-[data-theme="light"] body .text-yellow-300,[data-theme="light"] body .text-yellow-400,
-[data-theme="light"] body .text-orange-300,[data-theme="light"] body .text-orange-400{color:var(--ui-warn)}
-[data-theme="light"] body .text-rose-300,[data-theme="light"] body .text-rose-400,
-[data-theme="light"] body .text-red-300,[data-theme="light"] body .text-red-400,
-[data-theme="light"] body .text-pink-300,[data-theme="light"] body .text-pink-400{color:var(--ui-bad)}
-[data-theme="light"] body .text-sky-300,[data-theme="light"] body .text-sky-400,
-[data-theme="light"] body .text-cyan-300,[data-theme="light"] body .text-cyan-400,
-[data-theme="light"] body .text-blue-300,[data-theme="light"] body .text-blue-400,
-[data-theme="light"] body .text-teal-300,[data-theme="light"] body .text-teal-400{color:var(--ui-info)}
-[data-theme="light"] body .text-indigo-300,[data-theme="light"] body .text-indigo-400,
-[data-theme="light"] body .text-violet-300,[data-theme="light"] body .text-violet-400,
-[data-theme="light"] body .text-purple-300,[data-theme="light"] body .text-purple-400,
-[data-theme="light"] body .text-fuchsia-300,[data-theme="light"] body .text-fuchsia-400{color:#4338CA}
-[data-theme="light"] body ::placeholder{color:#64748B;opacity:1}
-/* 浅色下主色实底按钮里的白字不被 "文字变深" 规则误伤 */
-[data-theme="light"] body [class*="bg-[#4f46e5]"],[data-theme="light"] body [class*="bg-indigo-6"],
-[data-theme="light"] body [class*="bg-indigo-5"]:not([class*="/"]){color:#fff}
+/* ---------- 3. 浅色主题: 白色系工具类(border-white/x、bg-white/x、hover:text-white)没有进色阶, 单独换成墨色系 ---------- */
+[data-theme="light"] [class*="border-white/"]{border-color:var(--line)!important}
+[data-theme="light"] [class^="bg-white/"],[data-theme="light"] [class*=" bg-white/"]{background-color:rgba(16,16,20,.035)!important}
+[data-theme="light"] [class*="hover:bg-white/"]:hover{background-color:rgba(16,16,20,.05)!important}
+[data-theme="light"] [class*="hover:text-white"]:hover{color:var(--fg)!important}
+[data-theme="light"] [class*="hover:border-white/"]:hover{border-color:var(--line-strong)!important}
+[data-theme="light"] .text-white:not([class*="bg-"]):not(.ui-primary){color:var(--fg)}
 
-/* ---------- 4. 装饰收敛: 9 个色系的半透明底 → 语义色; 渐变发光去掉 ---------- */
-html body .card-glow:hover{box-shadow:none}
-html body .breath{animation-duration:2.4s}
+/* ---------- 4. 装饰: 一律关掉 ---------- */
+html body [class*="backdrop-blur"]{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+html body .breath{animation:none;opacity:1}
 
 /* ---------- 5. 交互: 统一焦点环 / 禁用态 / 触控尺寸 ---------- */
 html body :is(button,a,input,select,textarea,[tabindex]):focus-visible{outline:none;box-shadow:var(--ui-focus);border-radius:8px}
+html body textarea:focus,html body input:focus,html body select:focus{outline:none;border-color:rgb(var(--a-500));box-shadow:0 0 0 3px var(--accent-soft)}
 html body button:disabled,html body button[disabled]{cursor:not-allowed}
-html body input[type="checkbox"],html body input[type="radio"]{accent-color:var(--ui-brand)}
+html body input[type="checkbox"],html body input[type="radio"]{accent-color:rgb(var(--a-600))}
+html body ::placeholder{color:rgb(var(--n-600));opacity:1}
 @media (pointer:coarse){html body button,html body a.rounded-lg{min-height:36px}}
 
 /* ---------- 6. 动效偏好 ---------- */
@@ -85,54 +96,40 @@ html body input[type="checkbox"],html body input[type="radio"]{accent-color:var(
   html body *,html body *::before,html body *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
 }
 
-/* ---------- 7. 部署页新增元素 ---------- */
+/* ---------- 7. 部署页元素 ---------- */
 .ui-ttl{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--ui-fg-3);font-variant-numeric:tabular-nums}
 .ui-ttl.soon{color:var(--ui-warn)}
 .ui-pill{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap}
 .ui-hint{font-size:12px;line-height:1.6;color:var(--ui-fg-3)}
 .ui-danger-list{margin:8px 0 0;padding-left:18px;font-size:13px;line-height:1.7;color:var(--ui-fg-2)}
-.ui-seg{display:inline-flex;padding:3px;border-radius:10px;border:1px solid var(--ui-control);gap:2px}
-.ui-seg button{height:30px;padding:0 12px;border-radius:7px;font-size:13px;color:var(--ui-fg-2)}
-.ui-seg button[aria-pressed="true"]{background:var(--ui-brand);color:#fff}
+.ui-seg{display:inline-flex;padding:2px;border-radius:9px;border:1px solid var(--line);background:rgba(127,127,135,.06);gap:2px}
+.ui-seg button{height:28px;padding:0 12px;border-radius:7px;font-size:13px;color:var(--fg-3);white-space:nowrap;transition:background .15s,color .15s}
+.ui-seg button[aria-pressed="true"]{background:var(--surface);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.18),0 0 0 1px var(--line)}
+.ui-seg button:not([aria-pressed="true"]):hover{color:var(--fg)}
 .ui-btn-label{font-size:12px;white-space:nowrap}
 @media (max-width:520px){.ui-btn-label{display:none}}
 
-/* ---------- 8. 浅色模式选中态: 原 *-100/200 浅字在浅色底上几乎看不见 ---------- */
-[data-theme="light"] body .text-indigo-100,[data-theme="light"] body .text-indigo-200,
-[data-theme="light"] body .text-violet-100,[data-theme="light"] body .text-violet-200,
-[data-theme="light"] body .text-purple-200{color:#3730A3}
-[data-theme="light"] body .text-sky-100,[data-theme="light"] body .text-sky-200,
-[data-theme="light"] body .text-cyan-200,[data-theme="light"] body .text-blue-200{color:#1E40AF}
-[data-theme="light"] body .text-emerald-100,[data-theme="light"] body .text-emerald-200{color:#065F46}
-[data-theme="light"] body .text-amber-100,[data-theme="light"] body .text-amber-200{color:#92400E}
-[data-theme="light"] body .text-rose-100,[data-theme="light"] body .text-rose-200{color:#9F1239}
-[data-theme="light"] body .text-slate-100,[data-theme="light"] body .text-slate-200{color:#0F172A}
-[data-theme="light"] body [class*="bg-indigo-500/"]{border-color:rgba(79,70,229,.45)}
-[data-theme="light"] body button[class*="bg-slate-950/"]{background:#fff;border-color:#CBD5E1}
+/* ---------- 8. 侧栏: 导航 + 系统状态 ---------- */
+.sys-status{border-top:1px solid var(--line);padding:10px 4px 2px;display:grid;gap:2px}
+.sys-row{display:flex;align-items:center;gap:8px;height:26px;padding:0 8px;border-radius:6px;font-size:12px;color:var(--fg-3);width:100%;text-align:left}
+.sys-row:hover{background:rgba(127,127,135,.08);color:var(--fg-2)}
+.sys-row b{margin-left:auto;font-weight:500;color:var(--fg-2);font-variant-numeric:tabular-nums}
+.sys-dot{width:6px;height:6px;border-radius:999px;background:rgb(var(--n-700));flex:none}
+.sys-dot.on{background:rgb(var(--ok-400))}
+.sys-dot.busy{background:rgb(var(--warn-400))}
 
-/* ---------- 9. 窄屏顶栏: 运维指标胶囊收起, 面包屑不被遮挡 ---------- */
+/* ---------- 9. 窄屏 ---------- */
 @media (max-width:760px){
   html body .top-header{padding-left:12px;padding-right:12px;gap:8px}
-  html body .top-header > :not(:first-child):not(:last-child){display:none}
   html body .top-header > :first-child{flex:1;overflow:hidden}
-  html body .top-header > :last-child > :not(:last-child):not(:nth-last-child(3)){display:none}
-  /* 卡片网格最小 360px 的列在手机上会撑出屏幕: 改为单列自适应 */
   html body [class*="minmax(360px"],html body [class*="minmax(340px"],html body [class*="minmax(320px"]{grid-template-columns:minmax(0,1fr)}
   html body main.flex-1{min-width:0}
   html body .console-pill{bottom:auto;top:12px;right:116px;padding:0;width:32px;height:32px;justify-content:center;border-radius:10px}
   html body .console-pill > :not(:first-child){display:none}
-  /* 新建克隆: 左栏 560px 改满宽, 右侧说明栏收起, 三列卡片改单列 */
   html body aside[class*="w-[560px]"]{width:100%;border-right:0}
   html body aside.flex-1.overflow-y-auto{display:none}
   html body aside .grid-cols-3{grid-template-columns:minmax(0,1fr)}
   html body .main-wrapper div.flex.flex-1.min-h-0{min-width:0;max-width:100%}
-}
-
-/* ---------- 10. 任务详情 (P2) ---------- */
-.ui-seg button{white-space:nowrap;transition:background .15s,color .15s}
-.ui-seg button:not([aria-pressed="true"]):hover{color:var(--fg,#fff);background:rgba(148,163,184,.12)}
-[data-theme="light"] .ui-seg button:not([aria-pressed="true"]):hover{color:#0F172A}
-@media (max-width:760px){
   html body .task-head{gap:8px;padding:10px 12px}
   html body .task-head .max-w-\[420px\],html body .task-head .max-w-\[320px\]{max-width:60vw}
   html body .ui-seg button{padding:0 9px}
