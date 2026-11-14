@@ -370,6 +370,9 @@ class Probe(unittest.TestCase):
         self.assertTrue(kb["responded"])
 
 
+_ALT_LOCK = threading.Lock()
+
+
 class _FakeLLM(BaseHTTPRequestHandler):
     """按系统提示词分流的假上游。mode 控制各步行为; calls 记录每次请求的 (步骤, 是否带图)。"""
     mode = {}
@@ -396,6 +399,11 @@ class _FakeLLM(BaseHTTPRequestHandler):
             step = "repair"
             out = {"patch": "<<<<<<< SEARCH\nlet n=0;undefinedFunctionCall();\n=======\nlet n=0;\n>>>>>>> REPLACE",
                    "badpatch": "<<<<<<< SEARCH\n这段原文并不存在\n=======\nx\n>>>>>>> REPLACE"}.get(m.get("repair"), MOVING)
+        elif system == codegen.WRITE_SYSTEM and m.get("write") == "alt":
+            step = "write"
+            with _ALT_LOCK:
+                type(self).alt_n = getattr(type(self), "alt_n", 0) + 1
+                out = BROKEN if type(self).alt_n % 2 else MOVING      # 两稿一坏一好
         elif system == codegen.WRITE_SYSTEM:
             step = "write"
             out = {"broken": BROKEN, "static": STATIC, "text": "抱歉, 做不到", "fenced": "```html\n" + MOVING + "\n```"}.get(
@@ -467,6 +475,8 @@ class EndToEnd(unittest.TestCase):
         cls._saved = {k: getattr(config, k) for k in ("WORKSPACE_ROOT", "EXPORTS_DIR", "AI_API_KEY", "AI_API_BASE_URL", "AI_MODEL")}
         cls._env_file = settings.GEN_AI_ENV_FILE
         settings.GEN_AI_ENV_FILE = ""                           # 不读开发机上的真实 Key 文件
+        cls._drafts = settings.CODE_DRAFTS
+        settings.CODE_DRAFTS = 1                                # 调用序列断言按单稿写; 多稿另有专门用例
         config.WORKSPACE_ROOT = cls.tmp / "ws"
         config.EXPORTS_DIR = cls.tmp / "exports"
         config.WORKSPACE_ROOT.mkdir()
@@ -484,6 +494,7 @@ class EndToEnd(unittest.TestCase):
         for k, v in cls._saved.items():
             setattr(config, k, v)
         settings.GEN_AI_ENV_FILE = cls._env_file
+        settings.CODE_DRAFTS = cls._drafts
         shutil.rmtree(cls.tmp, ignore_errors=True)
 
     def _run(self, mode=None, key=True, vision=False, **spec):
@@ -527,6 +538,22 @@ class EndToEnd(unittest.TestCase):
         self.assertFalse((ws / "gen_probe").exists())           # 体检截图目录不进交付工程
         self.assertTrue(Path(task["zip_path"]).is_file())
         self.assertEqual(rep["tokens"], {"in": 300, "out": 150})
+
+    def test_two_drafts_keep_the_better_one(self):
+        settings.CODE_DRAFTS = 2
+        try:
+            _FakeLLM.alt_n = 0
+            task, rep, lines, ws, err = self._run({"write": "alt"}, vision=True)
+        finally:
+            settings.CODE_DRAFTS = 1
+        self.assertIsNone(err)
+        steps = [c[0] for c in _FakeLLM.calls]
+        self.assertEqual(steps[:3], ["plan", "write", "write"])
+        self.assertEqual(len(rep["rounds"][0]["drafts"]), 2)
+        self.assertEqual(rep["rounds"][0]["score"], max(rep["rounds"][0]["drafts"]))   # 取分高的一稿
+        self.assertNotIn("undefinedFunctionCall", (ws / "index.html").read_text(encoding="utf-8"))
+        self.assertFalse(list(ws.glob("_cand_*.html")))                                # 候选稿文件不留在交付里
+        self.assertTrue(any("并行写 2 稿" in ln for ln in lines))
 
     def test_broken_first_draft_gets_repaired(self):
         task, rep, lines, ws, err = self._run({"write": "broken"})

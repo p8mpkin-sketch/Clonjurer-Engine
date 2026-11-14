@@ -1048,6 +1048,16 @@ class Database:
                 " VALUES (?, ?, ?, ?, ?)", (workspace_id, kind, amount, task_id, _now()))
             self._conn.commit()
 
+    def previous_completed_task(self, task_id: int, target_url: str):
+        """同一网址、同一工作区里, 比 task_id 早的最近一次成功克隆(定时任务的「上一次」)。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT t.id, t.workspace_path, t.updated_at FROM clone_tasks t JOIN batch_jobs b ON t.batch_id = b.id"
+                " WHERE t.target_url = ? AND t.id < ? AND t.status = 'completed'"
+                " AND b.workspace_id = (SELECT b2.workspace_id FROM clone_tasks t2 JOIN batch_jobs b2 ON t2.batch_id = b2.id WHERE t2.id = ?)"
+                " ORDER BY t.id DESC LIMIT 1", (target_url, task_id, task_id)).fetchone()
+        return dict(row) if row else None
+
     # ---- token 用量 ----
     def _task_scope(self, task_id):
         row = self._conn.execute(

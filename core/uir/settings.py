@@ -48,6 +48,7 @@ GEN_AI_ENV_FILE = os.environ.get("CLONER_AI_ENV_FILE", "~/.clonjurer_ai.env")
 CODE_TARGET_SCORE = float(os.environ.get("CLONER_GEN_CODE_TARGET", "80"))   # req-fit-v2 口径下 80 ≈ 旧口径 85~90     # 需求符合度 ≥ 且无硬伤即停
 CODE_MIN_DESIGN = float(os.environ.get("CLONER_GEN_CODE_MIN_DESIGN", "0.75"))    # 设计分(0~1)低于此值不算达标, 继续按问题清单打磨
 CODE_MAX_REPAIRS = int(os.environ.get("CLONER_GEN_CODE_REPAIRS", "2"))        # 首版之后最多修几轮
+CODE_DRAFTS = int(os.environ.get("CLONER_GEN_CODE_DRAFTS", "2"))           # 首版并行写几稿(各自体检验收后取优; 1 = 关闭)
 CODE_MAX_TOKENS = int(os.environ.get("CLONER_GEN_CODE_TOKENS", "16384"))      # 写代码/修复的补全预算基档
 # 写代码/修复是否保留模型思考。默认关: 本机实测(同一批 7 条需求)开思考写一页 130~180s、总输出 token 近两倍,
 # 均分只高 1 分且有一条因超时失败; 关思考 6~28s 写完, 人工比对截图质量相当

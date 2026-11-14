@@ -30,6 +30,7 @@ except ImportError:  # pragma: no cover
     _np = None
 
 import config
+from core.clone.aria_shim import ARIA_SHIM_JS
 from core.clone.js import seed_random_hash, seed_random_js
 from core import ai_mock_generator, ai_vision_repair, flask_generator, smart_downloader
 from core import pattern_detector, strategy_packs
@@ -460,6 +461,8 @@ class LocalizeMixin:
             if bg_css:
                 localized = self._inject_after_head(localized, bg_css)
             localized = self._inject_after_head(localized, sim_script)
+            if getattr(config, "ARIA_SHIM", True):
+                localized = self._inject_after_head(localized, ARIA_SHIM_JS)
             localized = self._inject_after_head(localized, REPLAY_DEDUPE_JS)
             localized = self._inject_after_head(localized, SCROLL_UNLOCK_GUARD_JS)
             keep_js = CONTENT_KEEP_GUARD_JS if getattr(config, "CONTENT_KEEP_GROUP", True) \

@@ -23,7 +23,7 @@ import shutil
 import time
 from pathlib import Path
 
-from core.uir import codegen, llm, probe, render, settings
+from core.uir import codegen, llm, probe, render, settings, shot_measure
 
 SCORING = "shot-fit-v1"
 TABLET = {"width": 768, "height": 1024}
@@ -388,15 +388,26 @@ class ShotProfile(codegen.Profile):
         slim["checklist"] = [{k: i[k] for k in ("id", "text", "type", "must")} for i in brief["checklist"]]
         return json.dumps(slim, ensure_ascii=False, indent=1)
 
+    def _measure(self):
+        if not hasattr(self, "_ref_measure"):
+            try:
+                self._ref_measure = shot_measure.measure(Path(self.prep["ref"]))
+            except Exception:
+                self._ref_measure = None
+        return self._ref_measure
+
     def _head(self, brief):
         src = brief.get("source") or {}
-        return (f"截图宽 {src.get('css_w')} × 高 {src.get('css_h')}(CSS 像素; 这是桌面版的设计宽度)。\n"
+        m = self._measure()
+        geo = (f"\n原图的确定性测量(像素统计得出, 区块的位置、高度、背景色和内容左右边界以此为准, 写 CSS 时直接用这些数字):\n"
+               f"{shot_measure.describe(m)}\n") if m else ""
+        return (f"截图宽 {src.get('css_w')} × 高 {src.get('css_h')}(CSS 像素; 这是桌面版的设计宽度)。\n" + geo
                 + (f"用户补充要求(优先): {self.hint}\n" if self.hint else "")
                 + f"\n读图任务书:\n{self._brief_text(brief)}\n\n可用的图片素材(路径相对页面):\n{_assets_text(brief.get('assets'))}\n")
 
-    def write(self, ai_cfg, desc, brief, deadline, note="", on_delta=None):
+    def write(self, ai_cfg, desc, brief, deadline, note="", on_delta=None, temperature_bump=0.0):
         user = self._head(brief) + (f"\n{note}\n" if note else "") + "\n现在输出完整的 HTML 文档。"
-        return codegen._code_call(ai_cfg, WRITE_SYSTEM, user, deadline, 0.4,
+        return codegen._code_call(ai_cfg, WRITE_SYSTEM, user, deadline, min(1.0, 0.4 + temperature_bump),
                                   parts=_ref_parts(Path(self.prep["ref"])), on_delta=on_delta)
 
     def repair(self, ai_cfg, desc, brief, html, problems, deadline, shot=None, stalled=False, on_delta=None):
@@ -427,11 +438,12 @@ class ShotProfile(codegen.Profile):
         return new, dict(meta, mode="full")
 
     # ---- 附加测量: 原图宽度下的还原度 + 平板宽度 ----
-    def after_probe(self, pool, ws, rep, rdir, log):
+    def after_probe(self, pool, ws, rep, rdir, log, entry=None):
+        entry = Path(entry) if entry else ws / "index.html"
         src = self.prep
         ref = Path(src["ref"])
         fid = rdir / "fid.png"
-        render.screenshot_dir(pool, ws, ws / "index.html", fid, {"width": src["css_w"], "height": min(src["css_h"], 1200)})
+        render.screenshot_dir(pool, ws, entry, fid, {"width": src["css_w"], "height": min(src["css_h"], 1200)})
         # 只比与原图等高的部分(页面比截图长是正常的: 截图只截了首屏或一部分)
         from PIL import Image
         with Image.open(fid) as im:
@@ -443,6 +455,12 @@ class ShotProfile(codegen.Profile):
         rep["fidelity"] = {k: sim.get(k) for k in ("score", "structure", "edge", "text", "text_recall", "height_ratio")}
         rep["fidelity"]["hints"] = render.region_hints(ref, fid, sim, top=6)
         rep.setdefault("shots", {})["fid"] = str(fid)
+        try:
+            m = self._measure()
+            if m:
+                rep["layout_diff"] = shot_measure.compare(m, shot_measure.measure(fid))
+        except Exception:
+            rep["layout_diff"] = []
         if (rdir / "diff.png").is_file():
             rep["shots"]["diff"] = str(rdir / "diff.png")
         # 平板
@@ -450,7 +468,7 @@ class ShotProfile(codegen.Profile):
         with pool.context(viewport=dict(TABLET)) as ctx:
             page = ctx.new_page()
             page.route("**/*", lambda r: r.abort() if probe._remote(r.request.url) else r.continue_())
-            page.goto((ws / "index.html").resolve().as_uri(), wait_until="load")
+            page.goto(entry.resolve().as_uri(), wait_until="load")
             page.wait_for_timeout(500)
             dims = page.evaluate("() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]")
             page.screenshot(path=str(tab))
@@ -476,7 +494,9 @@ class ShotProfile(codegen.Profile):
                 + (f"\n\n用户补充要求: {self.hint}" if self.hint else "")
                 + f"\n\n自动测量:\n- 原图宽度下与原图的像素/结构相似度 {fidm.get('score')}(结构 {fidm.get('structure')}, 边缘 {fidm.get('edge')}, "
                   f"文字重合 {fidm.get('text')})\n- 差异最大的区域: " + ("; ".join(fidm.get("hints") or []) or "无")
-                + f"\n- 平板 768px 横向溢出 {'是' if tab.get('overflow_x') else '否'}\n" + codegen.probe_digest(rep) + "\n")
+                + f"\n- 平板 768px 横向溢出 {'是' if tab.get('overflow_x') else '否'}"
+                + ("\n- 版面测量差异: " + "; ".join(rep.get("layout_diff") or []) if rep.get("layout_diff") else "")
+                + "\n" + codegen.probe_digest(rep) + "\n")
         parts = _ref_parts(Path(self.prep["ref"]))
         shots = rep.get("shots") or {}
         if shots.get("fid") and Path(shots["fid"]).is_file():
@@ -515,7 +535,9 @@ class ShotProfile(codegen.Profile):
         return d
 
     def problems(self, defects, detail, rep):
-        out = codegen.problem_list(defects, detail, limit=12)
+        # 版面测量差异(确定性)放最前: 具体到区块的高度/背景色/内容宽度, 比像素差分格更好改
+        geo = [f"[版面] {x}" for x in ((rep or {}).get("layout_diff") or [])]
+        out = geo + codegen.problem_list(defects, detail, limit=12 - min(4, len(geo)))
         hints = ((rep or {}).get("fidelity") or {}).get("hints") or []
         if hints:
             out.append("[像素对比] 与原图差异最大的区域: " + "; ".join(hints[:5]))

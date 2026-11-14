@@ -48,12 +48,13 @@ def compute(orig: Path, clone: Path) -> dict:
             seen[y, x] = True
             while stack:
                 cy, cx = stack.pop()
-                ys.append(cy); xs.append(cx); hits += int(cells[cy, cx])
+                if cells[cy, cx]:                 # 框按真正有差别的格子量, 膨胀出来的格子只用来连通
+                    ys.append(cy); xs.append(cx); hits += 1
                 for ny, nx in ((cy + 1, cx), (cy - 1, cx), (cy, cx + 1), (cy, cx - 1)):
                     if 0 <= ny < gh and 0 <= nx < gw and grown[ny, nx] and not seen[ny, nx]:
                         seen[ny, nx] = True
                         stack.append((ny, nx))
-            if hits < 2:                       # 一两个格子的零星噪点(抗锯齿、光标)不算
+            if hits < 2 or not ys:             # 一两个格子的零星噪点(抗锯齿、光标)不算
                 continue
             y0, y1, x0, x1 = min(ys), max(ys) + 1, min(xs), max(xs) + 1
             regions.append({"x": round(x0 * CELL / WORK_W, 4), "y": round(y0 * CELL / ha, 4),
@@ -80,7 +81,7 @@ def for_workspace(ws: Path) -> dict | None:
     clone = next((ws / n for n in ("cloned_preview.png", "static_preview.png", "fidelity_preview.png") if (ws / n).is_file()), None)
     if not orig.is_file() or clone is None:
         return None
-    key = f"{orig.stat().st_mtime}:{clone.stat().st_mtime}:v1"
+    key = f"{orig.stat().st_mtime}:{clone.stat().st_mtime}:v2"
     cache = ws / "diff_regions.json"
     try:
         hit = json.loads(cache.read_text(encoding="utf-8"))
@@ -94,3 +95,18 @@ def for_workspace(ws: Path) -> dict | None:
     except OSError:
         pass
     return data
+
+
+def site_change(prev_ws: Path, cur_ws: Path) -> dict | None:
+    """同一网址两次克隆之间原站变了什么: 比较两次采集到的原站截图(original_preview.png)。"""
+    a, b = Path(prev_ws) / "original_preview.png", Path(cur_ws) / "original_preview.png"
+    if not (a.is_file() and b.is_file()):
+        return None
+    d = compute(a, b)
+    if not d["regions"] and d["area_pct"] < NEAR_SAME:
+        d["verdict"] = "与上次相比几乎没有变化"
+    elif d["regions"]:
+        d["verdict"] = f"与上次相比有 {len(d['regions'])} 处变化, 约占 {d['area_pct']}% 面积"
+    else:
+        d["verdict"] = f"与上次相比有细微变化(约 {d['area_pct']}% 面积)"
+    return d
