@@ -15,9 +15,9 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 <!-- 顶级字体体系: Inter / Plus Jakarta Sans / JetBrains Mono / Noto Sans SC -->
 <link href="/vendor/fonts/fonts.css" rel="stylesheet">
 <!-- UI 改版 P0 规范层: 字号/对比度/焦点/语义色(只换样式) -->
-<link href="/vendor/css/ui-tokens.css?v=16" rel="stylesheet">
+<link href="/vendor/css/ui-tokens.css?v=17" rel="stylesheet">
 
-<script src="/vendor/js/lucide.subset.js?v=3"></script>
+<script src="/vendor/js/lucide.subset.js?v=4"></script>
 <script>
 /* Lucide 非破坏性 shim: 官方 createIcons 会把 <i data-lucide> 整节点替换为 <svg>,
    Vue 记录的 vnode 锚点随之失效, 任务列表轮询触发 patch 时报
@@ -214,43 +214,45 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
   [class*="rounded-2xl"]{border-radius:12px}
   .shadow-lg,.shadow-xl{box-shadow:none}
   [data-theme="light"] .bg-slate-900,[data-theme="light"] [class*="bg-slate-900/"]{box-shadow:0 1px 2px rgba(16,16,20,.04)}
-  /* ===== 界面生成: 代码实时写入终端(任务卡 + 详情). 两种主题都用深底 ===== */
-  .lc{position:relative;overflow:hidden;background:#05070a;color:#b8f5d0;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-      border-radius:10px;border:1px solid rgba(0,255,156,.16);box-shadow:inset 0 0 40px rgba(0,255,156,.05)}
-  .lc-rain{position:absolute;inset:0;width:100%;height:100%;opacity:.38;pointer-events:none}
-  .lc::after{content:"";position:absolute;inset:0;pointer-events:none;
-      background:repeating-linear-gradient(0deg,rgba(255,255,255,.025) 0 1px,transparent 1px 3px)}
-  .lc-scan{position:absolute;left:0;right:0;height:46px;top:-46px;pointer-events:none;
-      background:linear-gradient(180deg,transparent,rgba(0,255,156,.10),transparent);animation:lc-scan 3.2s linear infinite}
-  @keyframes lc-scan{to{top:100%}}
-  .lc-head{position:relative;z-index:1;display:flex;align-items:center;gap:8px;padding:9px 12px 7px;font-size:11px;letter-spacing:.06em;
-      color:#7dffc4;border-bottom:1px solid rgba(0,255,156,.12);background:linear-gradient(180deg,rgba(5,7,10,.92),rgba(5,7,10,.6))}
-  .lc-head b{font-weight:600;color:#e8fff3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .lc-dot{width:7px;height:7px;border-radius:50%;background:#00ff9c;box-shadow:0 0 8px #00ff9c;animation:lc-blink 1s steps(2,start) infinite;flex:none}
-  .lc-meta{margin-left:auto;color:#5fd6a0;white-space:nowrap;font-variant-numeric:tabular-nums}
-  .lc-pct{color:#ff3fd2;text-shadow:0 0 8px rgba(255,63,210,.6);font-weight:600;flex:none}
-  .lc-body{position:relative;z-index:1;margin:0;padding:8px 12px 10px;font-size:12px;line-height:1.55;white-space:pre-wrap;word-break:break-all;
-      overflow:hidden;text-shadow:0 0 6px rgba(0,255,156,.35)}
-  .lc-body .lc-think{color:#4f8f73;font-style:italic}
-  .lc-cursor{display:inline-block;width:.6em;height:1.05em;vertical-align:-.15em;background:#00ff9c;box-shadow:0 0 10px #00ff9c;animation:lc-blink .9s steps(2,start) infinite}
+  /* ===== 界面生成: 实时「思考 + 写代码」视图(任务卡缩略 + 详情). 跟随站点主题, 不加装饰背景 ===== */
+  .lc{min-width:0;max-width:100%;display:flex;flex-direction:column;overflow:hidden;background:var(--surface);color:var(--fg-2);
+      border:1px solid var(--line);border-radius:10px}
+  .lc-head{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:12px;color:var(--fg-3);border-bottom:1px solid var(--line);min-width:0}
+  .lc-head b{color:var(--fg);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lc-head .lc-file{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fg-3)}
+  .lc-meta{margin-left:auto;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .lc-spin{width:10px;height:10px;border-radius:50%;border:1.5px solid var(--line-strong,rgba(127,127,127,.35));border-top-color:var(--fg-2);animation:lc-spin .9s linear infinite;flex:none}
+  @keyframes lc-spin{to{transform:rotate(360deg)}}
+  .lc-steps{list-style:none;margin:0;padding:8px 12px;max-height:150px;overflow-y:auto;border-bottom:1px solid var(--line);font-size:12.5px;line-height:1.5}
+  .lc-steps li{display:grid;grid-template-columns:16px 76px minmax(0,1fr);gap:6px;padding:2px 0;align-items:start}
+  .lc-steps .ic{color:rgb(var(--ok-500,34 197 94));font-size:11px;line-height:19px}
+  .lc-steps .ic .lc-spin{margin-top:4px}
+  .lc-steps .k{color:var(--fg-3)}
+  .lc-steps .v{color:var(--fg-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lc-steps li.now .v{color:var(--fg)}
+  .lc-bar{height:2px;background:var(--line);position:relative;overflow:hidden}
+  .lc-bar i{position:absolute;top:0;bottom:0;width:30%;background:var(--fg-3);opacity:.6;animation:lc-bar 1.4s ease-in-out infinite}
+  @keyframes lc-bar{from{left:-30%}to{left:100%}}
+  .lc-code{position:relative;flex:1;min-height:0;overflow:auto;margin:0;padding:6px 0;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      font-size:12px;line-height:1.6;background:var(--bg);color:var(--fg-2)}
+  .lc-code .ln{display:flex;white-space:pre-wrap;word-break:break-all}
+  .lc-code .no{flex:none;width:44px;padding-right:12px;text-align:right;color:var(--fg-3);opacity:.55;user-select:none;font-variant-numeric:tabular-nums}
+  .lc-code .tx{flex:1;min-width:0;padding-right:12px}
+  .lc-caret{display:inline-block;width:7px;height:14px;vertical-align:-2px;background:var(--fg-3);animation:lc-blink 1s steps(2,start) infinite}
   @keyframes lc-blink{to{visibility:hidden}}
-  .lc-body .t-tag{color:#ff5fd7}
-  .lc-body .t-attr{color:#7cd4ff}
-  .lc-body .t-str{color:#ffe36e}
-  .lc-body .t-com{color:#4f8f73}
-  .lc-body .t-kw{color:#c792ff}
-  .lc-body .t-num{color:#ff9e64}
-  .lc-body .t-sys{color:#00ff9c}
-  .lc-glitch{animation:lc-glitch .35s steps(2) 1}
-  @keyframes lc-glitch{0%{transform:translate(1px,-1px);filter:hue-rotate(40deg)}50%{transform:translate(-1px,1px)}100%{transform:none;filter:none}}
-  .lc{min-width:0;max-width:100%;display:flex;flex-direction:column}
-  .lc-body{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:flex-end}
-  .run-panel,.run-log{min-width:0;max-width:100%;overflow:hidden}
+  .lc-code .t-tag{color:#c2185b}.lc-code .t-attr{color:#1565c0}.lc-code .t-str{color:#2e7d32}.lc-code .t-com{color:var(--fg-3);font-style:italic}
+  .lc-code .t-kw{color:#6a1b9a}.lc-code .t-num{color:#b45309}.lc-code .t-sys{color:var(--fg);font-weight:600}
+  [data-theme="dark"] .lc-code .t-tag{color:#f48fb1}[data-theme="dark"] .lc-code .t-attr{color:#90caf9}[data-theme="dark"] .lc-code .t-str{color:#a5d6a7}
+  [data-theme="dark"] .lc-code .t-kw{color:#ce93d8}[data-theme="dark"] .lc-code .t-num{color:#ffcc80}
+  .lc-follow{position:absolute;right:14px;bottom:12px;font-size:12px;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--fg-2);box-shadow:0 2px 8px rgba(0,0,0,.12)}
+  .lc-empty{padding:10px 14px;color:var(--fg-3);font-size:12px}
+  .lc-big{height:430px;margin-top:12px}
   .lc-compact{height:180px;border-radius:0;border:0}
-  .lc-compact .lc-body{font-size:10.5px;line-height:1.5;padding:6px 10px}
-  .lc-big{height:340px;margin-top:12px}
-  .lc-big .lc-body{font-size:12.5px}
-  @media (prefers-reduced-motion: reduce){.lc-scan,.lc-dot,.lc-cursor{animation:none}.lc-rain{display:none}}
+  .lc-compact .lc-head{padding:7px 10px;font-size:11px}
+  .lc-compact .lc-code{font-size:10.5px;padding:4px 0;overflow:hidden}
+  .lc-compact .lc-code .no{width:28px;padding-right:8px}
+  .run-panel,.run-log{min-width:0;max-width:100%;overflow:hidden}
+  @media (prefers-reduced-motion: reduce){.lc-spin,.lc-bar i,.lc-caret{animation:none}}
   .shot-drop{position:relative;display:flex;align-items:center;justify-content:center;min-height:120px;max-height:260px;
       border:1.5px dashed rgba(148,163,184,.35);border-radius:12px;background:rgba(2,6,23,.45);cursor:pointer;overflow:hidden;transition:border-color .15s,background .15s}
   [data-theme="light"] .shot-drop{background:#f6f6f7;border-color:#cfcfd4}
@@ -264,7 +266,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 </style>
 <!-- Tailwind 预编译(tools/build_css.sh): 原 451KB 运行时 JS 每次打开都在浏览器里扫描 DOM 生成样式;
      放在 head 最后, 与运行时注入的位置一致, 层叠顺序不变 -->
-<link href="/vendor/css/app.css?v=6" rel="stylesheet">
+<link href="/vendor/css/app.css?v=7" rel="stylesheet">
 </head>
 <body class="h-screen overflow-hidden font-sans antialiased">
 
@@ -489,7 +491,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
   <div class="flex flex-1 min-h-0">
   <!-- ======================= 总览: 多项目工作台 ======================= -->
   <div v-show="view==='dashboard'" class="flex-1 min-h-0 overflow-y-auto custom-scroll">
-    <div class="dash mx-auto px-6 sm:px-10 pt-10 sm:pt-14 pb-20">
+    <div class="dash mx-auto px-6 sm:px-10 pt-8 sm:pt-10 pb-20">
       <!-- 抬头: 日期 + 衬线大标题 + 直接开克隆 -->
       <section class="dash-hero">
         <div class="dash-eyebrow">[[ dashDate ]]</div>
@@ -507,19 +509,19 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         </div>
       </section>
 
-      <!-- 关键数字: 不装盒子, 用发丝线分栏 -->
-      <section class="dash-kpis">
-        <div class="dash-kpi"><div class="dash-kpi-label">项目</div><div class="dash-kpi-num">[[ countUp.projects ]]</div></div>
-        <div class="dash-kpi"><div class="dash-kpi-label">克隆任务</div><div class="dash-kpi-num">[[ countUp.tasks ]]</div></div>
-        <div class="dash-kpi"><div class="dash-kpi-label">平均还原度</div><div class="dash-kpi-num">[[ dashAvg ]]<small v-if="dashAvg !== '—'">分</small></div></div>
-        <div class="dash-kpi"><div class="dash-kpi-label">正在运行</div><div class="dash-kpi-num">[[ countUp.running ]]<span v-if="countUp.running" class="dash-live"></span></div></div>
-      </section>
+      <!-- 关键数字: 一行紧凑指标, 每项可点击直达对应列表 -->
+      <nav class="dash-stats" aria-label="概览">
+        <button type="button" @click="dashJump('projects')">项目 <b class="tnums">[[ countUp.projects ]]</b></button>
+        <button type="button" @click="dashJump('tasks')">任务 <b class="tnums">[[ countUp.tasks ]]</b></button>
+        <button type="button" @click="dashJump('score')">平均还原度 <b class="tnums">[[ dashAvg ]]</b></button>
+        <button type="button" @click="dashJump('running')" :class="{ live: countUp.running }">正在运行 <b class="tnums">[[ countUp.running ]]</b><span v-if="countUp.running" class="dash-live"></span></button>
+      </nav>
 
       <section v-if="live.tasks.length" class="run-strip">
         <div class="dash-sec-head"><div class="flex items-baseline gap-3"><h2 class="dash-sec-title">正在克隆</h2><span class="text-[13px] text-slate-500 tnums">[[ live.tasks.length ]] 个<template v-if="live.pending_total"> · 排队 [[ live.pending_total ]]</template></span></div>
           <button type="button" class="dash-link" @click="goModule('browserpool')">看全部工位</button></div>
         <div class="run-list">
-          <button v-for="t in live.tasks.slice(0, 4)" :key="t.id" type="button" class="run-item" @click="openTaskDetail(t)">
+          <button v-for="t in live.tasks.slice(0, 4)" :key="t.id" type="button" class="run-item" @click="openRunning(t.id)">
             <div class="run-top"><b class="truncate">[[ t.domain ]]</b><span>[[ fmtDur(t.elapsed_s) ]]<template v-if="t.eta_s != null"> · [[ etaText(t.eta_s) ]]</template></span></div>
             <div class="run-steps"><span v-for="st in liveSteps(t, isGenTask(t))" :key="st.name" :class="st.state"></span></div>
             <div class="run-stage">[[ liveSteps(t, isGenTask(t)).find(x => x.state==='active') ? liveSteps(t, isGenTask(t)).find(x => x.state==='active').name : (t.stage || '准备中') ]]<small v-if="t.creator"> · [[ t.creator ]]</small></div>
@@ -529,7 +531,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 
       <div class="dash-body">
       <!-- 项目: 首页主体, 唯一带缩略图的区块 -->
-      <section class="dash-main">
+      <section class="dash-main" ref="dashProjects">
         <div class="dash-sec-head">
           <div class="flex items-baseline gap-3">
             <h2 class="dash-sec-title">项目</h2>
@@ -2159,17 +2161,18 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <span class="nm">[[ st.name ]]</span><span class="sec tnums">[[ st.secs ? fmtDur(st.secs) : '' ]]</span>
           </div>
         </div>
-        <live-code v-if="selectedTask.status==='running' && isGenTask(selectedTask)" :key="'lc' + selectedTask.id" :task-id="selectedTask.id"
+        <live-code v-if="selectedTask.status==='running' && isGenTask(selectedTask)" :key="'lc' + selectedTask.id" :task-id="selectedTask.id" :logs="taskLogs(selectedTask.id, 80)"
           :stage="selectedTask.stage || '准备中'" :pct="selectedTask.progress || 0"
           :elapsed="liveById[selectedTask.id] ? fmtDur(liveById[selectedTask.id].elapsed_s) : ''"></live-code>
-        <div v-if="taskLogs(selectedTask.id, 4).length" class="run-log">
+        <div v-if="taskLogs(selectedTask.id, 4).length && !(selectedTask.status==='running' && isGenTask(selectedTask))" class="run-log">
           <div v-for="(l, i) in taskLogs(selectedTask.id, 4)" :key="i" :class="l.level === 'ERROR' ? 'err' : ''"><span>[[ l.time ]]</span>[[ l.message ]]</div>
         </div>
       </div>
 
       <!-- 界面生成: 需求验收清单(需求符合度的逐条依据) -->
-      <details v-if="view==='task' && selectedTask && fitDetail(selectedTask)" class="fit-panel" :open="selectedTask.similarity_score < 85">
-        <summary>
+      <!-- 验收: 标题下一行摘要, 完整清单在右侧抽屉里看, 不占用预览区 -->
+      <div v-if="view==='task' && selectedTask && fitDetail(selectedTask)" class="fit-panel">
+        <button type="button" class="fit-bar" @click="fitDrawer = true" title="查看完整验收清单">
           <span class="fit-title">验收清单</span>
           <span class="fit-count tnums">[[ fitDetail(selectedTask).items.filter(i => i.verdict === 'yes').length ]]<i>/</i>[[ fitDetail(selectedTask).items.length ]] 满足</span>
           <span class="fit-stats tnums">
@@ -2184,7 +2187,15 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <span v-if="taskTokens.id === selectedTask.id && taskTokens.total">Token <b>[[ fmtTokens(taskTokens.total) ]]</b></span>
             <span v-if="fitGen(selectedTask)">[[ fitGen(selectedTask).ai_model ]]</span>
           </span>
-        </summary>
+          <span class="fit-open">验收详情<i data-lucide="panel-right-open" class="w-3.5 h-3.5"></i></span>
+        </button>
+        <div v-if="fitDrawer" class="fit-mask" @click.self="fitDrawer = false" @keydown.esc="fitDrawer = false">
+        <aside class="fit-drawer" role="dialog" aria-label="验收清单">
+          <header class="fit-drawer-head">
+            <div><b>验收清单</b><span class="tnums">[[ fitDetail(selectedTask).items.filter(i => i.verdict === 'yes').length ]] / [[ fitDetail(selectedTask).items.length ]] 满足 · [[ scoreLabel(selectedTask) ]] [[ Number(selectedTask.similarity_score).toFixed(1) ]]</span></div>
+            <button type="button" class="fit-close" @click="fitDrawer = false" aria-label="关闭">×</button>
+          </header>
+          <div class="fit-drawer-body">
         <p v-if="fitGen(selectedTask) && fitGen(selectedTask).brief && fitGen(selectedTask).brief.summary" class="fit-note">[[ fitGen(selectedTask).kind === 'screenshot' ? '截图理解' : '需求理解' ]]：[[ fitGen(selectedTask).brief.summary ]]</p>
         <ul class="fit-list">
           <li v-for="it in fitDetail(selectedTask).items" :key="it.id" :class="it.verdict">
@@ -2203,7 +2214,10 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <tbody><tr v-for="(r, i) in taskTokens.rows" :key="i"><td>[[ r.step || r.kind ]]</td><td>[[ r.model ]]</td><td>[[ r.tokens_in.toLocaleString() ]]</td><td>[[ r.tokens_out.toLocaleString() ]]</td></tr></tbody>
           </table>
         </div>
-      </details>
+          </div>
+        </aside>
+        </div>
+      </div>
 
       <!-- Tabs -->
       <div v-show="view==='task'" class="h-11 shrink-0 border-b border-white/[0.07] flex items-end gap-1 px-3 overflow-x-auto whitespace-nowrap">
@@ -2251,6 +2265,10 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <input v-model="searchQ" placeholder="搜索 URL / 域名"
                 class="w-40 xl:w-56 rounded-lg bg-slate-950/70 border border-white/[0.07] pl-8 pr-3 py-1.5 text-[11px] text-slate-200 placeholder-slate-600">
             </div>
+            <select v-model="taskSort" class="w-[118px] h-9 rounded-lg bg-slate-950/70 border border-white/[0.07] px-2 text-[11px] text-slate-300 shrink-0" title="排序">
+              <option value="recent">最近创建</option>
+              <option value="score">分数从高到低</option>
+            </select>
             <select v-model="statusFilter" class="w-[92px] h-9 rounded-lg bg-slate-950/70 border border-white/[0.07] px-2 text-[11px] text-slate-300 shrink-0">
               <option value="">全部状态</option>
               <option value="pending">排队中</option>
@@ -3502,7 +3520,7 @@ const __vueApp = createApp({
              hint: '', drag: false, fileInfo: '' },
       taskTokens: { id: null, rows: [], tokens_in: 0, tokens_out: 0, total: 0 },
       tokenUsage: { group: 'day', rows: [], tokens_in: 0, tokens_out: 0, loaded: false },
-      highlightTaskId: null,
+      highlightTaskId: null, taskSort: 'recent', fitDrawer: false,
       opsKpis: { tracker_total: 0, links_total: 0, clicks_total: 0,
                  scheduler_running: 0, scheduler_pending: 0, scheduler_paused: false },
       matrixView: 'grid', projectPill: '', groupByDomain: false,
@@ -3866,6 +3884,7 @@ const __vueApp = createApp({
         list = list.filter(t => t.batch_id === bid);
       }
       if (this.statusFilter) list = list.filter(t => t.status === this.statusFilter);
+      if (this.taskSort === 'score') list = list.slice().sort((a, b) => (b.similarity_score == null ? -1 : b.similarity_score) - (a.similarity_score == null ? -1 : a.similarity_score));
       if (this.searchQ) {
         const q = this.searchQ.toLowerCase();
         list = list.filter(t => (t.target_url || '').toLowerCase().includes(q) || (t.domain || '').toLowerCase().includes(q));
@@ -5487,6 +5506,7 @@ const __vueApp = createApp({
     },
     openTaskDetail(task) {
       this.selectedTaskId = task.id;
+      this.fitDrawer = false;
       this.taskTokens = { id: null, rows: [], tokens_in: 0, tokens_out: 0, total: 0 };
       if (this.isGenTask(task) || (task.stats && task.stats.generate)) this.loadTaskTokens(task.id);
       this.previewTaskId = task.id;
@@ -5924,6 +5944,22 @@ const __vueApp = createApp({
       });
     },
     isGenTask(t) { return !!t && String(t.target_url || '').startsWith('uir:generate:'); },
+    // 首页指标直达: 项目 → 项目列表; 任务 → 全部任务; 平均还原度 → 按分数排序的任务; 正在运行 → 只有一个时直接打开它
+    dashJump(kind) {
+      if (kind === 'projects') { const el = this.$refs.dashProjects; if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+      if (kind === 'running') {
+        const run = (this.live.tasks || []);
+        if (run.length === 1) { this.openRunning(run[0].id); return; }
+      }
+      this.currentProjectId = ''; this.currentBatchId = ''; this.searchQ = ''; this.groupByDomain = false;
+      this.statusFilter = kind === 'running' ? 'running' : '';
+      this.taskSort = kind === 'score' ? 'score' : 'recent';
+      this.activeTab = 'matrix'; this.goModule('tasks');
+    },
+    async openRunning(id) {
+      if (!this.tasks.some(t => t.id === id)) await this.refreshTasks();
+      this.openTaskById(id);
+    },
     fmtTokens(n) { n = Number(n || 0); return n >= 1e8 ? (n / 1e8).toFixed(2) + ' 亿' : n >= 1e4 ? (n / 1e4).toFixed(1) + ' 万' : n.toLocaleString(); },
     async loadTaskTokens(id) {
       try {
@@ -6077,7 +6113,7 @@ const __vueApp = createApp({
         // 立即反馈: 先提示并切到任务列表, 列表与统计在后台刷新, 不让界面等两次全量请求
         // 提交即反馈并直接打开新任务详情(能看到代码实时写入); 返回任务中心时新任务置顶高亮, 不套批次筛选
         this.toast('✅ 生成任务 #' + data.task_id + ' 已入队 (' + data.kind + ' → ' + data.target + ')');
-        this.currentBatchId = ''; this.statusFilter = ''; this.searchQ = ''; this.highlightTaskId = data.task_id;
+        this.currentBatchId = ''; this.statusFilter = ''; this.searchQ = ''; this.taskSort = 'recent'; this.highlightTaskId = data.task_id;
         this.activeTab = 'sandbox'; this.view = 'task';
         this.refreshTasks().then(() => this.openTaskById(data.task_id)); this.refreshTelemetry();
       } catch (e) { this.gen.error = '网络错误: ' + e; }
@@ -6487,6 +6523,8 @@ const __vueApp = createApp({
   mounted() {
     this._onPaste = (e) => this.onGlobalPaste(e);
     window.addEventListener('paste', this._onPaste);
+    this._onEsc = (e) => { if (e.key === 'Escape' && this.fitDrawer) this.fitDrawer = false; };
+    window.addEventListener('keydown', this._onEsc);
     // 窄屏(手机/小平板)默认折叠侧栏, 内容区不被 240px 侧栏挤成一列竖排
     if (window.innerWidth < 900) this.navCollapsed = true;
     try { this.themeMode = localStorage.getItem('cloner-theme') || 'system'; } catch (e) {}
@@ -6496,14 +6534,15 @@ const __vueApp = createApp({
   },
   beforeUnmount() {
     window.removeEventListener('paste', this._onPaste);
+    window.removeEventListener('keydown', this._onEsc);
     clearInterval(this._taskTimer);
     clearInterval(this._teleTimer);
     if (this._es) this._es.close();
   },
 });
-/* ---------- 界面生成: 代码实时写入终端 ----------
-   轮询 /api/tasks/<id>/live_code 拿模型正在写的代码增量, 逐字"打"出来 + 语法着色 + 字符雨背景。
-   模型还没开始写(理解需求)时显示思考流; 写完进入体检/验收时保留代码并扫描。纯展示, 出错静默。 */
+/* ---------- 界面生成: 实时「思考 + 写代码」视图 ----------
+   上: 模型每一步在做什么(取自任务日志: 理解需求 → 任务书要点 → 写页面 → 体检 → 验收 → 修复目标), 进行中的一步带细进度;
+   下: 轮询 /api/tasks/<id>/live_code 拿到的真实代码流, 编辑器样式(行号、等宽、克制着色), 自动跟随最新行, 手动上滚即暂停跟随。 */
 const __lcEsc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const __lcRe = /(<{7} SEARCH|={7}|>{7} REPLACE)|(<\!--[\s\S]*?--\>|\/\*[\s\S]*?\*\/|\/\/[^\n]*)|("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`[^`\n]*`)|(<\/?[a-zA-Z][\w-]*|\/?>)|\b(const|let|var|function|return|if|else|for|while|new|class|this|async|await|of|in|true|false|null)\b|(#[0-9a-fA-F]{3,8}\b|\b\d+(?:\.\d+)?(?:px|ms|s|%|deg|rem|em|vh|vw|fr)?\b)|([a-zA-Z_:@][\w:.-]*)(?==)/g;
 function __lcHighlight(src) {
@@ -6518,53 +6557,74 @@ function __lcHighlight(src) {
   }
   return out + __lcEsc(src.slice(last));
 }
-const __lcBoot = {
-  '理解需求': ['> 解析需求原话', '> 拟定任务书: 主题 / 版式 / 动效 / 交互', '> 生成逐条验收清单', '> 等待模型落笔 …'],
-  '浏览器体检': ['> 写入 index.html', '> 启动无头浏览器: 1440×900 / 390×844 / 1280×600', '> 采集报错、帧差、交互响应、文字重叠', '> 截取峰值帧与主体特写'],
-  '对照需求验收': ['> 多模态模型对照清单逐条核验', '> 核对构图、明暗、装饰与主体对齐', '> 计算需求符合度'],
-};
+// 日志 → 思考步骤(只取生成引擎的关键节点, 文案精简成一行)
+const __lcStepRules = [
+  [/^需求理解[:：]\s*/, '理解需求'], [/^截图理解[:：]\s*/, '读取截图'], [/^去掉截图外框/, '读取截图'], [/^提取位图素材/, '读取截图'],
+  [/^创意概念[:：]\s*/, '任务书'], [/^亮点[:：]\s*/, '任务书'], [/^验收清单\s*(\d+)\s*条/, '任务书'],
+  [/^第\s*\d+\s*轮写出页面/, '写页面'], [/^第\s*\d+\s*轮修复完成/, '修复'], [/^局部修改/, '修复'], [/^修复目标/, '修复目标'],
+  [/^体检/, '体检'], [/^原图宽度/, '对照原图'], [/^第\s*\d+\s*轮(需求符合度|还原度)/, '验收'],
+  [/^第\s*\d+\s*轮未提升/, '结论'], [/停止迭代|不再重写|保留第/, '结论'], [/失败/, '异常'],
+];
+function __lcSteps(logs) {
+  const out = [];
+  for (const l of logs || []) {
+    const msg = String(l.message || '');
+    for (const [re, k] of __lcStepRules) {
+      if (re.test(msg)) {
+        let v = msg.replace(/^(需求理解|截图理解|创意概念|亮点)[:：]\s*/, '');
+        const m = msg.match(/^验收清单\s*(\d+)\s*条/);
+        if (m) v = m[1] + ' 条验收清单';
+        out.push({ k, v: v.slice(0, 160) });
+        break;
+      }
+    }
+  }
+  return out.slice(-30);
+}
 __vueApp.component('live-code', {
   delimiters: ['[[', ']]'],
-  props: { taskId: { type: Number, required: true }, stage: String, pct: Number, elapsed: String, compact: Boolean },
-  data() { return { epoch: 0, code: '', think: '', label: '', done: false, shown: 0, html: '', glitch: false, gone: false }; },
+  props: { taskId: { type: Number, required: true }, stage: String, pct: Number, elapsed: String, compact: Boolean, logs: Array },
+  data() { return { epoch: 0, code: '', think: '', label: '', done: false, shown: 0, html: '', follow: true, gone: false }; },
   computed: {
-    head() {
-      const st = this.stage || '';
-      if (/编写|修复/.test(st) || (!this.done && this.code)) return (this.label || st || '编写页面') + ' · index.html';
-      return st || '准备中';
-    },
+    steps() { return __lcSteps(this.logs); },
     meta() {
       const n = this.code.length;
       return (n ? (n >= 1000 ? (n / 1000).toFixed(1) + 'k' : n) + ' 字符' : '') + (this.elapsed ? (n ? ' · ' : '') + this.elapsed : '');
     },
+    writing() { return !this.done && !!this.code; },
+    nowText() {
+      const st = this.stage || '';
+      if (this.writing) return (this.label || st) + ' · 正在写入 index.html';
+      if (/理解|读取/.test(st)) return '读需求 / 截图, 拟定任务书与验收清单';
+      if (/编写|修复/.test(st)) return this.code ? '写完, 等待体检' : '等待模型开始输出代码';
+      if (/体检/.test(st)) return '在真实浏览器里运行: 桌面 / 平板 / 手机, 报错、动效、交互、重叠';
+      if (/验收/.test(st)) return '看图模型逐条核对验收清单';
+      return st || '准备中';
+    },
   },
   template: `
-  <div class="lc" :class="[compact ? 'lc-compact' : 'lc-big', glitch ? 'lc-glitch' : '']">
-    <canvas ref="rain" class="lc-rain"></canvas>
-    <div v-if="done || !code" class="lc-scan"></div>
-    <div class="lc-head"><span class="lc-dot"></span><span v-if="pct != null" class="lc-pct">[[ pct ]]%</span><b>[[ head ]]</b><span class="lc-meta">[[ meta ]]</span></div>
-    <pre ref="body" class="lc-body"><div><code v-html="html"></code><span class="lc-cursor"></span></div></pre>
+  <div class="lc" :class="compact ? 'lc-compact' : 'lc-big'">
+    <div class="lc-head"><span class="lc-spin"></span><b>[[ stage || '准备中' ]]</b>
+      <span v-if="writing" class="lc-file">· index.html</span>
+      <span class="lc-meta"><template v-if="pct != null">[[ pct ]]% · </template>[[ meta ]]</span></div>
+    <ol v-if="!compact" ref="steps" class="lc-steps">
+      <li v-for="(st, i) in steps" :key="i"><span class="ic">✓</span><span class="k">[[ st.k ]]</span><span class="v" :title="st.v">[[ st.v ]]</span></li>
+      <li class="now"><span class="ic"><span class="lc-spin"></span></span><span class="k">进行中</span><span class="v">[[ nowText ]]</span></li>
+    </ol>
+    <div v-if="!compact" class="lc-bar"><i></i></div>
+    <pre ref="code" class="lc-code" @scroll="onScroll"><div v-if="html" v-html="html"></div><div v-else class="lc-empty">[[ code ? '' : '模型开始写代码后, 这里实时显示写入的内容' ]]</div></pre>
+    <button v-if="!compact && !follow" type="button" class="lc-follow" @click="resume">跟随最新 ↓</button>
   </div>`,
-  watch: {
-    stage(v, o) { if (v !== o) { this.flash(); this.paint(true); } },
-  },
   mounted() {
     this.reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     this.poll();
-    this._poll = setInterval(() => this.poll(), 650);
+    this._poll = setInterval(() => this.poll(), 700);
     this._frame = () => { this.step(); this._raf = requestAnimationFrame(this._frame); };
     this._raf = requestAnimationFrame(this._frame);
-    if (!this.reduced) this.rainStart();
   },
-  beforeUnmount() {
-    this.gone = true;
-    clearInterval(this._poll);
-    cancelAnimationFrame(this._raf);
-    cancelAnimationFrame(this._rainRaf);
-    if (this._ro) this._ro.disconnect();
-  },
+  updated() { if (this.$refs.steps) this.$refs.steps.scrollTop = this.$refs.steps.scrollHeight; },
+  beforeUnmount() { this.gone = true; clearInterval(this._poll); cancelAnimationFrame(this._raf); },
   methods: {
-    flash() { this.glitch = false; requestAnimationFrame(() => { this.glitch = true; setTimeout(() => { this.glitch = false; }, 400); }); },
     async poll() {
       if (this.gone || document.hidden || this._busy) return;
       this._busy = true;
@@ -6575,97 +6635,46 @@ __vueApp.component('live-code', {
         const d = await r.json();
         if (!d.active) return;
         if (d.reset) {
-          if (this.epoch && d.epoch !== this.epoch) this.flash();
           const first = !this.epoch;
           this.epoch = d.epoch; this.code = d.code || ''; this.think = d.think || '';
-          // 中途打开: 只把最后一小段"打"出来, 不从头重放几万字符
-          this.shown = (first || this.reduced) ? Math.max(0, this.code.length - 500) : 0;
-        } else {
-          this.code += d.code || ''; this.think += d.think || '';
-        }
+          this.shown = (first || this.reduced) ? Math.max(0, this.code.length - 400) : 0;
+          this.follow = true;
+        } else { this.code += d.code || ''; this.think += d.think || ''; }
         this.label = d.label || ''; this.done = !!d.done;
-      } catch (e) { /* 网络抖动: 下一拍再取 */ } finally { this._busy = false; }
+      } catch (e) { /* 下一拍再取 */ } finally { this._busy = false; }
     },
     step() {
-      const now = performance.now();
       if (this.shown < this.code.length) {
         const left = this.code.length - this.shown;
-        // 跟住流: 落后越多走得越快, 最慢约 90 字/秒, 保证"正在打字"的观感
-        this.shown = this.reduced ? this.code.length : Math.min(this.code.length, this.shown + Math.max(2, Math.ceil(left / 18)));
+        this.shown = this.reduced ? this.code.length : Math.min(this.code.length, this.shown + Math.max(3, Math.ceil(left / 14)));
       }
-      if (now - (this._paintAt || 0) > 45) this.paint();
+      const now = performance.now();
+      if (now - (this._paintAt || 0) > 120) this.paint();
     },
-    paint(force) {
-      const el = this.$refs.body;
-      if (!el) return;
-      const cs = getComputedStyle(el), lh = parseFloat(cs.lineHeight) || 18;
-      const maxLines = Math.max(3, Math.floor((el.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)) / lh) - 1);
-      let text;
-      if (this.code) {
-        let end = this.shown;
-        if (this.done) {                      // 写完后模型常在 </html> 后附一段说明文字: 终端只停在代码末尾
-          const k = this.code.lastIndexOf('</html>');
-          if (k > 0) end = Math.min(end, k + 7);
-        }
-        text = this.code.slice(Math.max(0, end - 6000), end);
-      } else if (this.think) {
-        const t = this.think.slice(-1500).split('\n').filter(Boolean).map(s => '// ' + s);
-        const key = 'T' + t.length + ':' + this.think.length;
-        if (!force && key === this._lastKey) return;
-        this._lastKey = key; this._paintAt = performance.now();
-        this.html = '<span class="lc-think">' + __lcEsc(t.slice(-maxLines).join('\n')) + '</span>';
-        return;
-      } else {
-        const st = Object.keys(__lcBoot).find(k => (this.stage || '').includes(k)) || '理解需求';
-        const lines = __lcBoot[st];
-        const n = 1 + Math.floor((performance.now() / 900) % lines.length);
-        text = lines.slice(0, n).join('\n');
-      }
-      let lines = text.split('\n');
-      if (this.done && this.code) {           // 已写完, 正在体检/验收: 在代码尾部追加阶段动作
-        const st = Object.keys(__lcBoot).find(k => (this.stage || '').includes(k));
-        if (st) { lines = lines.concat(['', ...__lcBoot[st].slice(0, 1 + Math.floor((performance.now() / 900) % __lcBoot[st].length))]); }
-      }
-      const key = lines.length + ':' + text.length + ':' + lines[lines.length - 1];
-      if (!force && key === this._lastKey) return;
-      this._lastKey = key; this._paintAt = performance.now();
-      const tail = lines.slice(-maxLines).join('\n');
-      this.html = __lcHighlight(tail);
+    paint() {
+      this._paintAt = performance.now();
+      let end = this.shown;
+      if (this.done) { const k = this.code.lastIndexOf('</html>'); if (k > 0) end = Math.min(end, k + 7); }
+      const key = end + ':' + this.epoch;
+      if (key === this._key) return;
+      this._key = key;
+      if (!end) { this.html = ''; return; }
+      const text = this.code.slice(0, end);
+      const all = text.split('\n');
+      const keep = this.compact ? 10 : 400;
+      const start = Math.max(0, all.length - keep);
+      const rows = all.slice(start).map((ln, i) => '<div class="ln"><span class="no">' + (start + i + 1) + '</span><span class="tx">' + (__lcHighlight(ln) || ' ') + '</span></div>');
+      if (!this.done) rows[rows.length - 1] = rows[rows.length - 1].replace(/<\/span><\/div>$/, '<span class="lc-caret"></span></span></div>');
+      this.html = rows.join('');
+      this.$nextTick(() => { const el = this.$refs.code; if (el && (this.follow || this.compact)) { this._auto = true; el.scrollTop = el.scrollHeight; } });
     },
-    rainStart() {
-      const cv = this.$refs.rain;
-      if (!cv) return;
-      const ctx = cv.getContext('2d');
-      const glyphs = 'アイウエオカキクケコサシスセソタチツテトナニヌネノ01<>{}/=;#ﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓ';
-      const fs = this.compact ? 10 : 13;
-      let cols = [], w = 0, h = 0;
-      const fit = () => {
-        const r = cv.getBoundingClientRect(), dpr = Math.min(2, window.devicePixelRatio || 1);
-        w = Math.max(1, r.width); h = Math.max(1, r.height);
-        cv.width = w * dpr; cv.height = h * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        cols = Array.from({ length: Math.ceil(w / fs) }, () => Math.random() * -h / fs);
-        ctx.fillStyle = '#05070a'; ctx.fillRect(0, 0, w, h);
-      };
-      fit();
-      if (window.ResizeObserver) { this._ro = new ResizeObserver(fit); this._ro.observe(cv); }
-      let last = 0;
-      const draw = (t) => {
-        if (this.gone) return;
-        this._rainRaf = requestAnimationFrame(draw);
-        if (document.hidden || t - last < 55) return;
-        last = t;
-        ctx.fillStyle = 'rgba(5,7,10,0.16)'; ctx.fillRect(0, 0, w, h);
-        ctx.font = fs + 'px ui-monospace, Menlo, monospace';
-        for (let i = 0; i < cols.length; i++) {
-          const y = cols[i] * fs;
-          const hot = Math.random() < 0.025;
-          ctx.fillStyle = hot ? '#ff3fd2' : (Math.random() < 0.12 ? '#d8ffe9' : '#00ff9c');
-          ctx.fillText(glyphs[(Math.random() * glyphs.length) | 0], i * fs, y);
-          cols[i] = (y > h && Math.random() > 0.96) ? 0 : cols[i] + 1;
-        }
-      };
-      this._rainRaf = requestAnimationFrame(draw);
+    onScroll() {
+      const el = this.$refs.code;
+      if (!el || this.compact) return;
+      if (this._auto) { this._auto = false; return; }
+      this.follow = el.scrollTop + el.clientHeight >= el.scrollHeight - 24;
     },
+    resume() { this.follow = true; const el = this.$refs.code; if (el) { this._auto = true; el.scrollTop = el.scrollHeight; } },
   },
 });
 __vueApp.config.errorHandler = function (err, instance, info) {

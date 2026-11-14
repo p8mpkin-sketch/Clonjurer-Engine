@@ -680,3 +680,34 @@ html body label.tracking-\[0\.16em\],html body div.tracking-\[0\.16em\]{letter-s
 .fit-text em{font-style:normal;font-size:11px;color:var(--fg-3);border:1px solid var(--line);border-radius:4px;padding:0 5px;margin-left:8px;white-space:nowrap}
 .fit-why{font-size:12px;line-height:1.55;color:var(--fg-3)}
 @media (max-width:640px){.fit-panel > summary{padding:10px 14px}.fit-list,.fit-note{padding-left:14px;padding-right:14px}.fit-list li{grid-template-columns:48px minmax(0,1fr)}}
+
+/* ===== 2026-11-15 体验整改: 首页紧凑指标 / 验收抽屉 ===== */
+.dash-title{font-size:30px;line-height:1.25;margin-top:6px}
+.dash-title-sub{display:inline;margin-left:.4em;font-weight:500}
+.dash-omni{margin-top:18px;height:54px}
+.dash-stats{margin-top:22px;display:flex;flex-wrap:wrap;gap:8px}
+.dash-stats button{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border:1px solid var(--line);border-radius:999px;
+  font-size:13px;color:var(--fg-3);background:var(--surface);transition:border-color .15s,color .15s}
+.dash-stats button b{font-weight:600;color:var(--fg);font-size:13px}
+.dash-stats button:hover{border-color:var(--line-strong);color:var(--fg-2)}
+.dash-stats button.live{border-color:rgba(34,197,94,.45)}
+.dash-stats .dash-live{margin-left:2px}
+.run-strip{margin-top:28px}
+.dash-body{margin-top:36px}
+.dash-main .dash-projects{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+.fit-panel{max-height:none;overflow:visible}
+.fit-bar{width:100%;display:flex;align-items:center;flex-wrap:wrap;gap:4px 16px;padding:9px 20px;min-height:40px;text-align:left;line-height:20px;color:var(--fg-2)}
+.fit-bar:hover{background:rgba(127,127,127,.05)}
+.fit-open{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--fg-2);padding:2px 8px;border:1px solid var(--line);border-radius:6px}
+.fit-mask{position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.28)}
+.fit-drawer{position:absolute;top:0;right:0;bottom:0;width:min(560px,100vw);display:flex;flex-direction:column;background:var(--surface);
+  border-left:1px solid var(--line);box-shadow:-12px 0 32px rgba(0,0,0,.18)}
+.fit-drawer-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.fit-drawer-head b{font-size:15px;color:var(--fg);margin-right:10px}
+.fit-drawer-head span{font-size:12.5px;color:var(--fg-3)}
+.fit-close{width:30px;height:30px;border-radius:8px;font-size:20px;line-height:28px;color:var(--fg-3)}
+.fit-close:hover{background:rgba(127,127,127,.1);color:var(--fg)}
+.fit-drawer-body{flex:1;overflow-y:auto;padding-top:10px}
+.fit-drawer-body .fit-list,.fit-drawer-body .fit-note{padding-left:18px;padding-right:18px}
+.fit-drawer-body .fit-tokens{margin-left:18px;margin-right:18px}
+@media (max-width:640px){.dash-title{font-size:24px}.dash-title-sub{display:block;margin-left:0}.fit-bar{padding:9px 14px}.fit-stats-end{margin-left:0}}
