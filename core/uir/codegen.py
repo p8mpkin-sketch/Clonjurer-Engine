@@ -33,7 +33,9 @@ PLAN_SYSTEM = (
     "- kind: 用几个字概括页面性质(由你自由判断, 例如动效展示、小游戏、工具、信息页、表单)\n"
     "- design: {mood: 气质关键词, palette: 3~6 个十六进制色值并注明各自用途, typography: 字体与字号层级, "
     "layout: 布局与构图}。用户明确说了的照做, 没说的由你给出有主张的设计, 避免紫色渐变、霓虹发光、emoji 装饰这类套路\n"
-    "- tech: 实现要点 —— 图形用 CSS / 内联 SVG / canvas 中的哪种, 动效怎么做, 有哪些状态和事件, 数据怎么存\n"
+    "- concept: 一句话说明这个页面的核心创意 / 记忆点(打开页面第一眼让人记住的东西)\n"
+    "- tech: 实现要点 —— 图形用 CSS / 内联 SVG / canvas 中的哪种, 动效怎么做, 有哪些状态和事件, 数据怎么存。"
+    "具象图形(形状、图标、物件、角色)用内联 SVG path 或 canvas 路径精确绘制, 不用 CSS 伪元素拼接\n"
     "- checklist: 4~10 条验收项, 每条 {id: \"c1\"..., text, type, must}\n"
     "验收项规则:\n"
     "1. 每条必须是打开页面后能直接观察或操作验证的具体事实, 不写空话(「体验良好」这类不算)。\n"
@@ -43,8 +45,12 @@ PLAN_SYSTEM = (
     "interaction 只用于要用户动手(点击、输入、按键、拖动)才能验证的条目; 靠打开页面验证不了的要求"
     "(跟随系统偏好设置、离线可用、数据持久化这类)归 content。\n"
     "3. must=true 只给用户原话明确要求或直接蕴含的条目; 你补充的质量要求 must=false。\n"
-    "4. 用户原话里的每一个要求都要有对应条目, 不要遗漏, 也不要把用户没要的大功能加进来。\n"
-    "5. 页面必须是不依赖后端和外网的单个网页, 不要规划需要服务器、登录或外部数据源的东西; 需要数据就用本地示例数据或浏览器本地存储。"
+    "4. 用户原话里的每一个要求都要有对应条目, 不要遗漏, 也不要把与主题无关的大功能(账号、后端、多页面)加进来。\n"
+    "5. 页面必须是不依赖后端和外网的单个网页, 不要规划需要服务器、登录或外部数据源的东西; 需要数据就用本地示例数据或浏览器本地存储。\n"
+    "6. 体量与完成度: 用户只说一两句话时, 期待的是一个完整、精致、有记忆点的成品, 不是满足字面的最低实现。"
+    "围绕主题定一个核心创意, 在不偏离题意的前提下补足: 与主题呼应的辅助层次(背景氛围、装饰元素、相关读数或文字), "
+    "以及至少一个与主题相关的轻量交互反馈(展示类页面也要有, 但不能妨碍默认效果)。主体视觉要醒目, 在桌面视口里不能缩成一小块。"
+    "这些补充写进 concept / design / tech, 并在验收清单里各有对应条目(must=false)。"
 )
 
 WRITE_SYSTEM = (
@@ -59,9 +65,11 @@ WRITE_SYSTEM = (
     "canvas 按容器尺寸和 devicePixelRatio 设置分辨率, 窗口尺寸变化时重新计算。\n"
     "6. 代码不能抛出运行时异常; 不使用 alert / confirm / prompt; 用到 localStorage 时做异常保护。\n"
     "7. 游戏或可操作的内容: 同时支持键盘和鼠标/触屏, 在页面上写明操作方式, 有开始、结束、重新开始的完整流程。\n"
-    "8. 设计质量: 要有明确的视觉主张 —— 讲究的配色、字号层级、留白和细节(过渡、状态反馈), 与内容气质相称。"
+    "8. 主体视觉要醒目(在桌面视口里不能缩成一小块); 具象图形(形状、图标、物件、角色)用内联 SVG path 或 canvas 路径"
+    "精确绘制, 不要用 CSS 伪元素拼接, 写完核对形状完整、比例协调、该对称处对称。任务书里的 concept 和辅助层次都要做出来。\n"
+    "9. 设计质量: 要有明确的视觉主张 —— 讲究的配色、字号层级、留白和细节(过渡、状态反馈), 与内容气质相称。"
     "不要默认的紫色渐变背景, 不要堆砌霓虹发光, 不要用 emoji 充当图标或装饰。界面文字使用任务书 lang 指定的语言。\n"
-    "9. 代码紧凑, 不写冗长注释, 整个文件控制在能一次完整输出的长度内。"
+    "10. 代码紧凑, 不写冗长注释, 整个文件控制在能一次完整输出的长度内。"
 )
 
 _REPAIR_HEAD = (
@@ -87,12 +95,16 @@ REVIEW_SYSTEM = (
     "unsure(现有截图和体检数据既不能证明满足, 也不能证明不满足 —— 例如要走完多步操作才能看到的结果)。"
     "不要把 unsure 的情况判成 no; 也不要因为拿不准就判 yes。\n"
     "3. 体检数据是确定性测量, 与你的观感冲突时以体检数据为准(例如相邻帧变化占比为 0 说明画面没有在动)。\n"
-    "4. 设计质量 design.score 为 0~10 的数: 5 是能用但平庸, 8 以上要求有专业设计水准。布局错乱、元素重叠、文字溢出或被裁切、"
+    "4. 先核对主体图形有没有画对: 形状完整、比例协调、该对称处对称、没有错位或残缺(有「主体特写」图时以特写为准)。"
+    "画错了, 描述该图形的条目判 no, 并作为 high 级 issue 写清哪里画错。\n"
+    "5. 设计质量 design.score 为 0~10 的数, 用「资深设计师会交出的成品」做参照: 5 是能用但平庸; "
+    "只有主体元素、缺少层次与细节的最低限度实现, 即使干净也不超过 6.5; 7 要求有完整的层次和打磨; "
+    "8 以上要求有清晰的创意主张、层次丰富、细节到位, 达到专业作品水准。布局错乱、元素重叠、文字溢出或被裁切、"
     "对比度不足、大片无意义空白、手机宽度下不可用, 都要扣分并写进 issues。\n"
-    "5. 前两张截图拍在页面刚加载时, 入场动画可能还没结束(元素半透明、位置未到位属正常); 对比度、布局、内容是否齐全"
+    "6. 前两张截图拍在页面刚加载时, 入场动画可能还没结束(元素半透明、位置未到位属正常); 对比度、布局、内容是否齐全"
     "以「静置后的整页」为准。整页图在截取前已自动逐屏滚动过一遍, 仍然空白的区域才是真的没有内容。\n"
-    "6. 涉及时间、日期、计时的条目, 用体检数据里给出的截图时刻去核对画面上的读数。\n"
-    "7. issues 只列真正需要修改的问题, 按严重程度从高到低, 每条写清现象(problem)和修改方向(fix), 最多 6 条; 没有问题给空数组。\n"
+    "7. 涉及时间、日期、计时的条目, 用体检数据里给出的截图时刻去核对画面上的读数。\n"
+    "8. issues 只列真正需要修改的问题, 按严重程度从高到低, 每条写清现象(problem)和修改方向(fix), 最多 6 条; 没有问题给空数组。\n"
     "输出格式: {\"items\":[{\"id\":\"c1\",\"verdict\":\"yes|partial|no|unsure\",\"evidence\":\"...\"}],"
     "\"design\":{\"score\":0,\"comment\":\"...\"},"
     "\"issues\":[{\"severity\":\"high|mid|low\",\"problem\":\"...\",\"fix\":\"...\"}],\"summary\":\"一句话总评\"}"
@@ -142,6 +154,7 @@ def normalize_plan(obj: dict, desc: str) -> dict:
             "lang": str(obj.get("lang") or "").strip()[:16],
             "summary": str(obj.get("summary") or "").strip()[:600],
             "kind": str(obj.get("kind") or "").strip()[:40],
+            "concept": str(obj.get("concept") or "").strip()[:300],
             "design": design,
             "tech": (tech if isinstance(tech, str) else json.dumps(tech, ensure_ascii=False))[:1500] if tech else "",
             "checklist": items}
@@ -208,7 +221,7 @@ def _html_complete(text: str) -> bool:
 
 
 def _brief_text(brief: dict) -> str:
-    slim = {k: brief.get(k) for k in ("title", "lang", "summary", "kind", "design", "tech")}
+    slim = {k: brief.get(k) for k in ("title", "lang", "summary", "kind", "concept", "design", "tech")}
     slim["checklist"] = [{"id": i["id"], "text": i["text"], "type": i["type"], "must": i["must"]}
                          for i in brief["checklist"]]
     return json.dumps(slim, ensure_ascii=False, indent=1)
@@ -425,6 +438,42 @@ def probe_digest(rep: dict) -> str:
     return "\n".join(lines)
 
 
+def subject_crop(src: Path, out: Path, max_frac: float = 0.45):
+    """从截图里裁出「画面主体」并放大 → out 路径; 主体已经占满大半画面(信息页、整屏画布)时返回 None。
+
+    缩到 1024 宽送审时, 居中的小图形只剩一两百像素, 验收模型看不出形状画错(残缺、错位、不对称)。
+    做法与题材无关: 以四边像素的中位色作背景, 与背景色差明显的像素算前景, 取前景坐标的 2%~98% 分位作外接框
+    (忽略零星粒子/噪点), 外扩 15% 后裁剪, 长边放大到约 900px。"""
+    import numpy as np
+    from PIL import Image
+    try:
+        with Image.open(src) as im:
+            rgb = im.convert("RGB")
+        w, h = rgb.size
+        small = np.asarray(rgb.resize((max(1, w // 4), max(1, h // 4))), dtype=np.int16)
+        border = np.concatenate([small[0], small[-1], small[:, 0], small[:, -1]])
+        bg = np.median(border, axis=0)
+        mask = np.abs(small - bg).max(axis=2) > 40
+        ys, xs = np.nonzero(mask)
+        if len(xs) < 50:
+            return None
+        x0, x1 = np.percentile(xs, [2, 98]) * 4
+        y0, y1 = np.percentile(ys, [2, 98]) * 4
+        bw, bh = x1 - x0, y1 - y0
+        if bw < 40 or bh < 40 or (bw * bh) / (w * h) > max_frac:
+            return None
+        px, py = bw * 0.15, bh * 0.15
+        box = (int(max(0, x0 - px)), int(max(0, y0 - py)), int(min(w, x1 + px)), int(min(h, y1 + py)))
+        crop = rgb.crop(box)
+        k = 900 / max(crop.size)
+        if k > 1:
+            crop = crop.resize((round(crop.size[0] * k), round(crop.size[1] * k)), Image.LANCZOS)
+        crop.save(out)
+        return out
+    except Exception:
+        return None
+
+
 def _review_parts(rep: dict) -> list:
     shots, parts = rep.get("shots") or {}, []
     gap_s = sum(settings.PROBE_FRAME_GAPS_MS) / 1000.0
@@ -443,6 +492,11 @@ def _review_parts(rep: dict) -> list:
     if ok("peak"):
         add(f"同一视口, 之后 {gap_s:.1f} 秒内与上一张差异最大的一帧(对比两张可判断是否在动)",
             llm._image_part(Path(shots["peak"]), 1024))
+    base = shots.get("peak") if ok("peak") else (shots.get("f0") if ok("f0") else None)
+    if base:
+        crop = subject_crop(Path(base), Path(base).with_name("subject.png"))
+        if crop:
+            add("主体特写: 从上一张截图里裁出画面主体并放大, 用来核对主体图形画得对不对", llm._image_part(crop, 900))
     if ok("full"):
         tiles = llm.image_parts(Path(shots["full"]), 1024, max_tiles=3, tile_h=1700)[0]
         for k, part in enumerate(tiles):

@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>心跳</title>
+<style>
+  :root{
+    --bg:#120a0d; --bg2:#22101a; --ink:#f6e7ea; --muted:#b9939c;
+    --red:#ff3b5c; --red-deep:#9e0f2c; --red-hi:#ff8a9e;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    background:radial-gradient(120% 90% at 50% 40%, var(--bg2) 0%, var(--bg) 60%, #07040a 100%);
+    color:var(--ink); overflow:hidden;
+    font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased; user-select:none;
+  }
+  canvas#fx{position:fixed;inset:0;width:100%;height:100%;pointer-events:none}
+  .stage{position:relative;height:100%;display:grid;place-items:center}
+  .heart-box{position:relative;width:min(46vmin,380px);aspect-ratio:1;display:grid;place-items:center;cursor:pointer;
+    -webkit-tap-highlight-color:transparent;outline:none}
+  .heart-box:focus-visible{outline:2px dashed rgba(255,138,158,.6);outline-offset:12px;border-radius:50%}
+  .ring{position:absolute;inset:8%;border-radius:50%;border:2px solid rgba(255,59,92,.55);opacity:0;pointer-events:none}
+  .halo{position:absolute;inset:-20%;border-radius:50%;
+    background:radial-gradient(closest-side, rgba(255,59,92,.42), rgba(255,59,92,.12) 55%, transparent 75%);
+    pointer-events:none;will-change:transform,opacity}
+  svg.heart{position:relative;width:100%;height:100%;overflow:visible;will-change:transform;
+    filter:drop-shadow(0 18px 30px rgba(0,0,0,.45))}
+  .hud{position:fixed;left:0;right:0;bottom:0;padding:0 24px 28px;display:flex;flex-direction:column;align-items:center;gap:10px;pointer-events:none}
+  canvas#ecg{width:min(560px,90vw);height:56px;display:block}
+  .meta{display:flex;align-items:baseline;gap:18px;font-size:13px;letter-spacing:.14em;color:var(--muted)}
+  .bpm{font-variant-numeric:tabular-nums;color:var(--ink);font-size:22px;letter-spacing:.04em;font-weight:600}
+  .bpm small{font-size:11px;color:var(--muted);margin-left:4px;letter-spacing:.14em;font-weight:400}
+  .hint{opacity:.8}
+  @media (max-width:480px){ .meta{gap:12px;font-size:12px} .hud{padding-bottom:20px} }
+</style>
+</head>
+<body>
+<canvas id="fx" aria-hidden="true"></canvas>
+<main class="stage">
+  <div class="heart-box" id="heartBox" role="button" tabindex="0" aria-label="跳动的爱心，点击让它跳得更快">
+    <div class="halo" id="halo"></div>
+    <div class="ring" id="r0"></div><div class="ring" id="r1"></div><div class="ring" id="r2"></div>
+    <svg class="heart" id="heart" viewBox="0 0 200 190" aria-hidden="true">
+      <defs>
+        <radialGradient id="body" cx="36%" cy="28%" r="80%">
+          <stop offset="0" stop-color="#ff8a9e"/>
+          <stop offset=".35" stop-color="#ff3b5c"/>
+          <stop offset=".75" stop-color="#d11a3d"/>
+          <stop offset="1" stop-color="#7d0a22"/>
+        </radialGradient>
+        <radialGradient id="rim" cx="50%" cy="45%" r="62%">
+          <stop offset=".7" stop-color="#5a0618" stop-opacity="0"/>
+          <stop offset="1" stop-color="#3d0410" stop-opacity=".6"/>
+        </radialGradient>
+        <linearGradient id="spec" x1="0" y1="0" x2=".3" y2="1">
+          <stop offset="0" stop-color="#fff" stop-opacity=".75"/>
+          <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+        </linearGradient>
+        <path id="hp" d="M100 176C60 146 12 112 12 68 12 37 36 14 64 14c17 0 29 9 36 22 7-13 19-22 36-22 28 0 52 23 52 54 0 44-48 78-88 108z"/>
+      </defs>
+      <use href="#hp" fill="url(#body)"/>
+      <use href="#hp" fill="url(#rim)"/>
+      <ellipse cx="58" cy="50" rx="24" ry="14" transform="rotate(-35 58 50)" fill="url(#spec)"/>
+      <circle cx="80" cy="34" r="4" fill="#fff" opacity=".55"/>
+    </svg>
+  </div>
+</main>
+<div class="hud">
+  <canvas id="ecg" aria-hidden="true"></canvas>
+  <div class="meta"><span class="bpm" id="bpm">72<small>BPM</small></span><span class="hint">点击爱心，让它心动加速</span></div>
+</div>
+<script>
+(() => {
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const heart = document.getElementById('heart'), halo = document.getElementById('halo');
+  const rings = [0,1,2].map(i => document.getElementById('r' + i));
+  const box = document.getElementById('heartBox'), bpmEl = document.getElementById('bpm');
+  const fx = document.getElementById('fx'), fctx = fx.getContext('2d');
+  const ecg = document.getElementById('ecg'), ectx = ecg.getContext('2d');
+  const BASE = 72, MAX = 128;
+  let bpm = BASE, excite = 0, phase = 0, last = performance.now(), ringIdx = 0, beatCount = 0;
+  const parts = [];
+
+  function fit() {
+    const d = devicePixelRatio || 1;
+    fx.width = innerWidth * d; fx.height = innerHeight * d; fctx.setTransform(d,0,0,d,0,0);
+    const r = ecg.getBoundingClientRect(); ecg.width = r.width * d; ecg.height = r.height * d; ectx.setTransform(d,0,0,d,0,0);
+    ecgBuf = new Array(Math.max(2, Math.round(r.width))).fill(0);
+  }
+  let ecgBuf = [];
+  addEventListener('resize', fit); fit();
+
+  // 心动曲线: 一个周期内 "扑通(lub)-通(dub)" 两次收缩, 返回 0..1 的收缩量
+  const pulse = p => {
+    const g = (x, c, w) => Math.exp(-((x - c) ** 2) / (2 * w * w));
+    return Math.min(1, g(p, .06, .035) + .62 * g(p, .26, .04));
+  };
+  // 心电图形状: P 波 - QRS - T 波
+  const ecgShape = p => {
+    const g = (x, c, w, a) => a * Math.exp(-((x - c) ** 2) / (2 * w * w));
+    return g(p,.88,.025,.12) + g(p,.995,.006,-.15) + g(p,.02,.008,1) + g(p,.045,.008,-.28) + g(p,.24,.05,.22);
+  };
+
+  function emitRing() {
+    const r = rings[ringIdx++ % rings.length];
+    r.animate([{transform:'scale(.92)',opacity:.75},{transform:'scale(1.9)',opacity:0}],
+              {duration:1400, easing:'cubic-bezier(.2,.6,.3,1)'});
+  }
+  function spawn(n, x, y, burst) {
+    for (let i = 0; i < n; i++) {
+      const a = burst ? Math.random() * Math.PI * 2 : -Math.PI / 2 + (Math.random() - .5) * 1.2;
+      const s = burst ? 2 + Math.random() * 4 : .3 + Math.random() * .7;
+      parts.push({x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - (burst ? 1 : 0),
+                  life: 0, max: burst ? 70 + Math.random() * 40 : 200 + Math.random() * 120,
+                  size: burst ? 6 + Math.random() * 8 : 3 + Math.random() * 5, rot: Math.random() * 6, heart: burst || Math.random() < .35});
+    }
+  }
+  function drawHeartShape(c, s) {
+    c.beginPath(); c.moveTo(0, s * .35);
+    c.bezierCurveTo(-s * 1.1, -s * .35, -s * .45, -s * 1.05, 0, -s * .45);
+    c.bezierCurveTo(s * .45, -s * 1.05, s * 1.1, -s * .35, 0, s * .35); c.fill();
+  }
+  function heartCenter() { const r = box.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height * .48, r.width]; }
+
+  function frame(now) {
+    const dt = Math.min(64, now - last) / 1000; last = now;
+    excite = Math.max(0, excite - dt * .18);
+    bpm = BASE + (MAX - BASE) * excite;
+    const prev = phase; phase = (phase + dt * bpm / 60) % 1;
+    if (phase < prev) { beatCount++; emitRing(); const [cx, cy, w] = heartCenter(); spawn(2 + Math.round(excite * 3), cx + (Math.random() - .5) * w * .5, cy - w * .1, false); }
+    const k = pulse(phase);
+    heart.style.transform = `scale(${1 + .13 * k}, ${1 + .11 * k}) translateY(${-2 * k}px)`;
+    halo.style.transform = `scale(${1 + .18 * k})`; halo.style.opacity = (.55 + .45 * k).toFixed(3);
+    if (beatCount % 4 === 0 || excite > 0) bpmEl.firstChild.nodeValue = Math.round(bpm);
+
+    // 粒子
+    fctx.clearRect(0, 0, innerWidth, innerHeight);
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const p = parts[i]; p.life++; p.x += p.vx; p.y += p.vy; p.vy += p.heart && p.max < 150 ? .04 : -.004; p.vx *= .99;
+      const t = p.life / p.max; if (t >= 1) { parts.splice(i, 1); continue; }
+      fctx.save(); fctx.globalAlpha = Math.sin(Math.PI * t) * .85; fctx.translate(p.x, p.y);
+      if (p.heart) { fctx.rotate(Math.sin(p.rot + p.life * .03) * .3); fctx.fillStyle = '#ff5a76'; drawHeartShape(fctx, p.size); }
+      else { fctx.fillStyle = '#ffb3c1'; fctx.beginPath(); fctx.arc(0, 0, p.size * .3, 0, 7); fctx.fill(); }
+      fctx.restore();
+    }
+
+    // 心电图: 扫描线随相位推进
+    const W = ecgBuf.length, H = ecg.clientHeight, step = Math.max(1, Math.round(dt * 160));
+    for (let s = 0; s < step; s++) { ecgBuf.shift(); ecgBuf.push(ecgShape((phase - (step - s) * dt * bpm / 60 / step + 1) % 1)); }
+    ectx.clearRect(0, 0, W, H);
+    const grad = ectx.createLinearGradient(0, 0, W, 0);
+    grad.addColorStop(0, 'rgba(255,59,92,0)'); grad.addColorStop(.7, 'rgba(255,59,92,.65)'); grad.addColorStop(1, 'rgba(255,138,158,1)');
+    ectx.strokeStyle = grad; ectx.lineWidth = 1.6; ectx.lineJoin = 'round'; ectx.beginPath();
+    ecgBuf.forEach((v, x) => { const y = H * .62 - v * H * .5; x ? ectx.lineTo(x, y) : ectx.moveTo(x, y); });
+    ectx.stroke();
+    ectx.fillStyle = '#ffd0d9'; ectx.beginPath(); ectx.arc(W - 2, H * .62 - ecgBuf[W - 1] * H * .5, 2.4, 0, 7); ectx.fill();
+
+    requestAnimationFrame(frame);
+  }
+
+  function kick() {
+    excite = Math.min(1, excite + .35);
+    const [cx, cy] = heartCenter(); spawn(14, cx, cy, true);
+    if (reduce) staticUpdate();
+  }
+  box.addEventListener('click', kick);
+  box.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); kick(); } });
+
+  function staticUpdate() { bpm = BASE + (MAX - BASE) * excite; bpmEl.firstChild.nodeValue = Math.round(bpm); }
+  if (reduce) { halo.style.opacity = .7; staticUpdate(); }
+  else requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
