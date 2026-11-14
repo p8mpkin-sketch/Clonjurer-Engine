@@ -599,3 +599,33 @@ html body .proj-sort select option{background:var(--surface);color:var(--fg)}
   .bt-line .mt-line-meta{white-space:nowrap;width:auto;min-width:56px}
   .bt-line .hide-sm{display:none}
 }
+/* 导入存档 */
+.imp-drop{display:flex;align-items:center;gap:10px;height:56px;margin-top:0;padding:0 14px;border-radius:10px;border:1px dashed var(--line-strong);background:var(--bg);color:var(--fg-3);font-size:13px;font-weight:400;cursor:pointer;transition:border-color .15s,color .15s}
+.imp-drop:hover{border-color:var(--fg-3);color:var(--fg-2)}
+.imp-drop.has{border-style:solid;color:var(--fg)}
+.imp-drop em{font-style:normal;color:var(--fg-3);margin-left:6px}
+.imp-bar{height:3px;border-radius:2px;background:var(--line);overflow:hidden}
+.imp-bar span{display:block;height:100%;background:var(--ink);transition:width .2s}
+/* 后台打包进度(右下角) */
+.arc-card{position:fixed;right:20px;bottom:20px;z-index:65;width:300px;max-width:calc(100vw - 32px);padding:14px 16px 12px;border-radius:12px;background:var(--surface);border:1px solid var(--line-strong);box-shadow:var(--shadow-pop)}
+.arc-head{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px;color:var(--fg)}
+.arc-head b{font-weight:600}
+.arc-head .mt-icon{width:24px;height:24px;margin:-4px -6px -4px 0;font-size:18px;line-height:1}
+.arc-bar{height:3px;margin:10px 0 8px;border-radius:2px;background:var(--line);overflow:hidden}
+.arc-bar span{display:block;height:100%;background:var(--ink);transition:width .4s}
+.arc-bar.done span{background:rgb(var(--ok-500))}
+.arc-bar.error span,.arc-bar.cancelled span{background:rgb(var(--bad-500))}
+.arc-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:var(--fg-3)}
+/* ===== 收尾: 字体 / 排列 / 颜色 / 边框统一 ===== */
+/* 批量选择栏: 与工具条同高同边框, 不用彩色底 */
+.sel-bar{display:inline-flex;align-items:center;gap:2px;height:36px;padding:0 4px 0 12px;border-radius:10px;background:var(--surface);border:1px solid var(--line-strong);flex:none}
+.sel-bar b{font-size:13px;font-weight:600;color:var(--fg);margin-right:8px;white-space:nowrap}
+.sel-bar button{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 9px;border-radius:7px;font-size:13px;color:var(--fg-2);white-space:nowrap;transition:background .15s,color .15s}
+.sel-bar button:hover{background:rgba(127,120,110,.1);color:var(--fg)}
+.sel-bar button:disabled{opacity:.45}
+/* 表单里的输入一律用正文字体(等宽只留给代码与数字列) */
+html body .create-main input,html body .create-main textarea,html body .create-main input::placeholder,html body .create-main textarea::placeholder{font-family:inherit}
+html body input[type="range"]{accent-color:var(--ink)}
+/* 小标题不再拉宽字距 */
+html body label.tracking-\[0\.16em\],html body div.tracking-\[0\.16em\]{letter-spacing:0;font-size:13px;font-weight:600;color:var(--fg-2)}
+.mt-btn.h-auto{height:auto}

@@ -245,6 +245,14 @@ CREATE TABLE IF NOT EXISTS system_settings (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS archive_imports (
+    workspace_id INTEGER NOT NULL,
+    uid          TEXT    NOT NULL,
+    task_id      INTEGER NOT NULL,
+    created_at   TEXT    NOT NULL,
+    PRIMARY KEY (workspace_id, uid)
+);
+
 CREATE TABLE IF NOT EXISTS docker_containers (
     task_id      INTEGER PRIMARY KEY,
     container_id TEXT    NOT NULL DEFAULT '',
@@ -1109,6 +1117,66 @@ class Database:
                 f"SELECT * FROM audit_logs{clause}"
                 " ORDER BY id DESC LIMIT ?", params).fetchall()
             return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # 存档导入(网站记录跨实例/工作区迁移)
+    # ------------------------------------------------------------------
+    def instance_id(self) -> str:
+        """本实例的稳定随机标识: 存档里的记录 uid = 实例:任务号, 用于导入去重。"""
+        iid = self.get_setting("instance_id")
+        if not iid:
+            import secrets
+            iid = secrets.token_hex(6)
+            self.set_setting("instance_id", iid)
+        return iid
+
+    def archive_task_for_uid(self, workspace_id: int, uid: str):
+        """该区里已存在的同一条记录(先前导入过的, 或就是本实例本区的原任务) -> 任务 id。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT a.task_id FROM archive_imports a JOIN clone_tasks t ON t.id = a.task_id"
+                " JOIN batch_jobs b ON b.id = t.batch_id"
+                " WHERE a.workspace_id = ? AND a.uid = ? AND b.workspace_id = ?",
+                (workspace_id, uid, workspace_id)).fetchone()
+            if row:
+                return row["task_id"]
+        iid, _, tid = uid.partition(":")
+        if iid == self.instance_id() and tid.isdigit():
+            t = self.get_task(int(tid))
+            if t and t.get("workspace_id") == workspace_id:
+                return t["id"]
+        return None
+
+    def insert_archived_batch(self, *, workspace_id: int, project_id: int, name: str,
+                              config: dict, created_by: str, created_at: str, tasks: list) -> list:
+        """按存档原样写入一个批次及其任务(不入调度队列: 状态只会是 completed/partial/failed)。
+        tasks: [{uid, target_url, domain, status, progress, stage, similarity_score,
+        stats_json, error_msg, created_at, updated_at}] -> 新任务 id 列表(同序)。"""
+        now = _now()
+        done = sum(1 for t in tasks if t["status"] in ("completed", "partial", "failed"))
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO batch_jobs (project_id, name, total_urls, completed_urls,"
+                " config_json, created_at, created_by, workspace_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (project_id, name, len(tasks), done, json.dumps(config, ensure_ascii=False),
+                 created_at or now, created_by or "", workspace_id))
+            batch_id = cur.lastrowid
+            ids = []
+            for t in tasks:
+                c = self._conn.execute(
+                    "INSERT INTO clone_tasks (batch_id, target_url, domain, status, progress, stage,"
+                    " similarity_score, stats_json, error_msg, created_at, updated_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (batch_id, t["target_url"], t["domain"], t["status"], int(t.get("progress") or 0),
+                     t.get("stage") or "", t.get("similarity_score"), t.get("stats_json") or "{}",
+                     t.get("error_msg") or "", t.get("created_at") or now, t.get("updated_at") or now))
+                ids.append(c.lastrowid)
+                if t.get("uid"):
+                    self._conn.execute(
+                        "INSERT OR REPLACE INTO archive_imports (workspace_id, uid, task_id, created_at)"
+                        " VALUES (?, ?, ?, ?)", (workspace_id, t["uid"], c.lastrowid, now))
+            self._conn.commit()
+            return ids
 
     # ------------------------------------------------------------------
     # 系统设置(KV)

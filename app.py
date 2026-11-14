@@ -50,7 +50,7 @@ from flask import (Flask, Response, abort, jsonify, render_template, request,
                    g, send_file, send_from_directory, session)
 
 import config
-from core import flask_generator, live, security
+from core import archive, flask_generator, live, security
 from core import ai_mock_generator
 from core.clone.api_match import pick_entry
 from core.browser_pool import SyncBrowserPool
@@ -188,7 +188,8 @@ def _rbac_gate():
     if path.startswith(_WS_ADMIN_PATHS):
         if rank < WS_ROLE_RANK["admin"]:
             return jsonify({"error": "该操作需要工作区管理员权限"}), 403
-    elif request.method not in ("GET", "HEAD", "OPTIONS"):
+    elif request.method not in ("GET", "HEAD", "OPTIONS") and not path.startswith("/api/v4/archive/jobs"):
+        # 打包存档是只读操作(只是用 POST 起后台任务), 只读成员可用; 导入仍需操作员
         if rank < WS_ROLE_RANK["operator"]:
             return jsonify({"error": "当前账号在本工作区为只读角色"}), 403
     return None
@@ -1523,6 +1524,209 @@ def v4_project_export(project_id):
     _audit("project.export", f"导出项目 #{project_id} ZIP({len(zips)} 个任务)")
     return send_file(out, as_attachment=True,
                      download_name=f"project_{project_id}.zip")
+
+
+# ---------------------------------------------------------------------------
+# 网站记录存档: 打包(单个/批量/项目/全部) 与 导入(归属当前工作区)
+# ---------------------------------------------------------------------------
+def _archive_label(text: str) -> str:
+    keep = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff._-]+", "-", text or "").strip("-")
+    return keep[:40] or "records"
+
+
+def _archive_select(args):
+    """按 tasks=1,2,3 | project=<id> | all=1 选出当前工作区可打包的记录 -> (tasks, label) 或 (None, 错误响应)。
+    运行中/排队的任务跳过(工作空间还在写)。"""
+    wid = _cur_ws()
+    label = ""
+    if args.get("project"):
+        try:
+            proj = _project_or_404(int(args["project"]))
+        except (TypeError, ValueError):
+            abort(404)
+        tasks = db.list_tasks(project_id=proj["id"], limit=archive.MAX_TASKS + 1, workspace_id=wid)
+        label = proj["name"]
+    elif args.get("tasks"):
+        raw = args["tasks"]
+        raw = raw.split(",") if isinstance(raw, str) else (raw if isinstance(raw, list) else [])
+        ids = [int(x) for x in raw if str(x).strip().isdigit()][:archive.MAX_TASKS]
+        tasks = [t for t in (db.get_task(i) for i in ids) if t and t.get("workspace_id") == wid]
+        label = tasks[0]["domain"] if len(tasks) == 1 else f"{len(tasks)}-records"
+    elif args.get("all"):
+        tasks = db.list_tasks(limit=archive.MAX_TASKS + 1, workspace_id=wid)
+        label = "all"
+    else:
+        return None, (jsonify({"error": "请指定要打包的记录"}), 400)
+    tasks = [t for t in tasks if t.get("status") not in ("pending", "running")]
+    tasks.sort(key=lambda t: t["id"])
+    if not tasks:
+        return None, (jsonify({"error": "没有可打包的记录(运行中的任务需等结束)"}), 404)
+    if len(tasks) > archive.MAX_TASKS:
+        return None, (jsonify({"error": f"单个存档最多 {archive.MAX_TASKS} 条记录, 请分批选择"}), 413)
+    return (tasks, label), None
+
+
+def _archive_prune():
+    """清掉 1 小时前的存档临时包(下载中断/没人来取的)与对应的任务登记。"""
+    now = time.time()
+    with _archive_jobs_lock:
+        for jid, j in list(_archive_jobs.items()):
+            if j["state"] != "running" and now - j["ended"] > 3600:
+                _archive_jobs.pop(jid, None)
+        keep = {j["path"] for j in _archive_jobs.values()}
+    for old in config.EXPORTS_DIR.glob("archive_*.zip"):
+        with suppress(OSError):
+            if str(old) not in keep and now - old.stat().st_mtime > 3600:
+                old.unlink()
+
+
+def _archive_build(out: Path, tasks: list, label: str, wid: int, username: str, progress=None):
+    batches = {b: db.get_batch(b) for b in {t["batch_id"] for t in tasks}}
+    projects = {p["id"]: p for p in db.list_projects(workspace_id=wid)}
+    return archive.build(out, tasks, batches, projects, instance_id=db.instance_id(),
+                         workspace_of=_workspace_of, label=label, exported_by=username, progress=progress)
+
+
+def _archive_filename(label: str) -> str:
+    return f"clonjurer-{_archive_label(label)}-{time.strftime('%Y%m%d')}.zip"
+
+
+@app.get("/api/v4/archive")
+def v4_archive_export():
+    """同步打包并直接下载(脚本/小存档用); 界面走下面的后台任务。"""
+    wid = _cur_ws()
+    picked, err = _archive_select(request.args)
+    if err:
+        return err
+    tasks, label = picked
+    _archive_prune()
+    out = config.EXPORTS_DIR / f"archive_{wid}_{time.strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(3)}.zip"
+    _archive_build(out, tasks, label, wid, (_current_user() or {}).get("username", ""))
+    _audit("archive.export", f"打包存档 {len(tasks)} 条记录({label})")
+    resp = send_file(out, as_attachment=True, mimetype="application/zip",
+                     download_name=_archive_filename(label))
+    resp.call_on_close(lambda: out.unlink(missing_ok=True))
+    return resp
+
+
+# 后台打包: 整库存档可达十几 GB、几分钟, 同步请求会占住一个工作线程且过不了反代超时
+_archive_jobs: dict = {}   # job_id -> 进度(内存, 平台重启即清; 临时包留 1 小时)
+_archive_jobs_lock = threading.Lock()
+
+
+class _ArchiveCancelled(Exception):
+    pass
+
+
+def _archive_job_out(j: dict) -> dict:
+    return {k: j[k] for k in ("id", "state", "label", "total", "done", "bytes", "size", "error", "filename")} | {
+        "elapsed_s": round((j["ended"] or time.time()) - j["started"], 1)}
+
+
+def _archive_job_or_404(job_id: str) -> dict:
+    j = _archive_jobs.get(job_id)
+    if j is None or j["workspace_id"] != _cur_ws():
+        abort(404)
+    return j
+
+
+@app.get("/api/v4/archive/jobs")
+def v4_archive_jobs():
+    wid = _cur_ws()
+    return jsonify({"jobs": [_archive_job_out(j) for j in list(_archive_jobs.values())
+                             if j["workspace_id"] == wid]})
+
+
+@app.post("/api/v4/archive/jobs")
+def v4_archive_job_create():
+    """body: {tasks:[id..]} | {project:id} | {all:true} -> 202 {job}。只读成员也可打包(只读操作)。"""
+    wid = _cur_ws()
+    picked, err = _archive_select(request.get_json(silent=True) or {})
+    if err:
+        return err
+    tasks, label = picked
+    _archive_prune()
+    username = (_current_user() or {}).get("username", "")
+    with _archive_jobs_lock:
+        if any(j["workspace_id"] == wid and j["state"] == "running" for j in _archive_jobs.values()):
+            return jsonify({"error": "已有一个存档在打包, 等它完成再开始"}), 409
+        jid = secrets.token_hex(8)
+        out = config.EXPORTS_DIR / f"archive_{wid}_{time.strftime('%Y%m%d_%H%M%S')}_{jid[:6]}.zip"
+        job = {"id": jid, "workspace_id": wid, "state": "running", "label": label, "total": len(tasks),
+               "done": 0, "bytes": 0, "size": 0, "error": "", "path": str(out), "cancel": False,
+               "filename": _archive_filename(label), "started": time.time(), "ended": 0.0}
+        _archive_jobs[jid] = job
+
+    def tick(done, nbytes):
+        job["done"], job["bytes"] = done, nbytes
+        if job["cancel"]:
+            raise _ArchiveCancelled()
+
+    def run():
+        try:
+            _archive_build(out, tasks, label, wid, username, progress=tick)
+            job["size"] = out.stat().st_size
+            job["state"] = "done"
+        except _ArchiveCancelled:
+            job["state"], job["error"] = "cancelled", "已取消"
+        except Exception as exc:  # noqa: BLE001 - 后台线程: 任何失败都要落到任务状态上
+            job["state"], job["error"] = "error", str(exc)[:300]
+        finally:
+            job["ended"] = time.time()
+            if job["state"] != "done":
+                out.unlink(missing_ok=True)
+
+    threading.Thread(target=run, name=f"archive-{jid[:6]}", daemon=True).start()
+    _audit("archive.export", f"打包存档 {len(tasks)} 条记录({label})")
+    return jsonify({"job": _archive_job_out(job)}), 202
+
+
+@app.get("/api/v4/archive/jobs/<job_id>/download")
+def v4_archive_job_download(job_id):
+    j = _archive_job_or_404(job_id)
+    if j["state"] != "done" or not Path(j["path"]).is_file():
+        return jsonify({"error": "存档已过期, 请重新打包"}), 404
+    return send_file(j["path"], as_attachment=True, mimetype="application/zip",
+                     download_name=j["filename"])
+
+
+@app.delete("/api/v4/archive/jobs/<job_id>")
+def v4_archive_job_cancel(job_id):
+    """取消进行中的打包, 或丢弃已完成的临时包。"""
+    j = _archive_job_or_404(job_id)
+    if j["state"] == "running":
+        j["cancel"] = True
+    else:
+        Path(j["path"]).unlink(missing_ok=True)
+        _archive_jobs.pop(job_id, None)
+    return jsonify({"ok": True})
+
+
+@app.post("/api/v4/archive/import")
+def v4_archive_import():
+    """multipart: file=存档 zip, project_id=可选(全部放进该项目)。只读成员被 _rbac_gate 拦在门外。"""
+    wid = _cur_ws()
+    f = request.files.get("file")
+    if f is None or not f.filename:
+        return jsonify({"error": "请选择存档文件"}), 400
+    pid = request.form.get("project_id") or ""
+    project_id = None
+    if pid.isdigit():
+        project_id = _project_or_404(int(pid))["id"]
+    tmp = config.EXPORTS_DIR / f"import_{secrets.token_hex(6)}.zip"
+    try:
+        f.save(tmp)
+        user = _current_user() or {}
+        res = archive.import_archive(tmp, db=db, workspace_id=wid, workspace_root=config.WORKSPACE_ROOT,
+                                     created_by=user.get("username", ""), project_id=project_id,
+                                     sanitize_config=_sanitize_config)
+    except archive.ArchiveError as exc:
+        return jsonify({"error": str(exc)}), 400
+    finally:
+        tmp.unlink(missing_ok=True)
+    _audit("archive.import", f"导入存档 {res['imported']} 条记录, 跳过已存在 {res['skipped']} 条"
+           + (f"({res['label']})" if res.get("label") else ""))
+    return jsonify(res), 201
 
 
 # ---------------------------------------------------------------------------
