@@ -1748,7 +1748,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                 class="flex-1 px-3 py-3 bg-transparent text-xs font-mono text-slate-100 placeholder-slate-600 focus:outline-none">
             </div>
             <button @click="heroSubmit()" :disabled="submitting" title="立即克隆"
-              class="shrink-0 px-4 rounded-xl border border-indigo-400/50 text-[13px] font-semibold text-indigo-200 hover:bg-indigo-500/15 disabled:opacity-50 transition-all duration-200 flex items-center gap-2">
+              class="mt-btn shrink-0 h-auto px-4 rounded-xl">
               <i :data-lucide="submitting ? 'loader-2' : 'corner-down-left'" :class="submitting ? 'animate-spin' : ''" class="w-4 h-4"></i>克隆
             </button>
           </div>
@@ -1785,7 +1785,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       </section>
 
       <!-- 中部: 高级克隆配置(可折叠, 3 列策略网格) -->
-      <section v-show="advOpen" class="flex-1 overflow-y-auto custom-scroll px-4 pb-4 space-y-4">
+      <section v-show="advOpen" class="flex-1 overflow-y-auto custom-scroll px-6 pb-4 space-y-4">
 
         <!-- 批量列表 -->
         <div class="space-y-1.5">
@@ -1934,7 +1934,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       </section>
 
       <!-- 底部常驻发射台(Sticky Footer): 永不挤出屏幕 -->
-      <section class="shrink-0 p-4 bg-slate-950/95 border-t border-white/[0.07] backdrop-blur-xl space-y-2">
+      <section class="shrink-0 px-6 py-4 bg-slate-950/95 border-t border-white/[0.07] space-y-2">
         <button @click="submit" :disabled="submitting"
           class="w-full py-3 rounded-xl font-semibold text-sm text-white ui-primary disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2">
           <i :data-lucide="submitting ? 'loader-2' : 'play'" :class="submitting ? 'w-4 h-4 animate-spin' : 'w-4 h-4'"></i>
@@ -1987,7 +1987,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             </div>
           </div>
           <button @click="poolRestart()" :disabled="poolRestarting"
-            class="mt-4 w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-amber-500/40 bg-amber-500/10 text-[11px] font-semibold text-amber-300 hover:bg-amber-500/20 disabled:opacity-50 transition-all">
+            class="mt-btn mt-4 w-full">
             <i :data-lucide="poolRestarting ? 'loader-2' : 'refresh-ccw'" :class="poolRestarting ? 'animate-spin' : ''" class="w-3.5 h-3.5"></i>
             [[ poolRestarting ? '重启调度中…' : '一键清理重启实例池' ]]
           </button>
@@ -2136,17 +2136,12 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             </button>
           </div>
           <div class="flex flex-wrap items-center gap-2">
-            <div v-if="selectedIds.size" class="flex items-center gap-2 px-3 h-9 rounded-lg border border-indigo-500/40 bg-indigo-500/10 shrink-0">
-              <span class="text-[11px] text-indigo-200 font-semibold whitespace-nowrap">已选 [[ selectedIds.size ]] 项</span>
-              <button @click="batchRebuild" :disabled="batchBusy"
-                class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-[10.5px] text-amber-200 hover:bg-amber-500/30 disabled:opacity-50 transition-all whitespace-nowrap">
-                <i data-lucide="refresh-cw" class="w-3 h-3"></i>[[ batchBusy ? '入队中…' : '批量重建' ]]
-              </button>
-              <button @click="archiveSelected" class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-white/[0.08] text-[10.5px] text-slate-300 hover:text-slate-100 transition-all whitespace-nowrap">
-                <i data-lucide="archive" class="w-3 h-3"></i>打包存档
-              </button>
-              <button @click="selectedIds = new Set()" class="px-2.5 py-1.5 rounded-lg border border-white/[0.08] text-[10.5px] text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap">取消选择</button>
-              <button @click="selectAllVisible" class="px-2.5 py-1.5 rounded-lg border border-white/[0.08] text-[10.5px] text-slate-400 hover:text-slate-200 transition-all whitespace-nowrap">全选当前页</button>
+            <div v-if="selectedIds.size" class="sel-bar">
+              <b class="tnums">已选 [[ selectedIds.size ]] 项</b>
+              <button v-if="canWrite" @click="batchRebuild" :disabled="batchBusy"><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>[[ batchBusy ? '入队中…' : '重建' ]]</button>
+              <button @click="archiveSelected"><i data-lucide="archive" class="w-3.5 h-3.5"></i>打包存档</button>
+              <button @click="selectAllVisible">全选</button>
+              <button @click="selectedIds = new Set()" title="取消选择" aria-label="取消选择"><i data-lucide="x" class="w-3.5 h-3.5"></i></button>
             </div>
             <div class="relative shrink-0">
               <i data-lucide="search" class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-600"></i>
@@ -2752,8 +2747,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <div class="max-w-[1400px] mx-auto px-6 py-6 space-y-4">
         <div class="flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <h2 class="font-display text-[28px] leading-tight text-slate-100">AI Mock 数据生成</h2>
-            <p class="text-[13px] text-slate-500 mt-1.5">AI Mock Generator · 业务场景 → 接口 Mock 响应 → 一键注入 Flask 模拟路由</p>
+            <h2 class="font-display text-[28px] leading-tight text-slate-100">Mock 数据</h2>
+            <p class="text-[13px] text-slate-500 mt-1.5">描述业务场景，生成接口响应，并注入到克隆站。</p>
           </div>
           <div class="flex items-center gap-2">
             <label class="text-[11px] text-slate-400">目标任务</label>
@@ -2763,7 +2758,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <option v-for="t in mockGenTasks" :key="t.id" :value="t.id">#[[ t.id ]] [[ t.domain ]]</option>
             </select>
             <button @click="mockGenToInspector" :disabled="!mockGen.taskId"
-              class="px-3 py-2 rounded-lg border border-indigo-500/40 bg-indigo-500/10 text-[11px] text-indigo-300 hover:bg-indigo-500/20 disabled:opacity-40 transition-all">深度编辑</button>
+              class="mt-btn">深度编辑</button>
           </div>
         </div>
 
@@ -3057,6 +3052,19 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
   </div>
   </div><!-- /右列 rightcol 容器 -->
 
+      <div v-if="archiveJob" class="arc-card" role="status" aria-live="polite">
+        <div class="arc-head">
+          <b>[[ archiveJob.state === 'running' ? '正在打包存档' : archiveJob.state === 'done' ? '存档已就绪' : archiveJob.state === 'cancelled' ? '已取消打包' : '打包失败' ]]</b>
+          <button type="button" class="mt-icon" :title="archiveJob.state === 'running' ? '取消' : '关闭'" :aria-label="archiveJob.state === 'running' ? '取消' : '关闭'" @click="archiveClose()">&times;</button>
+        </div>
+        <div class="arc-bar" :class="archiveJob.state"><span :style="{ width: (archiveJob.state === 'done' ? 100 : Math.max(2, Math.round(archiveJob.done / Math.max(1, archiveJob.total) * 100))) + '%' }"></span></div>
+        <div class="arc-foot">
+          <span v-if="archiveJob.state === 'running'" class="tnums">[[ archiveJob.done ]] / [[ archiveJob.total ]] 条 · [[ fmtBytes(archiveJob.bytes) ]]</span>
+          <span v-else-if="archiveJob.state === 'done'" class="tnums">[[ archiveJob.total ]] 条 · [[ fmtBytes(archiveJob.size) ]]</span>
+          <span v-else class="truncate">[[ archiveJob.error ]]</span>
+          <button v-if="archiveJob.state === 'done'" type="button" class="dash-link" @click="archiveSave()">再次下载</button>
+        </div>
+      </div>
       <div v-if="importModal.open" class="fixed inset-0 z-[70] flex items-center justify-center bg-black/50" @click.self="!importModal.busy && (importModal.open=false)">
         <form class="mt-modal" @submit.prevent="runImport()">
           <h3>导入存档</h3>
@@ -3420,6 +3428,7 @@ const __vueApp = createApp({
       ],
       projectQ: '', projectMenu: null,
       renameModal: { open: false, id: null, name: '', description: '', busy: false, error: '' },
+      archiveJob: null,
       importModal: { open: false, file: null, project: '', busy: false, pct: 0, result: null, error: '' },
       aiPrompt: '',
       workspace: { id: 1, name: '我的团队', role: 'owner', members: [], member_count: 0, spaces: [] },
@@ -3565,7 +3574,7 @@ const __vueApp = createApp({
         .filter(t => !q || (t.domain + ' #' + t.id).toLowerCase().includes(q)).slice(0, 40);
     },
     activeModule() {
-      const map = { create: 'hub', tasks: 'hub', task: 'hub', dashboard: 'hub',
+      const map = { create: 'create', tasks: 'hub', task: 'hub', dashboard: 'hub',
                     ailab: 'ai' };
       return map[this.view] || this.view;
     },
@@ -3603,7 +3612,7 @@ const __vueApp = createApp({
         task: ['任务详情', '沙盒预览 / API 与资产审查 / 部署蓝图'],
         browserpool: ['浏览器池', '工位 · 排队 · 资源'],
         ai: ['视觉修复', '对照原站修细节'],
-        mockgen: ['AI Mock 数据生成', 'AI Mock Generator · 克隆站接口 Mock 编排'],
+        mockgen: ['Mock 数据', '克隆站接口 Mock 编排'],
         tracker: ['表单捕获追踪', 'Form Tracker · 埋点配置总览与上报实时流'],
         links: ['短链管理', 'Link Shortener · 多服务短链生成与跳转统计'],
         generate: ['界面生成', '截图或文字描述 → 可运行网站'],
@@ -3854,6 +3863,10 @@ const __vueApp = createApp({
   },
   watch: {
     activeTab() { this.iconRefresh(); },
+    projectMenu() { this.iconRefresh(); },
+    moreMenu() { this.iconRefresh(); },
+    selectedIds() { this.iconRefresh(); },
+    'importModal.open'() { this.iconRefresh(); },
     tasks() { this.iconRefresh(); },
     mockEntries() { this.iconRefresh(); },
     logTaskFilter() { this.logs = []; this.connectSSE(); },
@@ -5171,18 +5184,64 @@ const __vueApp = createApp({
         await this.loadDocker();
       } catch (e) { this.toast('网络错误'); }
     },
-    archiveDownload(qs, what) {
-      this.toast('正在打包' + what + '…');
-      window.open('/api/v4/archive?' + qs, '_blank');
+    async archiveStart(body) {
+      if (this.archiveJob && this.archiveJob.state === 'running') { this.toast('已有一个存档在打包'); return; }
+      try {
+        const r = await fetch('/api/v4/archive/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (r.status === 401) { this.handleAuthExpired(); return; }
+        const d = await r.json();
+        if (!r.ok) { this.toast(d.error || '打包失败'); return; }
+        this.archiveJob = d.job;
+        this.archivePoll();
+      } catch (e) { this.toast('网络错误'); }
     },
-    archiveProject(p) { this.archiveDownload('project=' + p.id, '「' + p.name + '」'); },
-    archiveAll() { this.archiveDownload('all=1', '全部记录'); },
+    archivePoll() {
+      clearTimeout(this._arcTimer);
+      const tick = async () => {
+        const cur = this.archiveJob;
+        if (!cur || cur.state !== 'running') return;
+        try {
+          const d = await fetch('/api/v4/archive/jobs').then(r => r.json());
+          const j = (d.jobs || []).find(x => x.id === cur.id);
+          if (!j) { this.archiveJob = null; return; }
+          this.archiveJob = j;
+          if (j.state === 'done') { this.archiveSave(); return; }
+          if (j.state !== 'running') return;
+        } catch (e) { /* 下一轮再试 */ }
+        this._arcTimer = setTimeout(tick, 1000);
+      };
+      this._arcTimer = setTimeout(tick, 400);
+    },
+    async archiveResume() {
+      try {
+        const r = await fetch('/api/v4/archive/jobs');
+        if (!r.ok) return;
+        const jobs = (await r.json()).jobs || [];
+        const j = jobs.find(x => x.state === 'running') || jobs.filter(x => x.state === 'done').pop();
+        if (j && !this.archiveJob) { this.archiveJob = j; if (j.state === 'running') this.archivePoll(); }
+      } catch (e) { /* 未登录或离线 */ }
+    },
+    archiveSave() {
+      const a = document.createElement('a');
+      a.href = '/api/v4/archive/jobs/' + this.archiveJob.id + '/download';
+      a.download = '';
+      document.body.appendChild(a); a.click(); a.remove();
+    },
+    async archiveClose() {
+      const j = this.archiveJob;
+      if (!j) return;
+      if (j.state !== 'running') this.archiveJob = null;
+      try { await fetch('/api/v4/archive/jobs/' + j.id, { method: 'DELETE' }); } catch (e) { /* 临时包 1 小时后自动清 */ }
+    },
+    archiveProject(p) { this.archiveStart({ project: p.id }); },
+    archiveAll() { this.archiveStart({ all: true }); },
     archiveSelected() {
       const ids = [...this.selectedIds];
       if (!ids.length) return;
       const busy = this.tasks.filter(t => this.selectedIds.has(t.id) && ['pending', 'running'].includes(t.status)).length;
       if (busy === ids.length) { this.toast('运行中的任务需等结束后再打包'); return; }
-      this.archiveDownload('tasks=' + ids.join(','), ' ' + (ids.length - busy) + ' 条记录' + (busy ? '（跳过 ' + busy + ' 个运行中）' : ''));
+      if (busy) this.toast('已跳过 ' + busy + ' 个运行中的任务');
+      this.archiveStart({ tasks: ids });
     },
     openImport() {
       const pid = this.view === 'tasks' && this.currentProjectId ? String(this.currentProjectId) : '';
@@ -6209,6 +6268,7 @@ const __vueApp = createApp({
     // 窄屏(手机/小平板)默认折叠侧栏, 内容区不被 240px 侧栏挤成一列竖排
     if (window.innerWidth < 900) this.navCollapsed = true;
     try { this.themeMode = localStorage.getItem('cloner-theme') || 'system'; } catch (e) {}
+    this.archiveResume();
     this.loadAuth();
   },
   beforeUnmount() {

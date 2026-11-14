@@ -85,6 +85,22 @@ SCRIPT = textwrap.dedent(r'''
     # 指定项目导入 + 重导出后 uid 延续
     blob2 = c2.get(f"/api/v4/archive?tasks={nt_a}").data
     out["uid_keep"] = json.loads(zipfile.ZipFile(io.BytesIO(blob2)).read("manifest.json"))["tasks"][0]["uid"] == man["tasks"][0]["uid"]
+    # 后台打包: 只读成员也能起, 进度到 done 后下载; 别区看不到任务
+    import time
+    r = c3.post("/api/v4/archive/jobs", json={"tasks": [ta, tb]})
+    out["job_create"] = r.status_code
+    jid = r.get_json()["job"]["id"]
+    for _ in range(100):
+        j = [x for x in c3.get("/api/v4/archive/jobs").get_json()["jobs"] if x["id"] == jid][0]
+        if j["state"] != "running":
+            break
+        time.sleep(0.05)
+    out["job_state"] = [j["state"], j["done"], j["total"]]
+    d = c3.get(f"/api/v4/archive/jobs/{jid}/download")
+    out["job_dl"] = [d.status_code, len(json.loads(zipfile.ZipFile(io.BytesIO(d.data)).read("manifest.json"))["tasks"])]
+    out["job_other_ws"] = c2.get(f"/api/v4/archive/jobs/{jid}/download").status_code
+    out["job_drop"] = [c3.delete(f"/api/v4/archive/jobs/{jid}").status_code, c3.get(f"/api/v4/archive/jobs/{jid}/download").status_code]
+    out["job_empty"] = c3.post("/api/v4/archive/jobs", json={}).status_code
     # 恶意包
     def bad(entries):
         bio = io.BytesIO()
@@ -141,6 +157,15 @@ class ArchiveRoundTrip(unittest.TestCase):
         self.assertEqual(self.r["same_ws"], [201, 0, 2])
         self.assertEqual(self.r["again"], [0, 2])
         self.assertTrue(self.r["uid_keep"])
+
+    def test_background_job(self):
+        r = self.r
+        self.assertEqual(r["job_create"], 202)
+        self.assertEqual(r["job_state"], ["done", 2, 2])
+        self.assertEqual(r["job_dl"], [200, 2])
+        self.assertEqual(r["job_other_ws"], 404)
+        self.assertEqual(r["job_drop"], [200, 404])
+        self.assertEqual(r["job_empty"], 400)
 
     def test_rejects_bad_archives(self):
         r = self.r

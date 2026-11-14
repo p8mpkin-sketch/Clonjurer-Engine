@@ -65,9 +65,12 @@ def _iter_files(root: Path):
 
 
 def build(out_path: Path, tasks: list, batches: dict, projects: dict, *,
-          instance_id: str, workspace_of, label: str = "", exported_by: str = "") -> dict:
+          instance_id: str, workspace_of, label: str = "", exported_by: str = "",
+          progress=None) -> dict:
     """tasks: db 任务行; batches/projects: id -> 行; workspace_of(task) -> 工作空间目录。
-    写出 out_path, 返回 manifest。"""
+    写出 out_path, 返回 manifest。progress(已完成条数, 已写字节) 每条记录回调一次,
+    抛异常即中止(后台任务的取消)。"""
+    total_bytes = 0
     man_projects: list = []
     man_batches: list = []
     man_tasks: list = []
@@ -120,6 +123,9 @@ def build(out_path: Path, tasks: list, batches: dict, projects: dict, *,
                 "stats": stats, "error_msg": task.get("error_msg") or "",
                 "created_at": task.get("created_at") or "", "updated_at": task.get("updated_at") or "",
                 "files": files, "bytes": size})
+            total_bytes += size
+            if progress is not None:
+                progress(n, total_bytes)
         zf.writestr("manifest.json", json.dumps(man, ensure_ascii=False, indent=1))
     return man
 
