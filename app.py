@@ -50,7 +50,7 @@ from flask import (Flask, Response, abort, jsonify, render_template, request,
                    g, send_file, send_from_directory, session)
 
 import config
-from core import flask_generator, live, security
+from core import archive, flask_generator, live, security
 from core import ai_mock_generator
 from core.clone.api_match import pick_entry
 from core.browser_pool import SyncBrowserPool
@@ -1523,6 +1523,86 @@ def v4_project_export(project_id):
     _audit("project.export", f"导出项目 #{project_id} ZIP({len(zips)} 个任务)")
     return send_file(out, as_attachment=True,
                      download_name=f"project_{project_id}.zip")
+
+
+# ---------------------------------------------------------------------------
+# 网站记录存档: 打包(单个/批量/项目/全部) 与 导入(归属当前工作区)
+# ---------------------------------------------------------------------------
+def _archive_label(text: str) -> str:
+    keep = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff._-]+", "-", text or "").strip("-")
+    return keep[:40] or "records"
+
+
+@app.get("/api/v4/archive")
+def v4_archive_export():
+    """?tasks=1,2,3 | ?project=<id> | ?all=1 -> 存档 zip。只打包当前工作区可见的记录;
+    运行中/排队的任务跳过(工作空间还在写)。"""
+    wid = _cur_ws()
+    label = ""
+    if request.args.get("project"):
+        try:
+            proj = _project_or_404(int(request.args["project"]))
+        except ValueError:
+            abort(404)
+        tasks = db.list_tasks(project_id=proj["id"], limit=archive.MAX_TASKS * 4, workspace_id=wid)
+        label = proj["name"]
+    elif request.args.get("tasks"):
+        ids = [int(x) for x in request.args["tasks"].split(",") if x.strip().isdigit()][:archive.MAX_TASKS]
+        tasks = [t for t in (db.get_task(i) for i in ids) if t and t.get("workspace_id") == wid]
+        label = tasks[0]["domain"] if len(tasks) == 1 else f"{len(tasks)}-records"
+    elif request.args.get("all"):
+        tasks = db.list_tasks(limit=archive.MAX_TASKS * 4, workspace_id=wid)
+        label = "all"
+    else:
+        return jsonify({"error": "请指定要打包的记录"}), 400
+    tasks = [t for t in tasks if t.get("status") not in ("pending", "running")]
+    tasks.sort(key=lambda t: t["id"])
+    if not tasks:
+        return jsonify({"error": "没有可打包的记录(运行中的任务需等结束)"}), 404
+    if len(tasks) > archive.MAX_TASKS:
+        return jsonify({"error": f"单个存档最多 {archive.MAX_TASKS} 条记录, 请分批选择"}), 413
+    batches = {b: db.get_batch(b) for b in {t["batch_id"] for t in tasks}}
+    projects = {p["id"]: p for p in db.list_projects(workspace_id=wid)}
+    for old in config.EXPORTS_DIR.glob("archive_*.zip"):  # 上次的临时包(发送中断时留下的)
+        with suppress(OSError):
+            if time.time() - old.stat().st_mtime > 3600:
+                old.unlink()
+    out = config.EXPORTS_DIR / f"archive_{wid}_{time.strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(3)}.zip"
+    user = _current_user() or {}
+    archive.build(out, tasks, batches, projects, instance_id=db.instance_id(),
+                  workspace_of=_workspace_of, label=label, exported_by=user.get("username", ""))
+    _audit("archive.export", f"打包存档 {len(tasks)} 条记录({label})")
+    resp = send_file(out, as_attachment=True, mimetype="application/zip",
+                     download_name=f"clonjurer-{_archive_label(label)}-{time.strftime('%Y%m%d')}.zip")
+    resp.call_on_close(lambda: out.unlink(missing_ok=True))
+    return resp
+
+
+@app.post("/api/v4/archive/import")
+def v4_archive_import():
+    """multipart: file=存档 zip, project_id=可选(全部放进该项目)。只读成员被 _rbac_gate 拦在门外。"""
+    wid = _cur_ws()
+    f = request.files.get("file")
+    if f is None or not f.filename:
+        return jsonify({"error": "请选择存档文件"}), 400
+    pid = request.form.get("project_id") or ""
+    project_id = None
+    if pid.isdigit():
+        project_id = _project_or_404(int(pid))["id"]
+    tmp = config.EXPORTS_DIR / f"import_{secrets.token_hex(6)}.zip"
+    try:
+        f.save(tmp)
+        user = _current_user() or {}
+        res = archive.import_archive(tmp, db=db, workspace_id=wid, workspace_root=config.WORKSPACE_ROOT,
+                                     created_by=user.get("username", ""), project_id=project_id,
+                                     sanitize_config=_sanitize_config)
+    except archive.ArchiveError as exc:
+        return jsonify({"error": str(exc)}), 400
+    finally:
+        tmp.unlink(missing_ok=True)
+    _audit("archive.import", f"导入存档 {res['imported']} 条记录, 跳过已存在 {res['skipped']} 条"
+           + (f"({res['label']})" if res.get("label") else ""))
+    return jsonify(res), 201
 
 
 # ---------------------------------------------------------------------------
