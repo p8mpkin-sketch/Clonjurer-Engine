@@ -15,7 +15,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 <!-- 顶级字体体系: Inter / Plus Jakarta Sans / JetBrains Mono / Noto Sans SC -->
 <link href="/vendor/fonts/fonts.css" rel="stylesheet">
 <!-- UI 改版 P0 规范层: 字号/对比度/焦点/语义色(只换样式) -->
-<link href="/vendor/css/ui-tokens.css?v=10" rel="stylesheet">
+<link href="/vendor/css/ui-tokens.css?v=13" rel="stylesheet">
 
 <script src="/vendor/js/lucide.subset.js?v=2"></script>
 <script>
@@ -226,17 +226,46 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
   <!-- ======================= 左侧可折叠导航栏(App Shell · 240px/68px) ======================= -->
   <nav :class="navCollapsed ? 'w-[60px] px-2' : 'w-[232px] px-3'"
     class="sidebar shrink-0 h-full border-r border-white/[0.07] flex flex-col pt-3 pb-3 gap-0.5 transition-all duration-200 overflow-hidden">
-    <div class="flex items-center gap-2.5 px-1.5 h-10 mb-2" :class="navCollapsed ? 'justify-center px-0' : ''">
-      <div class="brand-mark" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" class="w-4 h-4"><rect x="3.5" y="3.5" width="11" height="11" rx="2" opacity=".45"/><rect x="9.5" y="9.5" width="11" height="11" rx="2"/></svg>
+    <div class="relative flex items-center gap-1 h-11 mb-2" :class="navCollapsed ? 'justify-center' : ''">
+      <button type="button" class="ws-switch" :class="navCollapsed ? 'justify-center' : ''" @click="wsMenu = !wsMenu; $nextTick(() => iconRefresh())" :aria-expanded="wsMenu ? 'true' : 'false'" :title="workspace.name" aria-label="切换工作区">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" class="w-4 h-4"><rect x="3.5" y="3.5" width="11" height="11" rx="2" opacity=".45"/><rect x="9.5" y="9.5" width="11" height="11" rx="2"/></svg>
+        </span>
+        <span v-show="!navCollapsed" class="ws-text">
+          <b>[[ workspace.name ]]</b>
+          <small>[[ workspace.member_count ? workspace.member_count + ' 位成员' : '单机模式 · 未启用登录' ]]</small>
+        </span>
+        <i v-show="!navCollapsed" data-lucide="chevrons-up-down" class="w-3.5 h-3.5 text-slate-500 shrink-0"></i>
+      </button>
+      <div v-if="wsMenu" class="fixed inset-0 z-[60]" @click="wsMenu=false"></div>
+      <div v-if="wsMenu" class="ws-menu" @click="wsMenu=false">
+        <div class="ws-menu-label">工作区</div>
+        <div class="ws-menu-cur">
+          <span class="brand-mark sm" aria-hidden="true"></span>
+          <span class="flex-1 min-w-0 truncate">[[ workspace.name ]]</span>
+          <i data-lucide="check" class="w-4 h-4"></i>
+        </div>
+        <div v-if="workspace.members.length" class="ws-menu-people">
+          <span class="av-stack">
+            <span v-for="m in workspace.members.slice(0, 5)" :key="m.name" class="av" :class="avTone(m.name)" :title="m.name + ' · ' + roleText(m.role)">[[ m.name.slice(0, 1) ]]</span>
+          </span>
+          <span class="text-[12px] text-slate-500">[[ workspace.member_count ]] 位成员</span>
+        </div>
+        <div class="ws-menu-sep"></div>
+        <template v-if="auth.user">
+          <button v-if="isAdmin()" type="button" @click="goModule('admin'); adminTab='users'; loadUsers();"><i data-lucide="users" class="w-4 h-4"></i>成员与权限</button>
+          <button v-if="isAdmin()" type="button" @click="goModule('admin'); adminTab='audit'; loadAudit();"><i data-lucide="history" class="w-4 h-4"></i>操作记录</button>
+          <button v-if="isAdmin()" type="button" @click="goModule('admin'); adminTab='settings'; loadSettings();"><i data-lucide="settings" class="w-4 h-4"></i>工作区设置</button>
+          <div v-if="!isAdmin()" class="ws-menu-note">你是[[ roleText(auth.user.role) ]]。成员和权限由管理员管理。</div>
+        </template>
+        <button v-else type="button" @click="auth.required = true"><i data-lucide="user-plus" class="w-4 h-4"></i>启用团队登录，邀请成员</button>
       </div>
-      <div v-show="!navCollapsed" class="min-w-0 flex-1 text-[15px] font-semibold tracking-tight text-slate-100">Clonjurer</div>
       <button v-show="!navCollapsed" @click="toggleNav" title="折叠导航" aria-label="折叠导航"
         class="w-7 h-7 rounded-md flex items-center justify-center text-slate-500 hover:text-slate-200 hover:bg-white/[0.05] transition-colors shrink-0">
         <i data-lucide="panel-left-close" class="w-4 h-4"></i>
       </button>
     </div>
-    <div class="nav-new-wrap">
+    <div v-if="canWrite" class="nav-new-wrap">
       <button @click="goModule('create')" title="新建克隆" :class="navCollapsed ? 'justify-center' : ''" class="btn-new-clone">
         <i data-lucide="plus" class="w-4 h-4 shrink-0"></i><span v-show="!navCollapsed">新建克隆</span>
       </button>
@@ -398,15 +427,16 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <!-- 抬头: 日期 + 衬线大标题 + 直接开克隆 -->
       <section class="dash-hero">
         <div class="dash-eyebrow">[[ dashDate ]]</div>
-        <h1 class="dash-title">[[ dashGreeting ]]<span class="dash-title-sub">今天想克隆哪个网站？</span></h1>
-        <form class="dash-omni" @submit.prevent="heroSubmit()">
+        <h1 class="dash-title">[[ dashGreeting ]]<span class="dash-title-sub">[[ canWrite ? '今天想克隆哪个网站？' : '看看团队最近的克隆进展' ]]</span></h1>
+        <form v-if="canWrite" class="dash-omni" @submit.prevent="heroSubmit()">
           <span class="dash-omni-prefix">https://</span>
           <input v-model="heroUrl" spellcheck="false" autocomplete="off" placeholder="粘贴一个网址，回车开始克隆" aria-label="要克隆的网址">
           <button type="submit" :disabled="submitting || !heroUrl.trim()" class="ui-primary dash-omni-btn">
             <span>[[ submitting ? '提交中…' : '开始克隆' ]]</span><kbd>↵</kbd>
           </button>
         </form>
-        <div class="dash-omni-foot">
+        <div v-if="!canWrite" class="dash-readonly">你在这个工作区是只读身份，可以查看项目、任务和报告。需要提交克隆时，请联系管理员调整角色。</div>
+        <div v-if="canWrite" class="dash-omni-foot">
           默认标准档，单页抓取。要批量导入、改交付形态或调参数，去<button type="button" @click="goModule('create')" class="dash-link">完整设置</button>
         </div>
       </section>
@@ -427,7 +457,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <h2 class="dash-sec-title">项目</h2>
             <span class="text-[13px] text-slate-500 tnums">[[ dashProjects.length ]] 个</span>
           </div>
-          <button @click="openProjectModal()" class="h-8 px-3 rounded-lg ui-primary text-[13px] flex items-center gap-1.5">
+          <button v-if="canWrite" @click="openProjectModal()" class="h-8 px-3 rounded-lg ui-primary text-[13px] flex items-center gap-1.5">
             <i data-lucide="plus" class="w-3.5 h-3.5"></i>新建项目
           </button>
         </div>
@@ -473,7 +503,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <div class="flex items-center gap-2">
                 <span class="w-2 h-2 rounded-full shrink-0" :style="{ background: p.color }"></span>
                 <span class="text-[15px] font-medium text-slate-100 truncate">[[ p.name ]]</span>
-                <button @click.stop="projectMenu = (projectMenu===p.id ? null : p.id)" title="项目操作" aria-label="项目操作"
+                <button v-if="canWrite" @click.stop="projectMenu = (projectMenu===p.id ? null : p.id)" title="项目操作" aria-label="项目操作"
                   class="ml-auto w-7 h-7 flex items-center justify-center rounded-md text-slate-500 hover:text-slate-100 hover:bg-white/[0.06] transition-colors shrink-0">
                   <i data-lucide="more-horizontal" class="w-4 h-4"></i>
                 </button>
@@ -492,7 +522,11 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                 </div>
               </div>
               <div class="proj-foot">
-                <span>[[ relTime(projMeta[p.id].last) ]]更新</span><span>[[ p.batch_cnt ]] 个批次</span>
+                <span>[[ relTime(projMeta[p.id].last) ]]更新</span>
+                <span v-if="projPeople(p).length" class="av-stack" :title="projPeople(p).join('、')">
+                  <span v-for="n in projPeople(p).slice(0, 4)" :key="n" class="av" :class="avTone(n)">[[ n.slice(0, 1) ]]</span>
+                </span>
+                <span v-else>[[ p.batch_cnt ]] 个批次</span>
               </div>
             </div>
             <div v-if="projectMenu===p.id" @click.stop="projectMenu=null" class="fixed inset-0 z-[60]"></div>
@@ -502,7 +536,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <button v-if="p.id !== defaultProjectId" @click.stop="deleteProject(p); projectMenu=null" class="danger"><i data-lucide="trash-2" class="w-4 h-4"></i>删除项目</button>
             </div>
           </div>
-          <button v-if="!projectQ && projFilter==='all'" @click="openProjectModal()" class="dash-proj dash-proj-new">
+          <button v-if="canWrite && !projectQ && projFilter==='all'" @click="openProjectModal()" class="dash-proj dash-proj-new">
             <i data-lucide="plus" class="w-5 h-5"></i><span>新建项目</span>
             <small>按客户或用途分组管理克隆任务</small>
           </button>
@@ -513,9 +547,9 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <div class="proj-row proj-head" role="row">
             <span></span>
             <button type="button" @click="projSort='name'" :class="projSort==='name' ? 'on' : ''">项目</button>
+            <span class="hide-sm">负责人</span>
             <button type="button" @click="projSort='score'" :class="projSort==='score' ? 'on' : ''" class="text-right">平均还原度</button>
-            <button type="button" @click="projSort='tasks'" :class="projSort==='tasks' ? 'on' : ''" class="text-right hide-sm">任务</button>
-            <span class="hide-sm">成功率</span>
+            <button type="button" @click="projSort='tasks'" :class="projSort==='tasks' ? 'on' : ''" class="hide-sm">任务</button>
             <button type="button" @click="projSort='recent'" :class="projSort==='recent' ? 'on' : ''" class="hide-sm">最近更新</button>
             <span></span>
           </div>
@@ -532,15 +566,23 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               </div>
               <div class="text-[12px] text-slate-500 truncate mt-0.5">[[ p.description || '暂无描述' ]]</div>
             </div>
+            <div class="hide-sm min-w-0">
+              <div v-if="projPeople(p).length" class="proj-owner" :title="projPeople(p).join('、')">
+                <span class="av-stack">
+                  <span v-for="n in projPeople(p).slice(0, 3)" :key="n" class="av" :class="avTone(n)">[[ n.slice(0, 1) ]]</span>
+                </span>
+                <span class="truncate">[[ projPeople(p)[0] ]]</span><small v-if="projPeople(p).length > 1" class="shrink-0">+[[ projPeople(p).length - 1 ]]</small>
+              </div>
+              <span v-else class="text-[13px] text-slate-600">—</span>
+            </div>
             <div class="text-right serif-num text-[24px] leading-none" :class="p.avg_score == null ? 'text-slate-600' : 'text-slate-100'">[[ p.avg_score != null ? p.avg_score.toFixed(1) : '—' ]]</div>
-            <div class="text-right text-[13px] text-slate-300 tnums hide-sm">[[ p.task_cnt ]]</div>
             <div class="hide-sm">
               <div class="proj-rate"><span :style="{ width: projMeta[p.id].rate + '%' }"></span><i v-if="p.fail_cnt" :style="{ width: projMeta[p.id].failRate + '%' }"></i></div>
-              <div class="text-[12px] text-slate-500 mt-1 tnums">[[ projMeta[p.id].rate ]]%<template v-if="p.fail_cnt"> · <span class="text-rose-400">[[ p.fail_cnt ]] 失败</span></template></div>
+              <div class="text-[12px] text-slate-500 mt-1 tnums">[[ p.ok_cnt || 0 ]]/[[ p.task_cnt ]] 成功<template v-if="p.fail_cnt"> · <span class="text-rose-400">[[ p.fail_cnt ]] 失败</span></template></div>
             </div>
             <div class="text-[13px] text-slate-400 hide-sm">[[ relTime(projMeta[p.id].last) ]]</div>
             <div class="relative flex justify-end">
-              <button @click.stop="projectMenu = (projectMenu===p.id ? null : p.id)" title="项目操作" aria-label="项目操作"
+              <button v-if="canWrite" @click.stop="projectMenu = (projectMenu===p.id ? null : p.id)" title="项目操作" aria-label="项目操作"
                 class="w-7 h-7 flex items-center justify-center rounded-md text-slate-500 hover:text-slate-100 hover:bg-white/[0.06] transition-colors">
                 <i data-lucide="more-horizontal" class="w-4 h-4"></i>
               </button>
@@ -569,7 +611,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <span class="dash-feed-dot" :class="'is-' + (t.status === 'completed' ? 'ok' : (t.status === 'failed' ? 'bad' : 'run'))"></span>
               <span class="dash-feed-text">
                 <span class="dash-feed-domain">[[ t.domain || t.target_url ]]</span>
-                <span class="dash-feed-sub">[[ dashTaskProject(t) ]] · [[ relTime(t.updated_at || t.created_at) ]]</span>
+                <span class="dash-feed-sub"><template v-if="t.creator_name"><b>[[ t.creator_name ]]</b> · </template>[[ dashTaskProject(t) ]] · [[ relTime(t.updated_at || t.created_at) ]]</span>
               </span>
               <span v-if="t.status === 'completed' && t.similarity_score != null" class="dash-feed-score">[[ Number(t.similarity_score).toFixed(1) ]]</span>
               <span v-else-if="t.status === 'failed'" class="dash-feed-tag is-bad">失败</span>
@@ -3392,6 +3434,8 @@ const __vueApp = createApp({
       projectQ: '', projectMenu: null,
       renameModal: { open: false, id: null, name: '', description: '', busy: false, error: '' },
       aiPrompt: '',
+      workspace: { name: '我的团队', members: [], member_count: 0 },
+      wsMenu: false,
       auth: { required: false, openMode: true, user: null, form: { username: '', password: '', display_name: '' }, busy: false, error: '' },
       navViews: [
         { id: 'dashboard', label: '总览', icon: 'layout-dashboard' },
@@ -3505,6 +3549,7 @@ const __vueApp = createApp({
       }
       return null;
     },
+    canWrite() { return !this.auth.required || !!(this.auth.user && ['admin', 'operator'].includes(this.auth.user.role)); },
     activeTitle() {
       const m = {
         dashboard: ['项目', '每个项目单独管理自己的批次、任务和部署'],
@@ -3673,12 +3718,13 @@ const __vueApp = createApp({
         { id: 'all', label: '全部', count: ps.length },
         { id: 'running', label: '运行中', count: ps.filter(p => p.running_cnt).length },
         { id: 'failed', label: '有失败', count: ps.filter(p => p.fail_cnt).length },
-      ];
+      ].concat(this.auth.user ? [{ id: 'mine', label: '我参与的', count: ps.filter(p => this.isMine(p)).length }] : []);
     },
     dashProjects() {
       let ps = this.filteredProjects.slice();
       if (this.projFilter === 'running') ps = ps.filter(p => p.running_cnt);
       if (this.projFilter === 'failed') ps = ps.filter(p => p.fail_cnt);
+      if (this.projFilter === 'mine') ps = ps.filter(p => this.isMine(p));
       const meta = this.projMeta, key = this.projSort;
       const cmp = {
         recent: (a, b) => String(meta[b.id].last).localeCompare(String(meta[a.id].last)),
@@ -4179,6 +4225,27 @@ const __vueApp = createApp({
       this.thumbErrs = new Set([...this.thumbErrs, id]);
     },
     setProjView(v) { this.projView = v; try { localStorage.setItem('cloner-proj-view', v); } catch (e) {} this.$nextTick(() => this.iconRefresh && this.iconRefresh()); },
+    projPeople(p) {
+      const out = [];
+      if (p.owner_name) out.push(p.owner_name);
+      for (const n of (p.contributors || [])) if (n && !out.includes(n)) out.push(n);
+      return out;
+    },
+    isMine(p) {
+      const u = this.auth.user; if (!u) return false;
+      const me = u.display_name || u.username;
+      return p.created_by === u.username || (p.contributors || []).includes(me);
+    },
+    avTone(name) {
+      let h = 0; for (const c of String(name || '')) h = (h * 31 + c.codePointAt(0)) >>> 0;
+      return 'av-' + (h % 6);
+    },
+    async loadWorkspace() {
+      try {
+        const d = await fetch('/api/auth/state').then(r => r.json());
+        if (d.workspace) this.workspace = d.workspace;
+      } catch (e) {}
+    },
     dashTaskProject(t) {
       const pid = this.batchProject[t.batch_id];
       const p = this.projects.find(x => x.id === pid);
@@ -4773,6 +4840,7 @@ const __vueApp = createApp({
         this.auth.required = !!data.required;
         this.auth.openMode = !!data.open_mode;
         this.auth.user = data.user || null;
+        if (data.workspace) this.workspace = data.workspace;
       } catch (e) { this.auth.required = false; this.auth.openMode = true; }
       if (!this.auth.required || this.auth.user) this.proceed();
     },
@@ -4938,6 +5006,7 @@ const __vueApp = createApp({
       this.iconRefresh();
     },
     proceed() {
+      this.loadWorkspace();
       this.refreshTasks();
       this.refreshTelemetry();
       // UI 版本哨兵: 平台模板更新后, 提醒长开窗口刷新(旧脚本收不到新功能)

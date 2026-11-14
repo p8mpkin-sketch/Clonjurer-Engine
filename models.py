@@ -221,6 +221,15 @@ class Database:
         if "project_id" not in cols:
             self._conn.execute(
                 "ALTER TABLE batch_jobs ADD COLUMN project_id INTEGER NOT NULL DEFAULT 1")
+        # 多用户: 记录项目负责人 / 批次提交人(存用户名; 开放模式为空)
+        if "created_by" not in cols:
+            self._conn.execute(
+                "ALTER TABLE batch_jobs ADD COLUMN created_by TEXT NOT NULL DEFAULT ''")
+        pj_cols = {r["name"] for r in
+                   self._conn.execute("PRAGMA table_info(projects)").fetchall()}
+        if pj_cols and "created_by" not in pj_cols:
+            self._conn.execute(
+                "ALTER TABLE projects ADD COLUMN created_by TEXT NOT NULL DEFAULT ''")
         sl_cols = {r["name"] for r in
                    self._conn.execute("PRAGMA table_info(short_links)").fetchall()}
         if sl_cols and "link_task_id" not in sl_cols:
@@ -240,16 +249,16 @@ class Database:
     # 批次
     # ------------------------------------------------------------------
     def create_batch(self, name: str, items, config: dict,
-                     project_id: int = None) -> int:
+                     project_id: int = None, created_by: str = "") -> int:
         """items: 由 (target_url, domain) 元组组成的列表 -> 新批次 id。"""
         now = _now()
         project_id = project_id or self.ensure_default_project()
         with self._lock:
             cur = self._conn.execute(
                 "INSERT INTO batch_jobs (project_id, name, total_urls, completed_urls,"
-                " config_json, created_at) VALUES (?, ?, ?, 0, ?, ?)",
+                " config_json, created_at, created_by) VALUES (?, ?, ?, 0, ?, ?, ?)",
                 (project_id, name, len(items),
-                 json.dumps(config, ensure_ascii=False), now),
+                 json.dumps(config, ensure_ascii=False), now, created_by or ""),
             )
             batch_id = cur.lastrowid
             self._conn.executemany(
@@ -363,7 +372,8 @@ class Database:
     def get_task(self, task_id: int):
         with self._lock:
             row = self._conn.execute(
-                "SELECT t.*, b.name AS batch_name FROM clone_tasks t"
+                "SELECT t.*, b.name AS batch_name, b.created_by AS created_by,"
+                " COALESCE((SELECT NULLIF(u.display_name, '') FROM users u WHERE u.username = b.created_by), b.created_by) AS creator_name FROM clone_tasks t"
                 " LEFT JOIN batch_jobs b ON t.batch_id = b.id WHERE t.id = ?",
                 (task_id,),
             ).fetchone()
@@ -388,7 +398,8 @@ class Database:
         params.append(limit)
         with self._lock:
             rows = self._conn.execute(
-                "SELECT t.*, b.name AS batch_name FROM clone_tasks t"
+                "SELECT t.*, b.name AS batch_name, b.created_by AS created_by,"
+                " COALESCE((SELECT NULLIF(u.display_name, '') FROM users u WHERE u.username = b.created_by), b.created_by) AS creator_name FROM clone_tasks t"
                 f" LEFT JOIN batch_jobs b ON t.batch_id = b.id{clause}"
                 " ORDER BY t.id DESC LIMIT ?",
                 params,
@@ -500,12 +511,13 @@ class Database:
             self._conn.commit()
             return pid
 
-    def create_project(self, name: str, description: str, color: str) -> int:
+    def create_project(self, name: str, description: str, color: str,
+                       created_by: str = "") -> int:
         with self._lock:
             cur = self._conn.execute(
-                "INSERT INTO projects (name, description, color, created_at)"
-                " VALUES (?, ?, ?, ?)",
-                (name, description, color, _now()))
+                "INSERT INTO projects (name, description, color, created_at, created_by)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (name, description, color, _now(), created_by or ""))
             self._conn.commit()
             return cur.lastrowid
 
@@ -541,9 +553,18 @@ class Database:
                 " (SELECT AVG(t.similarity_score) FROM clone_tasks t"
                 "  JOIN batch_jobs b2 ON t.batch_id = b2.id"
                 "  WHERE b2.project_id = p.id AND t.status = 'completed'"
-                "  AND t.similarity_score IS NOT NULL) AS avg_score"
+                "  AND t.similarity_score IS NOT NULL) AS avg_score,"
+                " COALESCE((SELECT NULLIF(u.display_name, '') FROM users u WHERE u.username = p.created_by), p.created_by) AS owner_name,"
+                " (SELECT GROUP_CONCAT(nm, char(31)) FROM (SELECT DISTINCT "
+                "COALESCE((SELECT NULLIF(u.display_name, '') FROM users u WHERE u.username = b3.created_by), b3.created_by) AS nm"
+                "  FROM batch_jobs b3 WHERE b3.project_id = p.id AND b3.created_by != '')) AS contributors"
                 " FROM projects p ORDER BY p.id ASC").fetchall()
-            return [dict(r) for r in rows]
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["contributors"] = [x for x in (d.get("contributors") or "").split("\x1f") if x]
+            out.append(d)
+        return out
 
     def delete_project(self, project_id: int) -> bool:
         """仅允许删除不含任务的项目; 批次先迁回默认项目。"""
@@ -617,6 +638,16 @@ class Database:
                 "SELECT id, username, display_name, role, is_active,"
                 " last_login_at, created_at FROM users ORDER BY id ASC").fetchall()
             return [dict(r) for r in rows]
+
+    def workspace_members(self, limit: int = 8) -> tuple:
+        """工作区成员(启用中), 供侧栏头像与成员数展示。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT username, display_name, role FROM users WHERE is_active = 1"
+                " ORDER BY id ASC LIMIT ?", (limit,)).fetchall()
+            total = self._conn.execute(
+                "SELECT COUNT(*) AS c FROM users WHERE is_active = 1").fetchone()["c"]
+            return [dict(r) for r in rows], total
 
     def count_users(self) -> int:
         with self._lock:

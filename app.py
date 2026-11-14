@@ -418,7 +418,8 @@ def create_batch():
         f"批次 {time.strftime('%m-%d %H:%M')} · {first_domain}"
         + (f" 等 {len(accepted)} 站" if len(accepted) > 1 else "")
     )
-    batch_id = db.create_batch(name, accepted, clean_config, project_id)
+    batch_id = db.create_batch(name, accepted, clean_config, project_id,
+                               created_by=(_current_user() or {}).get("username", ""))
     scheduler.start()
     bus.publish(None, "SCHED", f"新批次 #{batch_id} 已入队: {len(accepted)} 个站点")
     _audit("batch.create", f"批次 #{batch_id}「{name}」提交 {len(accepted)} 个站点"
@@ -1051,7 +1052,8 @@ def api_v4_generate():
         return jsonify({"error": f"项目 #{project_id} 不存在"}), 400
     name = str(form.get("name") or "").strip() or f"生成 · {label}"
     target_url = f"{gen_settings.TARGET_URL_PREFIX}{kind}:{label}"
-    batch_id = db.create_batch(name, [(target_url, "generated")], cfg, project_id)
+    batch_id = db.create_batch(name, [(target_url, "generated")], cfg, project_id,
+                               created_by=(_current_user() or {}).get("username", ""))
     task = db.list_tasks(batch_id=batch_id, limit=1)
     task_id = task[0]["id"] if task else None
     scheduler.start()
@@ -1184,9 +1186,17 @@ def v4_ai_playground_repair():
 @app.get("/api/auth/state")
 def auth_state():
     user = _current_user()
+    workspace = {"name": db.get_setting("workspace_name", "") or "我的团队",
+                 "members": [], "member_count": 0}
+    if user is not None:  # 成员名单只给已登录用户
+        members, total = db.workspace_members()
+        workspace["members"] = [{"name": m["display_name"] or m["username"], "role": m["role"]}
+                                for m in members]
+        workspace["member_count"] = total
     return jsonify({"required": _auth_required(),
                     "open_mode": not _auth_required(),
-                    "user": _public_user(user)})
+                    "user": _public_user(user),
+                    "workspace": workspace})
 
 
 @app.post("/api/auth/bootstrap")
@@ -1259,7 +1269,8 @@ def v4_project_create():
     color = str(data.get("color") or "#6366f1").strip()
     if not re.match(r"^#[0-9A-Fa-f]{6}$", color):
         color = "#6366f1"
-    pid = db.create_project(name, str(data.get("description") or "").strip()[:500], color)
+    pid = db.create_project(name, str(data.get("description") or "").strip()[:500], color,
+                            created_by=(_current_user() or {}).get("username", ""))
     _audit("project.create", f"创建项目 #{pid}「{name}」")
     return jsonify({"project": db.get_project(pid)}), 201
 
@@ -1468,6 +1479,7 @@ def _apply_saved_settings():
 @app.get("/api/v4/admin/settings")
 def v4_settings_get():
     return jsonify({
+        "workspace": {"name": db.get_setting("workspace_name", "")},
         "ai": {
             "base_url": config.AI_API_BASE_URL,
             "model": config.AI_MODEL,
@@ -1485,6 +1497,11 @@ def v4_settings_put():
     data = request.get_json(silent=True) or {}
     ai = data.get("ai") if isinstance(data.get("ai"), dict) else {}
     changed = []
+    ws = data.get("workspace") if isinstance(data.get("workspace"), dict) else {}
+    if "name" in ws:
+        wname = str(ws.get("name") or "").strip()[:40]
+        db.set_setting("workspace_name", wname)
+        changed.append("workspace_name")
     if "base_url" in ai:
         base = str(ai.get("base_url") or "").strip().rstrip("/")
         if base and not base.startswith(("http://", "https://")):
