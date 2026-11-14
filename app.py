@@ -576,27 +576,41 @@ _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
 
 def _display_title(task: dict, ws: Path) -> str:
     """任务显示名: 生成任务 = 任务记录里的标题(domain 列); 克隆任务 = 克隆页的 <title>(按文件修改时间缓存),
-    取不到时退回域名。列表里同一域名的多个任务据此能分清是哪个页面。"""
+    取不到时返回空串(前端退回域名)。目录型目标的入口页只是跳转壳, 按 site.json 的路由找与目标路径对应的页面。"""
     if str(task.get("target_url") or "").startswith("uir:generate:"):
         return task.get("domain") or ""
-    page = ws / "index.html"
+    site = ws / "site.json"
     try:
-        mt = page.stat().st_mtime
+        key = (site.stat().st_mtime if site.is_file() else 0.0, (ws / "index.html").stat().st_mtime)
     except OSError:
         return ""
     hit = _TITLE_CACHE.get(task["id"])
-    if hit and hit[0] == mt:
+    if hit and hit[0] == key:
         return hit[1]
-    title = ""
+    pages = ["index.html"]
     try:
-        with open(page, "rb") as fh:
-            head = fh.read(65536).decode("utf-8", errors="replace")
+        routes = (json.loads(site.read_text(encoding="utf-8")).get("routes") or {}) if site.is_file() else {}
+        want = urlsplit(task.get("target_url") or "").path.rstrip("/") or "/"
+        ordered = sorted(routes.items(), key=lambda kv: (kv[0].rstrip("/") or "/") != want)
+        pages = [v for _, v in ordered if str(v).endswith(".html")] + pages
+    except Exception:
+        pass
+    title = ""
+    for rel in dict.fromkeys(pages):
+        f = (ws / rel)
+        if not str(f.resolve()).startswith(str(ws.resolve())) or not f.is_file():
+            continue
+        try:
+            with open(f, "rb") as fh:
+                head = fh.read(524288).decode("utf-8", errors="replace")
+        except OSError:
+            continue
         m = _TITLE_RE.search(head)
         if m:
             title = html.unescape(re.sub(r"\s+", " ", m.group(1))).strip()[:80]
-    except OSError:
-        pass
-    _TITLE_CACHE[task["id"]] = (mt, title)
+            if title:
+                break
+    _TITLE_CACHE[task["id"]] = (key, title)
     return title
 
 
