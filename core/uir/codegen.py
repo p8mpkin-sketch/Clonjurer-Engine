@@ -24,17 +24,27 @@ SCORING = "req-fit-v1"
 ITEM_TYPES = ("content", "visual", "motion", "effect", "interaction")
 
 PLAN_SYSTEM = (
-    "你是资深产品设计师兼前端架构师。用户会用一两句话描述想要的网页, 你要把它扩写成一份任务书: "
-    "工程师拿到能直接实现, 验收员拿到能逐条检查。只输出一个 JSON 对象, 不要 markdown, 不要解释。\n"
+    "你是创意总监兼资深前端架构师。用户会用一两句话描述想要的网页。用户说得少, 不代表只想要一个刚好对上字面的最简实现 —— "
+    "他期待的是顶尖设计师拿到这句话后会交出的作品: 字面要求全部做到, 并且有巧思、有层次、有细节。"
+    "你要把这句话扩写成一份任务书: 工程师拿到能直接实现, 验收员拿到能逐条检查。只输出一个 JSON 对象, 不要 markdown, 不要解释。\n"
     "字段:\n"
     "- title: 页面标题(简短)\n"
     "- lang: 页面文字语言代码, 与用户需求所用语言一致(如 zh-CN / en)\n"
     "- summary: 一两句话说明你对需求的理解; 需求没说清的地方你做了什么假设\n"
     "- kind: 用几个字概括页面性质(由你自由判断, 例如动效展示、小游戏、工具、信息页、表单)\n"
+    "- concept: 一句话的创意概念 —— 这个页面让人记住的点是什么。围绕需求的主题展开联想: 它在现实中是什么样子、"
+    "有什么节奏和质感、有哪些相关的信息或状态值得呈现\n"
     "- design: {mood: 气质关键词, palette: 3~6 个十六进制色值并注明各自用途, typography: 字体与字号层级, "
-    "layout: 布局与构图}。用户明确说了的照做, 没说的由你给出有主张的设计, 避免紫色渐变、霓虹发光、emoji 装饰这类套路\n"
+    "layout: 布局与构图(主体在视口里的位置和大小; 内容要撑起整个视口, 不能缩在中间一小块), "
+    "layers: 画面由哪几层组成(背景氛围层 / 主体 / 点缀与信息层), 每层放什么}。"
+    "用户明确说了的照做, 没说的由你给出有主张的设计, 避免紫色渐变、霓虹发光、emoji 装饰这类套路\n"
+    "- motion: 动效设计 —— 每个动效的周期、分成哪几段、用什么缓动(要符合主题在现实中的节奏, 不要匀速的简单循环), 哪些元素联动; "
+    "页面不需要动效就写空字符串\n"
+    "- highlights: 2~4 个超出字面要求的亮点, 每个一句话, 写清楚用户能看到或操作到什么。必须贴合主题和使用场景: "
+    "展示类页面侧重氛围层次、与主题相关的信息呈现、对指针/点击/按键的呼应; 工具类页面侧重效率与细节"
+    "(键盘操作、空状态、即时反馈、数据不丢)。亮点是把这件事做到位, 不是另加一个大功能\n"
     "- tech: 实现要点 —— 图形用 CSS / 内联 SVG / canvas 中的哪种, 动效怎么做, 有哪些状态和事件, 数据怎么存\n"
-    "- checklist: 4~10 条验收项, 每条 {id: \"c1\"..., text, type, must}\n"
+    "- checklist: 6~12 条验收项, 每条 {id: \"c1\"..., text, type, must}\n"
     "验收项规则:\n"
     "1. 每条必须是打开页面后能直接观察或操作验证的具体事实, 不写空话(「体验良好」这类不算)。\n"
     "2. type 取值: content(页面上有什么内容/元素) / visual(外观、形状、配色、布局) / "
@@ -42,26 +52,37 @@ PLAN_SYSTEM = (
     "状态切换时的过渡) / interaction(用户操作后页面的反应, 含操作之后才开始的计时与动画)。"
     "interaction 只用于要用户动手(点击、输入、按键、拖动)才能验证的条目; 靠打开页面验证不了的要求"
     "(跟随系统偏好设置、离线可用、数据持久化这类)归 content。\n"
-    "3. must=true 只给用户原话明确要求或直接蕴含的条目; 你补充的质量要求 must=false。\n"
-    "4. 用户原话里的每一个要求都要有对应条目, 不要遗漏, 也不要把用户没要的大功能加进来。\n"
+    "3. must=true 只给用户原话明确要求或直接蕴含的条目; 你补充的亮点和质量要求 must=false。\n"
+    "4. 用户原话里的每一个要求都要有对应条目, 不要遗漏; highlights 里的每个亮点也都要有对应条目。"
+    "不要加入用户没要的大功能(另一个页面、账号体系、复杂设置)。\n"
     "5. 页面必须是不依赖后端和外网的单个网页, 不要规划需要服务器、登录或外部数据源的东西; 需要数据就用本地示例数据或浏览器本地存储。"
 )
 
 WRITE_SYSTEM = (
-    "你是顶尖的前端工程师兼视觉设计师。根据用户需求和任务书, 写出一个完整、打开就能运行的网页。\n"
+    "你是顶尖的前端工程师兼视觉设计师。根据用户需求和任务书, 写出一个完整、打开就能运行、达到作品集水准的网页。\n"
     "硬性要求:\n"
     "1. 只输出一个完整的 HTML 文档, 从 <!DOCTYPE html> 开始, 到 </html> 结束。不要任何解释文字, 不要 markdown 代码围栏。\n"
     "2. 所有 CSS 和 JavaScript 都内联在这个文件里。禁止引用任何外部资源: 不用 CDN, 不外链脚本、样式、字体、图片、音视频。"
     "需要图形就用 CSS、内联 SVG 或 canvas 自己画, 字体用系统字体栈。\n"
-    "3. 真正实现任务书验收清单里的每一条。不要占位内容、TODO、「功能开发中」; 页面上出现的每个按钮和控件都必须有真实作用。\n"
+    "3. 真正实现任务书验收清单里的每一条和 highlights 里的每一个亮点。不要占位内容、TODO、「功能开发中」; "
+    "页面上出现的每个按钮和控件都必须有真实作用; 页面上的说明文字只写已经实现的行为。\n"
     "4. 需求中的动效在页面加载后自动开始并持续可见, 幅度要足够明显, 不依赖用户操作(需求明确是操作触发的除外)。\n"
     "5. 自适应: 写 viewport meta; 从 360px 宽的手机到 1920px 宽的桌面都正常显示, 任何宽度下都不能出现横向滚动条; "
     "canvas 按容器尺寸和 devicePixelRatio 设置分辨率, 窗口尺寸变化时重新计算。\n"
     "6. 代码不能抛出运行时异常; 不使用 alert / confirm / prompt; 用到 localStorage 时做异常保护。\n"
     "7. 游戏或可操作的内容: 同时支持键盘和鼠标/触屏, 在页面上写明操作方式, 有开始、结束、重新开始的完整流程。\n"
-    "8. 设计质量: 要有明确的视觉主张 —— 讲究的配色、字号层级、留白和细节(过渡、状态反馈), 与内容气质相称。"
+    "8. 设计质量按作品集水准要求, 以下几点缺一不可:\n"
+    "   a. 层次 —— 画面至少有背景氛围层、主体、点缀或信息层; 主体要有体积感和质感(渐变、高光、阴影、描边的组合), "
+    "不能是一个扁平色块配一行字。\n"
+    "   b. 节奏 —— 动效用多段关键帧或基于时间的函数, 配合缓动, 符合主题在现实中的节奏; 相关元素(主体、光影、环境)联动; "
+    "避免单一匀速的缩放或旋转。\n"
+    "   c. 呼应 —— 至少有一处对用户操作(指针移动、点击或触摸、按键)的有意义的反馈, 并让用户知道可以这样操作。\n"
+    "   d. 构图 —— 内容撑起整个视口: 单一主体约占视口短边的三到五成; 卡片、工具类内容在桌面宽度下也要有足够的尺寸和"
+    "信息密度, 不要缩在中间一小块、四周大片空白。\n"
+    "   e. 排版与配色 —— 字号层级分明, 文字克制, 配色讲究并与内容气质相称。"
     "不要默认的紫色渐变背景, 不要堆砌霓虹发光, 不要用 emoji 充当图标或装饰。界面文字使用任务书 lang 指定的语言。\n"
-    "9. 代码紧凑, 不写冗长注释, 整个文件控制在能一次完整输出的长度内。"
+    "9. 篇幅服从质量: 该有的层次和细节都写出来, 不要为了省事而简化; 但不写冗长注释。"
+    "系统开启「减少动态效果」(prefers-reduced-motion)时降低动效幅度。"
 )
 
 _REPAIR_HEAD = (
@@ -87,8 +108,10 @@ REVIEW_SYSTEM = (
     "unsure(现有截图和体检数据既不能证明满足, 也不能证明不满足 —— 例如要走完多步操作才能看到的结果)。"
     "不要把 unsure 的情况判成 no; 也不要因为拿不准就判 yes。\n"
     "3. 体检数据是确定性测量, 与你的观感冲突时以体检数据为准(例如相邻帧变化占比为 0 说明画面没有在动)。\n"
-    "4. 设计质量 design.score 为 0~10 的数: 5 是能用但平庸, 8 以上要求有专业设计水准。布局错乱、元素重叠、文字溢出或被裁切、"
-    "对比度不足、大片无意义空白、手机宽度下不可用, 都要扣分并写进 issues。\n"
+    "4. 设计质量 design.score 为 0~10 的数, 以「顶尖设计师拿到同一句需求会交出的作品」为 9 分的参照: "
+    "只做到字面要求、画面单薄(单一主体加一行字, 没有氛围层次, 对用户操作没有任何呼应)最多 6 分; "
+    "有层次、有节奏、有细节但仍有明显瑕疵是 7~8 分。布局错乱、元素重叠、文字溢出或被裁切、对比度不足、"
+    "内容缩在视口中间一小块而四周大片空白、手机宽度下不可用, 都要扣分并写进 issues。\n"
     "5. 前两张截图拍在页面刚加载时, 入场动画可能还没结束(元素半透明、位置未到位属正常); 对比度、布局、内容是否齐全"
     "以「静置后的整页」为准。整页图在截取前已自动逐屏滚动过一遍, 仍然空白的区域才是真的没有内容。\n"
     "6. 涉及时间、日期、计时的条目, 用体检数据里给出的截图时刻去核对画面上的读数。\n"
@@ -138,11 +161,18 @@ def normalize_plan(obj: dict, desc: str) -> dict:
         items[0]["must"] = True          # 至少有一条代表用户原话, 否则 must 封顶规则形同虚设
     design = obj.get("design") if isinstance(obj.get("design"), dict) else {}
     tech = obj.get("tech")
+    motion = obj.get("motion")
+    hl = obj.get("highlights")
+    highlights = [str(x).strip()[:200] for x in (hl if isinstance(hl, list) else [hl] if isinstance(hl, str) else [])
+                  if str(x or "").strip()][:4]
     return {"title": str(obj.get("title") or (desc or "")[:24] or "页面").strip()[:80],
             "lang": str(obj.get("lang") or "").strip()[:16],
             "summary": str(obj.get("summary") or "").strip()[:600],
             "kind": str(obj.get("kind") or "").strip()[:40],
+            "concept": str(obj.get("concept") or "").strip()[:300],
             "design": design,
+            "motion": (motion if isinstance(motion, str) else json.dumps(motion, ensure_ascii=False))[:1200] if motion else "",
+            "highlights": highlights,
             "tech": (tech if isinstance(tech, str) else json.dumps(tech, ensure_ascii=False))[:1500] if tech else "",
             "checklist": items}
 
@@ -208,7 +238,8 @@ def _html_complete(text: str) -> bool:
 
 
 def _brief_text(brief: dict) -> str:
-    slim = {k: brief.get(k) for k in ("title", "lang", "summary", "kind", "design", "tech")}
+    slim = {k: brief.get(k) for k in ("title", "lang", "summary", "kind", "concept", "design", "motion", "highlights", "tech")
+            if brief.get(k) not in (None, "", [], {})}
     slim["checklist"] = [{"id": i["id"], "text": i["text"], "type": i["type"], "must": i["must"]}
                          for i in brief["checklist"]]
     return json.dumps(slim, ensure_ascii=False, indent=1)
@@ -611,6 +642,10 @@ def run(desc: str, ws: Path, pool, ai_cfg: dict, judge_cfg: dict, viewport: dict
     (ws / "brief.json").write_text(json.dumps(brief, ensure_ascii=False, indent=2), encoding="utf-8")
     if brief.get("summary"):
         log("GEN", f"需求理解: {brief['summary']}")
+    if brief.get("concept"):
+        log("GEN", f"创意概念: {brief['concept']}")
+    if brief.get("highlights"):
+        log("GEN", "亮点: " + "; ".join(brief["highlights"]))
     log("GEN", f"验收清单 {len(brief['checklist'])} 条: " + "; ".join(
         f"{i['id']}[{i['type']}{'*' if i['must'] else ''}] {i['text'][:40]}" for i in brief["checklist"]))
 
@@ -694,8 +729,9 @@ def run(desc: str, ws: Path, pool, ai_cfg: dict, judge_cfg: dict, viewport: dict
         else:
             stalled = True
             log("GEN", f"第 {rnd} 轮未提升({best['detail']['score']} → {detail['score']}), 保留第 {best['round']} 轮版本")
-        if best["detail"]["score"] >= target_score and not best["defects"]:
-            log("GEN", f"需求符合度达到 {target_score} 且无硬伤, 停止迭代")
+        if (best["detail"]["score"] >= target_score and not best["defects"]
+                and best["detail"]["design"] >= settings.CODE_MIN_DESIGN):
+            log("GEN", f"需求符合度达到 {target_score}、设计分达标且无硬伤, 停止迭代")
             break
         if best["detail"]["review_mode"] != "none" and not actionable(best["defects"], best["detail"]):
             log("GEN", "没有可以明确修复的问题了(剩下的是证据确认不了的条目或低优先级意见), 停止迭代")

@@ -46,6 +46,7 @@ SEG_PIC_CAP = float(os.environ.get("CLONER_GEN_PIC_CAP", "0.6"))
 # 仓库外的 Key 文件(KEY=VALUE, 只取 CLONER_AI_*): 服务进程没带环境变量启动时, 生成侧仍能拿到模型。置空关闭。
 GEN_AI_ENV_FILE = os.environ.get("CLONER_AI_ENV_FILE", "~/.clonjurer_ai.env")
 CODE_TARGET_SCORE = float(os.environ.get("CLONER_GEN_CODE_TARGET", "85"))     # 需求符合度 ≥ 且无硬伤即停
+CODE_MIN_DESIGN = float(os.environ.get("CLONER_GEN_CODE_MIN_DESIGN", "0.75"))    # 设计分(0~1)低于此值不算达标, 继续按问题清单打磨
 CODE_MAX_REPAIRS = int(os.environ.get("CLONER_GEN_CODE_REPAIRS", "2"))        # 首版之后最多修几轮
 CODE_MAX_TOKENS = int(os.environ.get("CLONER_GEN_CODE_TOKENS", "16384"))      # 写代码/修复的补全预算基档
 # 写代码/修复是否保留模型思考。默认关: 本机实测(同一批 7 条需求)开思考写一页 130~180s、总输出 token 近两倍,

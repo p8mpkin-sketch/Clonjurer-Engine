@@ -81,6 +81,12 @@ class Pure(unittest.TestCase):
             {"text": "在动", "type": "MOTION"}, {"text": "", "type": "content"}, {"text": "别的", "type": "weird"}]}, "d")
         self.assertEqual([i["id"] for i in brief["checklist"]], ["c1", "c2", "c3"])
         self.assertEqual([i["type"] for i in brief["checklist"]], ["visual", "motion", "content"])
+        # 创意概念 / 动效设计 / 亮点进任务书, 并原样交给写代码的一步
+        brief = codegen.normalize_plan({"concept": "概念", "motion": {"周期": "1s"}, "highlights": ["亮点一", "", "亮点二"],
+                                        "checklist": [{"text": "a"}]}, "d")
+        self.assertEqual((brief["concept"], brief["highlights"]), ("概念", ["亮点一", "亮点二"]))
+        text = codegen._brief_text(brief)
+        self.assertTrue("亮点一" in text and "周期" in text and "概念" in text)
         with self.assertRaises(ValueError):
             codegen.normalize_plan({"checklist": []}, "d")
         # 模型一条 must 都没标: 至少保留一条代表用户原话
