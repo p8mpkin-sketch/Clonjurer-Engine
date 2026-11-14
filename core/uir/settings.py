@@ -48,7 +48,9 @@ GEN_AI_ENV_FILE = os.environ.get("CLONER_AI_ENV_FILE", "~/.clonjurer_ai.env")
 CODE_TARGET_SCORE = float(os.environ.get("CLONER_GEN_CODE_TARGET", "85"))     # 需求符合度 ≥ 且无硬伤即停
 CODE_MAX_REPAIRS = int(os.environ.get("CLONER_GEN_CODE_REPAIRS", "2"))        # 首版之后最多修几轮
 CODE_MAX_TOKENS = int(os.environ.get("CLONER_GEN_CODE_TOKENS", "16384"))      # 写代码/修复的补全预算基档
-CODE_THINKING = os.environ.get("CLONER_GEN_CODE_THINKING", "1") not in ("0", "false", "")   # 写代码/修复是否保留模型思考
+# 写代码/修复是否保留模型思考。默认关: 本机实测(同一批 7 条需求)开思考写一页 130~180s、总输出 token 近两倍,
+# 均分只高 1 分且有一条因超时失败; 关思考 6~28s 写完, 人工比对截图质量相当
+CODE_THINKING = os.environ.get("CLONER_GEN_CODE_THINKING", "0") not in ("0", "false", "")
 CODE_PLAN_WALL = float(os.environ.get("CLONER_GEN_PLAN_WALL", "60"))          # 各步墙钟上限(秒)
 CODE_WRITE_WALL = float(os.environ.get("CLONER_GEN_WRITE_WALL", "180"))
 CODE_REVIEW_WALL = float(os.environ.get("CLONER_GEN_REVIEW_WALL", "75"))
@@ -59,6 +61,8 @@ PROBE_FRAME_GAPS_MS = (230, 410, 570)
 PROBE_DIFF_THRESHOLD = 14         # 灰度差超过此值的像素计为「变了」
 PROBE_MOTION_EPS = 0.0004         # 变化像素占比低于此值视为静止
 PROBE_MAX_INTERACT = 8
+PROBE_REVEAL_STEPS = 14           # 整页截图前逐屏滚动的最多步数(触发滚动渐显 / 懒加载)
+PROBE_POST_GAPS_MS = (450, 1150)  # 操作完之后再连拍的间隔: 第二档跨过 1 秒, 能看到按秒走的计时
 PROBE_MOBILE_VIEWPORT = {"width": 390, "height": 844}
 
 

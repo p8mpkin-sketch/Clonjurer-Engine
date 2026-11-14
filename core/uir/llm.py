@@ -119,15 +119,28 @@ def _image_part(path: Path, max_edge: int) -> dict:
 
 
 def extract_json(text: str) -> dict:
+    """从模型输出里取 JSON 对象。容忍: 代码围栏、对象前的说明文字、对象后的多余内容(小模型在 JSON 模式下
+    也会偶发在合法对象后面再吐一段, json.loads 报 Extra data) —— 取第一个能完整解析的对象。"""
     cleaned = re.sub(r"^```(?:json)?\s*", "", (text or "").strip())
     cleaned = re.sub(r"\s*```$", "", cleaned).strip()
     try:
         obj = json.loads(cleaned)
     except ValueError:
-        lo, hi = cleaned.find("{"), cleaned.rfind("}")
-        if lo < 0 or hi <= lo:
+        obj, pos, dec = None, cleaned.find("{"), json.JSONDecoder()
+        if pos < 0:
             raise RuntimeError(f"上游未输出 JSON: {cleaned[:160]!r}")
-        obj = json.loads(cleaned[lo:hi + 1])
+        first_err = None
+        while pos >= 0 and obj is None:
+            try:
+                got, _ = dec.raw_decode(cleaned, pos)
+                if isinstance(got, dict):
+                    obj = got
+                    break
+            except ValueError as exc:
+                first_err = first_err or exc
+            pos = cleaned.find("{", pos + 1)
+        if obj is None:
+            raise first_err or ValueError("上游输出不是 JSON 对象")
     if not isinstance(obj, dict):
         raise ValueError("上游输出不是 JSON 对象")
     return obj

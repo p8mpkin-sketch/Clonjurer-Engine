@@ -38,6 +38,19 @@ KEYS = """<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="m
 const g=document.getElementById('c').getContext('2d');let x=10;
 function d(){g.clearRect(0,0,400,300);g.fillStyle='#e5e5e5';g.fillRect(x,100,40,40)}
 addEventListener('keydown',e=>{if(e.key==='ArrowRight'){x+=50;d()}});d()</script></body></html>"""
+# 首屏以下的区块进入视口才显示(滚动渐显)
+REVEAL = """<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{margin:0;background:#fff}
+section{height:900px;display:grid;place-items:center}
+.r{width:70%;height:500px;background:#1f2937;opacity:0;transition:opacity .15s}.r.on{opacity:1}</style></head><body>
+<section><h1>首屏</h1></section><section><div class="r"></div></section><section><div class="r"></div></section>
+<script>const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting)e.target.classList.add('on')}));
+document.querySelectorAll('.r').forEach(e=>io.observe(e))</script></body></html>"""
+# 空闲时静止, 点了按钮才开始按秒走数
+STARTS = """<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;background:#fff">
+<p id="t" style="font:80px monospace">25:00</p><button id="go">开始</button><script>let s=1500,h=0;
+document.getElementById('go').onclick=()=>{if(h)return;h=setInterval(()=>{s--;
+document.getElementById('t').textContent=String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')},1000)}
+</script></body></html>"""
 
 
 class Pure(unittest.TestCase):
@@ -102,6 +115,35 @@ class Pure(unittest.TestCase):
         self.assertEqual(next(i for i in d["items"] if i["id"] == "c3")["verdict"], "no")
         none = self._rep(interactions=[])
         self.assertEqual(next(i for i in codegen.score(self.BRIEF, self._rev(), none)["items"] if i["id"] == "c3")["verdict"], "no")
+
+    def test_gates_only_when_falsifiable(self):
+        idle_still = {"moving": False, "running_animations": 0, "raf_per_s": 0, "max_frac": 0.0}
+        # 空闲时静止, 但操作之后画面在持续变化: 体检证伪不了「会动」, 不覆盖模型结论
+        started = self._rep(motion=idle_still, post={"moving": True, "frame_diffs": [0.0, 0.01]})
+        d = codegen.score(self.BRIEF, self._rev(), started)
+        item = next(i for i in d["items"] if i["id"] == "c2")
+        self.assertEqual((item["verdict"], item["gate"]), ("yes", None))
+        # 某次操作引出了动画也一样
+        clicked = self._rep(motion=idle_still, interactions=[
+            {"kind": "click", "tag": "button", "label": "x", "action": "click", "responded": True, "animated": True}])
+        self.assertEqual(next(i for i in codegen.score(self.BRIEF, self._rev(), clicked)["items"] if i["id"] == "c2")["verdict"], "yes")
+        # 没看图的文本验收: 外观类条目最多 partial, 并标为「无法确认」(不进修复清单)
+        d = codegen.score(self.BRIEF, dict(self._rev(), mode="text"), self._rep())
+        item = next(i for i in d["items"] if i["id"] == "c1")
+        self.assertEqual((item["verdict"], item["soft"]), ("partial", True))
+        self.assertFalse(d["caps"])                              # partial 不触发「明确要求未满足」封顶
+        self.assertEqual(codegen.problem_list([], d), [])
+        self.assertFalse(codegen.actionable([], d))
+        self.assertTrue(codegen.actionable(["报错"], d))
+        d = codegen.score(self.BRIEF, self._rev(("yes", "yes", "partial")), self._rep())
+        self.assertTrue(codegen.actionable([], d))
+
+    def test_extract_json_tolerates_trailing_content(self):
+        from core.uir import llm
+        self.assertEqual(llm.extract_json('{"a": {"b": [1, 2]}}\n{"extra": 1}'), {"a": {"b": [1, 2]}})
+        self.assertEqual(llm.extract_json('说明 {x} 然后 ```json\n{"ok": true}\n``` 完毕'), {"ok": True})
+        with self.assertRaises(ValueError):
+            llm.extract_json('{"a": 1,, }')
 
     def test_caps(self):
         self.assertLessEqual(codegen.score(self.BRIEF, self._rev(), self._rep(errors=["boom"]))["score"], 40)
@@ -190,6 +232,26 @@ class Probe(unittest.TestCase):
         self.assertTrue(f["external"] and any("外网" in d for d in defects))
         _, f, defects = self._inspect("wide", WIDE)
         self.assertTrue(f["overflow_desktop"] and f["overflow_mobile"])
+
+    def test_scroll_reveal_is_triggered_before_full_shot(self):
+        from PIL import Image
+        rep, f, _ = self._inspect("reveal", REVEAL)
+        self.assertTrue(rep["layout"]["revealed"])
+        with Image.open(self.tmp / "reveal" / "full.png") as im:
+            px = im.convert("L")
+            w, h = px.size
+            # 第 2、3 屏中央原本是透明的(整页截图不会触发渐显), 滚过一遍之后应当是深色块
+            self.assertLess(px.getpixel((w // 2, int(h * 0.5))), 90)
+            self.assertLess(px.getpixel((w // 2, int(h * 0.83))), 90)
+        self.assertRegex(rep["shot_at"]["f0"], r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$")
+
+    def test_motion_that_starts_after_operation(self):
+        rep, f, _ = self._inspect("starts", STARTS)
+        self.assertFalse(f["motion_seen"])                      # 空闲时确实没动
+        self.assertTrue(rep["post"]["moving"])                  # 点了「开始」之后跨过 1 秒, 读数变了
+        self.assertTrue(f["motion_after"] and not f["motion_none"])
+        self.assertIn("25:00", rep["post"]["text_removed"])
+        self.assertIn("操作完之后", codegen.probe_digest(rep))
 
     def test_keyboard_listener(self):
         rep, f, _ = self._inspect("keys", KEYS)
@@ -365,9 +427,10 @@ class EndToEnd(unittest.TestCase):
         self.assertLessEqual(rep["rounds"][0]["score"], 40)
         self.assertTrue(rep["rounds"][1]["kept"])
         self.assertEqual(rep["best_round"], 2)
-        self.assertGreaterEqual(task["similarity_score"], 85)
+        # 假上游的看图自检不通过 → 文本验收: 外观类条目只能判 partial, 分数相应低一档; 没有可修的目标所以不再迭代
+        self.assertTrue(80 <= task["similarity_score"] < 85)
         self.assertNotIn("undefinedFunctionCall", (ws / "index.html").read_text(encoding="utf-8"))
-        # 假上游的看图自检不通过 → 文本验收, 报告如实标注
+        # 报告如实标注
         self.assertEqual(rep["rounds"][1]["review_mode"], "text")
         self.assertTrue(any("修复目标" in ln and "undefinedFunctionCall" in ln for ln in lines))
         self.assertTrue(any("文本验收" in ln and "自检" in ln for ln in lines))     # 降级原因写进日志
@@ -377,14 +440,14 @@ class EndToEnd(unittest.TestCase):
         self.assertIsNone(err)
         self.assertEqual(next(c for c in rep["calls"] if c["step"] == "repair")["mode"], "patch")
         self.assertNotIn("undefinedFunctionCall", (ws / "index.html").read_text(encoding="utf-8"))
-        self.assertGreaterEqual(task["similarity_score"], 85)
+        self.assertGreaterEqual(task["similarity_score"], 80)
         # 修改块对不上原文: 这一轮作废, 下一轮改为整页重写
         task, rep, lines, ws, err = self._run({"write": "broken", "repair": "badpatch"})
         self.assertIsNone(err)
         steps = [c[0] for c in _FakeLLM.calls]
         self.assertIn("repair_full", steps)
         self.assertLess(steps.index("repair"), steps.index("repair_full"))
-        self.assertGreaterEqual(task["similarity_score"], 85)
+        self.assertGreaterEqual(task["similarity_score"], 80)
 
     def test_static_page_fails_motion_item_despite_model(self):
         # 模型写了不会动的页面, 验收模型却全判满足: 帧差硬证据把动效项判回 no, 触发修复

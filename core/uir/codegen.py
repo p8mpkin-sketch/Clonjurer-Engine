@@ -38,7 +38,9 @@ PLAN_SYSTEM = (
     "验收项规则:\n"
     "1. 每条必须是打开页面后能直接观察或操作验证的具体事实, 不写空话(「体验良好」这类不算)。\n"
     "2. type 取值: content(页面上有什么内容/元素) / visual(外观、形状、配色、布局) / "
-    "motion(无需用户操作、页面加载后自动持续发生的动效) / interaction(用户操作后页面的反应, 含操作触发的动画)。\n"
+    "motion(无需用户操作、页面加载后自动持续发生的动效) / interaction(用户操作后页面的反应, 含操作触发的动画)。"
+    "interaction 只用于要用户动手(点击、输入、按键、拖动)才能验证的条目; 靠打开页面验证不了的要求"
+    "(跟随系统偏好设置、离线可用、数据持久化这类)归 content。\n"
     "3. must=true 只给用户原话明确要求或直接蕴含的条目; 你补充的质量要求 must=false。\n"
     "4. 用户原话里的每一个要求都要有对应条目, 不要遗漏, 也不要把用户没要的大功能加进来。\n"
     "5. 页面必须是不依赖后端和外网的单个网页, 不要规划需要服务器、登录或外部数据源的东西; 需要数据就用本地示例数据或浏览器本地存储。"
@@ -84,7 +86,10 @@ REVIEW_SYSTEM = (
     "3. 体检数据是确定性测量, 与你的观感冲突时以体检数据为准(例如相邻帧变化占比为 0 说明画面没有在动)。\n"
     "4. 设计质量 design.score 为 0~10 的数: 5 是能用但平庸, 8 以上要求有专业设计水准。布局错乱、元素重叠、文字溢出或被裁切、"
     "对比度不足、大片无意义空白、手机宽度下不可用, 都要扣分并写进 issues。\n"
-    "5. issues 只列真正需要修改的问题, 按严重程度从高到低, 每条写清现象(problem)和修改方向(fix), 最多 6 条; 没有问题给空数组。\n"
+    "5. 前两张截图拍在页面刚加载时, 入场动画可能还没结束(元素半透明、位置未到位属正常); 对比度、布局、内容是否齐全"
+    "以「静置后的整页」为准。整页图在截取前已自动逐屏滚动过一遍, 仍然空白的区域才是真的没有内容。\n"
+    "6. 涉及时间、日期、计时的条目, 用体检数据里给出的截图时刻去核对画面上的读数。\n"
+    "7. issues 只列真正需要修改的问题, 按严重程度从高到低, 每条写清现象(problem)和修改方向(fix), 最多 6 条; 没有问题给空数组。\n"
     "输出格式: {\"items\":[{\"id\":\"c1\",\"verdict\":\"yes|partial|no\",\"evidence\":\"...\"}],"
     "\"design\":{\"score\":0,\"comment\":\"...\"},"
     "\"issues\":[{\"severity\":\"high|mid|low\",\"problem\":\"...\",\"fix\":\"...\"}],\"summary\":\"一句话总评\"}"
@@ -229,13 +234,23 @@ def problem_list(defects: list, detail: dict, limit: int = 14) -> list:
     out = [f"[硬伤] {d}" for d in defects]
     items = sorted((detail or {}).get("items") or [], key=lambda i: (not i.get("must"), i.get("verdict") != "no"))
     for it in items:
-        if it.get("verdict") in ("no", "partial"):
+        if it.get("verdict") in ("no", "partial") and not it.get("soft"):
             why = it.get("gate") or it.get("evidence") or ""
             out.append(f"[验收项{'未满足' if it['verdict'] == 'no' else '部分满足'}{' · 用户明确要求' if it.get('must') else ''}] "
                        f"{it['text']}" + (f" —— {why}" if why else ""))
     for iss in (detail or {}).get("issues") or []:
         out.append(f"[{iss.get('severity', 'mid')}] {iss.get('problem', '')}" + (f" → {iss['fix']}" if iss.get("fix") else ""))
     return out[:limit]
+
+
+def actionable(defects: list, detail: dict) -> bool:
+    """有没有值得再开一轮修复的目标: 硬伤、未满足/部分满足(且不是「无法确认」)的验收项、中高严重度的问题。
+    只剩低优先级意见或证据确认不了的条目时, 再修一轮多半只是换一种随机结果, 不值那几十秒。"""
+    if defects:
+        return True
+    if any(i.get("verdict") in ("no", "partial") and not i.get("soft") for i in (detail or {}).get("items") or []):
+        return True
+    return any(i.get("severity") in ("high", "mid") for i in (detail or {}).get("issues") or [])
 
 
 _PATCH_RE = re.compile(r"<{5,9} ?SEARCH[^\n]*\n(.*?)\n?={5,9}[^\n]*\n(.*?)\n?>{5,9} ?REPLACE", re.S)
@@ -363,6 +378,10 @@ def probe_digest(rep: dict) -> str:
                      f"{mot.get('frame_diffs')}" + (f", 变化集中在视口的归一化区域 {mot['bbox']}(x0,y0,x1,y1)" if mot.get("bbox") else "")
                      + f"; 运行中的 CSS/WAAPI 动画 {mot.get('running_animations')} 个; requestAnimationFrame 约 "
                      f"{mot.get('raf_per_s')} 次/秒; canvas {mot.get('canvas')} 个, svg {mot.get('svg')} 个")
+    shot_at = rep.get("shot_at") or {}
+    if shot_at.get("f0"):
+        lines.append(f"截图时刻(运行页面的浏览器本地时间): 加载后首帧 {shot_at['f0']}"
+                     + (f"; 操作后的截图 {shot_at['after']}" if shot_at.get("after") else ""))
     inter = rep.get("interactions") or []
     if inter:
         lines.append("交互探测(自动逐个操作):")
@@ -373,13 +392,22 @@ def probe_digest(rep: dict) -> str:
                 lines.append(f"  - 填写 {what}")
             else:
                 lines.append(f"  - {i['action']} {what if i['kind'] in ('click', 'canvas') else i['label']}: {word[i.get('responded')]}"
-                             + (f", 文字变化" if i.get("text_changed") else "")
+                             + (", 文字变化" if i.get("text_changed") else "")
+                             + (", 引出了动画" if i.get("animated") else "")
                              + (f", 报错 {i['new_errors']}" if i.get("new_errors") else ""))
+        post = rep.get("post")
+        if post:
+            gaps = "/".join(str(g) for g in settings.PROBE_POST_GAPS_MS)
+            lines.append(f"全部操作完之后: 间隔 {gaps} 毫秒再连拍, 相邻帧变化像素占比 {post.get('frame_diffs')}"
+                         f"({'画面仍在变化' if post.get('moving') else '画面静止'}); 运行中的动画 {post.get('running_animations')} 个"
+                         + (f"; 与操作前相比新出现的文字: {' / '.join(post['text_added'])}" if post.get("text_added") else "")
+                         + (f"; 消失的文字: {' / '.join(post['text_removed'])}" if post.get("text_removed") else ""))
     else:
         lines.append("交互探测: 页面上没有找到按钮、输入框、可点击区域, 也没有注册键盘/指针监听")
     if rep.get("listeners"):
         lines.append("页面注册的事件监听: " + ", ".join(rep["listeners"]))
-    lines.append(f"布局: 桌面视口 {rep.get('viewport', {}).get('width')}px 横向溢出 {'是' if lay.get('overflow_x') else '否'}; "
+    lines.append(f"布局: 桌面视口 {rep.get('viewport', {}).get('width')}×{rep.get('viewport', {}).get('height')}px "
+                 f"横向溢出 {'是' if lay.get('overflow_x') else '否'}; "
                  f"手机 390px 横向溢出 {'是' if mob.get('overflow_x') else '否'}; 页面总高 {lay.get('doc_h')}px")
     text = (rep.get("text") or "").strip()
     lines.append("页面可见文字(节选): " + (re.sub(r"\s+", " ", text)[:700] if text else "(没有文字)"))
@@ -389,20 +417,31 @@ def probe_digest(rep: dict) -> str:
 def _review_parts(rep: dict) -> list:
     shots, parts = rep.get("shots") or {}, []
     gap_s = sum(settings.PROBE_FRAME_GAPS_MS) / 1000.0
-    plan_ = [("f0", "桌面视口, 页面加载后约 0.5 秒", 1024),
-             ("peak", f"同一视口, 之后 {gap_s:.1f} 秒内与上一张差异最大的一帧(对比两张可判断是否在动)", 1024),
-             ("after", "自动操作完页面上的可交互元素之后", 1024),
-             ("mobile", "手机宽度 390px 下的首屏", 390)]
     n = 0
-    for key, label, width in plan_:
-        path = shots.get(key)
-        if not path or not Path(path).is_file():
-            continue
-        if key == "after" and not rep.get("interactions"):
-            continue
+
+    def add(label, part):
+        nonlocal n
         n += 1
         parts.append({"type": "text", "text": f"图 {n}: {label}"})
-        parts.append(llm._image_part(Path(path), width))
+        parts.append(part)
+
+    def ok(key):
+        return bool(shots.get(key)) and Path(shots[key]).is_file()
+    if ok("f0"):
+        add("桌面视口, 页面加载后约 0.5 秒(入场动画可能尚未结束)", llm._image_part(Path(shots["f0"]), 1024))
+    if ok("peak"):
+        add(f"同一视口, 之后 {gap_s:.1f} 秒内与上一张差异最大的一帧(对比两张可判断是否在动)",
+            llm._image_part(Path(shots["peak"]), 1024))
+    if ok("full"):
+        tiles = llm.image_parts(Path(shots["full"]), 1024, max_tiles=3, tile_h=1700)[0]
+        for k, part in enumerate(tiles):
+            add("静置后的整页(截取前已逐屏滚动到底再回到顶部)"
+                + (f", 从上到下第 {k + 1}/{len(tiles)} 段" if len(tiles) > 1 else ""), part)
+    if ok("after") and rep.get("interactions"):
+        add("自动操作完页面上的可交互元素之后" + ("又过了约 1.6 秒" if rep.get("post") else ""),
+            llm._image_part(Path(shots["after"]), 1024))
+    if ok("mobile"):
+        add("手机宽度 390px 下的首屏", llm._image_part(Path(shots["mobile"]), 390))
     return parts
 
 
@@ -470,31 +509,36 @@ _VALUE = {"yes": 1.0, "partial": 0.5, "no": 0.0}
 def score(brief: dict, rev: dict, rep: dict) -> dict:
     """需求符合度 req-fit-v1。rev=None 表示未经模型验收(只有体检硬证据)。
 
-    硬证据闸门(覆盖模型说法): motion 项在「确定没在动」时判 no, 有动画但连拍无可见变化时最多 partial;
-    interaction 项在页面没有任何可交互元素、或所有可交互元素都没反应时判 no。
+    硬证据闸门(只在体检能证伪时覆盖模型说法): motion 项在「空闲和操作后都确定没在动」时判 no, 有动画但连拍
+    无可见变化时最多 partial; interaction 项在页面没有任何可交互元素、或所有可交互元素都没反应时判 no;
+    文本验收(没看图)时 visual 项最多 partial。空闲静止但操作后会动的页面体检证伪不了, 交给验收模型按截图判断。
     封顶: 运行报错/空白/卡死 ≤40; 任一用户明确要求的条目为 no ≤60; 未经模型验收 ≤70。"""
     f = probe.facts(rep)
     verdicts = (rev or {}).get("items") or {}
+    text_only = (rev or {}).get("mode") == "text"
     rows, wsum, vsum, must_no = [], 0.0, 0.0, False
     for it in brief["checklist"]:
         got = verdicts.get(it["id"]) or {}
         verdict, gate = got.get("verdict"), None
+        soft = False        # soft: 判不满分是因为「现有证据确认不了」, 不是页面有已知缺陷 —— 不拿去让模型修
         if it["type"] == "motion":
             if f["motion_none"]:
-                verdict, gate = "no", "体检: 连拍各帧完全相同, 且没有运行中的动画"
-            elif not f["motion_seen"] and verdict == "yes":
-                verdict, gate = "partial", "体检: 有动画在运行, 但连拍画面没有可见变化"
+                verdict, gate = "no", "体检: 空闲时连拍各帧完全相同、没有运行中的动画, 逐个操作之后也没有动起来"
+            elif not f["motion_seen"] and not f["motion_after"] and verdict == "yes":
+                verdict, gate, soft = "partial", "体检: 有动画在运行, 但连拍画面没有可见变化", True
         elif it["type"] == "interaction":
             if f["interactive_n"] == 0:
                 verdict, gate = "no", "体检: 页面上没有任何可交互元素, 也没有键盘/指针监听"
             elif f["dead_n"] and not f["responded_n"] and not f["unknown_n"]:
                 verdict, gate = "no", "体检: 所有可交互元素操作后都没有反应"
+        elif it["type"] == "visual" and text_only and verdict == "yes":
+            verdict, gate, soft = "partial", "本轮没有看图验收, 外观类条目无法确认", True
         value = _VALUE.get(verdict, 0.5 if rev is None else 0.0)
         w = 2.0 if it["must"] else 1.0
         wsum += w
         vsum += w * value
         must_no = must_no or (it["must"] and verdict == "no")
-        rows.append(dict(it, verdict=verdict or "unknown", evidence=got.get("evidence", ""), gate=gate))
+        rows.append(dict(it, verdict=verdict or "unknown", evidence=got.get("evidence", ""), gate=gate, soft=soft))
     coverage = vsum / wsum if wsum else 0.0
     alive = not f["frozen"]
     health = (0.25 * (alive and not f["errors"]) + 0.25 * (alive and not f["blank"]) + 0.25 * (not f["external"])
@@ -637,6 +681,9 @@ def run(desc: str, ws: Path, pool, ai_cfg: dict, judge_cfg: dict, viewport: dict
         if best["detail"]["score"] >= target_score and not best["defects"]:
             log("GEN", f"需求符合度达到 {target_score} 且无硬伤, 停止迭代")
             break
+        if best["detail"]["review_mode"] != "none" and not actionable(best["defects"], best["detail"]):
+            log("GEN", "没有可以明确修复的问题了(剩下的是证据确认不了的条目或低优先级意见), 停止迭代")
+            break
 
     if not best:
         errs = [r.get("error") for r in rounds if r.get("error")]
@@ -651,7 +698,7 @@ def run(desc: str, ws: Path, pool, ai_cfg: dict, judge_cfg: dict, viewport: dict
     slim = {k: v for k, v in best["rep"].items() if k not in ("text", "shots")}
     slim["shots"] = {}
     for key, path in (best["rep"].get("shots") or {}).items():
-        if Path(path).is_file():
+        if key != "full" and Path(path).is_file():        # 整页图已另存为 cloned_preview.png
             (ws / f"gen_{key}.png").write_bytes(Path(path).read_bytes())
             slim["shots"][key] = f"gen_{key}.png"
     (ws / "gen_probe.json").write_text(json.dumps(slim, ensure_ascii=False, indent=2), encoding="utf-8")

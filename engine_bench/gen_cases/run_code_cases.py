@@ -99,7 +99,9 @@ def run_case(db, pool, case, args, out: Path) -> dict:
          "score": rep.get("final_score"), "coverage": det.get("coverage"), "health": det.get("health"),
          "design": det.get("design"), "review_mode": det.get("review_mode"),
          "items_yes": sum(1 for i in items if i["verdict"] == "yes"), "items": len(items),
-         "must_unmet": [i["text"] for i in items if i.get("must") and i["verdict"] != "yes"],
+         # 与评分口径一致: 只有判 no 才算「未满足」(触发 60 分封顶); partial 单列, 不混在一起
+         "must_unmet": [i["text"] for i in items if i.get("must") and i["verdict"] == "no"],
+         "must_partial": [i["text"] for i in items if i.get("must") and i["verdict"] == "partial"],
          "rounds": len(rep.get("rounds") or []), "best_round": rep.get("best_round"),
          "elapsed": elapsed, "llm_seconds": rep.get("llm_seconds"), "tokens": rep.get("tokens"),
          "defects": rep.get("remaining_defects") or [], "caps": [c["reason"] for c in det.get("caps") or []], "error": err}
@@ -144,9 +146,10 @@ def main():
     lines = [f"# 代码直写轨跑分 {stamp}", "", f"模型 `{ai['model']}`; 口径 req-fit-v1; 墙钟 {wall}s; "
              f"完成 {len(ok)}/{len(results)}; 均分 {summary['mean_score']}; 耗时中位 {summary['median_elapsed']}s; "
              f"tokens 入 {summary['tokens']['in']} / 出 {summary['tokens']['out']}", "",
-             "| 用例 | 组 | 需求 | 分数 | 清单 | 健康 | 设计 | 验收 | 轮 | 耗时 | 未满足的明确要求 / 遗留硬伤 |", "|---|---|---|---|---|---|---|---|---|---|---|"]
+             "| 用例 | 组 | 需求 | 分数 | 清单 | 健康 | 设计 | 验收 | 轮 | 耗时 | 明确要求里未满足或部分满足的 / 遗留硬伤 |", "|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in results:
-        left = "; ".join(r["must_unmet"] + r["defects"])[:160] or (r["error"] or "—")
+        left = "; ".join(["未满足: " + t for t in r["must_unmet"]] + ["部分: " + t for t in r["must_partial"]]
+                         + r["defects"])[:200] or (r["error"] or "—")
         lines.append(f"| {r['id']} | {r['group']} | {r['text'][:28]} | {r['score']} | {r['items_yes']}/{r['items']} | {r['health']} | "
                      f"{r['design']} | {r['review_mode']} | {r['rounds']} | {r['elapsed']}s | {left} |")
     (out / "REPORT.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
