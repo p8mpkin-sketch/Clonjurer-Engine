@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 Q = 16              # 颜色量化步长(抗锯齿/JPEG 噪声不拆色)
 ROW_DOM = 0.55      # 一行里占比超过它的颜色算这行的背景
@@ -62,7 +63,7 @@ def measure(path: Path, max_h: int = 2400) -> dict:
     if len(bands) > 1 and bands[0]["y1"] - bands[0]["y0"] < MIN_BAND:
         bands[1]["y0"] = 0
         bands.pop(0)
-    out = []
+    out: list[dict[str, Any]] = []
     for b in bands[:MAX_BANDS]:
         y0, y1 = b["y0"], b["y1"]
         # 区块背景 = 区块里「背景行」(主色占比高的行)的主色众数; 整块都是内容(图片墙)时退回全块众数
@@ -94,10 +95,10 @@ def describe(m: dict, cards: bool = False) -> str:
     for i, b in enumerate(m["bands"], 1):
         span = f"内容横向 {b['x0']}~{b['x1']}px" if b["x1"] > b["x0"] else "无明显内容"
         lines.append(f"  {i}. y {b['y0']}~{b['y1']} (高 {b['h']}px), 背景 {b['bg']}, {span}")
-    cards = (m.get("cards") or []) if cards else []
-    if cards:
+    card_list = (m.get("cards") or []) if cards else []
+    if card_list:
         lines.append("卡片/面板(与所在区块背景色不同的矩形块; x,y 为左上角):")
-        for i, c in enumerate(cards, 1):
+        for i, c in enumerate(card_list, 1):
             lines.append(f"  卡{i}: x {c['x']} y {c['y']}, 宽 {c['w']} 高 {c['h']}, 背景 {c['bg']}")
     return "\n".join(lines)
 
@@ -160,7 +161,7 @@ def _cards(a, bands, k: int = 3, max_cards: int = 24) -> list:
     edge[1:, :] |= np.abs(gray[1:, :] - gray[:-1, :]) > 6
     free = ~edge
     seen = np.zeros_like(free)
-    out = []
+    out: list[dict[str, Any]] = []
     min_w, min_h = 80 // k, 50 // k
     for y in range(0, H2, 3):
         for x in range(0, W2, 3):
