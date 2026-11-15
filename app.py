@@ -27,6 +27,13 @@ REST API:
   GET  /api/download/<id>           单任务 ZIP 导出
   GET  /api/export_all              批量导出全部已完成 ZIP
   POST /api/cache/clear             清空 CAS 缓存池
+  GET/POST /api/v4/link-tasks       短链任务列表(?q=)与新建
+  POST /api/v4/link-tasks/<id>/generate  后台生成该任务的短链
+  GET  /api/v4/link-tasks/<id>      短链任务详情(含其下所有短链)
+  GET  /api/v4/link-tasks/<id>/export    导出 txt / csv
+  GET  /api/v4/links/providers      四家缩链服务可用性预检
+  GET/POST /api/v4/links            短链列表与单独新建
+  GET  /s/<id>                      短链跳转(302)并计点击
 """
 import io
 import csv
@@ -48,7 +55,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import requests as upstream_http
-from flask import (Flask, Response, abort, jsonify, render_template, request,
+from flask import (Flask, Response, abort, jsonify, redirect, render_template, request,
                    g, send_file, send_from_directory, session)
 
 import config
@@ -3005,6 +3012,229 @@ def clear_cache():
     _audit("cache.clear", "清空 CAS 全局缓存池")
     return jsonify({"ok": True, "cas": db.cas_stats()})
 
+
+# ---------------------------------------------------------------------------
+# 短链管理: 任务制短链(一组服务各一条)+ 单独短链 + /s/<id> 跳转计数
+# 服务层 core/link_shortener.py; 生成走后台线程(与存档打包一致), 前端轮询任务详情。
+# ---------------------------------------------------------------------------
+from core import link_shortener  # noqa: E402
+
+_link_gen_running: set = set()
+_link_gen_lock = threading.Lock()
+
+
+def _short_link_out(item: dict) -> dict:
+    out = dict(item)
+    out["ok"] = bool(item.get("short_url"))
+    out["local_url"] = request.host_url.rstrip("/") + f"/s/{item['id']}" if out["ok"] else ""
+    return out
+
+
+def _short_task_out(task: dict, with_links: bool = False) -> dict:
+    out = dict(task)
+    out["running"] = task["id"] in _link_gen_running
+    if out["running"]:
+        out["status"] = "running"
+    out["services"] = [s for s in (task.get("services") or "").split(",") if s]
+    if with_links:
+        links = [_short_link_out(l) for l in db.list_links_of_short_task(task["id"])]
+        out["links"] = links
+        out["link_count"] = sum(1 for l in links if l["ok"])
+        out["failed_count"] = sum(1 for l in links if not l["ok"])
+        out["total_clicks"] = sum(l.get("clicks") or 0 for l in links)
+        out["services"] = sorted({l["service"] for l in links if l["ok"]})
+        clone = _visible_task(task["clone_task_id"]) if task.get("clone_task_id") else None
+        out["clone_domain"] = (clone or {}).get("domain", "")
+    return out
+
+
+def _short_task_or_404(task_row_id: int) -> dict:
+    task = db.get_short_task(task_row_id)
+    if task is None:
+        abort(404)
+    return task
+
+
+def _start_link_generation(task_row_id: int) -> bool:
+    """后台生成; 同一任务已在生成中返回 False。"""
+    with _link_gen_lock:
+        if task_row_id in _link_gen_running:
+            return False
+        _link_gen_running.add(task_row_id)
+
+    def run():
+        try:
+            res = link_shortener.generate_for_task(db, task_row_id)
+            bus.publish(None, "LINK", f"短链任务 #{task_row_id} 生成完成: 成功 {res.get('created', 0)},"
+                                      f" 失败 {res.get('failed', 0)}")
+        except Exception as exc:  # noqa: BLE001 - 后台线程: 任何失败都要落到任务状态上
+            with suppress(Exception):
+                db.update_short_task(task_row_id, status="failed")
+            bus.publish(None, "LINK", f"短链任务 #{task_row_id} 生成失败: {type(exc).__name__}")
+        finally:
+            with _link_gen_lock:
+                _link_gen_running.discard(task_row_id)
+
+    threading.Thread(target=run, name=f"link-gen-{task_row_id}", daemon=True).start()
+    return True
+
+
+@app.get("/api/v4/link-tasks")
+def v4_link_tasks():
+    q = (request.args.get("q") or "").strip()[:100] or None
+    tasks = [_short_task_out(t) for t in db.list_short_tasks(q=q)]
+    return jsonify({"tasks": tasks, "kpis": db.link_kpis()})
+
+
+@app.post("/api/v4/link-tasks")
+def v4_link_task_create():
+    body = request.get_json(silent=True) or {}
+    name = str(body.get("name") or "").strip()
+    if not 1 <= len(name) <= 120:
+        return jsonify({"error": "任务名称需 1~120 个字符"}), 400
+    try:
+        target = link_shortener.validate_target(body.get("target_url"))
+        service = link_shortener.normalize_service(body.get("service"), "all")
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    clone_id = body.get("clone_task_id")
+    if clone_id in ("", None):
+        clone_id = None
+    else:
+        try:
+            clone_id = int(clone_id)
+        except (TypeError, ValueError):
+            return jsonify({"error": "clone_task_id 非法"}), 400
+        if _visible_task(clone_id) is None:
+            return jsonify({"error": f"克隆任务 #{clone_id} 不存在"}), 400
+    note = str(body.get("note") or "").strip()[:300]
+    tid = db.create_short_task(name, target, service, clone_id, note)
+    _audit("links.task_create", f"新建短链任务 #{tid} {name} -> {target} ({service})")
+    if body.get("generate"):
+        _start_link_generation(tid)
+    return jsonify({"task": _short_task_out(db.get_short_task(tid), with_links=True)}), 201
+
+
+@app.get("/api/v4/link-tasks/<int:task_row_id>")
+def v4_link_task_detail(task_row_id):
+    return jsonify({"task": _short_task_out(_short_task_or_404(task_row_id), with_links=True)})
+
+
+@app.post("/api/v4/link-tasks/<int:task_row_id>/generate")
+def v4_link_task_generate(task_row_id):
+    task = _short_task_or_404(task_row_id)
+    if not _start_link_generation(task_row_id):
+        return jsonify({"error": "该任务正在生成中"}), 409
+    _audit("links.generate", f"生成短链任务 #{task_row_id} {task['name']}")
+    return jsonify({"task": _short_task_out(db.get_short_task(task_row_id), with_links=True)}), 202
+
+
+@app.delete("/api/v4/link-tasks/<int:task_row_id>")
+def v4_link_task_delete(task_row_id):
+    task = _short_task_or_404(task_row_id)
+    if task_row_id in _link_gen_running:
+        return jsonify({"error": "该任务正在生成中, 请稍后再删"}), 409
+    db.delete_short_task(task_row_id, cascade=True)
+    _audit("links.task_delete", f"删除短链任务 #{task_row_id} {task['name']}(级联短链)")
+    return jsonify({"ok": True})
+
+
+def _csv_cell(value) -> str:
+    """CSV 单元格: 以 = + - @ 开头的值前加 ' 防表格公式注入。"""
+    text = "" if value is None else str(value)
+    return "'" + text if text[:1] in ("=", "+", "-", "@", "\t", "\r") else text
+
+
+@app.get("/api/v4/link-tasks/<int:task_row_id>/export")
+def v4_link_task_export(task_row_id):
+    task = _short_task_or_404(task_row_id)
+    fmt = (request.args.get("format") or "txt").lower()
+    if fmt not in ("txt", "csv"):
+        return jsonify({"error": "format 仅支持 txt / csv"}), 400
+    links = [_short_link_out(l) for l in db.list_links_of_short_task(task_row_id)]
+    fname = f"SL-{task['seq']:03d}_{time.strftime('%Y%m%d_%H%M%S')}.{fmt}"
+    if fmt == "txt":
+        lines = [l["short_url"] for l in links if l["ok"]]
+        return Response("\n".join(lines) + ("\n" if lines else ""), mimetype="text/plain; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["序号", "服务", "短链", "本地跳转(计数)", "目标地址", "点击", "状态", "说明", "生成时间"])
+    for i, l in enumerate(links, 1):
+        extras = l.get("extras") or {}
+        if not l["ok"]:
+            remark = extras.get("error", "")
+        elif extras.get("fallback"):
+            remark = f"指定 {extras.get('requested')} 失败, 顺延到 {l['service']}"
+        else:
+            remark = ""
+        writer.writerow([_csv_cell(v) for v in (
+            i, l["service"], l["short_url"], l["local_url"], l["target_url"], l.get("clicks") or 0,
+            "成功" if l["ok"] else "失败", remark, l.get("created_at", ""))])
+    return Response("\ufeff" + buf.getvalue(), mimetype="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+@app.get("/api/v4/links/providers")
+def v4_link_providers():
+    """四家服务的可用性预检(结果缓存 60s; ?refresh=1 强制重测)。"""
+    force = request.args.get("refresh") in ("1", "true")
+    return jsonify({"providers": link_shortener.preflight(force=force)})
+
+
+@app.get("/api/v4/links")
+def v4_links():
+    q = (request.args.get("q") or "").strip()[:100] or None
+    standalone = request.args.get("standalone") in ("1", "true")
+    links = [_short_link_out(l) for l in db.list_short_links(q=q, standalone=standalone)]
+    return jsonify({"links": links})
+
+
+@app.post("/api/v4/links")
+def v4_link_create():
+    """单独新建一条短链: service 指定服务(失败顺延), all 为按顺序自动适配。"""
+    body = request.get_json(silent=True) or {}
+    try:
+        target = link_shortener.validate_target(body.get("target_url"))
+        service = link_shortener.normalize_service(body.get("service"), "all")
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    label = str(body.get("label") or "").strip()[:120]
+    res = link_shortener.shorten(db, target, service, label=label)
+    link = _short_link_out(db.get_short_link(res["link_id"]))
+    _audit("links.create", f"单独短链 #{res['link_id']} {target} -> {res['short_url'] or '失败'}")
+    if not res["ok"]:
+        return jsonify({"error": res.get("error") or "生成失败", "link": link,
+                        "attempts": res["attempts"]}), 502
+    return jsonify({"link": link, "attempts": res["attempts"]}), 201
+
+
+@app.delete("/api/v4/links/<int:link_id>")
+def v4_link_delete(link_id):
+    link = db.get_short_link(link_id)
+    if link is None:
+        return jsonify({"error": "短链不存在"}), 404
+    db.delete_short_link(link_id)
+    if link.get("link_task_id"):
+        db.refresh_short_task_status(link["link_task_id"])
+    _audit("links.delete", f"删除短链 #{link_id} {link.get('short_url') or ''}")
+    return jsonify({"ok": True})
+
+
+@app.get("/s/<int:link_id>")
+def short_link_redirect(link_id):
+    """短链跳转: 302 到目标地址并计一次点击。失败留痕行(没有短链)不跳转。"""
+    link = db.get_short_link(link_id)
+    if link is None or not link.get("short_url"):
+        return Response("短链不存在", status=404, mimetype="text/plain; charset=utf-8")
+    try:
+        target = link_shortener.validate_target(link.get("target_url"))
+    except ValueError:
+        return Response("短链目标地址无效", status=410, mimetype="text/plain; charset=utf-8")
+    db.bump_short_link_click(link_id)
+    resp = redirect(target, code=302)
+    resp.headers["Cache-Control"] = "no-store"  # 每次点击都要回到这里计数
+    return resp
 
 # ---------------------------------------------------------------------------
 # 沙盒预览(静态文件 + 反向代理兜底)

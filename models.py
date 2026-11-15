@@ -1392,21 +1392,29 @@ class Database:
             return cur.lastrowid
 
     def link_kpis(self) -> dict:
+        """短链 KPI: 任务数 / 成功短链数(失败留痕行 short_url 为空, 不计) / 总点击。"""
         with self._lock:
             row = self._conn.execute(
-                "SELECT COUNT(*) AS links, COALESCE(SUM(clicks), 0) AS clicks FROM short_links").fetchone()
-            return {"links": row["links"], "clicks": row["clicks"]}
+                "SELECT COUNT(*) AS links, COALESCE(SUM(clicks), 0) AS clicks FROM short_links"
+                " WHERE short_url != ''").fetchone()
+            tasks = self._conn.execute("SELECT COUNT(*) AS n FROM short_link_tasks").fetchone()
+            return {"tasks": tasks["n"], "links": row["links"], "clicks": row["clicks"]}
 
     def list_short_tasks(self, q: str = None, limit: int = 200):
         where, params = [], []
         if q:
-            where.append("(name LIKE ? OR target_url LIKE ? OR note LIKE ?)")
+            where.append("(t.name LIKE ? OR t.target_url LIKE ? OR t.note LIKE ?)")
             params.extend([f"%{q}%"] * 3)
         clause = (" WHERE " + " AND ".join(where)) if where else ""
         params.append(limit)  # type: ignore[arg-type]
         with self._lock:
             rows = self._conn.execute(
-                f"SELECT t.*, (SELECT COUNT(*) FROM short_links s WHERE s.link_task_id = t.id) AS link_count,"
+                f"SELECT t.*, (SELECT COUNT(*) FROM short_links s WHERE s.link_task_id = t.id"
+                f" AND s.short_url != '') AS link_count,"
+                f" (SELECT COUNT(*) FROM short_links s WHERE s.link_task_id = t.id"
+                f" AND s.short_url = '') AS failed_count,"
+                f" (SELECT GROUP_CONCAT(DISTINCT s.service) FROM short_links s WHERE s.link_task_id = t.id"
+                f" AND s.short_url != '') AS services,"
                 f" (SELECT COALESCE(SUM(s.clicks), 0) FROM short_links s WHERE s.link_task_id = t.id) AS total_clicks"
                 f" FROM short_link_tasks t{clause} ORDER BY t.id DESC LIMIT ?",
                 params).fetchall()
@@ -1439,20 +1447,36 @@ class Database:
             return cur.rowcount > 0
 
     def refresh_short_task_status(self, task_row_id: int):
-        """按短链生成结果刷新任务状态: pending -> partial/done/failed。"""
+        """按短链生成结果刷新任务状态: 全成功 done / 有成功有失败 partial / 只有失败 failed /
+        一条记录都没有 pending。失败留痕行的 short_url 为空串。"""
         task = self.get_short_task(task_row_id)
         if task is None:
             return
         with self._lock:
             n = self._conn.execute(
-                "SELECT COUNT(*) AS c FROM short_links WHERE link_task_id = ?",
+                "SELECT COALESCE(SUM(short_url != ''), 0) AS ok,"
+                " COALESCE(SUM(short_url = ''), 0) AS bad"
+                " FROM short_links WHERE link_task_id = ?",
                 (task_row_id,)).fetchone()
-        total = n["c"] or 0
-        if total == 0:
-            status = "failed" if task["status"] == "pending" else task["status"]
-        else:
+        ok, bad = n["ok"] or 0, n["bad"] or 0
+        if ok and bad:
+            status = "partial"
+        elif ok:
             status = "done"
+        elif bad:
+            status = "failed"
+        else:
+            status = "pending"
         self.update_short_task(task_row_id, status=status)
+
+    def delete_failed_links_of_short_task(self, task_row_id: int) -> int:
+        """清掉任务上一轮的失败留痕行(short_url 为空), 重新生成前调用。"""
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM short_links WHERE link_task_id = ? AND short_url = ''",
+                (task_row_id,))
+            self._conn.commit()
+            return cur.rowcount
 
     def delete_short_task(self, task_row_id: int, cascade: bool = True) -> bool:
         with self._lock:
@@ -1493,11 +1517,15 @@ class Database:
             self._conn.commit()
             return cur.lastrowid
 
-    def list_short_links(self, task_id=None, q: str = None, limit: int = 200):
+    def list_short_links(self, task_id=None, q: str = None, limit: int = 200,
+                         standalone: bool = False):
+        """standalone=True 只列不属于任何短链任务的单独短链。"""
         where, params = [], []
         if task_id:
             where.append("task_id = ?")
             params.append(task_id)
+        if standalone:
+            where.append("link_task_id IS NULL")
         if q:
             where.append("(target_url LIKE ? OR short_url LIKE ? OR label LIKE ?)")
             params.extend([f"%{q}%"] * 3)
