@@ -229,7 +229,7 @@ def _columns(a, W: int, H: int) -> list:
     if not edges or len(edges) > 3:
         return []
     cuts = [0] + edges + [W]
-    out = []
+    out: list[dict[str, Any]] = []
     for x0, x1 in zip(cuts, cuts[1:]):
         if x1 - x0 < 40:
             continue
