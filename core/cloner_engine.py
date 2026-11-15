@@ -64,6 +64,7 @@ from core import pattern_detector, strategy_packs
 from core import live
 from core import pixel_calibrator
 
+from core.clone import interaction_check
 from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 import 路径不变
     CANVAS_PIN_JS,
     CV_CANVAS_DRIFT_JS,
@@ -1208,9 +1209,34 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
                 (not isinstance(score, (int, float)) or fidelity > score):
             score = fidelity
             stats["dominant_track"] = "fidelity"
+        # 与上次克隆同一网址相比原站变了什么(定时任务盯变化用; 确定性像素比较, 带区域框)
+        try:
+            prev = self.db.previous_completed_task(self.task_id, self.task["target_url"]) \
+                if hasattr(self.db, "previous_completed_task") else None
+            if prev and prev.get("workspace_path"):
+                from core import diff_regions
+                ch = diff_regions.site_change(Path(prev["workspace_path"]), self.ws)
+                if ch is not None:
+                    stats["change_since_last"] = dict(ch, prev_task_id=prev["id"], prev_at=prev.get("updated_at"))
+                    self.log("INFO", f"原站变化: {ch['verdict']}(对比任务 #{prev['id']})")
+        except Exception as exc:   # noqa: BLE001 变化比较不阻断交付
+            self.log("INFO", f"原站变化比较跳过: {type(exc).__name__}: {str(exc)[:120]}")
         self._set(status="completed", progress=100, stage="完成",
                   similarity_score=score, stats_json=json.dumps(stats, ensure_ascii=False),
                   zip_path=str(zip_path))
+        # 交互可用检查放在任务已标为完成之后: 用户先看到结果, 检查(约 20~60 秒)跑完再补写 stats 并按比例扣分。
+        # 原站点了有反应的控件, 克隆页同样点一下; 点不动的按比例扣分(最多 8 分)。像素还原度量不到「看着一样但点不动」
+        if getattr(config, "INTERACTION_CHECK", True) and isinstance(score, (int, float)) and not blocked:
+            ic = self._interaction_check(pages_map.get("/", "index.html"))
+            if ic is not None:
+                stats["interaction_check"] = ic
+                pen = interaction_check.penalty(ic)
+                if pen:
+                    stats["score_before_interaction"] = score
+                    stats["interaction_penalty"] = pen
+                    score = round(max(0.0, score - pen), 1)
+                    self.log("INTERACT", f"交互扣分 {pen}: 还原度 {stats['score_before_interaction']} → {score}")
+                self.db.update_task(self.task_id, similarity_score=score, stats_json=json.dumps(stats, ensure_ascii=False))
         self.db.increment_completed(self.task["batch_id"])
 
     def _detect_blocked(self) -> str:
@@ -1246,6 +1272,24 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
         return script + html
 
     # ------------------------------------------------------------------
+    def _interaction_check(self, entry: str):
+        """克隆页交互可用检查: 交付入口页走本地沙盒, 原站走外网; 出错或超时返回 None(不影响交付)。"""
+        try:
+            from core.clone.support import _LocalPreviewServer
+            server = _LocalPreviewServer(self.ws)
+            server.start()
+            try:
+                vp = {"width": 1440, "height": 900}
+                return interaction_check.check(lambda v: self.pool.context(viewport=v), self.task["target_url"],
+                                               f"http://127.0.0.1:{server.port}/{entry}", vp, limit=10,
+                                               budget_s=float(getattr(config, "INTERACTION_CHECK_BUDGET", 45)),
+                                               log=self.log)
+            finally:
+                server.stop()
+        except Exception as exc:   # noqa: BLE001 检查不阻断交付
+            self.log("INTERACT", f"交互可用检查跳过: {type(exc).__name__}: {str(exc)[:160]}")
+            return None
+
     def _collect_stats(self) -> dict:
         """以任务工作空间真实文件为准统计; 固化产物(HTML/Mock)也计入总体积。"""
         stats = {"css": 0, "js": 0, "img": 0, "font": 0, "media": 0,

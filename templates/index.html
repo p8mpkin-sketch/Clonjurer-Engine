@@ -15,9 +15,9 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 <!-- 顶级字体体系: Inter / Plus Jakarta Sans / JetBrains Mono / Noto Sans SC -->
 <link href="/vendor/fonts/fonts.css" rel="stylesheet">
 <!-- UI 改版 P0 规范层: 字号/对比度/焦点/语义色(只换样式) -->
-<link href="/vendor/css/ui-tokens.css?v=15" rel="stylesheet">
+<link href="/vendor/css/ui-tokens.css?v=23" rel="stylesheet">
 
-<script src="/vendor/js/lucide.subset.js?v=2"></script>
+<script src="/vendor/js/lucide.subset.js?v=8"></script>
 <script>
 /* Lucide 非破坏性 shim: 官方 createIcons 会把 <i data-lucide> 整节点替换为 <svg>,
    Vue 记录的 vnode 锚点随之失效, 任务列表轮询触发 patch 时报
@@ -214,10 +214,59 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
   [class*="rounded-2xl"]{border-radius:12px}
   .shadow-lg,.shadow-xl{box-shadow:none}
   [data-theme="light"] .bg-slate-900,[data-theme="light"] [class*="bg-slate-900/"]{box-shadow:0 1px 2px rgba(16,16,20,.04)}
+  /* ===== 界面生成: 实时「思考 + 写代码」视图(任务卡缩略 + 详情). 跟随站点主题, 不加装饰背景 ===== */
+  .lc{min-width:0;max-width:100%;display:flex;flex-direction:column;overflow:hidden;background:var(--surface);color:var(--fg-2);
+      border:1px solid var(--line);border-radius:10px}
+  .lc-head{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:12px;color:var(--fg-3);border-bottom:1px solid var(--line);min-width:0}
+  .lc-head b{color:var(--fg);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lc-head .lc-file{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fg-3)}
+  .lc-meta{margin-left:auto;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .lc-spin{width:10px;height:10px;border-radius:50%;border:1.5px solid var(--line-strong,rgba(127,127,127,.35));border-top-color:var(--fg-2);animation:lc-spin .9s linear infinite;flex:none}
+  @keyframes lc-spin{to{transform:rotate(360deg)}}
+  .lc-steps{list-style:none;margin:0;padding:8px 12px;max-height:150px;overflow-y:auto;border-bottom:1px solid var(--line);font-size:12.5px;line-height:1.5}
+  .lc-steps li{display:grid;grid-template-columns:16px 76px minmax(0,1fr);gap:6px;padding:2px 0;align-items:start}
+  .lc-steps .ic{color:rgb(var(--ok-500,34 197 94));font-size:11px;line-height:19px}
+  .lc-steps .ic .lc-spin{margin-top:4px}
+  .lc-steps .k{color:var(--fg-3)}
+  .lc-steps .v{color:var(--fg-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lc-steps li.now .v{color:var(--fg)}
+  .lc-bar{height:2px;background:var(--line);position:relative;overflow:hidden}
+  .lc-bar i{position:absolute;top:0;bottom:0;width:30%;background:var(--fg-3);opacity:.6;animation:lc-bar 1.4s ease-in-out infinite}
+  @keyframes lc-bar{from{left:-30%}to{left:100%}}
+  .lc-code{position:relative;flex:1;min-height:0;overflow:auto;margin:0;padding:6px 0;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      font-size:12px;line-height:1.6;background:var(--bg);color:var(--fg-2)}
+  .lc-code .ln{display:flex;white-space:pre-wrap;word-break:break-all}
+  .lc-code .no{flex:none;width:44px;padding-right:12px;text-align:right;color:var(--fg-3);opacity:.55;user-select:none;font-variant-numeric:tabular-nums}
+  .lc-code .tx{flex:1;min-width:0;padding-right:12px}
+  .lc-caret{display:inline-block;width:7px;height:14px;vertical-align:-2px;background:var(--fg-3);animation:lc-blink 1s steps(2,start) infinite}
+  @keyframes lc-blink{to{visibility:hidden}}
+  .lc-code .t-tag{color:#c2185b}.lc-code .t-attr{color:#1565c0}.lc-code .t-str{color:#2e7d32}.lc-code .t-com{color:var(--fg-3);font-style:italic}
+  .lc-code .t-kw{color:#6a1b9a}.lc-code .t-num{color:#b45309}.lc-code .t-sys{color:var(--fg);font-weight:600}
+  [data-theme="dark"] .lc-code .t-tag{color:#f48fb1}[data-theme="dark"] .lc-code .t-attr{color:#90caf9}[data-theme="dark"] .lc-code .t-str{color:#a5d6a7}
+  [data-theme="dark"] .lc-code .t-kw{color:#ce93d8}[data-theme="dark"] .lc-code .t-num{color:#ffcc80}
+  .lc-follow{position:absolute;right:14px;bottom:12px;font-size:12px;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--fg-2);box-shadow:0 2px 8px rgba(0,0,0,.12)}
+  .lc-empty{padding:10px 14px;color:var(--fg-3);font-size:12px}
+  .lc-big{height:430px;margin-top:12px}
+  .lc-compact{height:180px;border-radius:0;border:0}
+  .lc-compact .lc-head{padding:7px 10px;font-size:11px}
+  .lc-compact .lc-code{font-size:10.5px;padding:4px 0;overflow:hidden}
+  .lc-compact .lc-code .no{width:28px;padding-right:8px}
+  .run-panel,.run-log{min-width:0;max-width:100%;overflow:hidden}
+  @media (prefers-reduced-motion: reduce){.lc-spin,.lc-bar i,.lc-caret{animation:none}}
+  .shot-drop{position:relative;display:flex;align-items:center;justify-content:center;min-height:120px;max-height:260px;
+      border:1.5px dashed rgba(148,163,184,.35);border-radius:12px;background:rgba(2,6,23,.45);cursor:pointer;overflow:hidden;transition:border-color .15s,background .15s}
+  [data-theme="light"] .shot-drop{background:#f6f6f7;border-color:#cfcfd4}
+  .shot-drop:hover,.shot-drop:focus{border-color:rgba(129,140,248,.8);outline:none}
+  .shot-drop.on{border-color:#818cf8;background:rgba(99,102,241,.12)}
+  .shot-drop.has{border-style:solid}
+  .shot-drop img{max-width:100%;max-height:256px;object-fit:contain;display:block}
+  .shot-drop-tip{display:flex;flex-direction:column;align-items:center;gap:4px;color:var(--fg-3);font-size:11px;padding:18px;text-align:center}
+  .shot-drop-tip b{font-size:12.5px;color:var(--fg-2);font-weight:600}
+  .shot-drop-x{position:absolute;top:6px;right:6px;width:24px;height:24px;border-radius:50%;background:rgba(0,0,0,.65);color:#fff;font-size:15px;line-height:22px}
 </style>
 <!-- Tailwind 预编译(tools/build_css.sh): 原 451KB 运行时 JS 每次打开都在浏览器里扫描 DOM 生成样式;
      放在 head 最后, 与运行时注入的位置一致, 层叠顺序不变 -->
-<link href="/vendor/css/app.css?v=5" rel="stylesheet">
+<link href="/vendor/css/app.css?v=13" rel="stylesheet">
 </head>
 <body class="h-screen overflow-hidden font-sans antialiased">
 
@@ -283,7 +332,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <div v-if="g.title && !navCollapsed" class="nav-group">[[ g.title ]]</div>
       <div v-else-if="gi && navCollapsed" class="h-px bg-white/[0.07] mx-2 my-2"></div>
       <div v-else class="h-2"></div>
-      <button v-for="m in g.items" :key="m.id" @click="goModule(m.id)" :title="m.label"
+      <button v-for="m in g.items" :key="m.id" @click="goModule(m.id)" :title="m.desc ? m.label + ': ' + m.desc : m.label"
         :class="[activeModule===m.id ? 'active' : '', navCollapsed ? 'justify-center px-0' : '']" class="nav-item">
         <i :data-lucide="m.icon" class="w-4 h-4 shrink-0"></i>
         <span v-show="!navCollapsed" class="flex-1 truncate">[[ m.label ]]</span>
@@ -300,15 +349,13 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         </div>
         <button @click="currentProjectId=''" class="mt-0.5 text-[12px] text-slate-500 hover:text-slate-200">显示全部项目</button>
       </div>
+      <!-- 系统状态: 一个状态点, 正常时只写「系统正常」, 异常/繁忙才给细节 -->
       <div v-if="!navCollapsed" class="sys-status">
-        <button class="sys-row" @click="goModule('browserpool')" title="浏览器池">
-          <span class="sys-dot" :class="telemetry.browser.alive ? 'on' : ''"></span>浏览器<b>[[ telemetry.browser.active ]] / [[ telemetry.browser.max ]]</b>
-        </button>
-        <button class="sys-row" @click="goModule('hub')" title="克隆队列">
-          <span class="sys-dot" :class="telemetry.queue.running ? 'busy' : ''"></span>队列<b>[[ telemetry.queue.running ]] 运行 · [[ telemetry.queue.pending ]] 等待</b>
-        </button>
-        <button class="sys-row" @click="goModule('docker')" title="部署容器">
-          <span class="sys-dot" :class="dockerSummary.running ? 'on' : ''"></span>容器<b>[[ dockerSummary.running ]] 运行</b>
+        <button class="sys-row" @click="goModule('browserpool')" :title="'浏览器 ' + telemetry.browser.active + '/' + telemetry.browser.max + ' · 运行 ' + telemetry.queue.running + ' · 排队 ' + telemetry.queue.pending + ' · 部署 ' + dockerSummary.running">
+          <span class="sys-dot" :class="sysBad ? 'bad' : (telemetry.queue.running ? 'busy' : 'on')"></span>
+          <template v-if="sysBad">浏览器服务异常</template>
+          <template v-else-if="telemetry.queue.running || telemetry.queue.pending">系统运行中<b>[[ telemetry.queue.running ]] 运行<template v-if="telemetry.queue.pending"> · [[ telemetry.queue.pending ]] 排队</template></b></template>
+          <template v-else>系统正常</template>
         </button>
       </div>
       <button @click="goModule('admin'); adminTab='settings'; loadSettings();" title="设置"
@@ -337,8 +384,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
     <header class="top-header h-12 shrink-0 sticky top-0 z-20 border-b border-white/[0.07] flex items-center gap-3 px-5" style="background:var(--bg)">
       <div class="min-w-0 flex items-center gap-1.5 text-[13px]">
         <template v-if="breadcrumb">
-          <button @click="goModule('hub'); currentProjectId=''" title="返回项目"
-            class="hidden sm:inline text-slate-500 hover:text-slate-200 transition-colors whitespace-nowrap">项目</button>
+          <button @click="goModule('hub'); currentProjectId=''" title="返回首页"
+            class="hidden sm:inline text-slate-500 hover:text-slate-200 transition-colors whitespace-nowrap">首页</button>
           <i data-lucide="chevron-right" class="hidden sm:inline-flex w-3.5 h-3.5 text-slate-600 shrink-0"></i>
           <span class="font-medium text-slate-100 truncate">[[ breadcrumb.current ]]</span>
         </template>
@@ -346,6 +393,19 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       </div>
       <div class="flex-1"></div>
       <div class="flex items-center gap-1">
+        <!-- 运行中的任务: 顶栏一个小指示, 点开直达任务(不再用右下角浮动胶囊压住页面) -->
+        <div v-if="(live.tasks || []).length" class="relative">
+          <button type="button" @click="runMenu = !runMenu" class="h-8 flex items-center gap-1.5 px-2.5 rounded-md text-[13px] text-slate-300 hover:text-slate-100 hover:bg-white/[0.05]" :aria-expanded="runMenu" aria-label="正在运行的任务">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span><span class="tnums">[[ live.tasks.length ]]</span><span class="hidden sm:inline">运行中</span>
+          </button>
+          <div v-if="runMenu" class="fixed inset-0 z-[60]" @click="runMenu = false"></div>
+          <div v-if="runMenu" class="head-menu z-[61]" style="width:300px" role="menu">
+            <button v-for="t in live.tasks" :key="t.id" type="button" role="menuitem" @click="runMenu = false; openRunning(t.id)">
+              <span class="min-w-0 flex-1 text-left"><b class="block truncate">[[ t.domain || ('任务 #' + t.id) ]]</b><small class="block truncate">[[ stageText(t.stage) ]] · [[ t.progress || 0 ]]%<template v-if="t.elapsed_s != null"> · [[ fmtDur(t.elapsed_s) ]]</template></small></span>
+            </button>
+            <div v-if="live.pending_total" class="px-3 py-2 text-[12px] text-slate-500">另有 [[ live.pending_total ]] 个排队</div>
+          </div>
+        </div>
         <button @click="toggleConsole" title="实时日志" aria-label="实时日志"
           class="h-8 flex items-center gap-1.5 px-2.5 rounded-md text-[13px] text-slate-400 hover:text-slate-100 hover:bg-white/[0.05] transition-colors">
           <i data-lucide="terminal" class="w-4 h-4"></i><span class="hidden lg:inline">日志</span>
@@ -442,7 +502,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
   <div class="flex flex-1 min-h-0">
   <!-- ======================= 总览: 多项目工作台 ======================= -->
   <div v-show="view==='dashboard'" class="flex-1 min-h-0 overflow-y-auto custom-scroll">
-    <div class="dash mx-auto px-6 sm:px-10 pt-10 sm:pt-14 pb-20">
+    <div class="dash mx-auto px-6 sm:px-10 pt-8 sm:pt-10 pb-20">
       <!-- 抬头: 日期 + 衬线大标题 + 直接开克隆 -->
       <section class="dash-hero">
         <div class="dash-eyebrow">[[ dashDate ]]</div>
@@ -458,31 +518,49 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         <div v-if="canWrite" class="dash-omni-foot">
           默认标准档，单页抓取。要批量导入、改交付形态或调参数，去<button type="button" @click="goModule('create')" class="dash-link">完整设置</button>
         </div>
+        <div v-if="canWrite && isFirstRun" class="dash-try">
+          <span>没想好克隆哪个？点一个试试：</span>
+          <button v-for="u in sampleUrls" :key="u" type="button" :disabled="submitting" @click="heroUrl = u; heroSubmit()">[[ u.replace(/^https?:\/\//, '').replace(/\/$/, '') ]]</button>
+        </div>
       </section>
 
-      <!-- 关键数字: 不装盒子, 用发丝线分栏 -->
-      <section class="dash-kpis">
-        <div class="dash-kpi"><div class="dash-kpi-label">项目</div><div class="dash-kpi-num">[[ countUp.projects ]]</div></div>
-        <div class="dash-kpi"><div class="dash-kpi-label">克隆任务</div><div class="dash-kpi-num">[[ countUp.tasks ]]</div></div>
-        <div class="dash-kpi"><div class="dash-kpi-label">平均还原度</div><div class="dash-kpi-num">[[ dashAvg ]]<small v-if="dashAvg !== '—'">分</small></div></div>
-        <div class="dash-kpi"><div class="dash-kpi-label">正在运行</div><div class="dash-kpi-num">[[ countUp.running ]]<span v-if="countUp.running" class="dash-live"></span></div></div>
+      <!-- 第一次使用: 三步说明 + 其他能力入口 -->
+      <section v-if="isFirstRun" class="dash-guide" aria-label="怎么用">
+        <ol class="dash-steps">
+          <li><b><em>1</em>粘贴网址</b><span>任意公开网页，回车就开始，普通页面半分钟左右完成。</span></li>
+          <li><b><em>2</em>看像不像</b><span>按桌面、平板、手机三种宽度和原站并排、卷帘、差异对比，并给出还原度分数。</span></li>
+          <li><b><em>3</em>下载或部署</b><span>下载网站源码包，或一键在本机跑起来，拿到可以直接打开的访问地址。</span></li>
+        </ol>
+        <div class="dash-more">
+          <button v-for="m in navGroups[1].items" :key="m.id" type="button" @click="goModule(m.id)">
+            <i :data-lucide="m.icon" class="w-4 h-4"></i><b>[[ m.label ]]</b><span>[[ m.desc ]]</span>
+          </button>
+        </div>
       </section>
+
+      <!-- 关键数字: 一行紧凑指标, 每项可点击直达对应列表 -->
+      <nav v-if="!isFirstRun" class="dash-stats" aria-label="概览">
+        <button type="button" @click="dashJump('projects')">项目 <b class="tnums">[[ countUp.projects ]]</b></button>
+        <button type="button" @click="dashJump('tasks')">任务 <b class="tnums">[[ countUp.tasks ]]</b></button>
+        <button type="button" @click="dashJump('score')" title="只统计克隆任务">克隆平均还原度 <b class="tnums">[[ dashAvg ]]</b></button>
+        <button type="button" @click="dashJump('running')" :class="{ live: countUp.running }">正在运行 <b class="tnums">[[ countUp.running ]]</b><span v-if="countUp.running" class="dash-live"></span></button>
+      </nav>
 
       <section v-if="live.tasks.length" class="run-strip">
-        <div class="dash-sec-head"><div class="flex items-baseline gap-3"><h2 class="dash-sec-title">正在克隆</h2><span class="text-[13px] text-slate-500 tnums">[[ live.tasks.length ]] 个<template v-if="live.pending_total"> · 排队 [[ live.pending_total ]]</template></span></div>
-          <button type="button" class="dash-link" @click="goModule('browserpool')">看全部工位</button></div>
+        <div class="dash-sec-head"><div class="flex items-baseline gap-3"><h2 class="dash-sec-title">正在进行</h2><span class="text-[13px] text-slate-500 tnums">[[ live.tasks.length ]] 个<template v-if="live.pending_total"> · 排队 [[ live.pending_total ]]</template></span></div>
+          <button type="button" class="dash-link" @click="dashJump('running')">查看全部</button></div>
         <div class="run-list">
-          <button v-for="t in live.tasks.slice(0, 4)" :key="t.id" type="button" class="run-item" @click="openTaskDetail(t)">
+          <button v-for="t in live.tasks.slice(0, 4)" :key="t.id" type="button" class="run-item" @click="openRunning(t.id)">
             <div class="run-top"><b class="truncate">[[ t.domain ]]</b><span>[[ fmtDur(t.elapsed_s) ]]<template v-if="t.eta_s != null"> · [[ etaText(t.eta_s) ]]</template></span></div>
-            <div class="run-steps"><span v-for="st in liveSteps(t)" :key="st.name" :class="st.state"></span></div>
-            <div class="run-stage">[[ liveSteps(t).find(x => x.state==='active') ? liveSteps(t).find(x => x.state==='active').name : (t.stage || '准备中') ]]<small v-if="t.creator"> · [[ t.creator ]]</small></div>
+            <div class="run-steps"><span v-for="st in liveSteps(t, isGenTask(t))" :key="st.name" :class="st.state"></span></div>
+            <div class="run-stage">[[ liveSteps(t, isGenTask(t)).find(x => x.state==='active') ? liveSteps(t, isGenTask(t)).find(x => x.state==='active').name : stageText(t.stage) ]]<small v-if="t.creator"> · [[ t.creator ]]</small></div>
           </button>
         </div>
       </section>
 
       <div class="dash-body">
       <!-- 项目: 首页主体, 唯一带缩略图的区块 -->
-      <section class="dash-main">
+      <section class="dash-main" ref="dashProjects">
         <div class="dash-sec-head">
           <div class="flex items-baseline gap-3">
             <h2 class="dash-sec-title">项目</h2>
@@ -544,11 +622,12 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               </div>
               <p class="text-[13px] text-slate-500 mt-1 truncate">[[ p.description || '暂无描述' ]]</p>
               <div class="flex items-end gap-5 mt-5">
-                <div class="shrink-0">
+                <div v-if="!p.task_cnt" class="text-[13px] text-slate-500">还没有任务。<button v-if="canWrite" type="button" class="dash-link" @click.stop="enterProject(p); goModule('create')">在这个项目里新建克隆</button></div>
+                <div v-if="p.task_cnt" class="shrink-0">
                   <div class="dash-proj-score" :class="p.avg_score == null ? 'text-slate-600' : ''">[[ p.avg_score != null ? p.avg_score.toFixed(1) : '—' ]]</div>
                   <div class="text-[12px] text-slate-500 mt-0.5">平均还原度</div>
                 </div>
-                <div class="flex-1 min-w-0 pb-1">
+                <div v-if="p.task_cnt" class="flex-1 min-w-0 pb-1">
                   <div class="proj-rate"><span :style="{ width: projMeta[p.id].rate + '%' }"></span><i v-if="p.fail_cnt" :style="{ width: projMeta[p.id].failRate + '%' }"></i></div>
                   <div class="flex justify-between mt-1.5 text-[12px] text-slate-500 tnums">
                     <span>[[ p.ok_cnt ]]/[[ p.task_cnt ]] 成功</span><span v-if="p.fail_cnt" class="text-rose-400">[[ p.fail_cnt ]] 失败</span>
@@ -646,8 +725,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <button type="button" class="dash-feed-row" @click="openTaskDetail(t)" :title="t.target_url">
               <span class="dash-feed-dot" :class="'is-' + (t.status === 'completed' ? 'ok' : (t.status === 'failed' ? 'bad' : 'run'))"></span>
               <span class="dash-feed-text">
-                <span class="dash-feed-domain">[[ t.domain || t.target_url ]]</span>
-                <span class="dash-feed-sub"><template v-if="t.creator_name"><b>[[ t.creator_name ]]</b> · </template>[[ dashTaskProject(t) ]] · [[ relTime(t.updated_at || t.created_at) ]]</span>
+                <span class="dash-feed-domain">[[ taskTitle(t) ]]</span>
+                <span class="dash-feed-sub"><template v-if="t.creator_name"><b>[[ t.creator_name ]]</b> · </template>[[ taskSub(t) ]] · [[ relTime(t.updated_at || t.created_at) ]]</span>
               </span>
               <span v-if="t.status === 'completed' && t.similarity_score != null" class="dash-feed-score">[[ Number(t.similarity_score).toFixed(1) ]]</span>
               <span v-else-if="t.status === 'failed'" class="dash-feed-tag is-bad">失败</span>
@@ -669,7 +748,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         </div>
         <div class="space-y-3">
           <div><label class="text-[11px] text-slate-400 mb-1 block">项目名称 *</label>
-            <input v-model="projectModal.name" placeholder="例如: 钓鱼演练-金融行业组" class="w-full bg-slate-950/80 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500/60"></div>
+            <input v-model="projectModal.name" placeholder="例如: 客户官网改版" class="w-full bg-slate-950/80 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500/60"></div>
           <div><label class="text-[11px] text-slate-400 mb-1 block">描述</label>
             <textarea v-model="projectModal.description" rows="2" placeholder="项目用途 / 负责人 / 备注" class="w-full bg-slate-950/80 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500/60 resize-none"></textarea></div>
           <div><label class="text-[11px] text-slate-400 mb-1 block">标识色</label>
@@ -994,7 +1073,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <div class="pg-head">
         <div>
           <h2 class="pg-title">部署</h2>
-          <div class="pg-meta"><span class="live-dot" :class="dockerSummary.running ? 'on' : ''"></span>[[ dockerSummary.running ]] 个在线<template v-if="dockerSummary.stopped"> · [[ dockerSummary.stopped ]] 个已停止</template> · [[ docker.available ? ('Docker ' + docker.version) : '本机进程模式' ]]
+          <div class="pg-meta"><span class="live-dot" :class="dockerSummary.running ? 'on' : ''"></span>[[ dockerSummary.running ]] 个在线<template v-if="dockerSummary.stopped"> · [[ dockerSummary.stopped ]] 个已停止</template> · [[ docker.available ? '部署在本机(Docker)' : '部署在本机' ]]
             <template v-if="dockerMeta.runtime && dockerMeta.runtime.state==='warming'"> · 正在准备运行环境</template></div>
         </div>
         <div class="flex items-center gap-2">
@@ -1014,7 +1093,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <i v-if="c.status==='starting'" data-lucide="loader" class="w-3.5 h-3.5 animate-spin"></i><span v-else class="dot"></span>[[ deployStateText(c) ]]
           </div>
           <div class="hide-sm min-w-0">
-            <div v-if="c.url" class="flex items-center gap-1 min-w-0"><a :href="c.url" target="_blank" rel="noopener" class="dp-link truncate">[[ c.lan ? '局域网' : '本机' ]] :[[ c.port ]]</a>
+            <div v-if="c.url" class="flex items-center gap-1 min-w-0"><a :href="c.url" target="_blank" rel="noopener" class="dp-link truncate" :title="c.url">[[ c.url.replace(/^https?:\/\//, '') ]]</a>
               <button type="button" class="mt-icon sm" title="复制地址" @click="copyText(c.url)"><i data-lucide="copy" class="w-3.5 h-3.5"></i></button></div>
             <span v-else class="text-[13px] text-slate-500">—</span>
           </div>
@@ -1317,7 +1396,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         <div>
           <h2 class="pg-title">视觉修复</h2>
           <div class="pg-meta">
-            <span class="live-dot" :class="aiKeyConfigured ? 'on' : 'off'"></span>[[ aiKeyConfigured ? (aiDefaults.model || '已配置模型') : '还没配置模型' ]]
+            <span class="live-dot" :class="aiKeyConfigured ? 'on' : 'off'"></span>[[ aiKeyConfigured ? '模型已就绪' : '还没配置模型' ]]
             <template v-if="aiJobs.some(j => j.state==='running')"> · [[ aiJobs.filter(j => j.state==='running').length ]] 个修复进行中</template>
             <button v-if="!aiKeyConfigured && isPlatformAdmin()" type="button" class="dash-link ml-1" @click="switchView('admin'); adminTab='settings'; loadSettings()">去配置</button>
           </div>
@@ -1335,16 +1414,17 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <input v-model="aiQ" class="mt-input pl-8 w-full max-w-none" placeholder="搜索域名或 #编号" aria-label="搜索">
             </div>
             <select v-model="aiSort" class="mt-select" aria-label="排序"><option value="score_asc">分低优先</option><option value="recent">最新</option></select>
+            <label class="flex items-center gap-1.5 text-[12px] text-slate-400 whitespace-nowrap"><input type="checkbox" v-model="aiAll" class="accent-indigo-500">显示全部</label>
           </div>
           <div class="ai-rows custom-scroll">
             <div v-for="t in aiList" :key="t.id" class="ai-row" :class="previewTaskId===t.id ? 'on' : ''" @click="aiPick(t)">
               <input type="checkbox" :checked="aiSel.has(t.id)" @click.stop="aiToggle(t)" :aria-label="'选择 ' + t.domain">
               <img v-if="!thumbErrs.has(t.id)" :src="thumbUrl(t)" @error="thumbFail(t.id)" alt="" loading="lazy"><span v-else class="pick-ph"></span>
-              <span class="flex-1 min-w-0"><b class="block truncate">[[ t.domain ]]</b><small>#[[ t.id ]]</small></span>
+              <span class="flex-1 min-w-0"><b class="block truncate">[[ taskTitle(t) ]]</b><small>#[[ t.id ]] · [[ taskSub(t) ]]</small></span>
               <span v-if="aiJobById[t.id] && aiJobById[t.id].state==='running'" class="ai-run"><i data-lucide="loader" class="w-3.5 h-3.5 animate-spin"></i>[[ fmtDur(aiJobById[t.id].elapsed_s) ]]</span>
               <span v-else class="score-pill" :class="(t.similarity_score || 0) >= 90 ? 'ok' : (t.similarity_score || 0) >= 80 ? 'mid' : 'low'">[[ t.similarity_score != null ? Number(t.similarity_score).toFixed(1) : '—' ]]</span>
             </div>
-            <div v-if="!aiList.length" class="pg-empty">还没有完成的克隆</div>
+            <div v-if="!aiList.length" class="pg-empty">[[ aiAll || !tasks.some(t => t.status === 'completed' && taskKind(t) === 'clone') ? '还没有完成的克隆' : '所有克隆都已达到 95 分, 不需要修复。勾选「显示全部」查看全部任务' ]]</div>
           </div>
         </section>
 
@@ -1468,6 +1548,24 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 
       <!-- 工作区: 名称 / 套餐与用量 / 离开 -->
       <div v-show="adminTab==='workspace'" class="space-y-6">
+        <section class="mt-panel p-5 max-w-[640px]">
+          <!-- 模型用量: 界面生成与 AI 视觉修复消耗的 token, 近 30 天 -->
+        <div class="dash-sec-head">
+          <h2 class="text-[15px] font-semibold text-slate-100">模型用量<span class="tok-sub">近 30 天 · [[ fmtTokens(tokenUsage.tokens_in + tokenUsage.tokens_out) ]] token</span></h2>
+        </div>
+        <div class="tok-seg" role="tablist" aria-label="用量分组">
+          <button v-for="g in [['day','按天'],['project','按项目'],['model','按模型']]" :key="g[0]" type="button" role="tab"
+            :aria-selected="tokenUsage.group === g[0]" @click="loadTokenUsage(g[0])">[[ g[1] ]]</button>
+        </div>
+        <ol v-if="tokenUsage.rows.length" class="tok-list">
+          <li v-for="r in tokenUsage.rows.slice(0, 8)" :key="r.key">
+            <div class="tok-row"><span class="tok-label">[[ r.label || '未知' ]]</span><span class="tok-num tnums">[[ fmtTokens(r.tokens_in + r.tokens_out) ]]</span></div>
+            <div class="tok-bar"><i :style="{ width: tokenBar(r) }"></i></div>
+            <div class="tok-meta tnums">[[ r.tasks ]] 个任务 · 输入 [[ fmtTokens(r.tokens_in) ]] · 输出 [[ fmtTokens(r.tokens_out) ]]<template v-if="r.ai_repair"> · 修复 [[ fmtTokens(r.ai_repair) ]]</template></div>
+          </li>
+        </ol>
+        <div v-else class="dash-feed-empty">[[ tokenUsage.loaded ? '近 30 天还没有模型调用。' : '加载中…' ]]</div>
+        </section>
         <section class="mt-panel">
           <div class="mt-head"><div><h3>工作区名称</h3><p>成员在侧栏和邀请页看到的名字</p></div></div>
           <form class="flex items-center gap-2 px-5 pb-5" @submit.prevent="saveWorkspaceName()">
@@ -1529,6 +1627,10 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       </div>
 
       <!-- 系统设置 -->
+      <div v-show="adminTab==='settings' && isPlatformAdmin()" class="mb-3 flex items-center gap-3 rounded-xl border border-white/[0.07] px-4 py-3 text-[13px] text-slate-400">
+        <i data-lucide="activity" class="w-4 h-4"></i>系统: 浏览器池、克隆工位与资源占用
+        <button type="button" class="mt-btn ml-auto" @click="goModule('browserpool')">打开浏览器池</button>
+      </div>
       <div v-show="adminTab==='settings'" class="cfg-wrap flex gap-4 items-start">
         <!-- 左侧分类锚点 -->
         <div class="cfg-nav w-[180px] shrink-0 sticky top-0 space-y-1">
@@ -1726,7 +1828,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
     </div>
   </div>
 
-  <div v-show="view==='create' || view==='tasks' || view==='task'" class="flex flex-1 min-h-0" :class="view==='create' ? 'create-stack' : ''">
+  <div v-show="view==='create' || view==='tasks' || view==='task'" class="flex flex-1 min-h-0 min-w-0" :class="view==='create' ? 'create-stack' : ''">
 
     <!-- ======================= 新建克隆(独立向导页) ======================= -->
     <aside v-show="view==='create'" :class="view==='create' ? 'w-[600px]' : 'w-[380px]'" class="create-main shrink-0 border-r border-white/[0.07] flex flex-col h-full overflow-hidden">
@@ -1736,22 +1838,14 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         <h1 class="font-display text-[30px] leading-tight text-slate-100">新建克隆</h1>
         <p class="text-[13px] text-slate-500 mt-1 mb-5">填好网址和交付形态就能开始，其余设置都有合理的默认值。</p>
         <div class="rounded-xl border border-white/[0.1] bg-slate-900 p-4 space-y-3">
-          <label class="text-[11px] font-semibold text-slate-300 flex items-center gap-1.5">
-            <i data-lucide="zap" class="w-3.5 h-3.5 text-indigo-400"></i>目标站点
-            <span class="text-[9.5px] text-slate-500 font-normal">· 每行一个, 单次最多 50 个</span>
+          <label for="clone-urls" class="text-[12px] font-semibold text-slate-300 flex items-center gap-1.5">要克隆的网址
+            <span class="text-[11px] text-slate-500 font-normal">· 粘贴一个或多个, 一行一个, 一次最多 50 个</span>
           </label>
-          <div class="flex gap-2">
-            <div class="flex-1 flex items-stretch rounded-xl border border-white/[0.10] bg-slate-950/80 overflow-hidden transition-all duration-300 focus-within:border-indigo-400/70 focus-within:ring-4 focus-within:ring-indigo-500/20 focus-within:shadow-[0_0_36px_rgba(99,102,241,0.28)]">
-              <span class="pl-3 pr-2.5 flex items-center text-[11px] font-mono text-slate-500 select-none border-r border-white/[0.06] bg-slate-900/70">https://</span>
-              <input v-model="heroUrl" @keydown.enter="heroSubmit()" spellcheck="false"
-                placeholder="example.com 或粘贴完整 URL, 回车立即克隆"
-                class="flex-1 px-3 py-3 bg-transparent text-xs font-mono text-slate-100 placeholder-slate-600 focus:outline-none">
-            </div>
-            <button @click="heroSubmit()" :disabled="submitting" title="立即克隆"
-              class="mt-btn shrink-0 h-auto px-4 rounded-xl">
-              <i :data-lucide="submitting ? 'loader-2' : 'corner-down-left'" :class="submitting ? 'animate-spin' : ''" class="w-4 h-4"></i>克隆
-            </button>
-          </div>
+          <textarea id="clone-urls" v-model="urlsText" :rows="Math.min(8, Math.max(2, urlCount + 1))" spellcheck="false"
+            @keydown.meta.enter.prevent="submit()" @keydown.ctrl.enter.prevent="submit()"
+            placeholder="https://example.com&#10;粘贴多行时自动按批量处理"
+            class="w-full rounded-xl bg-slate-950/80 border border-white/[0.10] px-3 py-2.5 text-[13px] font-mono text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-400/70 resize-y custom-scroll"></textarea>
+          <div v-if="urlCount" class="text-[11px] text-slate-500 -mt-1">识别到 <b class="text-slate-300 tnums">[[ urlCount ]]</b> 个网址[[ urlCount > 1 ? ', 将作为一个批次克隆' : '' ]] · ⌘/Ctrl + 回车 开始</div>
           <!-- 交付形态: 同一个克隆任务, 产出网站工程 / 桌面应用 / Android 应用 -->
           <div class="space-y-1.5">
             <div class="text-[10px] text-slate-500 tracking-[0.16em] font-semibold flex items-center gap-1.5">交付形态
@@ -1773,7 +1867,6 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             </button>
             <div class="flex items-center gap-2">
               <span v-if="submitError" class="text-[10px] text-rose-400">[[ submitError ]]</span>
-              <span class="tnums text-[10px] text-slate-500">[[ urlCount ]] / 50</span>
               <button @click="$refs.fileInput.click()"
                 class="flex items-center gap-1 text-[10px] px-2 py-1 rounded-md border border-white/[0.07] bg-slate-950/60 text-slate-400 hover:text-slate-100 hover:border-white/[0.18] transition-all">
                 <i data-lucide="upload" class="w-3 h-3"></i>导入 .txt / .csv
@@ -1786,16 +1879,6 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 
       <!-- 中部: 高级克隆配置(可折叠, 3 列策略网格) -->
       <section v-show="advOpen" class="flex-1 overflow-y-auto custom-scroll px-6 pb-4 space-y-4">
-
-        <!-- 批量列表 -->
-        <div class="space-y-1.5">
-          <label class="text-[10px] text-slate-500 flex items-center gap-1.5">
-            <i data-lucide="list" class="w-3 h-3 text-indigo-400"></i>批量目标站点清单(Hero 输入会自动追加到这里)
-          </label>
-          <textarea v-model="urlsText" rows="4" spellcheck="false"
-            placeholder="每行一个 URL,单次最多 50 个站点&#10;example.com&#10;https://another-site.org"
-            class="w-full rounded-xl bg-slate-950/70 border border-white/[0.07] p-3 text-xs font-mono text-slate-200 placeholder-slate-600 resize-y custom-scroll"></textarea>
-        </div>
 
         <!-- 下载策略: 3 列网格卡片 -->
         <div class="space-y-2">
@@ -1947,64 +2030,16 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
     </aside>
 
     <!-- ======================= 工作台右侧: 浏览器池监控 + 引导 ======================= -->
-    <aside v-show="view==='create'" class="create-side flex-1 min-h-0 overflow-y-auto custom-scroll px-8 pb-8 space-y-5">
-      <div class="pt-[86px] max-w-[440px]">
-        <h2 class="text-[13px] font-medium text-slate-400 mb-3">运行环境</h2>
-      <div class="grid grid-cols-1 gap-4">
-        <!-- 浏览器池监控卡片 -->
-        <div class="rounded-2xl border border-white/[0.07] bg-slate-900/70 backdrop-blur-xl p-5">
-          <div class="flex items-center justify-between mb-4">
-            <div class="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-              <i data-lucide="cpu" class="w-3.5 h-3.5 text-sky-400"></i>浏览器池实时状态
-            </div>
-            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[9.5px]"
-              :class="telemetry.browser.alive ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-white/[0.08] text-slate-500'">
-              <span class="w-1.5 h-1.5 rounded-full" :class="telemetry.browser.alive ? 'bg-emerald-400 ' : 'bg-slate-600'"></span>
-              [[ telemetry.browser.alive ? '守护在线' : '未启动' ]]
-            </span>
-          </div>
-          <div class="flex items-center gap-5">
-            <div class="relative w-[104px] h-[104px] shrink-0">
-              <svg viewBox="0 0 104 104" class="w-full h-full -rotate-90">
-                <circle cx="52" cy="52" r="44" fill="none" stroke="rgba(148,163,184,0.15)" stroke-width="9"/>
-                <circle cx="52" cy="52" r="44" fill="none" stroke="url(#poolRing)" stroke-width="9" stroke-linecap="round"
-                  :stroke-dasharray="276.5" :stroke-dashoffset="276.5 * (1 - (telemetry.browser.max ? telemetry.browser.active / telemetry.browser.max : 0))"
-                  class="transition-all duration-700"/>
-                <defs><linearGradient id="poolRing" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0%" stop-color="#818cf8"/><stop offset="100%" stop-color="#a78bfa"/>
-                </linearGradient></defs>
-              </svg>
-              <div class="absolute inset-0 flex flex-col items-center justify-center">
-                <div class="text-xl font-bold text-slate-100 tnums">[[ telemetry.browser.active ]]<span class="text-[10px] text-slate-500 font-normal"> / [[ telemetry.browser.max ]]</span></div>
-                <div class="text-[9px] text-slate-500">忙碌实例</div>
-              </div>
-            </div>
-            <div class="flex-1 space-y-2 text-[11px]">
-              <div class="flex justify-between"><span class="text-slate-500">空闲实例</span><span class="font-mono text-emerald-300 tnums">[[ Math.max(0, telemetry.browser.max - telemetry.browser.active) ]]</span></div>
-              <div class="flex justify-between"><span class="text-slate-500">Chromium 进程</span><span class="font-mono text-slate-300 tnums">[[ telemetry.browser.instances ]] 个</span></div>
-              <div class="flex justify-between"><span class="text-slate-500">内存占用估算</span><span class="font-mono text-slate-300 tnums">[[ fmtBytes(telemetry.browser.instances * 150 * 1024 * 1024) ]]</span></div>
-              <div class="text-[9px] text-slate-600">估算口径: 每实例约 150MB(视目标站复杂度浮动)</div>
-            </div>
-          </div>
-          <button @click="poolRestart()" :disabled="poolRestarting"
-            class="mt-btn mt-4 w-full">
-            <i :data-lucide="poolRestarting ? 'loader-2' : 'refresh-ccw'" :class="poolRestarting ? 'animate-spin' : ''" class="w-3.5 h-3.5"></i>
-            [[ poolRestarting ? '重启调度中…' : '一键清理重启实例池' ]]
-          </button>
-          <div v-if="storage" class="mt-4 pt-3 border-t border-white/[0.06] space-y-1.5 text-[11px]">
-            <div class="flex justify-between"><span class="text-slate-500">磁盘剩余</span>
-              <span class="font-mono tnums" :class="storage.disk && storage.disk.free < storage.disk.min_free_mb * 1048576 ? 'text-rose-300' : 'text-emerald-300'">[[ storage.disk ? fmtBytes(storage.disk.free) : '—' ]]</span></div>
-            <div class="flex justify-between"><span class="text-slate-500">工作空间</span><span class="font-mono text-slate-300 tnums">[[ fmtBytes(storage.workspaces.bytes) ]]</span></div>
-            <div class="flex justify-between"><span class="text-slate-500">导出包(可再生)</span><span class="font-mono text-slate-300 tnums">[[ fmtBytes(storage.exports.bytes) ]]</span></div>
-            <div v-if="storage.disk && storage.disk.free < storage.disk.min_free_mb * 1048576" class="text-[9px] text-rose-300">剩余低于 [[ storage.disk.min_free_mb ]]MB, 已暂停领取新任务</div>
-            <button @click="pruneExports()" :disabled="pruning"
-              class="mt-1 w-full py-2 rounded-xl border border-white/10 bg-white/[0.03] text-[11px] text-slate-300 hover:bg-white/[0.06] disabled:opacity-50 transition-all">
-              [[ pruning ? '清理中…' : '清理可再生导出包(下载时自动重建)' ]]
-            </button>
-          </div>
-        </div>
-
-        </div>
+    <aside v-show="view==='create'" class="create-side flex-1 min-h-0 overflow-y-auto custom-scroll px-8 pb-8">
+      <div class="pt-[86px] max-w-[440px] space-y-4">
+        <h2 class="text-[13px] font-medium text-slate-400">克隆完成后你会得到</h2>
+        <ol class="gain-list">
+          <li><b>一个能离线打开的克隆网站</b><span>页面、样式、图片、字体都下载到本地, 原站下线也能看。</span></li>
+          <li><b>还原度评分和对比</b><span>与原站逐像素比对打分, 可并排、卷帘、看差异图找出不一样的地方。</span></li>
+          <li><b>可下载的网站工程</b><span>一个源码包(ZIP), 解压即可运行; 选了桌面/Android 应用时同时给安装包。</span></li>
+          <li><b>一键部署</b><span>在本机启动这个网站, 得到一个可以直接打开的访问地址。</span></li>
+        </ol>
+        <p class="text-[12px] text-slate-500 leading-relaxed">普通单页通常 30 秒到 2 分钟完成; 页面越大、图片越多越久。需要登录的页面, 在「高级克隆配置」里填 Cookie。</p>
       </div>
     </aside>
 
@@ -2035,47 +2070,60 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       </div>
       <!-- 任务详情头: 左=是谁/状态/还原度, 右=一个主操作(部署或访问) + 次要操作 -->
       <div v-if="view==='task' && selectedTask" class="task-head shrink-0 flex flex-wrap items-center gap-3 px-4 py-3 border-b border-white/[0.07] bg-slate-900/60">
-        <button @click="goModule('tasks')" aria-label="返回任务列表" class="flex items-center justify-center w-8 h-8 rounded-lg border border-white/[0.10] text-slate-400 hover:text-white transition-all">
+        <button @click="activeTab = 'matrix'; goModule('tasks')" aria-label="返回任务列表" class="flex items-center justify-center w-8 h-8 rounded-lg border border-white/[0.10] text-slate-400 hover:text-white transition-all">
           <i data-lucide="arrow-left" class="w-4 h-4"></i>
         </button>
         <span class="w-6 h-6 rounded-md inline-flex items-center justify-center text-[10px] font-bold text-white shrink-0" v-html="favBadge(selectedTask)"></span>
         <div class="min-w-0">
           <div class="flex items-center gap-2">
-            <span class="text-base font-semibold text-slate-100 truncate max-w-[320px]">[[ selectedTask.domain ]]</span>
+            <span class="text-base font-semibold text-slate-100 truncate max-w-[420px]" :title="taskTitle(selectedTask)">[[ taskTitle(selectedTask) ]]</span>
             <span class="px-2 py-0.5 rounded-full border text-[12px] whitespace-nowrap" :class="statusBadge(selectedTask.status)">[[ statusText(selectedTask.status) ]]</span>
           </div>
-          <div class="text-[12px] text-slate-500 truncate max-w-[420px]">#[[ selectedTask.id ]] · [[ selectedTask.target_url ]]</div>
+          <div class="text-[12px] text-slate-500 truncate max-w-[520px]" :title="taskKindLine(selectedTask)">#[[ selectedTask.id ]] · [[ taskKindLine(selectedTask) ]]</div>
         </div>
-        <div v-if="selectedTask.similarity_score != null" class="flex items-baseline gap-1 pl-3 ml-1 border-l border-white/[0.08]" title="克隆站与原站的视觉还原度">
-          <span class="text-[12px] text-slate-500">还原度</span>
+        <div v-if="selectedTask.similarity_score != null" class="flex items-baseline gap-1 pl-3 ml-1 border-l border-white/[0.08]" :title="isReqFit(selectedTask) ? '页面对照需求验收清单的符合程度' : '克隆站与原站的视觉还原度'">
+          <span class="text-[12px] text-slate-500">[[ scoreLabel(selectedTask) ]]</span>
           <span class="serif-num text-[34px] leading-none" :class="selectedTask.similarity_score >= 85 ? 'text-slate-100' : 'text-amber-400'">[[ Number(selectedTask.similarity_score).toFixed(1) ]]</span>
         </div>
+        <div v-if="taskKind(selectedTask)==='clone' && selectedTask.stats && selectedTask.stats.interaction_check && selectedTask.stats.interaction_check.checked" class="flex items-baseline gap-1 pl-3 ml-1 border-l border-white/[0.08]" :title="interactionTip(selectedTask)">
+          <span class="text-[12px] text-slate-500">交互可用</span>
+          <span class="serif-num text-[22px] leading-none" :class="(selectedTask.stats.interaction_check.failed || []).length ? 'text-amber-400' : 'text-slate-100'">[[ selectedTask.stats.interaction_check.ok ]]<span class="text-[13px] text-slate-500">/[[ selectedTask.stats.interaction_check.checked ]]</span></span>
+          <span v-if="selectedTask.stats.interaction_penalty" class="text-[11px] text-amber-400 pl-0.5">扣[[ selectedTask.stats.interaction_penalty ]]</span>
+        </div>
         <div class="flex-1"></div>
-        <div class="flex flex-wrap items-center gap-2">
-          <button @click="openCompare(selectedTask)" class="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white hover:border-white/[0.2] transition-all"><i data-lucide="images" class="w-4 h-4"></i><span class="ui-btn-label">对比原站</span></button>
-          <button @click="openTrackerConfig" class="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white hover:border-white/[0.2] transition-all" :title="trackerEnabled ? '表单埋点推送已开启' : '表单埋点推送'">
-            <i data-lucide="radio" class="w-4 h-4"></i><span class="ui-btn-label">表单推送</span>
-            <span v-if="trackerEnabled" class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+        <!-- 操作按主次: 主按钮下载, 次按钮部署, 其余进「更多」; 失败/运行中不显示交付操作(失败只在下方给一个「重试」) -->
+        <div v-if="['completed','partial'].includes(selectedTask.status)" class="flex flex-wrap items-center gap-2">
+          <button v-if="selectedTask.zip_path" @click="downloadZip(selectedTask)" class="flex items-center gap-1.5 h-8 px-3.5 rounded-lg ui-primary text-white text-[13px] font-medium transition-all" title="下载可运行的网站工程(ZIP)">
+            <i data-lucide="download" class="w-4 h-4"></i>下载
           </button>
-          <button v-if="selectedTask.zip_path" @click="downloadZip(selectedTask)" class="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white hover:border-white/[0.2] transition-all"><i data-lucide="download" class="w-4 h-4"></i><span class="ui-btn-label">下载 ZIP</span></button>
-          <button @click="rebuild(selectedTask)" class="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white hover:border-white/[0.2] transition-all" title="用当前引擎重新克隆"><i data-lucide="rotate-cw" class="w-4 h-4"></i><span class="ui-btn-label">重建</span></button>
-          <template v-if="['completed','partial'].includes(selectedTask.status)">
-            <template v-if="dockerInfo && dockerInfo.status==='running'">
-              <button @click="dockerAction('stop')" :disabled="docker.busy" class="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white hover:border-white/[0.2] transition-all disabled:opacity-50"><i data-lucide="square" class="w-4 h-4"></i><span class="ui-btn-label">停止部署</span></button>
-              <a v-if="dockerInfo.url" :href="dockerInfo.url" target="_blank" rel="noopener"
-                class="flex items-center gap-1.5 h-8 px-3.5 rounded-lg ui-primary text-white text-[13px] font-medium transition-all">
-                <i data-lucide="external-link" class="w-4 h-4"></i>打开站点 :[[ dockerInfo.port ]]
-              </a>
-            </template>
-            <button v-else-if="dockerInfo && dockerInfo.status==='starting'" disabled
-              class="flex items-center gap-1.5 h-8 px-3.5 rounded-lg ui-primary text-white text-[13px] font-medium opacity-80">
-              <i data-lucide="loader" class="w-4 h-4 animate-spin"></i>部署中 · [[ dockerInfo.step || '启动' ]]
-            </button>
-            <button v-else @click="dockerAction('start')" :disabled="docker.busy"
-              class="flex items-center gap-1.5 h-8 px-3.5 rounded-lg ui-primary text-white text-[13px] font-medium disabled:opacity-60 transition-all">
-              <i data-lucide="rocket" class="w-4 h-4"></i>[[ docker.busy ? '提交中…' : '一键部署' ]]
-            </button>
+          <template v-if="dockerInfo && dockerInfo.status==='running'">
+            <div v-if="dockerInfo.url" class="dep-addr">
+              <span class="dep-dot"></span><span class="hidden md:inline text-slate-500">已部署</span>
+              <a :href="dockerInfo.url" target="_blank" rel="noopener" :title="'打开 ' + dockerInfo.url" class="dep-link">[[ dockerInfo.url.replace(/^https?:\/\//, '') ]]</a>
+              <button type="button" class="dep-copy" @click="copyText(dockerInfo.url)" title="复制访问地址" aria-label="复制访问地址"><i data-lucide="copy" class="w-3.5 h-3.5"></i></button>
+              <a :href="dockerInfo.url" target="_blank" rel="noopener" class="dep-copy" title="在新窗口打开" aria-label="在新窗口打开"><i data-lucide="external-link" class="w-3.5 h-3.5"></i></a>
+            </div>
           </template>
+          <button v-else-if="dockerInfo && dockerInfo.status==='starting'" disabled
+            class="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 opacity-80">
+            <i data-lucide="loader" class="w-4 h-4 animate-spin"></i>部署中 · [[ dockerInfo.step || '启动' ]]
+          </button>
+          <button v-else @click="dockerAction('start')" :disabled="docker.busy" title="在本机启动这个网站, 得到一个可访问的地址"
+            class="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-200 hover:border-white/[0.2] disabled:opacity-60 transition-all">
+            <i data-lucide="rocket" class="w-4 h-4"></i>[[ docker.busy ? '提交中…' : '部署' ]]
+          </button>
+          <div class="relative">
+            <button type="button" @click="headMore = !headMore" class="flex items-center gap-1 h-8 px-2.5 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white transition-all" :aria-expanded="headMore" aria-label="更多操作">
+              更多<i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
+            </button>
+            <div v-if="headMore" class="fixed inset-0 z-[60]" @click="headMore = false"></div>
+            <div v-if="headMore" class="head-menu z-[61]" role="menu">
+              <button type="button" role="menuitem" @click="headMore = false; rebuild(selectedTask)"><i data-lucide="rotate-cw" class="w-4 h-4"></i>重新运行</button>
+              <button v-if="taskKind(selectedTask) === 'clone'" type="button" role="menuitem" @click="headMore = false; openTrackerConfig()"><i data-lucide="radio" class="w-4 h-4"></i>表单推送<span v-if="trackerEnabled" class="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-400"></span></button>
+              <button v-if="dockerInfo && dockerInfo.status==='running'" type="button" role="menuitem" @click="headMore = false; dockerAction('stop')"><i data-lucide="square" class="w-4 h-4"></i>停止部署</button>
+              <button type="button" role="menuitem" @click="headMore = false; openNewWindow('/preview/' + selectedTask.id + '/')"><i data-lucide="external-link" class="w-4 h-4"></i>新窗口打开预览</button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -2084,27 +2132,86 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         <div class="run-panel-head">
           <template v-if="selectedTask.status==='running'">
             <b class="tnums">[[ selectedTask.progress || 0 ]]%</b>
-            <span>[[ selectedTask.stage || '准备中' ]]</span>
+            <span>[[ stageText(selectedTask.stage) ]]</span>
             <span v-if="liveById[selectedTask.id]" class="ml-auto tnums text-slate-500">已用 [[ fmtDur(liveById[selectedTask.id].elapsed_s) ]]<template v-if="liveById[selectedTask.id].eta_s != null"> · [[ etaText(liveById[selectedTask.id].eta_s) ]]</template></span>
           </template>
           <template v-else-if="selectedTask.status==='pending'"><b>排队中</b><span v-if="live.pending.findIndex(p => p.id === selectedTask.id) >= 0">前面还有 [[ live.pending.findIndex(p => p.id === selectedTask.id) ]] 个</span></template>
-          <template v-else><b class="text-rose-500">克隆失败</b><span class="truncate">停在「[[ selectedTask.stage || '开始' ]]」</span>
-            <button v-if="canWrite" type="button" class="mt-btn ml-auto" @click="rebuild(selectedTask)"><i data-lucide="rotate-cw" class="w-4 h-4"></i>重建</button></template>
+          <template v-else><b class="text-rose-500">[[ humanError(selectedTask).title ]]</b><span class="truncate text-slate-400">[[ humanError(selectedTask).advice ]]</span>
+            <button v-if="canWrite" type="button" class="mt-btn ml-auto" @click="rebuild(selectedTask)"><i data-lucide="rotate-cw" class="w-4 h-4"></i>重试</button></template>
         </div>
         <div class="run-track">
-          <div v-for="st in liveSteps(liveById[selectedTask.id] || selectedTask)" :key="st.name" class="run-step" :class="selectedTask.status==='failed' && st.state==='active' ? 'bad' : st.state">
+          <div v-for="st in liveSteps(liveById[selectedTask.id] || selectedTask, isGenTask(selectedTask))" :key="st.name" class="run-step" :class="selectedTask.status==='failed' && st.state==='active' ? 'bad' : st.state">
             <span class="bar"><i :style="st.state==='active' && selectedTask.status==='running' ? { width: Math.min(96, 20 + (st.secs || 0) * 3) + '%' } : {}"></i></span>
             <span class="nm">[[ st.name ]]</span><span class="sec tnums">[[ st.secs ? fmtDur(st.secs) : '' ]]</span>
           </div>
         </div>
-        <div v-if="taskLogs(selectedTask.id, 4).length" class="run-log">
+        <live-code v-if="selectedTask.status==='running' && isGenTask(selectedTask)" :key="'lc' + selectedTask.id" :task-id="selectedTask.id" :logs="taskLogs(selectedTask.id, 80)"
+          :stage="selectedTask.stage || '准备中'" :pct="selectedTask.progress || 0"
+          :elapsed="liveById[selectedTask.id] ? fmtDur(liveById[selectedTask.id].elapsed_s) : ''"></live-code>
+        <details v-if="selectedTask.status==='failed' && selectedTask.error_msg" class="run-tech"><summary>技术详情</summary><pre>[[ selectedTask.error_msg ]]</pre></details>
+        <div v-if="taskLogs(selectedTask.id, 4).length && !(selectedTask.status==='running' && isGenTask(selectedTask))" class="run-log">
           <div v-for="(l, i) in taskLogs(selectedTask.id, 4)" :key="i" :class="l.level === 'ERROR' ? 'err' : ''"><span>[[ l.time ]]</span>[[ l.message ]]</div>
         </div>
       </div>
 
+      <!-- 界面生成: 需求验收清单(需求符合度的逐条依据) -->
+      <!-- 验收: 标题下一行摘要, 完整清单在右侧抽屉里看, 不占用预览区 -->
+      <div v-if="view==='task' && selectedTask && fitDetail(selectedTask)" class="fit-panel">
+        <button type="button" class="fit-bar" @click="fitDrawer = true" title="查看完整验收清单">
+          <span class="fit-title">验收清单</span>
+          <span class="fit-count tnums" title="满足 = 完全做到; 部分 = 做到了但有瑕疵或现有证据确认不了">[[ fitDetail(selectedTask).items.filter(i => i.verdict === 'yes').length ]] 满足<template v-if="fitDetail(selectedTask).items.filter(i => i.verdict === 'partial').length"> · [[ fitDetail(selectedTask).items.filter(i => i.verdict === 'partial').length ]] 部分</template><i>/</i>[[ fitDetail(selectedTask).items.length ]] 条</span>
+          <span class="fit-stats tnums">
+            <span v-if="fitDetail(selectedTask).fidelity && fitDetail(selectedTask).fidelity.score != null">原图相似度 <b>[[ Math.round(fitDetail(selectedTask).fidelity.score) ]]</b></span>
+            <span>运行健康 <b>[[ Math.round(fitDetail(selectedTask).health * 100) ]]%</b></span>
+            <span>设计 <b>[[ (fitDetail(selectedTask).design * 10).toFixed(1) ]]</b></span>
+          </span>
+          <span class="fit-stats fit-stats-end tnums">
+            <span v-if="fitGen(selectedTask)">[[ fitGen(selectedTask).rounds.length ]] 轮</span>
+            <span v-if="fitGen(selectedTask)">模型用时 [[ fmtDur(fitGen(selectedTask).llm_seconds) ]]</span>
+            <span v-if="taskTokens.id === selectedTask.id && taskTokens.total">Token <b>[[ fmtTokens(taskTokens.total) ]]</b></span>
+          </span>
+          <span class="fit-open">验收详情<i data-lucide="panel-right-open" class="w-3.5 h-3.5"></i></span>
+        </button>
+        <div v-if="fitDrawer" class="fit-mask" @click.self="fitDrawer = false" @keydown.esc="fitDrawer = false">
+        <aside class="fit-drawer" role="dialog" aria-label="验收清单">
+          <header class="fit-drawer-head">
+            <div><b>验收清单</b><span class="tnums">[[ fitDetail(selectedTask).items.filter(i => i.verdict === 'yes').length ]] / [[ fitDetail(selectedTask).items.length ]] 满足 · [[ scoreLabel(selectedTask) ]] [[ Number(selectedTask.similarity_score).toFixed(1) ]]</span></div>
+            <button type="button" class="fit-close" @click="fitDrawer = false" aria-label="关闭">×</button>
+          </header>
+          <div class="fit-drawer-body">
+        <p v-if="fitGen(selectedTask) && fitGen(selectedTask).brief && fitGen(selectedTask).brief.summary" class="fit-note">[[ fitGen(selectedTask).kind === 'screenshot' ? '截图理解' : '需求理解' ]]：[[ fitGen(selectedTask).brief.summary ]]</p>
+        <ul class="fit-list">
+          <li v-for="it in fitDetail(selectedTask).items" :key="it.id" :class="it.verdict">
+            <span class="fit-mark">[[ ({yes: '满足', partial: '部分', no: '未满足'})[it.verdict] || '未验收' ]]</span>
+            <span class="fit-text">[[ it.text ]]<em v-if="it.must">用户要求</em></span>
+            <span class="fit-why">[[ it.gate || it.evidence ]]</span>
+          </li>
+        </ul>
+        <p v-for="c in fitDetail(selectedTask).caps" :key="c.reason" class="fit-note warn">分数封顶 [[ c.max ]]：[[ c.reason ]]</p>
+        <p v-if="fitDetail(selectedTask).review_mode !== 'vision'" class="fit-note warn">[[ fitDetail(selectedTask).review_mode === 'text' ? '当前模型未通过看图自检，本次验收只依据页面源码和浏览器体检数据，外观类条目可信度较低。' : '本次未经模型验收，分数只依据浏览器体检数据。' ]]</p>
+        <p v-for="(d, i) in (fitGen(selectedTask) ? fitGen(selectedTask).remaining_defects || [] : [])" :key="'d' + i" class="fit-note warn">仍存在：[[ d ]]</p>
+        <div v-if="taskTokens.id === selectedTask.id && taskTokens.rows.length" class="fit-tokens">
+          <div class="fit-tokens-head">Token 用量<span class="tnums">输入 [[ fmtTokens(taskTokens.tokens_in) ]] · 输出 [[ fmtTokens(taskTokens.tokens_out) ]] · 合计 [[ fmtTokens(taskTokens.total) ]]</span></div>
+          <table class="tnums">
+            <thead><tr><th>步骤</th><th>模型</th><th>输入</th><th>输出</th></tr></thead>
+            <tbody><tr v-for="(r, i) in taskTokens.rows" :key="i"><td>[[ r.step || r.kind ]]</td><td>[[ r.model ]]</td><td>[[ r.tokens_in.toLocaleString() ]]</td><td>[[ r.tokens_out.toLocaleString() ]]</td></tr></tbody>
+          </table>
+        </div>
+          </div>
+        </aside>
+        </div>
+      </div>
+
+      <!-- 定时/重复克隆: 与上次成功克隆相比变了什么 -->
+      <div v-if="view==='task' && selectedTask && selectedTask.stats && selectedTask.stats.change_since_last && selectedTask.stats.change_since_last.prev_task_id" class="shrink-0 flex items-center gap-2 px-4 py-1.5 text-[12px] border-b border-white/[0.06] bg-slate-900/40">
+        <i data-lucide="git-compare" class="w-3.5 h-3.5 text-slate-500"></i>
+        <span class="text-slate-300">[[ selectedTask.stats.change_since_last.verdict || '与上次相比有变化' ]]</span>
+        <span v-if="selectedTask.stats.change_since_last.area_pct != null" class="tnums text-slate-500">· 变化约 [[ Number(selectedTask.stats.change_since_last.area_pct).toFixed(1) ]]%</span>
+      </div>
+
       <!-- Tabs -->
-      <div v-show="view==='task'" class="h-11 shrink-0 border-b border-white/[0.07] flex items-end gap-1 px-3 overflow-x-auto whitespace-nowrap">
-        <button v-for="tab in tabs" :key="tab.id" @click="tabClick(tab.id)"
+      <div v-show="view==='task' && detailTabs.length > 1" class="h-11 shrink-0 border-b border-white/[0.07] flex items-end gap-1 px-3 overflow-x-auto whitespace-nowrap">
+        <button v-for="tab in detailTabs" :key="tab.id" @click="tabClick(tab.id)"
           :class="activeTab===tab.id ? 'text-slate-100 border-slate-100' : 'text-slate-500 border-transparent hover:text-slate-200'"
           class="flex items-center gap-1.5 px-3 h-11 text-[13px] font-medium border-b-2 -mb-px transition-colors">
           <i :data-lucide="tab.icon" class="w-3.5 h-3.5"></i>[[ tab.label ]]
@@ -2117,10 +2224,12 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         <div v-show="activeTab==='matrix'" class="space-y-3">
           <div v-if="view==='tasks'" class="flex items-end justify-between gap-4 flex-wrap pt-4 pb-3 px-1">
             <div>
-              <h1 class="font-display text-[30px] leading-tight text-slate-100">[[ currentProject ? currentProject.name : '全部任务' ]]</h1>
-              <div class="mt-1 text-[13px] text-slate-500 tnums">[[ filteredTasks.length ]] 个任务<template v-if="dashDone.length"> · 平均还原度 <span class="serif-num text-[17px] text-slate-200">[[ dashAvg ]]</span></template></div>
+              <h1 class="font-display text-[22px] sm:text-[30px] leading-tight text-slate-100">[[ currentProject ? currentProject.name : '全部任务' ]]</h1>
+              <div v-if="currentBatchId !== '' && currentBatchId !== null" class="mt-1 text-[13px] text-slate-500 tnums">本批 [[ filteredTasks.length ]] 个
+                <button type="button" class="dash-link ml-1" @click="currentBatchId = ''">查看全部 [[ tasks.length ]] 个</button></div>
+              <div v-else class="mt-1 text-[13px] text-slate-500 tnums">[[ filteredTasks.length ]] 个任务<template v-if="listAvg"> · [[ listAvg.n ]] 个克隆的平均还原度 <span class="serif-num text-[17px] text-slate-200">[[ listAvg.v ]]</span></template></div>
             </div>
-            <button @click="goModule('create')" class="ui-primary h-9 px-4 rounded-lg text-[13px] flex items-center gap-1.5"><i data-lucide="plus" class="w-4 h-4"></i>新建克隆</button>
+            <button @click="goModule('create')" class="hidden sm:flex ui-primary h-9 px-4 rounded-lg text-[13px] items-center gap-1.5"><i data-lucide="plus" class="w-4 h-4"></i>新建克隆</button>
           </div>
           <div class="flex items-center gap-1.5 flex-wrap mb-3 px-1">
             <button @click="projectPill=''; currentProjectId=''"
@@ -2145,9 +2254,18 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             </div>
             <div class="relative shrink-0">
               <i data-lucide="search" class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-600"></i>
-              <input v-model="searchQ" placeholder="搜索 URL / 域名"
+              <input v-model="searchQ" placeholder="搜索标题或网址"
                 class="w-40 xl:w-56 rounded-lg bg-slate-950/70 border border-white/[0.07] pl-8 pr-3 py-1.5 text-[11px] text-slate-200 placeholder-slate-600">
             </div>
+            <button type="button" class="filt-btn" @click="filtSheet = true" :class="(statusFilter || currentBatchId || taskSort !== 'recent' || groupByDomain) ? 'on' : ''">
+              <i data-lucide="sliders-horizontal" class="w-3.5 h-3.5"></i>筛选</button>
+            <div class="filt-set" :class="filtSheet ? 'open' : ''" @click.self="filtSheet = false">
+            <div class="filt-sheet">
+            <div class="filt-sheet-head"><b>筛选与排序</b><button type="button" @click="filtSheet = false">完成</button></div>
+            <select v-model="taskSort" class="w-[118px] h-9 rounded-lg bg-slate-950/70 border border-white/[0.07] px-2 text-[11px] text-slate-300 shrink-0" title="排序">
+              <option value="recent">最近创建</option>
+              <option value="score">分数从高到低</option>
+            </select>
             <select v-model="statusFilter" class="w-[92px] h-9 rounded-lg bg-slate-950/70 border border-white/[0.07] px-2 text-[11px] text-slate-300 shrink-0">
               <option value="">全部状态</option>
               <option value="pending">排队中</option>
@@ -2162,12 +2280,13 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <label class="flex items-center gap-1.5 text-[10.5px] text-slate-400 cursor-pointer select-none whitespace-nowrap shrink-0" title="同一域名仅显示最新一次克隆">
               <input type="checkbox" v-model="groupByDomain" class="accent-indigo-500">按域名聚合
             </label>
+            </div></div>
             <div class="flex-1 min-w-[16px]"></div>
             <div class="flex bg-slate-950/90 p-0.5 rounded-lg border border-white/[0.07] shrink-0">
               <button @click="matrixView='grid'" :class="matrixView==='grid' ? 'bg-slate-700 text-slate-50' : 'text-slate-500 hover:text-slate-300'" class="term-btn" title="网格卡片视图"><i data-lucide="layout-grid" class="w-3.5 h-3.5"></i></button>
               <button @click="matrixView='table'" :class="matrixView==='table' ? 'bg-slate-700 text-slate-50' : 'text-slate-500 hover:text-slate-300'" class="term-btn" title="紧凑表格视图"><i data-lucide="table" class="w-3.5 h-3.5"></i></button>
             </div>
-            <button @click="refreshTasks" class="h-9 px-3 inline-flex items-center gap-1 rounded-lg border border-white/[0.07] bg-slate-950/60 text-[11px] text-slate-400 hover:text-slate-100 transition-all shrink-0 whitespace-nowrap">
+            <button @click="refreshTasks" class="hidden sm:inline-flex h-9 px-3 items-center gap-1 rounded-lg border border-white/[0.07] bg-slate-950/60 text-[11px] text-slate-400 hover:text-slate-100 transition-all shrink-0 whitespace-nowrap">
               <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>刷新
             </button>
           </div>
@@ -2178,7 +2297,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           </div>
 
           <div class="grid grid-cols-[repeat(auto-fill,minmax(360px,1fr))] gap-5">
-            <div v-for="task in filteredTasks" :key="task.id" class="fade-in panel rounded-xl p-4 flex flex-col gap-3 hover:border-white/[0.16]">
+            <div v-for="task in filteredTasks" :key="task.id" class="fade-in panel rounded-xl p-4 flex flex-col gap-3 hover:border-white/[0.16]"
+              :class="{ 'task-hl': task.id === highlightTaskId }">
 
               <!-- Header: 复选框 + 序号/域名/创建时间 + 状态徽章 + 评分胶囊 -->
               <div class="flex items-start gap-2.5">
@@ -2187,15 +2307,15 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                   class="mt-1 w-3.5 h-3.5 accent-indigo-500 cursor-pointer shrink-0" :title="'选择任务 #' + task.id">
                 <div class="min-w-0 flex-1">
                   <div class="flex items-center gap-1.5">
-                    <span class="text-[14px] font-medium text-slate-100 truncate" :title="task.target_url">[[ task.domain || task.target_url ]]</span>
+                    <span class="text-[14px] font-medium text-slate-100 truncate" :title="taskKindLine(task)">[[ taskTitle(task) ]]</span>
                   </div>
-                  <div class="text-[12px] text-slate-500 tnums mt-0.5">#[[ task.id ]] · [[ (task.created_at || '').replace('T',' ').slice(5, 16) ]]</div>
+                  <div class="text-[12px] text-slate-500 truncate mt-0.5" :title="taskKindLine(task)"><span class="tnums">#[[ task.id ]] · [[ (task.created_at || '').replace('T',' ').slice(5, 16) ]]</span> · [[ taskSub(task) ]]</div>
                 </div>
                 <div class="flex flex-col items-end gap-1 shrink-0">
                   <!-- 已完成: 还原度大数字即状态; 其他状态才显示状态徽标 -->
-                  <span v-if="task.status==='completed' && task.similarity_score != null" class="tnums leading-none text-right" :title="'还原度 ' + task.similarity_score + ' 分'"
-                    :class="task.similarity_score >= 85 ? 'text-slate-100' : 'text-amber-300'">
-                    <span class="serif-num text-[30px]">[[ Number(task.similarity_score).toFixed(1) ]]</span><span class="text-[12px] text-slate-500 ml-0.5">分</span>
+                  <span v-if="task.status==='completed' && task.similarity_score != null" class="tnums leading-none text-right" :title="scoreLabel(task) + ' ' + task.similarity_score + ' 分'"
+                    >
+                    <span class="text-[15px] font-semibold tnums" :class="scoreTone(task.similarity_score)">[[ Number(task.similarity_score).toFixed(1) ]]</span><span class="text-[12px] text-slate-500 ml-0.5">分</span>
                   </span>
                   <span v-else class="inline-flex items-center gap-1 text-[9px] font-medium px-2 py-0.5 rounded-full border"
                     :class="task.status==='completed' ? 'bg-emerald-500/10 text-emerald-300/90 border-emerald-500/25' : statusBadge(task.status)">
@@ -2206,15 +2326,18 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 
               <!-- Body: macOS 浏览器视窗(16:10 固定高) -->
               <div class="relative w-full h-[180px] rounded-lg overflow-hidden border border-white/[0.08] bg-slate-950 cursor-pointer group"
-                @click="task.status==='completed' ? openTaskDetail(task) : openCompare(task)" title="点击进入任务详情">
+                @click="task.status==='completed' || (task.status==='running' && isGenTask(task)) ? openTaskDetail(task) : openCompare(task)" title="点击进入任务详情">
                 <template v-if="task.status==='completed' && task.has_cloned_preview !== false && !thumbErrs.has(task.id)">
                   <img :src="thumbUrl(task)" @error="thumbFail(task.id)" loading="lazy" decoding="async"
                     class="w-full h-[180px] object-cover object-top" alt="克隆实景截图">
                 </template>
+                <live-code v-else-if="task.status==='running' && isGenTask(task)" :task-id="task.id" compact
+                  :stage="task.stage || '准备中'" :pct="task.progress || 0"
+                  :elapsed="liveById[task.id] ? fmtDur(liveById[task.id].elapsed_s) : ''"></live-code>
                 <div v-else-if="task.status==='running'" class="card-run">
                   <div class="card-run-pct tnums">[[ task.progress || 0 ]]<small>%</small></div>
-                  <div class="card-run-stage">[[ task.stage || '准备中' ]]</div>
-                  <div class="run-steps"><span v-for="st in liveSteps(liveById[task.id] || task)" :key="st.name" :class="st.state"></span></div>
+                  <div class="card-run-stage">[[ stageText(task.stage) ]]</div>
+                  <div class="run-steps"><span v-for="st in liveSteps(liveById[task.id] || task, isGenTask(task))" :key="st.name" :class="st.state"></span></div>
                   <div class="card-run-time" v-if="liveById[task.id]">[[ fmtDur(liveById[task.id].elapsed_s) ]]<template v-if="liveById[task.id].eta_s != null"> · [[ etaText(liveById[task.id].eta_s) ]]</template></div>
                 </div>
                 <div v-else-if="task.status==='pending'" class="card-run">
@@ -2222,15 +2345,14 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                 </div>
                 <div v-else class="h-[180px] flex flex-col items-center justify-center gap-1.5">
                   <i data-lucide="inbox" class="w-5 h-5 text-slate-700"></i>
-                  <span class="text-[9px] text-slate-600">[[ task.status==='failed' ? '克隆失败 — 可点底部按钮重建' : '排队等待渲染' ]]</span>
+                  <span class="text-[12px] text-slate-500 text-center px-4">[[ task.status==='failed' ? humanError(task).title : (task.status==='pending' ? '排队中' : '没有截图, 点「预览」查看页面') ]]</span>
                 </div>
                 <div v-if="task.status==='completed'" class="absolute bottom-2 right-2 px-2 py-0.5 rounded-md bg-black/70 text-[12px] text-white opacity-0 group-hover:opacity-100 transition-opacity">查看详情</div>
               </div>
 
-              <div v-if="task.status==='failed' && task.error_msg" class="text-[12px] text-rose-400 leading-snug break-all line-clamp-2" :title="task.error_msg">[[ task.error_msg ]]</div>
 
               <!-- 资产统计: 一行淡字 -->
-              <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[12px] text-slate-500 tnums">
+              <div v-if="taskKind(task) === 'clone' && ['completed','partial'].includes(task.status)" class="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[12px] text-slate-500 tnums">
                 <span>CSS [[ task.stats.css || 0 ]]</span><span>JS [[ task.stats.js || 0 ]]</span><span>图片 [[ task.stats.img || 0 ]]</span><span>字体 [[ task.stats.font || 0 ]]</span><span>接口 [[ task.stats.api || 0 ]]</span>
                 <span class="ml-auto">[[ task.stats.total_bytes_h || '0 B' ]]</span>
               </div>
@@ -2248,8 +2370,14 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                   class="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300 font-sans">构建失败(悬停看原因)</span>
               </div>
 
-              <!-- 操作栏 -->
-              <div class="flex items-center gap-1.5 pt-0.5 border-t border-white/[0.05] mt-auto">
+              <!-- 失败: 一句人话原因 + 只保留「重试」 -->
+              <div v-if="task.status==='failed'" class="flex items-center gap-1.5 pt-0.5 border-t border-white/[0.05] mt-auto">
+                <button @click="rebuild(task)" class="flex items-center gap-1.5 px-3 h-8 rounded-lg text-[13px] font-medium text-slate-200 border border-white/[0.1] hover:border-white/[0.2] transition-colors">
+                  <i data-lucide="rotate-cw" class="w-3.5 h-3.5"></i>重试
+                </button>
+              </div>
+              <!-- 操作栏: 运行中/排队中只看进度, 不摆灰掉的按钮 -->
+              <div v-else-if="['completed','partial'].includes(task.status)" class="flex items-center gap-1.5 pt-0.5 border-t border-white/[0.05] mt-auto">
                 <button @click="openPreview(task)" :disabled="task.status!=='completed'"
                   class="flex items-center gap-1.5 px-3 h-8 rounded-lg text-[13px] font-medium text-slate-200 border border-white/[0.1] hover:border-white/[0.2] hover:text-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
                   <i data-lucide="eye" class="w-3.5 h-3.5"></i>预览
@@ -2259,10 +2387,10 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                   <i data-lucide="download" class="w-3.5 h-3.5"></i>下载
                 </button>
                 <div class="flex-1"></div>
-                <button @click="openInspector(task)" title="审查资产与录制 API" class="icon-btn2">
+                <button v-if="taskKind(task) === 'clone'" @click="openInspector(task)" title="查看抓到的资源与接口" aria-label="查看抓到的资源与接口" class="icon-btn2">
                   <i data-lucide="search-code" class="w-3.5 h-3.5"></i>
                 </button>
-                <button @click="rebuild(task)" :disabled="task.status==='running'" title="重新克隆" class="icon-btn2">
+                <button @click="rebuild(task)" :disabled="task.status==='running'" :title="taskKind(task) === 'clone' ? '重新克隆' : '重新生成'" :aria-label="taskKind(task) === 'clone' ? '重新克隆' : '重新生成'" class="icon-btn2">
                   <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
                 </button>
               </div>
@@ -2272,27 +2400,35 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 
         <!-- ============ Tab 2: 双屏对比与响应式沙盒预览器 ============ -->
         <div v-show="activeTab==='sandbox'" class="h-full flex flex-col gap-3">
-          <div class="flex flex-wrap items-center gap-2">
+          <div v-if="previewTask && ['completed','partial'].includes(previewTask.status)" class="flex flex-wrap items-center gap-2">
+            <!-- 对比入口统一在这一组: 克隆任务 克隆站/并排/卷帘/差异; 截图生成 产出/并排/卷帘/差异(对照原图); 文字生成 页面/代码 -->
             <div class="ui-seg" role="group">
-              <button @click="previewMode='single'" :aria-pressed="previewMode==='single'">克隆站</button>
-              <button @click="previewMode='compare'" :aria-pressed="previewMode==='compare'">并排对比</button>
-              <button @click="previewMode='overlay'" :aria-pressed="previewMode==='overlay'">卷帘对比</button>
+              <button @click="previewMode='single'" :aria-pressed="previewMode==='single'">[[ previewTask && taskKind(previewTask) === 'clone' ? '克隆站' : (previewTask && taskKind(previewTask) === 'shot' ? '产出' : '页面') ]]</button>
+              <template v-if="previewTask && taskKind(previewTask) !== 'text'">
+                <button @click="previewMode='compare'" :aria-pressed="previewMode==='compare'">并排</button>
+                <button @click="previewMode='overlay'" :aria-pressed="previewMode==='overlay'">卷帘</button>
+                <button @click="previewMode='diff'" :aria-pressed="previewMode==='diff'">差异</button>
+              </template>
+              <button v-else-if="previewTask" @click="previewMode='code'; loadPreviewCode(previewTask)" :aria-pressed="previewMode==='code'">代码</button>
             </div>
-            <div class="ui-seg" role="group">
-              <button @click="previewWidth='full'" :aria-pressed="previewWidth==='full'">桌面</button>
+            <select v-model="previewWidth" class="sm:hidden mt-select h-8 text-[13px]" aria-label="预览宽度">
+              <option value="full">桌面 1440</option><option value="tablet">平板 768</option><option value="mobile">手机 390</option>
+            </select>
+            <div class="ui-seg hidden sm:inline-flex" role="group">
+              <button @click="previewWidth='full'" :aria-pressed="previewWidth==='full'">桌面 1440</button>
               <button @click="previewWidth='tablet'" :aria-pressed="previewWidth==='tablet'">平板 768</button>
               <button @click="previewWidth='mobile'" :aria-pressed="previewWidth==='mobile'">手机 390</button>
             </div>
-            <div v-if="previewMode==='compare'" class="fade-in">
+            <span v-if="previewScale < 0.995 && ['single','compare','overlay'].includes(previewMode)" class="text-[12px] text-slate-500 tnums whitespace-nowrap" title="页面按真实宽度排版, 容器不够宽时整体等比缩小显示">按 [[ Math.round(previewScale * 100) ]]% 显示</span>
+            <div v-if="previewMode==='compare' && previewTask && taskKind(previewTask) === 'clone'" class="fade-in">
               <div class="ui-seg" role="group">
-              <button @click="origView='live'" :aria-pressed="origView==='live'">原站实时</button>
-              <button @click="origView='shot'" :aria-pressed="origView==='shot'">原站截图</button>
+              <button @click="origView='shot'" :aria-pressed="origView==='shot'" title="克隆时拍下的原站整页截图, 评分就是拿它比的">原站截图</button>
+              <button @click="origView='live'" :aria-pressed="origView==='live'" title="直接加载原站; 很多网站禁止被嵌入, 会显示空白">原站实时</button>
             </div>
             </div>
             <div class="flex-1"></div>
-            <button v-if="previewTask" @click="openHotpatch" class="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white transition-all" title="直接改克隆站的 CSS, 即时生效"><i data-lucide="paintbrush" class="w-4 h-4"></i><span class="ui-btn-label">改样式</span></button>
-            <button v-if="previewTask" @click="openCompare(previewTask)" class="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white transition-all"><i data-lucide="images" class="w-4 h-4"></i><span class="ui-btn-label">截图对比</span></button>
-            <button v-if="previewTask" @click="openNewWindow('/preview/' + previewTask.id + '/')" class="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white transition-all"><i data-lucide="external-link" class="w-4 h-4"></i><span class="ui-btn-label">新窗口</span></button>
+            <button v-if="previewTask" @click="openHotpatch" class="hidden sm:flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white transition-all" title="直接改克隆站的 CSS, 即时生效"><i data-lucide="paintbrush" class="w-4 h-4"></i><span class="ui-btn-label">改样式</span></button>
+            <button v-if="previewTask" @click="openNewWindow('/preview/' + previewTask.id + '/')" class="hidden sm:flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white transition-all"><i data-lucide="external-link" class="w-4 h-4"></i><span class="ui-btn-label">新窗口</span></button>
           </div>
 
           <div v-if="!previewTask" class="flex-1 flex flex-col items-center justify-center gap-3 text-slate-600">
@@ -2301,54 +2437,97 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           </div>
           <div v-else-if="['running','pending'].includes(previewTask.status) || (previewTask.status==='failed' && !previewTask.zip_path)" class="flex-1 pg-empty lg">
             <i :data-lucide="previewTask.status==='failed' ? 'image' : 'loader'" class="w-6 h-6" :class="previewTask.status==='failed' ? '' : 'animate-spin'"></i>
-            <div>[[ previewTask.status==='failed' ? '这次克隆没有产出页面，重建一次试试' : '克隆完成后这里显示预览' ]]</div>
+            <div>[[ previewTask.status==='failed' ? (taskKind(previewTask) === 'clone' ? '这次克隆没有产出页面' : '这次生成没有产出页面') + '，点上方「重试」再来一次' : (taskKind(previewTask) === 'clone' ? '克隆完成后这里显示预览' : '页面写完并通过体检后这里显示预览') ]]</div>
           </div>
 
-          <div v-else-if="previewMode==='single'" class="flex-1 min-h-0 panel rounded-xl overflow-hidden p-2">
-            <iframe :src="'/preview/' + previewTask.id + '/'" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
-              class="sandbox-frame mx-auto block rounded-lg ring-1 ring-black/5" :style="{width: previewWidthStyle}"></iframe>
+          <div v-else-if="previewMode==='single'" class="flex-1 min-h-0 panel rounded-xl overflow-hidden p-2 flex">
+            <pv-scale :width="previewNominal" fill @scale="previewScale = $event">
+              <iframe :src="'/preview/' + previewTask.id + '/'" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+                class="sandbox-frame block w-full rounded-lg ring-1 ring-black/5"></iframe>
+            </pv-scale>
           </div>
 
           <div v-else-if="previewMode==='compare'" class="flex-1 min-h-0 grid grid-cols-2 gap-3">
             <div class="flex flex-col min-h-0 panel rounded-xl overflow-hidden p-2">
-              <div class="text-[10px] font-mono text-slate-500 px-1 pb-1.5 flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-sky-400"></span>原站 [[ previewTask.domain ]][[ origView==='live' ? ' · 实时' : ' · 截图' ]]</div>
-              <div class="flex-1 min-h-0 overflow-auto custom-scroll">
-                <iframe v-if="origView==='live'" :src="previewTask.target_url" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
-                  class="sandbox-frame mx-auto block rounded-lg ring-1 ring-black/5" :style="{width: previewWidthStyle}"></iframe>
-                <img v-else :src="origShotUrl" alt="原站全页截图"
-                  class="mx-auto block rounded-lg ring-1 ring-black/5 bg-white" :style="{width: previewWidthStyle}">
+              <div class="text-[10px] font-mono text-slate-500 px-1 pb-1.5 flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-sky-400"></span><template v-if="taskKind(previewTask) === 'clone'">原站 [[ previewTask.domain ]][[ origView==='live' ? ' · 实时' : ' · 截图' ]]</template><template v-else>原图</template></div>
+              <div v-if="origView==='live' && taskKind(previewTask) === 'clone'" class="flex-1 min-h-0 flex">
+                <pv-scale :width="previewNominal" fill @scale="previewScale = $event">
+                  <iframe :src="previewTask.target_url" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+                    class="sandbox-frame block w-full rounded-lg ring-1 ring-black/5"></iframe>
+                </pv-scale>
+              </div>
+              <div v-else class="flex-1 min-h-0 overflow-auto custom-scroll">
+                <pv-scale :width="previewNominal">
+                  <img :src="origShotUrl" alt="原站全页截图" class="block w-full rounded-lg ring-1 ring-black/5 bg-white">
+                </pv-scale>
               </div>
             </div>
             <div class="flex flex-col min-h-0 panel rounded-xl overflow-hidden p-2" style="border-color:rgba(99,102,241,.3)">
-              <div class="text-[10px] font-mono text-indigo-300 px-1 pb-1.5 flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-indigo-400 "></span>克隆站 /preview</div>
-              <div class="flex-1 min-h-0 overflow-auto custom-scroll">
-                <iframe :src="'/preview/' + previewTask.id + '/'" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
-                  class="sandbox-frame mx-auto block rounded-lg ring-1 ring-black/5" :style="{width: previewWidthStyle}"></iframe>
+              <div class="text-[10px] font-mono text-indigo-300 px-1 pb-1.5 flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-indigo-400 "></span>[[ taskKind(previewTask) === 'clone' ? '克隆站' : '产出' ]]</div>
+              <div class="flex-1 min-h-0 flex">
+                <pv-scale :width="previewNominal" fill @scale="previewScale = $event">
+                  <iframe :src="'/preview/' + previewTask.id + '/'" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+                    class="sandbox-frame block w-full rounded-lg ring-1 ring-black/5"></iframe>
+                </pv-scale>
               </div>
             </div>
+          </div>
+
+          <!-- 差异: 一句结论 + 差别区域画框, 点框/点条目滚动定位 -->
+          <div v-else-if="previewMode==='diff'" class="flex-1 min-h-0 panel rounded-xl flex flex-col overflow-hidden">
+            <div class="diff-head">
+              <template v-if="diffInfo.loading">正在比较…</template>
+              <template v-else-if="diffInfo.error">[[ diffInfo.error ]]</template>
+              <template v-else>
+                <b>[[ diffVerdict ]]</b>
+                <span class="text-slate-500">· 越亮的地方与[[ diffRef ]]差别越大</span>
+                <span class="diff-chips">
+                  <button v-for="(r, i) in diffInfo.regions" :key="i" type="button" :class="diffSel === i ? 'on' : ''" @click="diffFocus(i)">[[ i + 1 ]]</button>
+                </span>
+              </template>
+            </div>
+            <div ref="diffScroll" class="flex-1 min-h-0 overflow-auto custom-scroll p-3">
+              <div class="diff-stage">
+                <img :src="'/api/tasks/' + previewTask.id + '/screenshots/diff'" alt="差异图" class="block w-full rounded-lg ring-1 ring-black/5 bg-white"
+                  @error="diffInfo.imgErr = true">
+                <button v-for="(r, i) in diffInfo.regions" :key="'b' + i" type="button" class="diff-box" :class="diffSel === i ? 'on' : ''"
+                  :ref="el => { if (el) diffBoxEls[i] = el }" @click="diffSel = i"
+                  :style="{ left: (r.x * 100) + '%', top: (r.y * 100) + '%', width: (r.w * 100) + '%', height: (r.h * 100) + '%' }"
+                  :aria-label="'差别区域 ' + (i + 1)"><span>[[ i + 1 ]]</span></button>
+              </div>
+              <div v-if="diffInfo.imgErr" class="pg-empty">这个任务没有差异图</div>
+            </div>
+          </div>
+          <!-- 文字生成: 看源码 -->
+          <div v-else-if="previewMode==='code'" class="flex-1 min-h-0 lc" style="height:auto">
+            <div class="lc-head"><b>index.html</b><span class="lc-meta">[[ previewCode.loading ? '读取中…' : (previewCode.text.length / 1000).toFixed(1) + 'k 字符' ]]</span></div>
+            <pre class="lc-code" style="padding:10px 14px"><code v-html="previewCodeHtml()"></code></pre>
           </div>
 
           <!-- 滑动卷帘重叠对比: 底层克隆站实时 iframe, 上层原站全页截图 -->
           <div v-else-if="previewMode==='overlay'" class="flex-1 min-h-0 panel rounded-xl p-2 flex flex-col gap-2 fade-in" style="border-color:rgba(217,70,239,.3)">
             <div class="text-[10px] font-mono text-fuchsia-300 px-1 flex items-center gap-1.5">
               <span class="w-1.5 h-1.5 rounded-full bg-fuchsia-400 "></span>
-              滑动卷帘重叠对比 · 左侧露出 <span class="text-slate-400">原站截图</span> / 右侧 <span class="text-indigo-300">克隆站实时</span> · 卷帘位置 <span class="tnums">[[ overlayPos ]]%</span>
+              卷帘对比 · 左侧 <span class="text-slate-400">[[ taskKind(previewTask) === 'clone' ? '原站截图' : '原图' ]]</span> / 右侧 <span class="text-indigo-300">[[ taskKind(previewTask) === 'clone' ? '克隆站' : '产出' ]]</span> · 位置 <span class="tnums">[[ overlayPos ]]%</span>
             </div>
             <div class="flex-1 min-h-0 relative overflow-auto custom-scroll bg-slate-950/60">
-              <div class="relative mx-auto" :style="{width: previewWidthStyle, height: overlayHeight + 'px'}">
-                <iframe :src="'/preview/' + previewTask.id + '/'" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
-                  class="w-full h-full border-0 bg-white"></iframe>
-                <img :src="origShotUrl" alt="原站截图叠加层"
-                  class="absolute top-0 left-0 w-full h-full pointer-events-none object-fill border-r-2 border-fuchsia-400"
-                  :style="{clipPath: 'inset(0 ' + (100 - overlayPos) + '% 0 0)'}">
-              </div>
+              <pv-scale :width="previewNominal" @scale="previewScale = $event">
+                <div class="relative w-full">
+                  <iframe :src="'/preview/' + previewTask.id + '/'" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+                    class="absolute inset-0 w-full h-full border-0 bg-white"></iframe>
+                  <img :src="origShotUrl" alt="原站截图叠加层"
+                    class="relative block w-full h-auto pointer-events-none"
+                    :style="{clipPath: 'inset(0 ' + (100 - overlayPos) + '% 0 0)'}">
+                  <div class="absolute top-0 bottom-0 w-[2px] bg-fuchsia-400 pointer-events-none" :style="{ left: overlayPos + '%' }"></div>
+                </div>
+              </pv-scale>
             </div>
             <input type="range" min="0" max="100" v-model.number="overlayPos" class="accent-fuchsia-500 cursor-pointer">
           </div>
         </div>
 
         <!-- ============ Tab 3: Mock API 与静态资产审查器 ============ -->
-        <div v-show="activeTab==='inspector'" class="h-full flex flex-col gap-3">
+        <div v-show="activeTab==='inspector'" class="insp-scope h-full flex flex-col gap-3">
           <div v-if="!selectedTask" class="flex-1 flex flex-col items-center justify-center gap-3 text-slate-600">
             <i data-lucide="file-search" class="w-10 h-10 opacity-40"></i>
             <div class="text-xs">在任务矩阵点击【审查资产与API】选择一个任务</div>
@@ -2356,14 +2535,14 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <template v-else>
             <div class="flex items-center gap-2 text-[11px] text-slate-400">
               <i data-lucide="satellite" class="w-3.5 h-3.5 text-cyan-400"></i>
-              正在审查 <span class="font-mono text-slate-200">[[ selectedTask.domain ]]</span>
+              查看 <span class="font-mono text-slate-200">[[ selectedTask.domain ]]</span>
               <span class="text-slate-600">·</span> <span class="font-mono tnums">#[[ selectedTask.id ]]</span>
             </div>
             <div class="flex-1 min-h-0 grid grid-cols-[300px_1fr] gap-3">
               <!-- 左: 接口列表 + 资产树 -->
               <div class="min-h-0 panel rounded-xl overflow-y-auto custom-scroll p-2 space-y-1">
                 <div class="text-[10px] font-semibold text-slate-400 px-1 py-1 flex items-center gap-1.5">
-                  <i data-lucide="braces" class="w-3 h-3 text-cyan-400"></i>录制接口 ([[ mockEntries.length ]])
+                  <i data-lucide="braces" class="w-3 h-3 text-cyan-400"></i>接口 ([[ mockEntries.length ]])
                 </div>
                 <button v-for="(m, i) in mockEntries" :key="i" @click="selectMock(i)"
                   :class="mockIndex===i && !mockCreating ? 'bg-slate-500/10 border-slate-400' : 'bg-slate-950/50 border-transparent hover:border-white/10'"
@@ -2374,12 +2553,12 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                   <span class="text-[9px] font-mono tnums" :class="m.status < 400 ? 'text-emerald-400' : 'text-rose-400'">[[ m.status ]]</span>
                 </button>
                 <div v-if="!mockEntries.length" class="text-[10px] text-slate-600 px-2 py-2 flex items-center gap-2">
-                  未录制到 JSON 接口
+                  没有抓到接口
                   <button @click="startNewMock" class="px-1.5 py-0.5 rounded border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 transition-all">+ 手动新增</button>
                 </div>
 
                 <div class="text-[10px] font-semibold text-slate-400 px-1 pt-3 pb-1 flex items-center gap-1.5">
-                  <i data-lucide="folder-tree" class="w-3 h-3 text-indigo-400"></i>静态资产树
+                  <i data-lucide="folder-tree" class="w-3 h-3 text-indigo-400"></i>文件
                 </div>
                 <div v-for="(row, i) in assetRows" :key="row.node.path + i" class="flex items-center gap-1 rounded px-1 py-0.5 hover:bg-white/[0.04]" :style="{paddingLeft: (row.depth * 12 + 4) + 'px'}">
                   <span v-if="row.node.type==='dir'" @click="toggleAsset(row)" class="cursor-pointer text-slate-500 hover:text-slate-100 flex items-center gap-0.5 w-full">
@@ -2519,9 +2698,18 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
     </main>
   </div><!-- /create+tasks 包裹层 -->
 
+  <!-- 手机宽度: 底部导航(左侧图标栏在窄屏隐藏) -->
+  <nav class="m-tabbar" aria-label="主导航">
+    <button type="button" :class="activeModule==='hub' ? 'on' : ''" @click="goModule('hub'); currentProjectId=''"><i data-lucide="house" class="w-5 h-5"></i><span>首页</span></button>
+    <button v-if="canWrite" type="button" :class="activeModule==='create' ? 'on' : ''" @click="goModule('create')"><i data-lucide="plus" class="w-5 h-5"></i><span>新建克隆</span></button>
+    <button type="button" :class="activeModule==='generate' ? 'on' : ''" @click="goModule('generate')"><i data-lucide="wand-2" class="w-5 h-5"></i><span>界面生成</span></button>
+    <button type="button" :class="activeModule==='docker' ? 'on' : ''" @click="goModule('docker')"><i data-lucide="container" class="w-5 h-5"></i><span>部署</span></button>
+    <button type="button" :class="activeModule==='admin' ? 'on' : ''" @click="goModule('admin'); adminTab='settings'; loadSettings();"><i data-lucide="settings" class="w-5 h-5"></i><span>设置</span></button>
+  </nav>
+
   <!-- ======================= 底部 SSE 实时终端 2.0 ======================= -->
   <!-- ===== 浮动终端: 右下角脉冲胶囊 + 毛玻璃抽屉 ===== -->
-  <div v-if="consoleState===0 && telemetry.queue.running" @click="toggleConsole"
+  <div v-if="false" @click="toggleConsole"
     class="console-pill fixed bottom-5 right-5 z-40 flex items-center gap-2.5 px-4 h-9 rounded-full border border-white/[0.1] bg-slate-900 cursor-pointer hover:border-white/[0.2] transition-colors group" style="box-shadow:var(--shadow-pop)">
     <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
     <span class="text-[13px] text-slate-200">[[ telemetry.queue.running ]] 个任务运行中</span>
@@ -2668,12 +2856,12 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         <div class="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <h2 class="font-display text-[28px] leading-tight text-slate-100">界面生成</h2>
-            <p class="text-[13px] text-slate-500 mt-1.5">上传截图或写一段描述，生成可运行、可评分的网站；达到目标分即停。</p>
+            <p class="text-[13px] text-slate-500 mt-1.5">写一段需求或上传截图，生成可运行的网页；按需求逐条验收，不达标自动修复。</p>
           </div>
           <div class="flex items-center gap-2 text-[11px] text-slate-400">
-            <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-white/[0.08] bg-slate-950/60">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5 text-indigo-300"><path d="m15 4 1 1-9 9-1-1zM3 21l3-1 1-3"/><path d="M14 7l3 3"/></svg>
-              先用规则生成，不够时再用大模型补（没配置 Key 时只用规则）
+            <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border border-white/[0.08] bg-slate-950/60">
+              <span class="w-1.5 h-1.5 rounded-full" :class="genReady ? 'bg-emerald-400' : 'bg-amber-400'"></span>
+              [[ genReady ? '模型已就绪' : '未配置模型' ]]
             </span>
           </div>
         </div>
@@ -2686,22 +2874,27 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                 class="flex-1 px-3 py-1.5 rounded-md border text-[11px] transition-all">界面截图</button>
             </div>
             <div v-show="gen.kind==='description'" class="space-y-1.5">
-              <label class="text-[10px] text-slate-500">页面描述(原型由关键词决定: 登录 / 落地页 / 仪表盘 / 商品列表 / 文章; 用「」给出标题文案, 可写颜色与数量)</label>
-              <textarea v-model="gen.description" rows="6" maxlength="4000" placeholder="例如: 一个蓝色主题的登录页, 有手机号、密码和短信验证码, 品牌叫 云帆, 标题「欢迎登录云帆控制台」"
+              <label class="text-[10px] text-slate-500">想要什么样的网页(一句话也可以; 动效、小游戏、工具、信息页都行, 写得越具体越贴合)</label>
+              <textarea v-model="gen.description" rows="6" maxlength="4000" placeholder="例如: 做一个番茄钟, 25 分钟专注 5 分钟休息, 可以开始、暂停、重置, 配色安静一些"
                 class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500 resize-none"></textarea>
             </div>
-            <div v-show="gen.kind==='screenshot'" class="space-y-1.5">
-              <label class="text-[10px] text-slate-500">界面截图(PNG/JPG, ≤12MB; 参考图即该截图, 评分口径与克隆侧一致)</label>
-              <input type="file" accept="image/*" @change="handleGenFile" class="block w-full text-[11px] text-slate-400 file:mr-3 file:px-3 file:py-1.5 file:rounded-md file:border-0 file:bg-indigo-500/20 file:text-indigo-200">
-              <img v-if="gen.preview" :src="gen.preview" class="mt-2 max-h-48 rounded-lg border border-white/[0.08] object-contain bg-slate-950/60">
+            <div v-show="gen.kind==='screenshot'" class="space-y-2">
+              <label class="text-[10px] text-slate-500">界面截图(PNG/JPG/WebP, ≤12MB; 浏览器整窗截图会自动去掉地址栏等外框, Retina 截图自动按倍率换算)</label>
+              <div class="shot-drop" :class="{ on: gen.drag, has: gen.preview }" tabindex="0"
+                @click="$refs.genFile.click()" @keydown.enter.prevent="$refs.genFile.click()"
+                @dragover.prevent="gen.drag = true" @dragleave.prevent="gen.drag = false" @drop.prevent="onGenDrop">
+                <img v-if="gen.preview" :src="gen.preview" alt="截图预览">
+                <div v-else class="shot-drop-tip"><i data-lucide="image-plus" class="w-5 h-5"></i>
+                  <b>⌘V / Ctrl+V 粘贴截图</b><span>或拖入图片、点击选择文件</span></div>
+                <button v-if="gen.preview" type="button" class="shot-drop-x" title="移除截图" @click.stop="clearGenFile">×</button>
+              </div>
+              <div v-if="gen.fileInfo" class="text-[10px] text-slate-500 tnums">[[ gen.fileInfo ]]</div>
+              <input ref="genFile" type="file" accept="image/*" @change="handleGenFile" class="hidden">
+              <label class="text-[10px] text-slate-500 block pt-1">补充要求(可选: 想在截图基础上改什么、加什么; 不填就按截图还原)</label>
+              <textarea v-model="gen.hint" rows="3" maxlength="2000" placeholder="例如: 配色换成深色; 右侧加一个购物车按钮; 商品卡片做成 3 列"
+                class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500 resize-none"></textarea>
             </div>
             <div class="grid grid-cols-2 gap-3">
-              <div class="space-y-1"><label class="text-[10px] text-slate-500">渲染视口</label>
-                <select v-model="gen.viewport" class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-2 py-1.5 text-xs text-slate-200">
-                  <option value="desktop">desktop 1920</option><option value="laptop">laptop 1440</option><option value="mobile">mobile 390</option></select></div>
-              <div class="space-y-1"><label class="text-[10px] text-slate-500">界面代码</label>
-                <select v-model="gen.target" @change="gen.package = (gen.target==='flutter' && gen.package==='desktop') ? '' : gen.package" class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-2 py-1.5 text-xs text-slate-200">
-                  <option value="html_css">HTML / CSS(可预览评分)</option><option value="flutter">Flutter 原生控件(D3 最小版)</option></select></div>
               <!-- 交付形态: 与「新建克隆」同一组选项 -->
               <div class="space-y-1.5 col-span-2">
                 <div class="text-[10px] text-slate-500 tracking-[0.16em] font-semibold flex items-center gap-1.5">交付形态
@@ -2716,29 +2909,49 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                   </button>
                 </div>
               </div>
+            </div>
+            <button type="button" @click="genAdv = !genAdv" class="flex items-center gap-1.5 text-[12px] text-slate-400 hover:text-slate-100" :aria-expanded="genAdv">
+              <i data-lucide="sliders-horizontal" class="w-3.5 h-3.5"></i>高级设置<span class="text-slate-600">· 视口、目标分、时间预算</span>
+              <i data-lucide="chevron-down" class="w-3.5 h-3.5 transition-transform" :class="genAdv ? 'rotate-180' : ''"></i>
+            </button>
+            <div v-show="genAdv" class="grid grid-cols-2 gap-3">
+              <div class="space-y-1"><label class="text-[10px] text-slate-500">渲染视口</label>
+                <select v-model="gen.viewport" class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-2 py-1.5 text-xs text-slate-200">
+                  <option value="desktop">大屏桌面 1920</option><option value="laptop">笔记本 1440</option><option value="mobile">手机 390</option></select></div>
+              <div class="space-y-1"><label class="text-[10px] text-slate-500">界面代码</label>
+                <select v-model="gen.target" @change="gen.package = (gen.target==='flutter' && gen.package==='desktop') ? '' : gen.package" class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-2 py-1.5 text-xs text-slate-200">
+                  <option value="html_css">HTML / CSS(可预览评分)</option><option value="flutter">Flutter 原生控件(D3 最小版)</option></select></div>
               <div class="space-y-1"><label class="text-[10px] text-slate-500">目标分(≥即停)</label>
                 <input v-model.number="gen.targetScore" type="number" min="1" max="100" class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-2 py-1.5 text-xs text-slate-200"></div>
               <div class="space-y-1"><label class="text-[10px] text-slate-500">最多轮数 / 时间预算(s)</label>
                 <div class="flex gap-2"><input v-model.number="gen.maxRounds" type="number" min="1" max="12" class="w-1/2 rounded-lg bg-slate-950/80 border border-white/[0.08] px-2 py-1.5 text-xs text-slate-200">
                 <input v-model.number="gen.timeBudget" type="number" min="10" max="3600" class="w-1/2 rounded-lg bg-slate-950/80 border border-white/[0.08] px-2 py-1.5 text-xs text-slate-200"></div></div>
             </div>
-            <p class="text-[10px] text-slate-500">大模型配置沿用「新建批次」表单里的 AI 字段(任务级 &gt; 环境变量 &gt; 默认); 未配置时走确定性版面分析 / 页面原型。</p>
+
             <div v-if="gen.error" class="text-[11px] text-rose-300">[[ gen.error ]]</div>
             <button @click="submitGenerate" :disabled="gen.submitting"
               class="w-full px-3 py-2 rounded-lg ui-primary text-xs font-semibold disabled:opacity-50 transition-all">
               [[ gen.submitting ? '提交中…' : '开始生成' ]]</button>
           </div>
-          <div class="rounded-2xl border border-white/[0.07] bg-slate-900/70 backdrop-blur-xl p-4 space-y-3 text-[11px] text-slate-400 leading-relaxed">
-            <div class="text-xs font-semibold text-slate-300">流程与口径</div>
-            <ol class="list-decimal pl-4 space-y-1">
-              <li>输入经 InputAdapter 归一化为 <b class="text-slate-200">UIR</b>(组件树 + 设计令牌 + 内容 + 交互意图)。</li>
-              <li>OutputTarget 把 UIR 渲染为离线可运行的 HTML/CSS(无外链), Playwright 整页截图。</li>
-              <li>截图输入: 与参考图过三通道评分 v3(结构 NCC / 边缘 IoU / 文本 F2), 与克隆任务同一函数。描述输入: 无参考图, 自评分单列。</li>
-              <li>低于目标分则把像素差分线索回喂下一轮; 只保留净提升轮次; 达标或预算耗尽即停。</li>
-              <li>产物进任务矩阵: 预览 / 导出 ZIP / 评分明细与「生成报告」均可查看; 选了桌面应用 / Android 应用交付形态的任务另有 .app / .exe / APK 下载按钮。</li>
-            </ol>
-            <div class="text-xs font-semibold text-slate-300 pt-2">边界</div>
-            <p>仅重建界面外观与交互意图; 不做任何站点 / 应用特判; 移动端(L2)只处理自有 / 授权安装包的公开资源。</p>
+          <div class="rounded-2xl border border-white/[0.07] bg-slate-900/70 p-4 space-y-3">
+            <div class="flex items-center justify-between">
+              <div class="text-[13px] font-semibold text-slate-200">不知道怎么写? 点一个试试</div>
+              <span class="gen-help" tabindex="0" aria-label="评分说明">?
+                <span class="gen-help-pop">[[ gen.kind === 'screenshot'
+                  ? '还原度 = 40% 与原图的相似度 + 30% 清单达成 + 15% 电脑/平板/手机三端正常 + 15% 设计。模型先读截图, 再写响应式页面, 在真实浏览器里三端体检, 对照原图验收, 不达标自动修一到两轮。'
+                  : '需求符合度 = 35% 清单达成(只算能确认的条目) + 25% 运行正常 + 40% 设计。模型先把一句话扩写成任务书和验收清单, 写页面, 在真实浏览器里体检, 看图逐条验收, 不达标自动修一到两轮。' ]]</span></span>
+            </div>
+            <template v-if="gen.kind !== 'screenshot'">
+              <button v-for="ex in genExamples" :key="ex" type="button" class="gen-example" @click="gen.description = ex">[[ ex ]]</button>
+            </template>
+            <template v-else>
+              <p class="text-[12.5px] text-slate-400 leading-relaxed">截一张网页或 App 的图, 在左边按 ⌘V 粘贴。浏览器整窗截图会自动去掉地址栏; 可以在「补充要求」里写想改的地方, 比如:</p>
+              <button v-for="ex in genShotHints" :key="ex" type="button" class="gen-example" @click="gen.hint = ex">[[ ex ]]</button>
+            </template>
+            <div v-if="!genReady && !form.aiKey" class="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-[12.5px] text-amber-200 flex items-center gap-2">
+              还没有配置大模型, 生成需要它。
+              <button v-if="isPlatformAdmin()" type="button" class="ml-auto mt-btn" @click="switchView('admin'); adminTab='settings'; loadSettings()">去配置</button>
+            </div>
           </div>
         </div>
       </div>
@@ -2758,7 +2971,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <option v-for="t in mockGenTasks" :key="t.id" :value="t.id">#[[ t.id ]] [[ t.domain ]]</option>
             </select>
             <button @click="mockGenToInspector" :disabled="!mockGen.taskId"
-              class="mt-btn">深度编辑</button>
+              class="mt-btn">在这个任务里编辑</button>
           </div>
         </div>
 
@@ -2766,7 +2979,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <!-- 左: Schema / 字段规则配置区 -->
           <div class="rounded-2xl border border-white/[0.07] bg-slate-900/70 backdrop-blur-xl p-4 space-y-4">
             <div class="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-              <i data-lucide="braces" class="w-4 h-4 text-emerald-400"></i>Schema / 字段规则配置
+              <i data-lucide="braces" class="w-4 h-4 text-emerald-400"></i>字段规则配置
             </div>
             <div class="space-y-1.5">
               <label class="text-[10px] text-slate-500">业务场景描述(关键词决定字段: 商品 / 订单 / 用户 / 文章)</label>
@@ -2827,9 +3040,9 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                   class="flex items-center gap-1 px-2 py-1 rounded-md border border-white/[0.08] text-[9.5px] text-slate-400 hover:text-slate-100 disabled:opacity-40 transition-all">
                   <i data-lucide="download" class="w-3 h-3"></i>导出 .json
                 </button>
-                <button @click="injectMockGen" :disabled="!mockGen.entry || !mockGen.taskId || mockGen.busy" title="注入 Flask 模拟路由"
+                <button @click="injectMockGen" :disabled="!mockGen.entry || !mockGen.taskId || mockGen.busy" title="把这份模拟数据接到克隆站"
                   class="flex items-center gap-1 px-2.5 py-1 rounded-md ui-primary text-[9.5px] font-semibold text-white disabled:opacity-40 transition-all">
-                  <i data-lucide="syringe" class="w-3 h-3"></i>注入 Flask 模拟路由
+                  <i data-lucide="syringe" class="w-3 h-3"></i>接到克隆站
                 </button>
               </div>
             </div>
@@ -3034,19 +3247,6 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           </div>
         </section>
 
-        <section class="mt-panel">
-          <div class="mt-head"><div><h3>最近批次</h3></div>
-            <button type="button" class="mt-btn" @click="goModule('browserpool')"><i data-lucide="activity" class="w-4 h-4"></i>看实时工位</button></div>
-          <div v-for="bt in (telemetry.batches || []).slice(0, 10)" :key="bt.id" class="mt-line bt-line">
-            <span class="truncate flex-1 text-slate-200">[[ bt.name || ('批次 ' + bt.id) ]]</span>
-            <div class="bt-bar" :title="'成功 ' + (bt.ok_cnt || 0) + ' / 失败 ' + (bt.fail_cnt || 0) + ' / 共 ' + bt.total_urls">
-              <span class="ok" :style="{ width: (100 * (bt.ok_cnt || 0) / Math.max(1, bt.total_urls)) + '%' }"></span><span class="bad" :style="{ width: (100 * (bt.fail_cnt || 0) / Math.max(1, bt.total_urls)) + '%' }"></span>
-            </div>
-            <span class="mt-line-meta tnums w-[64px] text-right">[[ (bt.ok_cnt || 0) + (bt.fail_cnt || 0) ]] / [[ bt.total_urls ]]</span>
-            <span class="mt-line-meta hide-sm w-[88px] text-right">[[ relTime(bt.created_at) ]]</span>
-          </div>
-          <div v-if="!(telemetry.batches || []).length" class="pg-empty">还没有批次</div>
-        </section>
       </div>
     </div>
   </div>
@@ -3138,7 +3338,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <div class="flex-1 flex flex-col gap-1"><label>运行方式</label>
               <select v-model="deployModal.mode" class="mt-select">
                 <option value="">自动（[[ modeText(dockerMeta.default_mode) ]]）</option>
-                <option value="process">本机进程</option>
+                <option value="process">部署在本机</option>
                 <option value="fast" :disabled="!docker.available">Docker 极速</option>
                 <option value="image" :disabled="!docker.available">Docker 镜像</option>
               </select></div>
@@ -3213,8 +3413,9 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <div v-for="r in (aiReport.data.rounds || [])" :key="r.round"
         class="rounded-xl border border-white/[0.08] bg-slate-950/60 p-3 space-y-1.5">
         <div class="flex items-center gap-2 text-[10px] font-mono text-slate-400">
-          <span class="px-1.5 py-0.5 rounded bg-fuchsia-500/15 text-fuchsia-300 border border-fuchsia-500/30">Round [[ r.round ]]</span>
+          <span class="px-1.5 py-0.5 rounded bg-slate-700/50 text-slate-300 border border-white/10">第 [[ r.round ]] 轮</span>
           <span v-if="r.score_before !== null && r.score_before !== undefined">[[ r.score_before ]]% → [[ r.score_after ?? '-' ]]%</span>
+          <span v-if="r.rolled_back" class="px-1.5 py-0.5 rounded bg-amber-400/15 text-amber-300 border border-amber-400/30">已回滚·改坏</span>
           <span v-else-if="r.error" class="text-rose-300">调用失败</span>
         </div>
         <div class="text-slate-300 leading-relaxed">[[ r.diagnosis || r.error || '(无诊断)' ]]</div>
@@ -3348,7 +3549,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 </div>
 
 <!-- 全局轻提示 -->
-<div v-if="toastMsg" role="status" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-2.5 px-4 h-10 rounded-lg bg-slate-900 border border-white/[0.1] text-[13px] text-slate-100 fade-in font-sans max-w-[92vw]" style="box-shadow:var(--shadow-pop)"><span class="w-1.5 h-1.5 rounded-full shrink-0" :class="{ok:'bg-emerald-400',bad:'bg-rose-400',warn:'bg-amber-400',info:'bg-slate-500'}[toastKind]"></span><span class="truncate">[[ toastMsg ]]</span></div>
+<div v-if="toastMsg" role="status" class="ui-toast fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-2.5 px-4 h-10 rounded-lg bg-slate-900 border border-white/[0.1] text-[13px] text-slate-100 fade-in font-sans max-w-[92vw]" style="box-shadow:var(--shadow-pop)"><span class="w-1.5 h-1.5 rounded-full shrink-0" :class="{ok:'bg-emerald-400',bad:'bg-rose-400',warn:'bg-amber-400',info:'bg-slate-500'}[toastKind]"></span><span class="truncate">[[ toastMsg ]]</span></div>
 </div>
 
 <script src="/vendor/js/vue.global.prod.js"></script>
@@ -3363,26 +3564,34 @@ const __vueApp = createApp({
       navCollapsed: localStorage.getItem('cloner-nav') === '1',
       navGroups: [
         { title: '', items: [
-          { id: 'hub', label: '项目', icon: 'folder-kanban' },
-          { id: 'docker', label: '部署', icon: 'container' },
-          { id: 'scheduler', label: '定时任务', icon: 'calendar-clock' },
+          { id: 'hub', label: '首页', icon: 'house', desc: '粘网址开始克隆，看项目和最近任务' },
+          { id: 'docker', label: '部署', icon: 'container', desc: '把克隆好的网站在本机跑起来，拿到访问地址' },
+          { id: 'scheduler', label: '定时任务', icon: 'calendar-clock', desc: '按时间自动重新克隆，盯住网站变化' },
         ]},
         { title: '工具', items: [
-          { id: 'generate', label: '界面生成', icon: 'wand-2' },
-          { id: 'ai', label: '视觉修复', icon: 'flask-conical' },
-          { id: 'mockgen', label: 'Mock 数据', icon: 'database' },
-          { id: 'browserpool', label: '浏览器池', icon: 'activity' },
+          { id: 'generate', label: '界面生成', icon: 'wand-2', desc: '一句话或一张截图，生成可运行的网页' },
+          { id: 'ai', label: '视觉修复', icon: 'flask-conical', desc: '还原度不够的克隆，自动修细节' },
+          { id: 'mockgen', label: 'Mock 数据', icon: 'database', desc: '给克隆站的接口造模拟数据，离线也能显示' },
         ]},
       ],
       schedulerBatches: [],
       gen: { kind: 'description', description: '', viewport: 'laptop', target: 'html_css', package: '',
-             targetScore: 85, maxRounds: 4, timeBudget: 240, file: null, preview: '', submitting: false, error: '' },
+             targetScore: 80, maxRounds: 4, timeBudget: 240, file: null, preview: '', submitting: false, error: '',
+             hint: '', drag: false, fileInfo: '' },
+      taskTokens: { id: null, rows: [], tokens_in: 0, tokens_out: 0, total: 0 },
+      tokenUsage: { group: 'day', rows: [], tokens_in: 0, tokens_out: 0, loaded: false },
+      genAdv: (() => { try { return localStorage.getItem('cloner-gen-adv') === '1'; } catch (e) { return false; } })(),
+      genExamples: ['做一个番茄钟, 25 分钟专注 5 分钟休息, 可以开始、暂停、重置, 配色安静一些',
+        '一家独立咖啡店的官网首页: 品牌故事、招牌饮品、门店地址和营业时间',
+        '个人记账本: 能添加收入和支出, 按分类统计本月花费, 数据保存在本地'],
+      genShotHints: ['配色保持不变, 右上角加一个购物车按钮', '整体换成深色主题', '商品卡片改成 3 列, 手机上 1 列'],
+      highlightTaskId: null, filtSheet: false, taskSort: 'recent', fitDrawer: false, headMore: false, runMenu: false, previewCode: { id: null, text: '', loading: false },
       opsKpis: { tracker_total: 0, links_total: 0, clicks_total: 0,
                  scheduler_running: 0, scheduler_pending: 0, scheduler_paused: false },
       matrixView: 'grid', projectPill: '', groupByDomain: false,
       pg: { page: 1, size: 9 },
       thumbErrs: new Set(),
-      aiPoolSearch: '', aiPoolSort: 'score_asc', aiPoolSize: 12, aiPoolPage: 1,
+      aiAll: false, aiPoolSearch: '', aiPoolSort: 'score_asc', aiPoolSize: 12, aiPoolPage: 1,
       trackerEnabledOnly: false, trackerRowSearch: '', trackerRowPage: 1, trackerPageSize: 10,
       trackerSearch: '', trackerRange: 'all', trackerExpanded: -1,
       trackerModal: { open: false, time: '', json: '', html: '', lines: 0 },
@@ -3462,9 +3671,9 @@ const __vueApp = createApp({
       tasks: [],
       telemetry: { browser: { active: 0, max: 4, alive: false }, cas: { assets: 0, hit_rate: 0 }, queue: { pending: 0, running: 0, completed: 0, failed: 0 }, batches: [] },
       urlsText: '',
-      form: { mode: 'single', maxPages: 3, viewport: 'desktop', renderTimeout: 30, cssom: true, mockApi: true, proxy: true, interactionSim: true, simLoginMessage: '', simLoginRedirect: '', disableHydration: false, similarity: true, cookie: '', bearer: '', ua: '', aiRepair: false, aiKey: '', aiModel: '', aiBaseUrl: '', package: '' },
-      heroUrl: '', advOpen: true, poolRestarting: false, storage: null, storageAt: 0, pruning: false,
-      aiDefaults: { base_url: '', model: '' }, aiKeyConfigured: false,
+      form: { mode: 'single', maxPages: 3, viewport: 'laptop', renderTimeout: 30, cssom: true, mockApi: true, proxy: true, interactionSim: true, simLoginMessage: '', simLoginRedirect: '', disableHydration: false, similarity: true, cookie: '', bearer: '', ua: '', aiRepair: false, aiKey: '', aiModel: '', aiBaseUrl: '', package: '' },
+      heroUrl: '', advOpen: (() => { try { return localStorage.getItem('cloner-adv-open') === '1'; } catch (e) { return false; } })(), poolRestarting: false, storage: null, storageAt: 0, pruning: false,
+      aiDefaults: { base_url: '', model: '' }, aiKeyConfigured: false, genReady: false, genModel: '',
       aiReport: { open: false, loading: false, busy: false, data: null },
       splitRight: 'cloned',
       repairHistory: { open: false, items: [] },
@@ -3479,7 +3688,8 @@ const __vueApp = createApp({
       selectedTaskId: null, previewTaskId: null,
       selectedIds: new Set(), batchBusy: false,
       previewMode: 'single', previewWidth: 'full',
-      origView: 'live', overlayPos: 50, overlayHeight: 1200,
+      diffInfo: { id: null, loading: false, error: '', regions: [], area_pct: 0, imgErr: false }, diffSel: -1, diffBoxEls: [],
+      origView: 'shot', overlayPos: 50, overlayHeight: 1200, previewScale: 1,
       compareModal: false, compareData: { original: '', cloned: '', diff: '', rightMode: 'cloned', score: null },
       hotpatch: { open: false, css: '', saving: false },
       mockEntries: [], mockIndex: -1, mockBody: '', mockSaving: false, mockMsg: '',
@@ -3490,6 +3700,8 @@ const __vueApp = createApp({
       consoleLevel: 'all', consoleSearch: '',
       consoleState: 0, lastConsoleState: 1, sseOk: false,
       countUp: { projects: 0, tasks: 0, running: 0, done: 0 },
+      tasksLoaded: false,
+      sampleUrls: ['https://www.python.org/', 'https://www.djangoproject.com/', 'https://example.com/'],
       projView: (function(){ try { return localStorage.getItem('cloner-proj-view') || 'grid'; } catch (e) { return 'grid'; } })(), projSort: 'recent', projFilter: 'all',
       toastMsg: '', toastKind: 'info',
       tabs: [
@@ -3498,14 +3710,14 @@ const __vueApp = createApp({
         { id: 'inspector', label: '资源与接口', icon: 'search-code' },
       ],
       deliveries: [
-        { id: '', label: '网站工程', sub: 'Flask ZIP / Docker 部署', icon: 'globe', hint: '默认: 导出可独立运行的 Flask 网站工程' },
+        { id: '', label: '网站工程', sub: '可下载的网站源码包, 可一键部署', icon: 'globe', hint: '默认: 导出可独立运行的网站工程' },
         { id: 'desktop', label: '桌面应用', sub: 'macOS .app + Windows .exe', icon: 'monitor', hint: '系统 WebView 应用壳(macOS WKWebView / Windows WebView2), 体积≈站点 + 约 2.5MB; 未签名' },
         { id: 'apk', label: 'Android 应用', sub: 'APK(debug 证书签名)', icon: 'smartphone', hint: '原生 Android WebView 应用壳, 体积≈站点 + 约 20KB; 构建数秒' },
       ],
       viewports: [
-        { id: 'desktop', label: 'Desktop', size: '1920×1080' },
-        { id: 'laptop', label: 'Laptop', size: '1440×900' },
-        { id: 'mobile', label: 'Mobile', size: '390×844' },
+        { id: 'desktop', label: '大屏桌面', size: '1920×1080' },
+        { id: 'laptop', label: '笔记本', size: '1440×900' },
+        { id: 'mobile', label: '手机', size: '390×844' },
       ],
       toggles: [
         { key: 'cssom', label: '保留动态生成的样式', hint: 'React/Vue 等框架运行时插入的样式也一起保存' },
@@ -3558,8 +3770,10 @@ const __vueApp = createApp({
     },
     aiList() {
       const q = this.aiQ.trim().toLowerCase();
-      let xs = this.tasks.filter(t => t.status === 'completed');
-      if (q) xs = xs.filter(t => (t.domain + ' #' + t.id).toLowerCase().includes(q));
+      // 视觉修复只针对克隆任务; 默认只列还没到 95 分的(需要修的), 勾「显示全部」看全部
+      let xs = this.tasks.filter(t => t.status === 'completed' && this.taskKind(t) === 'clone');
+      if (!this.aiAll) xs = xs.filter(t => t.similarity_score == null || t.similarity_score < 95);
+      if (q) xs = xs.filter(t => (this.taskTitle(t) + ' ' + t.domain + ' #' + t.id).toLowerCase().includes(q));
       const sc = t => (t.similarity_score == null ? 999 : t.similarity_score);
       if (this.aiSort === 'score_asc') xs = xs.slice().sort((a, b) => sc(a) - sc(b));
       else xs = xs.slice().sort((a, b) => b.id - a.id);
@@ -3606,20 +3820,20 @@ const __vueApp = createApp({
     },
     activeTitle() {
       const m = {
-        dashboard: ['项目', '每个项目单独管理自己的批次、任务和部署'],
-        create: ['新建克隆', '批量目标站点 · 引擎选项 · 仿真交互配置'],
-        tasks: ['任务', '批量克隆与任务看板'],
-        task: ['任务详情', '沙盒预览 / API 与资产审查 / 部署蓝图'],
-        browserpool: ['浏览器池', '工位 · 排队 · 资源'],
+        dashboard: ['首页', '粘贴网址开始克隆, 查看进行中的任务与项目'],
+        create: ['新建克隆', '一次克隆一个或多个网址，可调引擎选项'],
+        tasks: ['任务', '所有克隆与生成任务'],
+        task: ['任务详情', '预览、对比、下载与部署'],
+        browserpool: ['浏览器池', '渲染工位、排队与资源占用'],
         ai: ['视觉修复', '对照原站修细节'],
-        mockgen: ['Mock 数据', '克隆站接口 Mock 编排'],
+        mockgen: ['Mock 数据', '给克隆站的接口造模拟数据，离线也能显示'],
         tracker: ['表单捕获追踪', 'Form Tracker · 埋点配置总览与上报实时流'],
-        links: ['短链管理', 'Link Shortener · 多服务短链生成与跳转统计'],
+        links: ['短链管理', '生成短链接并统计点击'],
         generate: ['界面生成', '截图或文字描述 → 可运行网站'],
-        scheduler: ['定时任务', 'Scheduler · 批次队列与执行状态'],
-        docker: ['部署', '把克隆站跑起来'],
-        remote: ['远程一键部署', 'Remote Deploy · SSH 推送 VPS 运行'],
-        admin: ['团队与设置', 'Team · 成员 / 用量 / 审计'],
+        scheduler: ['定时任务', '按时间自动重新克隆，盯住网站变化'],
+        docker: ['部署', '把克隆好的网站在本机跑起来，拿到访问地址'],
+        remote: ['远程一键部署', '推送到你自己的服务器运行'],
+        admin: ['团队与设置', '成员、用量与操作记录'],
       };
       const t = m[this.view] || ['Clonjurer', ''];
       return { title: t[0], sub: t[1] };
@@ -3711,6 +3925,10 @@ const __vueApp = createApp({
     urlCount() { return this.urlsText.split('\n').map(s => s.trim()).filter(s => s && !s.startsWith('#')).length; },
     filteredTasks() {
       let base = this.oldFilteredTasks;
+      if (this.highlightTaskId != null) {          // 刚新建的任务置顶
+        const k = base.findIndex(t => t.id === this.highlightTaskId);
+        if (k > 0) base = [base[k]].concat(base.slice(0, k), base.slice(k + 1));
+      }
       if (this.groupByDomain) {
         const seen = {};
         base = base.filter(t => {
@@ -3736,6 +3954,7 @@ const __vueApp = createApp({
         list = list.filter(t => t.batch_id === bid);
       }
       if (this.statusFilter) list = list.filter(t => t.status === this.statusFilter);
+      if (this.taskSort === 'score') list = list.slice().sort((a, b) => (b.similarity_score == null ? -1 : b.similarity_score) - (a.similarity_score == null ? -1 : a.similarity_score));
       if (this.searchQ) {
         const q = this.searchQ.toLowerCase();
         list = list.filter(t => (t.target_url || '').toLowerCase().includes(q) || (t.domain || '').toLowerCase().includes(q));
@@ -3800,11 +4019,24 @@ const __vueApp = createApp({
       const u = this.auth && this.auth.user;
       return u ? g + '，' + (u.display_name || u.username) : g;
     },
-    dashDone() { return this.tasks.filter(t => t.status === 'completed' && t.similarity_score != null); },
+    // 还原度只对克隆任务有意义(生成任务是需求符合度/对原图的还原度, 口径不同), 不混在一起平均
+    dashDone() { return this.tasks.filter(t => t.status === 'completed' && t.similarity_score != null && this.taskKind(t) === 'clone'); },
+    listAvg() {
+      const d = this.filteredTasks.filter(t => t.status === 'completed' && t.similarity_score != null && this.taskKind(t) === 'clone');
+      return d.length ? { n: d.length, v: (d.reduce((a, t) => a + Number(t.similarity_score), 0) / d.length).toFixed(1) } : null;
+    },
     dashAvg() {
       const d = this.dashDone; if (!d.length) return '—';
       return (d.reduce((a, t) => a + Number(t.similarity_score), 0) / d.length).toFixed(1);
     },
+    // 任务详情的页签: 不再有「任务列表」(返回按钮回列表); 「资源与接口」只对克隆任务有意义
+    // 浏览器按需启动: 空闲时 instances=0 且 alive=false 属正常; 有实例却不在线才算异常
+    sysBad() { const br = (this.telemetry || {}).browser || {}; return (br.instances || 0) > 0 && !br.alive; },
+    detailTabs() {
+      const t = this.selectedTask;
+      return this.tabs.filter(x => x.id !== 'matrix' && (x.id !== 'inspector' || (t && this.taskKind(t) === 'clone')));
+    },
+    isFirstRun() { return this.tasksLoaded && !this.tasks.length && !this.live.tasks.length; },
     dashActivity() {
       return this.tasks.slice().sort((a, b) => String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || ''))).slice(0, 8);
     },
@@ -3820,6 +4052,14 @@ const __vueApp = createApp({
     },
     selectedTask() { return this.tasks.find(t => t.id === this.selectedTaskId) || null; },
     previewTask() { return this.tasks.find(t => t.id === this.previewTaskId) || null; },
+    diffRef() { return this.previewTask && this.taskKind(this.previewTask) === 'clone' ? '原站' : '原图'; },
+    diffVerdict() {
+      const d = this.diffInfo;
+      if (!d.regions.length && d.area_pct < 1) return '与' + this.diffRef + '几乎一致';
+      if (!d.regions.length) return '整体有细微差别, 约 ' + d.area_pct + '% 面积';
+      return '差别集中在 ' + d.regions.length + ' 处, 约占 ' + d.area_pct + '% 面积';
+    },
+    previewNominal() { return this.previewWidth === 'full' ? 1440 : (this.previewWidth === 'tablet' ? 768 : 390); },
     previewWidthStyle() { return this.previewWidth === 'full' ? '100%' : (this.previewWidth === 'tablet' ? '768px' : '390px'); },
     origShotUrl() { return this.previewTaskId ? ('/api/tasks/' + this.previewTaskId + '/screenshots/original') : ''; },
     compareRightUrl() { return this.previewTaskId ? ('/api/tasks/' + this.previewTaskId + '/screenshots/' + this.compareData.rightMode) : ''; },
@@ -3891,7 +4131,20 @@ const __vueApp = createApp({
     'remote.logKind'(v) {
       if (v === 'runtime' && this.remote.detail) this.loadRemoteRuntimeLogs();
     },
-    selectedTaskId() { if (this.activeTab === 'deploy') this.loadDocker(); },
+    advOpen(v) { try { localStorage.setItem('cloner-adv-open', v ? '1' : '0'); } catch (e) { /* 隐私模式 */ } },
+    previewMode(v) { if (v === 'diff') this.loadDiffRegions(this.previewTask); },
+    genAdv(v) { try { localStorage.setItem('cloner-gen-adv', v ? '1' : '0'); } catch (e) { /* 隐私模式 */ } },
+    selectedTaskId() {
+      if (this.activeTab === 'deploy') this.loadDocker();
+      if (this.previewMode === 'diff') this.$nextTick(() => this.loadDiffRegions(this.previewTask));
+      const t = this.selectedTask;
+      if (t) {
+        const k = this.taskKind(t);
+        if (k === 'text' && !['single', 'code'].includes(this.previewMode)) this.previewMode = 'single';
+        if (k !== 'text' && this.previewMode === 'code') this.previewMode = 'single';
+        if (k !== 'clone') this.origView = 'shot';
+      }
+    },
   },
   methods: {
     /* ---------- 运行态(2s 轮询): 工位 / 进度 / 预计剩余 ---------- */
@@ -3906,7 +4159,8 @@ const __vueApp = createApp({
         // 运行中任务的进度直接合进任务列表, 不等整表刷新
         const m = {}; d.tasks.forEach(t => { m[t.id] = t; });
         let touched = false;
-        this.tasks.forEach(t => { const x = m[t.id]; if (x && (t.progress !== x.progress || t.stage !== x.stage)) { t.progress = x.progress; t.stage = x.stage; touched = true; } });
+        // 运行中的任务: 进度/阶段/状态直接合进任务列表(刚提交时列表里还是「排队中」, 这里及时变成「运行中」)
+        this.tasks.forEach(t => { const x = m[t.id]; if (x && (t.progress !== x.progress || t.stage !== x.stage || t.status !== x.status)) { t.progress = x.progress; t.stage = x.stage; if (x.status) t.status = x.status; touched = true; } });
         if (before && d.tasks.length < before) this.refreshTasks();
       } catch (e) { /* 网络抖动: 下一拍再取 */ }
     },
@@ -3942,11 +4196,22 @@ const __vueApp = createApp({
       if (/完成/.test(s)) return 5;
       return -1;
     },
-    liveSteps(lt) {
-      const names = ['打开页面', '提取样式', '下载资源', '校准还原', '生成工程'];
+    genStageGroup(stage) {
+      const s = String(stage || '');
+      if (/理解/.test(s)) return 0;
+      if (/编写/.test(s)) return 1;
+      if (/体检/.test(s)) return 2;
+      if (/验收/.test(s)) return 3;
+      if (/修复/.test(s)) return 4;
+      if (/完成|打包|落盘/.test(s)) return 5;
+      return -1;
+    },
+    liveSteps(lt, gen) {
+      const names = gen ? ['理解需求', '编写页面', '浏览器体检', '对照验收', '修复'] : ['打开页面', '提取样式', '下载资源', '校准还原', '生成工程'];
+      const group = gen ? (st => this.genStageGroup(st)) : (st => this.stageGroup(st));
       const secs = [0, 0, 0, 0, 0]; let cur = -1;
-      ((lt && lt.trail) || []).forEach(x => { const g = this.stageGroup(x.stage); if (g >= 0 && g < 5) { secs[g] += x.secs; if (x.current) cur = g; } });
-      if (cur < 0 && lt) cur = Math.max(0, this.stageGroup(lt.stage));
+      ((lt && lt.trail) || []).forEach(x => { const g = group(x.stage); if (g >= 0 && g < 5) { secs[g] += x.secs; if (x.current) cur = g; } });
+      if (cur < 0 && lt) cur = Math.max(0, group(lt.stage));
       return names.map((n, i) => ({ name: n, secs: secs[i], state: i < cur ? 'done' : (i === cur ? 'active' : 'todo') }));
     },
     taskLogs(id, n) { return this.logs.filter(l => l.task_id === id).slice(-(n || 5)); },
@@ -4005,7 +4270,7 @@ const __vueApp = createApp({
     async runScheduleNow(sc) {
       const { ok, data } = await this.apiJson('/api/v4/schedules/' + sc.id + '/run', { method: 'POST' });
       if (!ok) { this.toast(data.error || '运行失败'); return; }
-      this.toast('已入队 ' + data.accepted + ' 个站点'); this.loadSchedules(); this.loadLive(); this.refreshTasks();
+      this.toast('已开始克隆 ' + data.accepted + ' 个网址'); this.loadSchedules(); this.loadLive(); this.refreshTasks();
     },
     async deleteSchedule(sc) {
       if (!confirm('删除定时任务「' + sc.name + '」？已经克隆出的结果会保留。')) return;
@@ -4084,7 +4349,7 @@ const __vueApp = createApp({
       if (c.status === 'starting') return c.step || '启动中';
       return { running: '运行中', stopped: '已停止', failed: '启动失败', missing: '已不存在', orphan: '未登记' }[c.status] || c.status;
     },
-    modeText(m) { return { fast: 'Docker 极速', image: 'Docker 镜像', process: '本机进程' }[m] || m; },
+    modeText(m) { return { fast: '极速启动', image: '独立镜像', process: '部署在本机' }[m] || m; },
 
     async loadProjects() {
       try {
@@ -4235,7 +4500,7 @@ const __vueApp = createApp({
         this.settings.max_rounds = data.ai.max_rounds;
         this.settings.configured = !!data.ai.key_configured;
         this.settings.masked = data.ai.key_masked || '';
-        this.toast('✅ 已重置为内置默认(立即生效)');
+        this.toast('已重置为内置默认(立即生效)');
       } catch (e) { this.toast('网络错误: ' + e); }
       finally { this.settings.resetBusy = false; }
     },
@@ -4416,6 +4681,7 @@ const __vueApp = createApp({
         if (r.status === 401) { this.handleAuthExpired(); return; }
         const data = await r.json();
         this.tasks = data.tasks || [];
+        this.tasksLoaded = true;
       } catch (e) { return; }
     },
     async refreshTelemetry() {
@@ -4535,6 +4801,7 @@ const __vueApp = createApp({
       let t = String(msg == null ? '' : msg), kind = 'info';
       const m = t.match(/^\s*(✅|❌|⚠️?|⏸|▶|📦)\uFE0F?\s*/u);
       if (m) { kind = { '✅': 'ok', '❌': 'bad', '⚠': 'warn', '⚠️': 'warn' }[m[1]] || 'info'; t = t.slice(m[0].length); }
+      else if (/^(已|正在)/.test(t)) kind = 'ok';
       this.toastKind = kind; this.toastMsg = t;
       clearTimeout(this._toastTimer); this._toastTimer = setTimeout(() => { this.toastMsg = ''; }, kind === 'bad' ? 4000 : 2400);
     },
@@ -4585,7 +4852,7 @@ const __vueApp = createApp({
         const data = await r.json();
         if (!r.ok) { this.toast('❌ ' + (data.error || '创建失败')); return; }
         this.links.creating = false;
-        this.toast('✅ 短链任务 SL-' + String(data.task.seq).padStart(3, '0') + ' 已创建'
+        this.toast('短链任务 SL-' + String(data.task.seq).padStart(3, '0') + ' 已创建'
                    + (f.generate ? ', 短链已生成' : ''));
         await this.loadLinks();
         if (f.generate) this.openLinkTask(data.task);
@@ -4760,7 +5027,7 @@ const __vueApp = createApp({
                           this.remote.list[i].progress = dep.progress;
                           this.remote.list[i].stage = dep.stage; }
             if (dep.status !== prevStatus) {
-              if (dep.status === 'running') this.toast('✅ 部署完成, 服务已运行');
+              if (dep.status === 'running') this.toast('部署完成, 服务已运行');
               if (dep.status === 'failed') this.toast('❌ 部署失败, 请查看部署日志');
               prevStatus = dep.status;
             }
@@ -4816,7 +5083,7 @@ const __vueApp = createApp({
         const r = await fetch('/api/v4/remote/deploys/' + this.remote.detail.id + '/deploy', { method: 'POST' });
         const data = await r.json();
         if (!r.ok && !data.started) { this.toast('❌ ' + (data.error || data.message || '部署失败')); return; }
-        this.toast('✅ 部署已开始, 进度见抽屉');
+        this.toast('正在部署…');
         this.openRemoteDetail(this.remote.detail);
       } catch (e) { this.toast('网络错误: ' + e); }
       finally { this.remote.busy = false; }
@@ -4830,7 +5097,7 @@ const __vueApp = createApp({
         const r = await fetch('/api/v4/remote/deploys/' + this.remote.detail.id + '/' + kind, { method: 'POST' });
         const data = await r.json();
         if (!r.ok && !data.ok) { this.toast('❌ ' + (data.error || data.message || '操作失败')); return; }
-        this.toast('✅ ' + names[kind] + (data.ok ? '成功' : '指令已下发'));
+        this.toast('' + names[kind] + (data.ok ? '成功' : '指令已下发'));
         this.openRemoteDetail(this.remote.detail);
       } catch (e) { this.toast('网络错误: ' + e); }
       finally { this.remote.busy = false; }
@@ -4923,7 +5190,7 @@ const __vueApp = createApp({
           headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) });
         const data = await r.json();
         if (!r.ok) { this.toast(data.error || '操作失败'); return; }
-        this.toast('✅ 已处理 ' + data.affected + ' 个容器');
+        this.toast('已处理 ' + data.affected + ' 个容器');
         await this.loadDocker();
       } catch (e) { this.toast('网络错误: ' + e); }
     },
@@ -5025,7 +5292,7 @@ const __vueApp = createApp({
       this.loadUsers();
     },
     copyText(t) {
-      try { navigator.clipboard.writeText(t); this.toast('✅ 已复制'); } catch (e) { this.toast('请手动复制'); }
+      try { navigator.clipboard.writeText(t); this.toast('已复制'); } catch (e) { this.toast('请手动复制'); }
     },
     async changeMemberRole(u, role) {
       const { ok, data } = await this.apiJson('/api/v4/users/' + u.id, { method: 'PATCH', body: JSON.stringify({ role }) });
@@ -5034,6 +5301,7 @@ const __vueApp = createApp({
       if (ok && this.auth.user && u.id === this.auth.user.id) this.loadAuth();
     },
     async loadUsage() {
+      this.loadTokenUsage();
       const { ok, data } = await this.apiJson('/api/v4/usage');
       if (ok) this.usage = data;
       this.wsForm.name = this.workspace.name;
@@ -5043,7 +5311,7 @@ const __vueApp = createApp({
       if (!ok) { this.toast('❌ ' + (data.error || '保存失败')); return; }
       this.workspace.name = data.workspace.name;
       this.loadWorkspace();
-      this.toast('✅ 已保存');
+      this.toast('已保存');
     },
     async leaveWorkspace() {
       if (!confirm('确定离开「' + this.workspace.name + '」？')) return;
@@ -5341,11 +5609,15 @@ const __vueApp = createApp({
         }
         await new Promise(r => setTimeout(r, 500));
       }
-      this.toast('任务 #' + id + ' 不存在或未加载');
+      this.toast('没找到这个任务, 可能已被删除');
       return false;
     },
     openTaskDetail(task) {
       this.selectedTaskId = task.id;
+      this.fitDrawer = false;
+      if (window.innerWidth < 640) this.previewWidth = 'mobile';     // 手机上默认按手机宽度预览, 不把桌面页挤成一条
+      this.taskTokens = { id: null, rows: [], tokens_in: 0, tokens_out: 0, total: 0 };
+      if (this.isGenTask(task) || (task.stats && task.stats.generate)) this.loadTaskTokens(task.id);
       this.previewTaskId = task.id;
       this.activeTab = 'sandbox';
       this.view = 'task';
@@ -5401,7 +5673,7 @@ const __vueApp = createApp({
           body: JSON.stringify({ task_ids: ids }) });
         const data = await r.json();
         if (!r.ok) { this.toast('❌ ' + (data.error || '队列创建失败')); return; }
-        this.toast('✅ ' + data.queued + ' 个任务进入修复队列, 完成后分数自动更新');
+        this.toast('已开始修复 ' + data.queued + ' 个任务, 完成后分数自动更新');
         this.aiBatchIds = new Set();
         this.aiBatchMode = false;
         await this.refreshTasks();
@@ -5550,7 +5822,7 @@ const __vueApp = createApp({
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob); a.download = name; a.click();
       URL.revokeObjectURL(a.href);
-      this.toast('✅ 已导出 ' + rows.length + ' 条');
+      this.toast('已导出 ' + rows.length + ' 条');
     },
     async quickGenLink() {
       const u = this.linksQuick.url.trim();
@@ -5564,7 +5836,7 @@ const __vueApp = createApp({
         const data = await r.json();
         if (!r.ok) { this.toast('❌ ' + (data.error || '生成失败')); return; }
         this.linksQuick.lastShort = (data.link && data.link.short_url) || '';
-        this.toast('✅ 短链已生成');
+        this.toast('短链已生成');
         await this.loadLinksStandalone();
         await this.loadOpsKpis();
       } catch (e) { this.toast('网络错误: ' + e); }
@@ -5596,7 +5868,7 @@ const __vueApp = createApp({
       if (it.enabled) {
         try { await fetch(`/api/v4/tasks/${it.task_id}/tracker`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: false }) }); } catch (e) {}
         it.enabled = false;
-        this.toast('⏸ 任务 #' + it.task_id + ' 推送已停用');
+        this.toast('推送已暂停');
         this.loadTrackerOverview();
         return;
       }
@@ -5611,7 +5883,7 @@ const __vueApp = createApp({
         const r = await fetch(`/api/v4/tasks/${it.task_id}/tracker`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: true, mask: it.mask, slots: it.slots }) });
         if (!r.ok) { this.toast('❌ 启用失败'); return; }
         it.enabled = true;
-        this.toast('✅ 任务 #' + it.task_id + ' 推送已启用');
+        this.toast('推送已开启');
         this.loadTrackerOverview();
       } catch (e) { this.toast('网络错误: ' + e); }
     },
@@ -5632,7 +5904,7 @@ const __vueApp = createApp({
       try {
         const r = await fetch(`/api/v4/tasks/${it.task_id}/tracker/reset`, { method: 'POST' });
         if (!r.ok) { this.toast('❌ 重置失败'); return; }
-        this.toast('✅ 埋点配置已重置');
+        this.toast('埋点配置已重置');
         this.loadTrackerOverview();
       } catch (e) { this.toast('网络错误: ' + e); }
     },
@@ -5665,7 +5937,7 @@ const __vueApp = createApp({
                                  status: f.status || 200, response_body: f.body || '{}' }) });
         const data = await r.json();
         if (!r.ok) { this.toast('❌ ' + (data.error || '保存失败')); return; }
-        this.toast('✅ Mock 规则已新增: ' + f.method + ' ' + f.path);
+        this.toast('Mock 规则已新增: ' + f.method + ' ' + f.path);
         this.mockGen.form = { path: '', method: 'GET', status: 200, body: '{"ok": true}' };
         this.loadMockGenList();
       } catch (e) { this.toast('网络错误: ' + e); }
@@ -5692,7 +5964,7 @@ const __vueApp = createApp({
         if (!r.ok) { this.toast('❌ ' + (data.error || '生成失败')); return; }
         this.mockGen.entry = data.entry;
         this.mockGen.previewBody = data.entry.response_body;
-        this.toast('✅ 已生成 ' + JSON.parse(data.entry.response_body).total + ' 条场景数据');
+        this.toast('已生成 ' + JSON.parse(data.entry.response_body).total + ' 条场景数据');
       } catch (e) { this.toast('网络错误: ' + e); }
       finally { this.mockGen.busy = false; }
     },
@@ -5708,13 +5980,13 @@ const __vueApp = createApp({
         });
         const data = await r.json();
         if (!r.ok) { this.toast('❌ ' + (data.error || '注入失败')); return; }
-        this.toast('✅ 已注入 Flask 模拟路由: ' + e.method + ' ' + e.path);
+        this.toast('已加入克隆站: ' + e.method + ' ' + e.path);
         this.loadMockGenList();
       } catch (err) { this.toast('网络错误: ' + err); }
       finally { this.mockGen.busy = false; }
     },
     async copyMockJson() {
-      try { await navigator.clipboard.writeText(this.mockGenPretty); this.toast('✅ JSON 已复制到剪贴板'); }
+      try { await navigator.clipboard.writeText(this.mockGenPretty); this.toast('JSON 已复制到剪贴板'); }
       catch (e) { this.toast('复制失败: ' + e); }
     },
     exportMockJson() {
@@ -5725,18 +5997,14 @@ const __vueApp = createApp({
       a.download = 'mock_' + (this.mockGen.form.path.replace(/^\/+/, '').replace(/\//g, '_') || 'data') + '.json';
       a.click();
       URL.revokeObjectURL(a.href);
-      this.toast('✅ 已导出 .json');
+      this.toast('已导出 .json');
     },
+    // 首页快速克隆: 只提交首页输入框里的网址(不再把「新建克隆」页里残留的网址一并带上)
     heroSubmit() {
       let u = this.heroUrl.trim();
-      if (u) {
-        if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
-        const cur = this.urlsText.trim();
-        if (!cur.split('\n').map(s => s.trim()).includes(u)) {
-          this.urlsText = cur ? cur + '\n' + u : u;
-        }
-      }
-      this.submit();
+      if (!u) return;
+      if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+      this.submit([u]).then(ok => { if (ok) this.heroUrl = ''; });
     },
     async poolRestart() {
       if (this.poolRestarting) return;
@@ -5746,7 +6014,7 @@ const __vueApp = createApp({
         const r = await fetch('/api/pool/restart', { method: 'POST' });
         const data = await r.json();
         if (!r.ok) { this.toast('❌ ' + (data.error || '重启失败')); return; }
-        this.toast('✅ 实例池重启已调度, 各线程将在下次任务前自动重建');
+        this.toast('浏览器将在下一个任务开始前重启');
         await this.refreshTelemetry();
       } catch (e) { this.toast('网络错误: ' + e); }
       finally { this.poolRestarting = false; }
@@ -5780,12 +6048,144 @@ const __vueApp = createApp({
         return { label: d.label, sub: d.sub, state };
       });
     },
+    isGenTask(t) { return !!t && String(t.target_url || '').startsWith('uir:generate:'); },
+    // 阶段名换成人话(引擎内部阶段名不直接给用户看)
+    stageText(st) {
+      const m = { 'DOM渲染': '打开并渲染页面', 'CSSOM提取': '提取样式', 'CAS并发下载': '下载图片与字体', '资源重写': '整理资源链接',
+        '活体回补': '补抓遗漏资源', 'Flask构建打包': '打包网站工程', 'AI视觉修复': 'AI 对照修正', '重试渲染': '重新打开页面',
+        '重试排队': '等待重试', '中断': '已中断', '导入': '导入中' };
+      st = String(st || '');
+      return m[st] || st || '准备中';
+    },
+    scoreTone(v) { v = Number(v); return v >= 90 ? 'text-emerald-400' : (v >= 75 ? 'text-slate-100' : 'text-amber-400'); },
+    // 失败原因翻成人话 + 建议; 原始报错只放在「技术详情」里
+    humanError(t) {
+      const raw = String((t && t.error_msg) || '');
+      const clone = this.taskKind(t) === 'clone';
+      const rules = [
+        [/ERR_NAME_NOT_RESOLVED|getaddrinfo|Name or service not known|nodename nor servname/i, '目标网站打不开: 域名解析失败', '检查网址是否拼写正确, 或本机网络是否正常, 然后重试'],
+        [/ERR_CONNECTION_(REFUSED|RESET|CLOSED)|ECONNREFUSED|Connection refused/i, '目标网站拒绝了连接', '确认网站当前可以访问(可能需要内网/VPN), 然后重试'],
+        [/ERR_CERT|SSL|certificate/i, '目标网站的证书有问题', '确认网址是 https 且证书有效; 内部站点可改用 http 地址重试'],
+        [/\b(401|403)\b|Forbidden|Unauthorized|验证码|captcha/i, '目标网站拒绝访问(需要登录或有防护)', '先在浏览器里确认能直接打开; 需要登录的页面目前无法直接克隆'],
+        [/\b404\b|Not Found/i, '目标网址不存在(404)', '检查网址是否正确'],
+        [/Key|api_key|大模型|模型配置|AI 供应商/i, '没有可用的大模型', '到「设置 → AI 供应商」配置模型 Key 后重试'],
+        [/Deadline|墙钟|超出.*预算|time budget/i, '超出了时间预算还没完成', '在提交时把时间预算调大一些后重试'],
+        [/Timeout|timed out|超时/i, clone ? '目标网站响应太慢, 加载超时' : '模型响应超时', clone ? '稍后重试; 网站很重时可在新建时选择更长的等待' : '稍后重试'],
+        [/截图输入缺失|截图.*(不可解析|过小)/, '截图文件有问题', '重新粘贴或上传一张清晰的截图'],
+        [/CodegenError|没有产出可用的网页|不是 HTML|不完整/, '模型没有写出可用的页面', '把需求写得更具体一些后重试'],
+        [/Chromium 启动失败|Playwright|Executable doesn't exist/i, '浏览器服务没能启动', '稍后重试; 反复出现时请管理员在「设置 → 浏览器池」重启'],
+        [/Target (page|closed)|browser has been closed|Browser closed|crash/i, '浏览器在处理过程中意外退出', '直接重试即可'],
+        [/No space left|磁盘/i, '磁盘空间不足', '清理磁盘后重试'],
+      ];
+      for (const [re, title, advice] of rules) if (re.test(raw)) return { title, advice, raw };
+      return { title: clone ? '这次克隆没能完成' : '这次生成没能完成', advice: '点「重试」再来一次; 仍然失败时把技术详情发给管理员', raw };
+    },
+    taskKind(t) {
+      const u = String((t && t.target_url) || '');
+      if (u.startsWith('uir:generate:screenshot')) return 'shot';
+      if (u.startsWith('uir:generate:')) return 'text';
+      return 'clone';
+    },
+    // 显示名: 生成任务用任务标题; 克隆任务用页面标题(没有时用域名)
+    taskTitle(t) { if (!t) return ''; return t.title || t.domain || ('任务 #' + t.id); },
+    taskKindLine(t) {
+      if (!t) return '';
+      const k = this.taskKind(t), u = String(t.target_url || '');
+      if (k === 'text') return '文字生成 · ' + u.replace(/^uir:generate:description:/, '');
+      if (k === 'shot') return '截图生成' + (t.stats && t.stats.generate && t.stats.generate.brief && t.stats.generate.brief.hint ? ' · ' + t.stats.generate.brief.hint : '');
+      return '克隆 · ' + u;
+    },
+    taskSub(t) {
+      const k = this.taskKind(t);
+      if (k === 'text') return '文字生成';
+      if (k === 'shot') return '截图生成';
+      try { const x = new URL(t.target_url); return x.host + (x.pathname === '/' ? '' : x.pathname); } catch (e) { return t.domain || ''; }
+    },
+    async loadPreviewCode(t) {
+      if (!t || (this.previewCode.id === t.id && this.previewCode.text)) return;
+      this.previewCode = { id: t.id, text: '', loading: true };
+      try {
+        const r = await fetch('/api/tasks/' + t.id + '/file?path=index.html');
+        const d = await r.json();
+        this.previewCode = { id: t.id, text: d.content || d.error || '', loading: false };
+      } catch (e) { this.previewCode = { id: t.id, text: '读取失败', loading: false }; }
+    },
+    previewCodeHtml() { return __lcHighlight(this.previewCode.text || ''); },
+    // 首页指标直达: 项目 → 项目列表; 任务 → 全部任务; 平均还原度 → 按分数排序的任务; 正在运行 → 只有一个时直接打开它
+    dashJump(kind) {
+      if (kind === 'projects') { const el = this.$refs.dashProjects; if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+      if (kind === 'running') {
+        const run = (this.live.tasks || []);
+        if (run.length === 1) { this.openRunning(run[0].id); return; }
+      }
+      this.currentProjectId = ''; this.currentBatchId = ''; this.searchQ = ''; this.groupByDomain = false;
+      this.statusFilter = kind === 'running' ? 'running' : '';
+      this.taskSort = kind === 'score' ? 'score' : 'recent';
+      this.activeTab = 'matrix'; this.goModule('tasks');
+    },
+    async openRunning(id) {
+      if (!this.tasks.some(t => t.id === id)) await this.refreshTasks();
+      this.openTaskById(id);
+    },
+    async loadDiffRegions(t) {
+      if (!t || this.diffInfo.id === t.id) return;
+      this.diffInfo = { id: t.id, loading: true, error: '', regions: [], area_pct: 0, imgErr: false }; this.diffSel = -1; this.diffBoxEls = [];
+      try {
+        const r = await fetch('/api/tasks/' + t.id + '/diff_regions');
+        const d = await r.json();
+        if (this.diffInfo.id !== t.id) return;
+        this.diffInfo = Object.assign({ id: t.id, loading: false, error: r.ok ? '' : (d.error || '无法比较'), regions: [], area_pct: 0, imgErr: false }, r.ok ? d : {});
+      } catch (e) { this.diffInfo = Object.assign({}, this.diffInfo, { loading: false, error: '无法比较' }); }
+    },
+    diffFocus(i) {
+      this.diffSel = i;
+      const el = this.diffBoxEls[i], sc = this.$refs.diffScroll;
+      if (el && sc) sc.scrollTo({ top: Math.max(0, el.offsetTop - 40), behavior: 'smooth' });
+    },
+    fmtTokens(n) { n = Number(n || 0); return n >= 1e8 ? (n / 1e8).toFixed(2) + ' 亿' : n >= 1e4 ? (n / 1e4).toFixed(1) + ' 万' : n.toLocaleString(); },
+    async loadTaskTokens(id) {
+      try {
+        const r = await fetch('/api/tasks/' + id + '/tokens');
+        if (!r.ok) return;
+        const d = await r.json();
+        if (this.selectedTaskId === id) this.taskTokens = Object.assign({ id }, d);
+      } catch (e) { /* 忽略 */ }
+    },
+    async loadTokenUsage(group) {
+      if (group) this.tokenUsage.group = group;
+      try {
+        const r = await fetch('/api/usage/tokens?group=' + this.tokenUsage.group + '&days=30');
+        if (!r.ok) return;
+        const d = await r.json();
+        this.tokenUsage = Object.assign({}, this.tokenUsage, { rows: d.rows || [], tokens_in: d.tokens_in, tokens_out: d.tokens_out, loaded: true });
+      } catch (e) { /* 忽略 */ }
+    },
+    tokenBar(r) {
+      const max = Math.max(1, ...this.tokenUsage.rows.map(x => x.tokens_in + x.tokens_out));
+      return Math.max(2, Math.round((r.tokens_in + r.tokens_out) / max * 100)) + '%';
+    },
+    interactionTip(t) {
+      const ic = t && t.stats && t.stats.interaction_check;
+      if (!ic) return '';
+      const parts = ['克隆完成后自动点一遍导航、按钮与表单, 与原站对比有无反应'];
+      const sb = t.stats && t.stats.score_before_interaction;
+      if (sb != null && t.stats.interaction_penalty) parts.push('扣分前还原度 ' + Number(sb).toFixed(1) + ', 交互不可用扣 ' + t.stats.interaction_penalty);
+      const failed = (ic.failed || []);
+      if (failed.length) parts.push('点不动: ' + failed.slice(0, 6).map(x => x.text || x.selector).join('、') + (failed.length > 6 ? ' 等' : ''));
+      else parts.push('检查的控件都有反应');
+      return parts.join('\n');
+    },
+    isReqFit(t) { return !!t && !!t.stats && String(t.stats.scoring || '').startsWith('req-fit'); },
+    scoreLabel(t) { return this.isReqFit(t) ? '需求符合度' : '还原度'; },
+    fitDetail(t) { const d = t && t.stats && t.stats.similarity_detail; return d && Array.isArray(d.items) ? d : null; },
+    fitGen(t) { const g = t && t.stats && t.stats.generate; return g && Array.isArray(g.rounds) ? g : null; },
     async loadAiConfig() {
       try {
         const r = await fetch('/api/ai/config');
         const data = await r.json();
         this.aiDefaults = { base_url: data.base_url || '', model: data.model || '' };
         this.aiKeyConfigured = !!data.key_configured;
+        this.genReady = !!data.generate_ready; this.genModel = data.generate_model || '';
       } catch (e) { return; }
     },
 
@@ -5805,9 +6205,9 @@ const __vueApp = createApp({
         package: this.form.package,
       };
     },
-    async submit() {
-      const urls = this.urlsText.split('\n').map(s => s.trim()).filter(s => s && !s.startsWith('#'));
-      if (!urls.length) { this.submitError = '请输入至少一个 URL'; return; }
+    async submit(only) {
+      const urls = Array.isArray(only) ? only : this.urlsText.split('\n').map(s => s.trim()).filter(s => s && !s.startsWith('#'));
+      if (!urls.length) { this.submitError = '请输入至少一个 URL'; return false; }
       this.submitting = true; this.submitError = '';
       try {
         const r = await fetch('/api/batches', {
@@ -5816,40 +6216,94 @@ const __vueApp = createApp({
             project_id: this.currentProjectId !== '' && this.currentProjectId !== null ? Number(this.currentProjectId) : null }),
         });
         const data = await r.json();
-        if (!r.ok) { this.submitError = data.error || '提交失败'; this.toast('❌ ' + (data.error || '提交失败')); return; }
-        this.currentBatchId = data.batch_id;
-        this.statusFilter = '';
-        this.activeTab = 'matrix';
-        this.view = 'tasks';
+        if (!r.ok) { this.submitError = data.error || '提交失败'; this.toast('❌ ' + (data.error || '提交失败')); return false; }
+        if (!Array.isArray(only)) this.urlsText = '';
+        this.statusFilter = ''; this.searchQ = ''; this.taskSort = 'recent';
         await this.refreshTasks();
-        await this.refreshTelemetry();
-        this.toast('✅ 批次 #' + data.batch_id + ' 创建成功, ' + data.accepted + ' 个任务已开始运行');
-      } catch (e) { this.submitError = '网络错误: ' + e; }
+        this.refreshTelemetry();
+        // 一个网址: 直接打开它的详情(看进度, 完成后就是预览对比); 多个: 任务列表只看这一批
+        const mine = this.tasks.filter(t => t.batch_id === data.batch_id);
+        if (mine.length === 1) {
+          this.currentBatchId = ''; this.highlightTaskId = mine[0].id;
+          this.toast('已开始克隆 ' + (mine[0].domain || urls[0]));
+          this.openTaskById(mine[0].id);
+        } else {
+          this.currentBatchId = data.batch_id; this.activeTab = 'matrix'; this.view = 'tasks';
+          this.toast('已开始克隆 ' + data.accepted + ' 个网址');
+        }
+        return true;
+      } catch (e) { this.submitError = '网络错误: ' + e; return false; }
       finally { this.submitting = false; }
     },
     handleGenFile(ev) {
       const file = ev.target.files && ev.target.files[0];
-      this.gen.file = file || null; this.gen.preview = '';
+      this.setGenImage(file || null);
+      ev.target.value = '';
+    },
+    onGenDrop(ev) {
+      this.gen.drag = false;
+      const f = Array.from((ev.dataTransfer && ev.dataTransfer.files) || []).find(x => /^image\//.test(x.type));
+      if (f) this.setGenImage(f); else this.toast('请拖入图片文件');
+    },
+    clearGenFile() { this.setGenImage(null); },
+    // 预览用 ObjectURL(不把几 MB 的 data URL 放进响应式状态); 文件对象不做响应式代理
+    setGenImage(file) {
+      if (this._genUrl) { URL.revokeObjectURL(this._genUrl); this._genUrl = ''; }
+      this.gen.file = file ? Vue.markRaw(file) : null;
+      this.gen.preview = ''; this.gen.fileInfo = '';
       if (!file) return;
-      const reader = new FileReader();
-      reader.onload = () => { this.gen.preview = String(reader.result || ''); };
-      reader.readAsDataURL(file);
+      if (file.size > 12 * 1024 * 1024) { this.gen.file = null; this.toast('截图超过 12MB'); return; }
+      this._genUrl = URL.createObjectURL(file);
+      this.gen.preview = this._genUrl;
+      this.gen.kind = 'screenshot';
+      const img = new Image();
+      img.onload = () => { this.gen.fileInfo = img.naturalWidth + ' × ' + img.naturalHeight + ' 像素 · ' + (file.size / 1048576).toFixed(1) + ' MB'; };
+      img.src = this._genUrl;
+    },
+    // 全局粘贴: 在「界面生成」页任意位置粘贴图片即作为截图输入; 文字描述页里已经写了文字的, 文字转为截图的补充要求
+    onGlobalPaste(ev) {
+      if (this.view !== 'generate') return;
+      const items = Array.from((ev.clipboardData && ev.clipboardData.items) || []);
+      const it = items.find(x => x.kind === 'file' && /^image\//.test(x.type));
+      if (!it) return;
+      const f = it.getAsFile();
+      if (!f) return;
+      ev.preventDefault();
+      if (this.gen.kind === 'description' && this.gen.description.trim() && !this.gen.hint.trim()) this.gen.hint = this.gen.description.trim();
+      const named = new File([f], 'pasted-' + Date.now() + '.' + ((f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')), { type: f.type });
+      this.setGenImage(named);
+      this.toast('已粘贴截图');
+    },
+    // 上传前压缩: 尺寸不变(倍率换算要用原始像素宽), 超过 2.5MB 的 PNG 转成高质量 JPEG, 上传量通常降到 1/4~1/6
+    async genUploadBlob(file) {
+      if (!file || file.size <= 2.5 * 1024 * 1024 || !/png|bmp|tiff/i.test(file.type) || !window.createImageBitmap) return file;
+      try {
+        const bmp = await createImageBitmap(file);
+        const cv = document.createElement('canvas');
+        cv.width = bmp.width; cv.height = bmp.height;
+        const ctx = cv.getContext('2d');
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+        ctx.drawImage(bmp, 0, 0);
+        const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.92));
+        return blob && blob.size < file.size ? new File([blob], 'screenshot.jpg', { type: 'image/jpeg' }) : file;
+      } catch (e) { return file; }
     },
     async submitGenerate() {
       this.gen.error = '';
       if (this.gen.kind === 'description' && !this.gen.description.trim()) { this.gen.error = '请输入页面描述'; return; }
-      if (this.gen.kind === 'screenshot' && !this.gen.file) { this.gen.error = '请选择界面截图'; return; }
+      if (this.gen.kind === 'screenshot' && !this.gen.file) { this.gen.error = '请粘贴、拖入或选择界面截图'; return; }
       this.gen.submitting = true;
       try {
         const fd = new FormData();
-        fd.append('kind', this.gen.kind); fd.append('description', this.gen.description);
+        fd.append('kind', this.gen.kind);
+        fd.append('description', this.gen.kind === 'screenshot' ? this.gen.hint.trim() : this.gen.description);
         fd.append('viewport', this.gen.viewport); fd.append('target', this.gen.target);
         // 交付形态: Flutter 原生界面直接构建 APK; HTML/CSS 产物与克隆任务一样装进应用壳
         if (this.gen.package === 'apk' && this.gen.target === 'flutter') fd.append('build', 'apk');
         else if (this.gen.package) fd.append('package', this.gen.package);
         fd.append('target_score', this.gen.targetScore); fd.append('max_rounds', this.gen.maxRounds);
         fd.append('time_budget', this.gen.timeBudget);
-        if (this.gen.file) fd.append('image', this.gen.file);
+        if (this.gen.kind === 'screenshot' && this.gen.file) fd.append('image', await this.genUploadBlob(this.gen.file));
         if (this.form.aiKey) fd.append('ai_api_key', this.form.aiKey);
         if (this.form.aiModel) fd.append('ai_model', this.form.aiModel);
         if (this.form.aiBaseUrl) fd.append('ai_base_url', this.form.aiBaseUrl);
@@ -5857,9 +6311,12 @@ const __vueApp = createApp({
         const r = await fetch('/api/v4/generate', { method: 'POST', body: fd });
         const data = await r.json();
         if (!r.ok) { this.gen.error = data.error || '提交失败'; this.toast('❌ ' + this.gen.error); return; }
-        this.currentBatchId = data.batch_id; this.statusFilter = ''; this.activeTab = 'matrix'; this.view = 'tasks';
-        await this.refreshTasks(); await this.refreshTelemetry();
-        this.toast('✅ 生成任务 #' + data.task_id + ' 已入队 (' + data.kind + ' → ' + data.target + ')');
+        // 立即反馈: 先提示并切到任务列表, 列表与统计在后台刷新, 不让界面等两次全量请求
+        // 提交即反馈并直接打开新任务详情(能看到代码实时写入); 返回任务中心时新任务置顶高亮, 不套批次筛选
+        this.toast('已开始生成');
+        this.currentBatchId = ''; this.statusFilter = ''; this.searchQ = ''; this.taskSort = 'recent'; this.highlightTaskId = data.task_id;
+        this.activeTab = 'sandbox'; this.view = 'task';
+        this.refreshTasks().then(() => this.openTaskById(data.task_id)); this.refreshTelemetry();
       } catch (e) { this.gen.error = '网络错误: ' + e; }
       finally { this.gen.submitting = false; }
     },
@@ -5897,8 +6354,8 @@ const __vueApp = createApp({
           body: JSON.stringify({ task_ids: ids }) });
         const data = await r.json();
         if (!r.ok) { this.toast(data.error || '批量重建失败'); return; }
-        this.toast('✅ ' + data.accepted.length + ' 个任务已入队' +
-                   (data.skipped.length ? ', 跳过 ' + data.skipped.length + ' 个' : ''));
+        this.toast('已重新开始 ' + data.accepted.length + ' 个任务' +
+                   (data.skipped.length ? ', ' + data.skipped.length + ' 个正在运行的已跳过' : ''));
         this.selectedIds = new Set();
         await this.refreshTasks();
       } catch (e) { this.toast('网络错误: ' + e); }
@@ -5907,7 +6364,7 @@ const __vueApp = createApp({
     async rebuild(task) {
       try {
         const r = await fetch('/api/tasks/' + task.id + '/rebuild', { method: 'POST' });
-        if (r.ok) { this.toast('任务 #' + task.id + ' 已重新入队'); this.refreshTasks(); }
+        if (r.ok) { this.toast('已重新开始: ' + this.taskTitle(task)); this.refreshTasks(); }
         else { const d = await r.json(); this.toast(d.error || '重建失败'); }
       } catch (e) { this.toast('网络错误'); }
     },
@@ -6008,7 +6465,7 @@ const __vueApp = createApp({
         if (!r.ok) { this.toast(data.error || '保存失败'); return false; }
         this.trackerEnabled = !!f.enabled;
         if (silent !== true) {
-          this.toast('✅ 埋点推送配置已保存' + (f.enabled ? ', 重新导出 Flask 工程即自动注入' : ''));
+          this.toast('表单推送已保存' + (f.enabled ? ', 重新下载工程后生效' : ''));
           this.loadSettings && null;
         }
         return true;
@@ -6265,6 +6722,10 @@ const __vueApp = createApp({
     },
   },
   mounted() {
+    this._onPaste = (e) => this.onGlobalPaste(e);
+    window.addEventListener('paste', this._onPaste);
+    this._onEsc = (e) => { if (e.key === 'Escape' && this.fitDrawer) this.fitDrawer = false; };
+    window.addEventListener('keydown', this._onEsc);
     // 窄屏(手机/小平板)默认折叠侧栏, 内容区不被 240px 侧栏挤成一列竖排
     if (window.innerWidth < 900) this.navCollapsed = true;
     try { this.themeMode = localStorage.getItem('cloner-theme') || 'system'; } catch (e) {}
@@ -6272,10 +6733,183 @@ const __vueApp = createApp({
     this.loadAuth();
   },
   beforeUnmount() {
+    window.removeEventListener('paste', this._onPaste);
+    window.removeEventListener('keydown', this._onEsc);
     clearInterval(this._taskTimer);
     clearInterval(this._teleTimer);
     if (this._es) this._es.close();
   },
+});
+/* ---------- 界面生成: 实时「思考 + 写代码」视图 ----------
+   上: 模型每一步在做什么(取自任务日志: 理解需求 → 任务书要点 → 写页面 → 体检 → 验收 → 修复目标), 进行中的一步带细进度;
+   下: 轮询 /api/tasks/<id>/live_code 拿到的真实代码流, 编辑器样式(行号、等宽、克制着色), 自动跟随最新行, 手动上滚即暂停跟随。 */
+const __lcEsc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const __lcRe = /(<{7} SEARCH|={7}|>{7} REPLACE)|(<\!--[\s\S]*?--\>|\/\*[\s\S]*?\*\/|\/\/[^\n]*)|("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`[^`\n]*`)|(<\/?[a-zA-Z][\w-]*|\/?>)|\b(const|let|var|function|return|if|else|for|while|new|class|this|async|await|of|in|true|false|null)\b|(#[0-9a-fA-F]{3,8}\b|\b\d+(?:\.\d+)?(?:px|ms|s|%|deg|rem|em|vh|vw|fr)?\b)|([a-zA-Z_:@][\w:.-]*)(?==)/g;
+function __lcHighlight(src) {
+  let out = '', last = 0, m;
+  __lcRe.lastIndex = 0;
+  while ((m = __lcRe.exec(src))) {
+    if (m.index > last) out += __lcEsc(src.slice(last, m.index));
+    const cls = m[1] ? 't-sys' : m[2] ? 't-com' : m[3] ? 't-str' : m[4] ? 't-tag' : m[5] ? 't-kw' : m[6] ? 't-num' : 't-attr';
+    out += '<span class="' + cls + '">' + __lcEsc(m[0]) + '</span>';
+    last = __lcRe.lastIndex;
+    if (m[0].length === 0) __lcRe.lastIndex++;
+  }
+  return out + __lcEsc(src.slice(last));
+}
+// 日志 → 思考步骤(只取生成引擎的关键节点, 文案精简成一行)
+const __lcStepRules = [
+  [/^需求理解[:：]\s*/, '理解需求'], [/^截图理解[:：]\s*/, '读取截图'], [/^去掉截图外框/, '读取截图'], [/^提取位图素材/, '读取截图'],
+  [/^创意概念[:：]\s*/, '任务书'], [/^亮点[:：]\s*/, '任务书'], [/^验收清单\s*(\d+)\s*条/, '任务书'],
+  [/^第\s*\d+\s*轮写出页面/, '写页面'], [/^第\s*\d+\s*轮修复完成/, '修复'], [/^局部修改/, '修复'], [/^修复目标/, '修复目标'],
+  [/^体检/, '体检'], [/^原图宽度/, '对照原图'], [/^第\s*\d+\s*轮(需求符合度|还原度)/, '验收'],
+  [/^第\s*\d+\s*轮未提升/, '结论'], [/停止迭代|不再重写|保留第/, '结论'], [/失败/, '异常'],
+];
+function __lcSteps(logs) {
+  const out = [];
+  for (const l of logs || []) {
+    const msg = String(l.message || '');
+    for (const [re, k] of __lcStepRules) {
+      if (re.test(msg)) {
+        let v = msg.replace(/^(需求理解|截图理解|创意概念|亮点)[:：]\s*/, '');
+        const m = msg.match(/^验收清单\s*(\d+)\s*条/);
+        if (m) v = m[1] + ' 条验收清单';
+        out.push({ k, v: v.slice(0, 160) });
+        break;
+      }
+    }
+  }
+  return out.slice(-30);
+}
+__vueApp.component('live-code', {
+  delimiters: ['[[', ']]'],
+  props: { taskId: { type: Number, required: true }, stage: String, pct: Number, elapsed: String, compact: Boolean, logs: Array },
+  data() { return { epoch: 0, code: '', think: '', label: '', done: false, shown: 0, html: '', follow: true, gone: false }; },
+  computed: {
+    steps() { return __lcSteps(this.logs); },
+    meta() {
+      const n = this.code.length;
+      return (n ? (n >= 1000 ? (n / 1000).toFixed(1) + 'k' : n) + ' 字符' : '') + (this.elapsed ? (n ? ' · ' : '') + this.elapsed : '');
+    },
+    writing() { return !this.done && !!this.code; },
+    nowText() {
+      const st = this.stage || '';
+      if (this.writing) return (this.label || st) + ' · 正在写入 index.html';
+      if (/读取/.test(st)) return '读截图: 布局、配色、文字与图片素材, 拟定验收清单';
+      if (/理解/.test(st)) return '读需求, 拟定任务书与验收清单';
+      if (/编写|修复/.test(st)) return this.code ? '写完, 等待体检' : '等待模型开始输出代码';
+      if (/体检/.test(st)) return '在真实浏览器里运行: 桌面 / 平板 / 手机, 报错、动效、交互、重叠';
+      if (/验收/.test(st)) return '看图模型逐条核对验收清单';
+      return st || '准备中';
+    },
+  },
+  template: `
+  <div class="lc" :class="compact ? 'lc-compact' : 'lc-big'">
+    <div class="lc-head"><span class="lc-spin"></span><b>[[ stage || '准备中' ]]</b>
+      <span v-if="writing" class="lc-file">· index.html</span>
+      <span class="lc-meta"><template v-if="pct != null">[[ pct ]]% · </template>[[ meta ]]</span></div>
+    <ol v-if="!compact" ref="steps" class="lc-steps">
+      <li v-for="(st, i) in steps" :key="i"><span class="ic">✓</span><span class="k">[[ st.k ]]</span><span class="v" :title="st.v">[[ st.v ]]</span></li>
+      <li class="now"><span class="ic"><span class="lc-spin"></span></span><span class="k">进行中</span><span class="v">[[ nowText ]]</span></li>
+    </ol>
+    <div v-if="!compact" class="lc-bar"><i></i></div>
+    <pre ref="code" class="lc-code" @scroll="onScroll"><div v-if="html" v-html="html"></div><div v-else class="lc-empty">[[ code ? '' : '模型开始写代码后, 这里实时显示写入的内容' ]]</div></pre>
+    <button v-if="!compact && !follow" type="button" class="lc-follow" @click="resume">跟随最新 ↓</button>
+  </div>`,
+  mounted() {
+    this.reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    this.poll();
+    this._poll = setInterval(() => this.poll(), 700);
+    this._frame = () => { this.step(); this._raf = requestAnimationFrame(this._frame); };
+    this._raf = requestAnimationFrame(this._frame);
+  },
+  updated() { if (this.$refs.steps) this.$refs.steps.scrollTop = this.$refs.steps.scrollHeight; },
+  beforeUnmount() { this.gone = true; clearInterval(this._poll); cancelAnimationFrame(this._raf); },
+  methods: {
+    async poll() {
+      if (this.gone || document.hidden || this._busy) return;
+      this._busy = true;
+      try {
+        const q = '?epoch=' + this.epoch + '&since=' + this.code.length + '&think_since=' + this.think.length;
+        const r = await fetch('/api/tasks/' + this.taskId + '/live_code' + q);
+        if (!r.ok) return;
+        const d = await r.json();
+        if (!d.active) return;
+        if (d.reset) {
+          const first = !this.epoch;
+          this.epoch = d.epoch; this.code = d.code || ''; this.think = d.think || '';
+          this.shown = (first || this.reduced) ? Math.max(0, this.code.length - 400) : 0;
+          this.follow = true;
+        } else { this.code += d.code || ''; this.think += d.think || ''; }
+        this.label = d.label || ''; this.done = !!d.done;
+      } catch (e) { /* 下一拍再取 */ } finally { this._busy = false; }
+    },
+    step() {
+      if (this.shown < this.code.length) {
+        const left = this.code.length - this.shown;
+        this.shown = this.reduced ? this.code.length : Math.min(this.code.length, this.shown + Math.max(3, Math.ceil(left / 14)));
+      }
+      const now = performance.now();
+      if (now - (this._paintAt || 0) > 120) this.paint();
+    },
+    paint() {
+      this._paintAt = performance.now();
+      let end = this.shown;
+      if (this.done) { const k = this.code.lastIndexOf('</html>'); if (k > 0) end = Math.min(end, k + 7); }
+      const key = end + ':' + this.epoch;
+      if (key === this._key) return;
+      this._key = key;
+      if (!end) { this.html = ''; return; }
+      const text = this.code.slice(0, end);
+      const all = text.split('\n');
+      const keep = this.compact ? 10 : 400;
+      const start = Math.max(0, all.length - keep);
+      const rows = all.slice(start).map((ln, i) => '<div class="ln"><span class="no">' + (start + i + 1) + '</span><span class="tx">' + (__lcHighlight(ln) || ' ') + '</span></div>');
+      if (!this.done) rows[rows.length - 1] = rows[rows.length - 1].replace(/<\/span><\/div>$/, '<span class="lc-caret"></span></span></div>');
+      this.html = rows.join('');
+      this.$nextTick(() => { const el = this.$refs.code; if (el && (this.follow || this.compact)) { this._auto = true; el.scrollTop = el.scrollHeight; } });
+    },
+    onScroll() {
+      const el = this.$refs.code;
+      if (!el || this.compact) return;
+      if (this._auto) { this._auto = false; return; }
+      this.follow = el.scrollTop + el.clientHeight >= el.scrollHeight - 24;
+    },
+    resume() { this.follow = true; const el = this.$refs.code; if (el) { this._auto = true; el.scrollTop = el.scrollHeight; } },
+  },
+});
+/* ---------- 预览按标称宽度渲染 ----------
+   iframe / 截图按真实视口宽度(桌面 1440 / 平板 768 / 手机 390)排版, 容器不够宽时整体等比缩小(transform), 不裁切、不挤压;
+   fill: 内容高度填满容器(iframe 用); 否则按内容自然高度缩放后占位(截图、卷帘叠层用)。缩放比通过 scale 事件告诉父组件。 */
+__vueApp.component('pv-scale', {
+  delimiters: ['[[', ']]'],
+  props: { width: { type: Number, required: true }, fill: Boolean },
+  emits: ['scale'],
+  data() { return { boxW: 0, boxH: 0, innerH: 0 }; },
+  computed: {
+    scale() { return this.boxW ? Math.min(1, this.boxW / this.width) : 1; },
+    left() { return Math.max(0, (this.boxW - this.width * this.scale) / 2); },
+  },
+  template: `
+  <div ref="box" class="pv-box" :class="fill ? 'pv-fill' : ''" :style="fill ? {} : { height: (innerH * scale) + 'px' }">
+    <div ref="inner" class="pv-inner" :style="{ width: width + 'px', height: fill ? (boxH / scale) + 'px' : 'auto', transform: 'scale(' + scale + ')', left: left + 'px' }"><slot></slot></div>
+  </div>`,
+  watch: { scale: { handler(v) { this.$emit('scale', v); }, immediate: true } },
+  mounted() {
+    const measure = () => {
+      const b = this.$refs.box, i = this.$refs.inner;
+      if (!b) return;
+      this.boxW = b.clientWidth; this.boxH = b.clientHeight;
+      if (!this.fill && i) this.innerH = i.offsetHeight;
+    };
+    measure();
+    if (window.ResizeObserver) {
+      this._ro = new ResizeObserver(measure);
+      this._ro.observe(this.$refs.box);
+      if (!this.fill && this.$refs.inner) this._ro.observe(this.$refs.inner);
+    }
+  },
+  beforeUnmount() { if (this._ro) this._ro.disconnect(); },
 });
 __vueApp.config.errorHandler = function (err, instance, info) {
   console.error('VUE-ERR[' + info + '] ' + (err && err.message));

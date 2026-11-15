@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>精密计算器</title>
+<style>
+  :root{
+    --bg:#14161a;
+    --panel:#1e2127;
+    --num-key:#2a2e36;
+    --fn-key:#3a3f4a;
+    --ink:#e8e4dc;
+    --copper:#d98b4a;
+    --copper-deep:#b96f34;
+    --muted:rgba(232,228,220,.6);
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    background:var(--bg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    color:var(--ink);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    min-height:100vh;
+    min-height:100dvh;
+    overflow:hidden;
+    position:relative;
+    padding:16px;
+  }
+
+  /* ===== 背景氛围层 ===== */
+  .bg-glow{
+    position:fixed;
+    inset:0;
+    pointer-events:none;
+    z-index:0;
+    background:
+      radial-gradient(ellipse 60% 55% at 50% 38%, rgba(217,139,74,.11), transparent 68%),
+      radial-gradient(ellipse 90% 70% at 50% 110%, rgba(58,63,74,.5), transparent 70%),
+      radial-gradient(ellipse 50% 40% at 12% 8%, rgba(120,140,170,.06), transparent 70%);
+  }
+  .bg-noise{
+    position:fixed;
+    inset:0;
+    pointer-events:none;
+    z-index:0;
+    opacity:.05;
+    mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  .bg-vignette{
+    position:fixed;
+    inset:0;
+    pointer-events:none;
+    z-index:0;
+    background:radial-gradient(ellipse 75% 75% at 50% 50%, transparent 40%, rgba(0,0,0,.45) 100%);
+  }
+  /* 桌面上的柔和投影光斑 */
+  .bg-spot{
+    position:fixed;
+    left:50%;top:50%;
+    width:min(760px,120vw);
+    height:min(760px,120vw);
+    transform:translate(-50%,-50%);
+    pointer-events:none;
+    z-index:0;
+    background:radial-gradient(circle, rgba(217,139,74,.07) 0%, rgba(217,139,74,.03) 32%, transparent 62%);
+    animation:spotBreath 9s ease-in-out infinite;
+  }
+  @keyframes spotBreath{
+    0%,100%{opacity:.75;transform:translate(-50%,-50%) scale(1);}
+    50%{opacity:1;transform:translate(-50%,-50%) scale(1.06);}
+  }
+
+  /* ===== 主体：计算器 ===== */
+  .calc{
+    position:relative;
+    z-index:2;
+    width:min(360px, calc(100vw - 32px));
+    height:min(600px, calc(100vh - 32px));
+    height:min(600px, calc(100dvh - 32px));
+    max-height:calc(100vh - 32px);
+    max-height:calc(100dvh - 32px);
+    background:
+      linear-gradient(168deg, #262a31 0%, #1e2127 42%, #191c21 100%);
+    border-radius:28px;
+    padding:22px 20px 16px;
+    display:flex;
+    flex-direction:column;
+    box-shadow:
+      0 1px 0 rgba(255,255,255,.09) inset,
+      0 0 0 1px rgba(0,0,0,.55),
+      0 0 0 1.5px rgba(255,255,255,.035),
+      0 30px 60px -18px rgba(0,0,0,.85),
+      0 60px 110px -40px rgba(0,0,0,.7),
+      0 2px 6px rgba(0,0,0,.5);
+    transition:transform .5s cubic-bezier(.22,1,.36,1);
+    animation:calcIn .9s cubic-bezier(.22,1,.36,1) both;
+  }
+  @keyframes calcIn{
+    from{opacity:0;transform:translateY(22px) scale(.97);}
+    to{opacity:1;transform:translateY(0) scale(1);}
+  }
+  /* 机身顶部高光细线 */
+  .calc::before{
+    content:"";
+    position:absolute;
+    left:14px;right:14px;top:0;
+    height:1px;
+    border-radius:1px;
+    background:linear-gradient(90deg,transparent,rgba(255,255,255,.16),transparent);
+    pointer-events:none;
+  }
+
+  /* ===== 显示区 ===== */
+  .display{
+    flex:0 0 27%;
+    min-height:0;
+    border-radius:18px;
+    background:
+      linear-gradient(180deg, #15171b 0%, #101216 100%);
+    box-shadow:
+      0 2px 6px rgba(0,0,0,.6) inset,
+      0 -1px 0 rgba(255,255,255,.05) inset,
+      0 1px 0 rgba(255,255,255,.045);
+    padding:14px 18px 12px;
+    display:flex;
+    flex-direction:column;
+    justify-content:flex-end;
+    overflow:hidden;
+    position:relative;
+    margin-bottom:16px;
+  }
+  .display::after{
+    content:"";
+    position:absolute;
+    inset:0;
+    border-radius:18px;
+    pointer-events:none;
+    background:linear-gradient(115deg, rgba(255,255,255,.05) 0%, transparent 28%);
+  }
+  .expr{
+    font-size:15px;
+    line-height:1.35;
+    font-weight:400;
+    color:var(--muted);
+    text-align:right;
+    min-height:21px;
+    letter-spacing:.02em;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    transition:opacity .2s ease;
+    font-variant-numeric:tabular-nums;
+  }
+  .result-wrap{
+    position:relative;
+    text-align:right;
+    margin-top:2px;
+    display:flex;
+    justify-content:flex-end;
+    align-items:baseline;
+    overflow:hidden;
+  }
+  .result{
+    font-size:clamp(40px, 13vw, 62px);
+    line-height:1.1;
+    font-weight:300;
+    letter-spacing:-.015em;
+    font-variant-numeric:tabular-nums;
+    color:var(--ink);
+    white-space:nowrap;
+    text-shadow:0 0 22px rgba(232,228,220,.13);
+    display:inline-block;
+    will-change:transform,opacity,color;
+  }
+  .result.enter{
+    animation:digitIn .12s ease-out;
+  }
+  @keyframes digitIn{
+    from{opacity:.25;transform:translateY(4px);}
+    to{opacity:1;transform:translateY(0);}
+  }
+  .result.pulse{
+    animation:resPulse .22s ease-in-out;
+  }
+  @keyframes resPulse{
+    0%{color:var(--ink);text-shadow:0 0 22px rgba(232,228,220,.13);}
+    45%{color:var(--copper);text-shadow:0 0 26px rgba(217,139,74,.55);}
+    100%{color:var(--ink);text-shadow:0 0 22px rgba(232,228,220,.13);}
+  }
+  .display.shake{
+    animation:shake .36s ease-in-out;
+  }
+  @keyframes shake{
+    0%{transform:translateX(0);}
+    16%{transform:translateX(-6px);}
+    33%{transform:translateX(6px);}
+    50%{transform:translateX(-5px);}
+    66%{transform:translateX(5px);}
+    83%{transform:translateX(-3px);}
+    100%{transform:translateX(0);}
+  }
+  .display.error .result{
+    color:var(--copper);
+    font-size:clamp(30px, 9.5vw, 44px);
+    letter-spacing:.01em;
+    text-shadow:0 0 24px rgba(217,139,74,.35);
+  }
+
+  /* ===== 按键区 ===== */
+  .keys{
+    flex:1 1 auto;
+    min-height:0;
+    display:grid;
+    grid-template-columns:repeat(4,1fr);
+    grid-template-rows:repeat(5,1fr);
+    gap:10px;
+  }
+  .key{
+    position:relative;
+    border:none;
+    border-radius:50%;
+    font-family:inherit;
+    font-size:clamp(17px, 5vw, 22px);
+    font-weight:400;
+    color:var(--ink);
+    cursor:pointer;
+    user-select:none;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:
+      linear-gradient(180deg, #343942 0%, var(--num-key) 55%, #24272e 100%);
+    box-shadow:
+      0 1px 0 rgba(255,255,255,.10) inset,
+      0 -2px 4px rgba(0,0,0,.35) inset,
+      0 3px 6px rgba(0,0,0,.45),
+      0 1px 2px rgba(0,0,0,.5);
+    transition:
+      transform .16s cubic-bezier(.34,1.56,.64,1),
+      box-shadow .16s ease,
+      background .16s ease,
+      filter .16s ease;
+    outline:none;
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  /* 圆形高光弧 */
+  .key::after{
+    content:"";
+    position:absolute;
+    left:12%;right:12%;top:5%;
+    height:38%;
+    border-radius:50%;
+    background:linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,0));
+    pointer-events:none;
+  }
+  .key.fn{
+    background:
+      linear-gradient(180deg, #474d59 0%, var(--fn-key) 55%, #30343d 100%);
+    color:#f0ece4;
+    font-size:clamp(16px, 4.6vw, 20px);
+  }
+  .key.op{
+    background:
+      linear-gradient(180deg, #4a505c 0%, #3d434e 55%, #333842 100%);
+    color:#f4f0e8;
+    font-size:clamp(19px, 5.6vw, 25px);
+  }
+  .key.eq{
+    background:
+      linear-gradient(180deg, #e29a5c 0%, var(--copper) 48%, var(--copper-deep) 100%);
+    color:#1a1208;
+    font-weight:500;
+    font-size:clamp(20px, 6vw, 27px);
+    box-shadow:
+      0 1px 0 rgba(255,255,255,.35) inset,
+      0 -3px 6px rgba(120,60,10,.45) inset,
+      0 3px 10px rgba(217,139,74,.30),
+      0 4px 8px rgba(0,0,0,.5);
+  }
+  .key.eq::after{
+    background:linear-gradient(180deg, rgba(255,255,255,.30), rgba(255,255,255,0));
+  }
+  .key:hover{filter:brightness(1.09);}
+  .key:focus-visible{
+    box-shadow:
+      0 0 0 2px rgba(217,139,74,.85),
+      0 3px 6px rgba(0,0,0,.45);
+  }
+  .key.pressed{
+    transform:scale(.96);
+    transition:
+      transform .08s ease-out,
+      box-shadow .08s ease-out,
+      background .08s ease-out;
+    box-shadow:
+      0 3px 10px rgba(0,0,0,.55) inset,
+      0 -1px 0 rgba(255,255,255,.05) inset,
+      0 1px 2px rgba(0,0,0,.4);
+    filter:brightness(.94);
+  }
+  /* 按键高光扩散环 */
+  .key .ripple{
+    position:absolute;
+    inset:0;
+    border-radius:50%;
+    pointer-events:none;
+    box-shadow:0 0 0 0 rgba(232,228,220,.30) inset;
+    opacity:0;
+  }
+  .key.pressed .ripple{
+    animation:rippleOut .42s ease-out;
+  }
+  @keyframes rippleOut{
+    0%{opacity:1;box-shadow:0 0 0 0 rgba(232,228,220,.34) inset;}
+    60%{opacity:.5;}
+    100%{opacity:0;box-shadow:0 0 0 14px rgba(232,228,220,0) inset;}
+  }
+  .key.eq.pressed{
+    box-shadow:
+      0 3px 10px rgba(90,40,5,.6) inset,
+      0 1px 2px rgba(0,0,0,.4);
+  }
+
+  /* ===== 底部提示 ===== */
+  .hint{
+    flex:0 0 auto;
+    margin-top:12px;
+    text-align:center;
+    font-size:10.5px;
+    letter-spacing:.06em;
+    color:rgba(232,228,220,.30);
+    line-height:1.5;
+    user-select:none;
+  }
+  .hint b{
+    color:rgba(232,228,220,.5);
+    font-weight:500;
+  }
+
+  @media (max-width:400px){
+    .calc{padding:18px 15px 13px;border-radius:24px;}
+    .display{border-radius:15px;padding:11px 14px 10px;margin-bottom:13px;}
+    .keys{gap:8px;}
+    .hint{font-size:9.5px;margin-top:9px;}
+  }
+  @media (max-height:620px){
+    .calc{height:calc(100vh - 24px);height:calc(100dvh - 24px);padding:16px 16px 11px;}
+    .display{flex-basis:25%;margin-bottom:11px;}
+    .keys{gap:8px;}
+    .hint{margin-top:8px;font-size:9.5px;}
+  }
+  @media (min-width:1100px){
+    .calc{width:380px;height:min(640px, calc(100vh - 48px));height:min(640px, calc(100dvh - 48px));}
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    .calc{animation:none;}
+    .bg-spot{animation:none;}
+    .result.enter{animation-duration:.06s;}
+    .result.pulse{animation-duration:.1s;}
+    .display.shake{animation-duration:.2s;}
+    .key{transition-duration:.06s;}
+    .key.pressed{transform:scale(.985);}
+    .key.pressed .ripple{animation-duration:.2s;}
+  }
+</style>
+</head>
+<body>
+  <div class="bg-glow"></div>
+  <div class="bg-spot"></div>
+  <div class="bg-noise"></div>
+  <div class="bg-vignette"></div>
+
+  <main class="calc" id="calc">
+    <section class="display" id="display" aria-live="polite">
+      <div class="expr" id="expr">就绪</div>
+      <div class="result-wrap">
+        <span class="result" id="result">0</span>
+      </div>
+    </section>
+
+    <div class="keys" id="keys">
+      <button class="key fn" data-key="clear" aria-label="全部清除">AC</button>
+      <button class="key fn" data-key="sign" aria-label="正负号">±</button>
+      <button class="key fn" data-key="percent" aria-label="百分号">%</button>
+      <button class="key op" data-key="÷" aria-label="除">÷</button>
+
+      <button class="key" data-key="7">7</button>
+      <button class="key" data-key="8">8</button>
+      <button class="key" data-key="9">9</button>
+      <button class="key op" data-key="×" aria-label="乘">×</button>
+
+      <button class="key" data-key="4">4</button>
+      <button class="key" data-key="5">5</button>
+      <button class="key" data-key="6">6</button>
+      <button class="key op" data-key="−" aria-label="减">−</button>
+
+      <button class="key" data-key="1">1</button>
+      <button class="key" data-key="2">2</button>
+      <button class="key" data-key="3">3</button>
+      <button class="key op" data-key="+" aria-label="加">+</button>
+
+      <button class="key" data-key="0">0</button>
+      <button class="key" data-key=".">.</button>
+      <button class="key fn" data-key="back" aria-label="退格">⌫</button>
+      <button class="key eq" data-key="=" aria-label="等于">=</button>
+    </div>
+
+    <div class="hint">
+      键盘：<b>0–9</b> · <b>+ − * /</b> · <b>Enter</b> 等号 · <b>Esc</b> 清空 · <b>Backspace</b> 退格
+    </div>
+  </main>
+
+<script>
+(function(){
+  "use strict";
+
+  var displayEl = document.getElementById('display');
+  var resultEl  = document.getElementById('result');
+  var exprEl    = document.getElementById('expr');
+  var keysEl    = document.getElementById('keys');
+
+  var MAX_LEN = 14;
+
+  var st = {
+    current: '0',      // 当前输入字符串
+    stored: null,      // 暂存值 (number)
+    pendingOp: null,   // 待执行运算符
+    justEvaluated: false,
+    freshEntry: true,  // 下一次数字输入是否覆盖当前值
+    error: false,
+    lastExpr: ''       // 等号后保留的算式
+  };
+
+  var OP_SYMBOL = { '+':'+', '−':'−', '×':'×', '÷':'÷' };
+
+  /* ---------- 数字格式化 ---------- */
+  function formatNumber(n){
+    if (!isFinite(n)) return null;
+    if (Number.isInteger(n) && Math.abs(n) < 1e15) {
+      return String(n);
+    }
+    var s = String(n);
+    if (s.indexOf('e') !== -1 || s.indexOf('E') !== -1) {
+      // 科学计数法：控制长度
+      var parts = s.split(/e/i);
+      var mant = parseFloat(parts[0]).toFixed(6).replace(/0+$/,'').replace(/\.$/,'');
+      return mant + 'e' + parts[1];
+    }
+    if (s.length > MAX_LEN) {
+      var fixed = n.toPrecision(MAX_LEN);
+      fixed = String(parseFloat(fixed));
+      if (fixed.length > MAX_LEN) {
+        fixed = n.toExponential(6).replace(/\.?0+e/,'e');
+      }
+      return fixed;
+    }
+    return s;
+  }
+
+  function groupDigits(str){
+    // 只为显示做千分位分组（保留小数与负号）
+    if (!/^-?\d+(\.\d+)?$/.test(str)) return str;
+    var neg = str.charAt(0) === '-';
+    if (neg) str = str.slice(1);
+    var dot = str.indexOf('.');
+    var intPart = dot === -1 ? str : str.slice(0, dot);
+    var decPart = dot === -1 ? '' : str.slice(dot);
+    intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return (neg ? '−' : '') + intPart + decPart;
+  }
+
+  function displayValue(){
+    if (st.error) return '无法计算';
+    return groupDigits(st.current);
+  }
+
+  /* ---------- 渲染 ---------- */
+  var lastRendered = null;
+  function render(animate){
+    var txt = displayValue();
+    if (txt !== lastRendered) {
+      resultEl.textContent = txt;
+      if (animate !== false && !st.error) {
+        resultEl.classList.remove('enter');
+        void resultEl.offsetWidth;
+        resultEl.classList.add('enter');
+      }
+      lastRendered = txt;
+    } else {
+      resultEl.textContent = txt;
+    }
+    // 字号自适应：长数字缩小
+    var len = txt.length;
+    var base = window.innerWidth < 400 ? 40 : 62;
+    if (st.error) {
+      resultEl.style.fontSize = '';
+    } else if (len > 11) {
+      resultEl.style.fontSize = 'clamp(20px, 6.2vw, 30px)';
+    } else if (len > 8) {
+      resultEl.style.fontSize = 'clamp(26px, 8.4vw, 42px)';
+    } else {
+      resultEl.style.fontSize = '';
+    }
+  }
+
+  function renderExpr(){
+    var parts = [];
+    if (st.stored !== null && st.pendingOp) {
+      parts.push(groupDigits(String(st.stored)));
+      parts.push(OP_SYMBOL[st.pendingOp] || st.pendingOp);
+      if (!st.freshEntry) {
+        parts.push(groupDigits(st.current));
+      }
+    } else if (st.lastExpr) {
+      parts.push(st.lastExpr);
+    }
+    exprEl.textContent = parts.length ? parts.join(' ') : '就绪';
+  }
+
+  /* ---------- 状态操作 ---------- */
+  function clearAll(){
+    st.current = '0';
+    st.stored = null;
+    st.pendingOp = null;
+    st.justEvaluated = false;
+    st.freshEntry = true;
+    st.error = false;
+    st.lastExpr = '';
+    displayEl.classList.remove('error');
+    render();
+    renderExpr();
+  }
+
+  function clearError(){
+    if (st.error) {
+      st.error = false;
+      st.current = '0';
+      st.stored = null;
+      st.pendingOp = null;
+      st.freshEntry = true;
+      st.justEvaluated = false;
+      st.lastExpr = '';
+      displayEl.classList.remove('error');
+    }
+  }
+
+  function inputDigit(d){
+    if (st.error) clearError();
+    if (st.justEvaluated) {
+      // 等号后输入数字：开始新计算
+      st.stored = null;
+      st.pendingOp = null;
+      st.justEvaluated = false;
+      st.freshEntry = true;
+      st.lastExpr = '';
+    }
+    if (st.freshEntry) {
+      st.current = d;
+      st.freshEntry = false;
+    } else {
+      if (st.current === '0') st.current = d;
+      else if (st.current === '-0') st.current = '-' + d;
+      else {
+        if (st.current.replace(/[-.]/g,'').length >= MAX_LEN) return;
+        st.current += d;
+      }
+    }
+    render();
+    renderExpr();
+  }
+
+  function inputDot(){
+    if (st.error) clearError();
+    if (st.justEvaluated) {
+      st.stored = null;
+      st.pendingOp = null;
+      st.justEvaluated = false;
+      st.freshEntry = true;
+      st.lastExpr = '';
+    }
+    if (st.freshEntry) {
+      st.current = '0.';
+      st.freshEntry = false;
+    } else if (st.current.indexOf('.') === -1) {
+      st.current += '.';
+    }
+    render();
+    renderExpr();
+  }
+
+  function toggleSign(){
+    if (st.error) clearError();
+    if (st.current === '0' || st.current === '0.') {
+      // 0 取负仍为 0，但保留 -0 视觉意义不大，直接忽略
+      render();
+      return;
+    }
+    if (st.current.charAt(0) === '-') st.current = st.current.slice(1);
+    else st.current = '-' + st.current;
+    st.justEvaluated = false;
+    render();
+    renderExpr();
+  }
+
+  function percent(){
+    if (st.error) clearError();
+    var v = parseFloat(st.current);
+    if (!isFinite(v)) return;
+    var r;
+    if (st.stored !== null && (st.pendingOp === '+' || st.pendingOp === '−')) {
+      r = st.stored * v / 100;
+    } else {
+      r = v / 100;
+    }
+    var s = formatNumber(r);
+    if (s === null) { triggerError(); return; }
+    st.current = s;
+    st.freshEntry = false;
+    st.justEvaluated = false;
+    render();
+    renderExpr();
+  }
+
+  function backspace(){
+    if (st.error) { clearError(); render(); renderExpr(); return; }
+    if (st.justEvaluated) {
+      // 等号后退格：清空为新输入
+      st.stored = null;
+      st.pendingOp = null;
+      st.justEvaluated = false;
+      st.lastExpr = '';
+      st.current = '0';
+      st.freshEntry = true;
+      render(); renderExpr();
+      return;
+    }
+    if (st.freshEntry) {
+      st.current = '0';
+      render(); renderExpr();
+      return;
+    }
+    var s = st.current;
+    s = s.slice(0, -1);
+    if (s === '' || s === '-') s = '0';
+    st.current = s;
+    render();
+    renderExpr();
+  }
+
+  function applyOp(a, op, b){
+    switch(op){
+      case '+': return a + b;
+      case '−': return a - b;
+      case '×': return a * b;
+      case '÷':
+        if (b === 0) return null;
+        return a / b;
+      default: return b;
+    }
+  }
+
+  function setOperator(op){
+    if (st.error) clearError();
+    var cur = parseFloat(st.current);
+    if (!isFinite(cur)) cur = 0;
+
+    if (st.pendingOp !== null && st.stored !== null && !st.freshEntry) {
+      var r = applyOp(st.stored, st.pendingOp, cur);
+      if (r === null || !isFinite(r)) { triggerError(); return; }
+      var s = formatNumber(r);
+      if (s === null) { triggerError(); return; }
+      st.stored = r;
+      st.current = s;
+    } else if (st.pendingOp !== null && st.stored !== null && st.freshEntry) {
+      // 连续按运算符：仅替换运算符
+    } else {
+      st.stored = cur;
+    }
+    st.pendingOp = op;
+    st.freshEntry = true;
+    st.justEvaluated = false;
+    st.lastExpr = '';
+    render();
+    renderExpr();
+  }
+
+  function equals(){
+    if (st.error) { clearError(); render(); renderExpr(); return; }
+    var cur = parseFloat(st.current);
+    if (!isFinite(cur)) cur = 0;
+
+    var a, op, b, exprStr;
+    if (st.pendingOp !== null && st.stored !== null) {
+      a = st.stored;
+      op = st.pendingOp;
+      b = cur;
+      exprStr = groupDigits(formatNumber(a) || String(a)) + ' ' + OP_SYMBOL[op] + ' ' +
+                groupDigits(st.freshEntry ? (formatNumber(a) || String(a)) : st.current) + ' =';
+    } else {
+      a = cur; op = null; b = null;
+      exprStr = groupDigits(st.current) + ' =';
+    }
+
+    var r = op === null ? cur : applyOp(a, op, b);
+    if (r === null || !isFinite(r)) {
+      triggerError();
+      return;
+    }
+    var s = formatNumber(r);
+    if (s === null) { triggerError(); return; }
+
+    st.current = s;
+    st.stored = null;
+    st.pendingOp = null;
+    st.freshEntry = true;
+    st.justEvaluated = true;
+    st.lastExpr = exprStr;
+
+    render();
+    exprEl.textContent = exprStr;
+    // 亮度脉冲
+    resultEl.classList.remove('pulse');
+    void resultEl.offsetWidth;
+    resultEl.classList.add('pulse');
+  }
+
+  function triggerError(){
+    st.error = true;
+    st.current = '0';
+    st.stored = null;
+    st.pendingOp = null;
+    st.freshEntry = true;
+    st.justEvaluated = false;
+    st.lastExpr = '';
+    displayEl.classList.add('error');
+    render(false);
+    exprEl.textContent = '除以零或数值溢出';
+    displayEl.classList.remove('shake');
+    void displayEl.offsetWidth;
+    displayEl.classList.add('shake');
+  }
+
+  /* ---------- 按键视觉反馈 ---------- */
+  var pressTimers = {};
+  function flashKey(keyName){
+    var btn = keysEl.querySelector('[data-key="' + cssEscape(keyName) + '"]');
+    if (!btn) return;
+    btn.classList.remove('pressed');
+    void btn.offsetWidth;
+    btn.classList.add('pressed');
+    if (pressTimers[keyName]) clearTimeout(pressTimers[keyName]);
+    pressTimers[keyName] = setTimeout(function(){
+      btn.classList.remove('pressed');
+    }, 130);
+  }
+  function cssEscape(s){
+    return String(s).replace(/["\\]/g, '\\$&');
+  }
+
+  /* ---------- 分发 ---------- */
+  function handleKeyInput(k){
+    if (k >= '0' && k <= '9') { inputDigit(k); return; }
+    switch(k){
+      case '.': inputDot(); break;
+      case '+': case '−': case '×': case '÷': setOperator(k); break;
+      case '=': equals(); break;
+      case 'clear': clearAll(); break;
+      case 'sign': toggleSign(); break;
+      case 'percent': percent(); break;
+      case 'back': backspace(); break;
+    }
+  }
+
+  /* ---------- 鼠标 / 触屏 ---------- */
+  keysEl.addEventListener('pointerdown', function(e){
+    var btn = e.target.closest('.key');
+    if (!btn) return;
+    var k = btn.getAttribute('data-key');
+    if (k) flashKey(k);
+  });
+
+  keysEl.addEventListener('click', function(e){
+    var btn = e.target.closest('.key');
+    if (!btn) return;
+    var k = btn.getAttribute('data-key');
+    if (!k) return;
+    handleKeyInput(k);
+  });
+
+  // 阻止长按选中与双击缩放
+  keysEl.addEventListener('contextmenu', function(e){ e.preventDefault(); });
+
+  /* ---------- 键盘 ---------- */
+  var KEYMAP = {
+    '+': '+', '-': '−', '*': '×', 'x': '×', 'X': '×', '/': '÷',
+    'Enter': '=', '=': '=', 'Escape': 'clear', 'Esc': 'clear',
+    'Backspace': 'back', 'Delete': 'clear', 'c': 'clear', 'C': 'clear',
+    '%': 'percent', 'p': 'percent', 'P': 'percent',
+    'n': 'sign', 'N': 'sign'
+  };
+
+  document.addEventListener('keydown', function(e){
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    var k = e.key;
+    var mapped = null;
+
+    if (k >= '0' && k <= '9') mapped = k;
+    else if (k === '.' || k === ',') mapped = '.';
+    else if (KEYMAP[k] !== undefined) mapped = KEYMAP[k];
+
+    if (mapped === null) return;
+    e.preventDefault();
+    flashKey(mapped);
+    handleKeyInput(mapped);
+  });
+
+  /* ---------- 尺寸变化时重排字号 ---------- */
+  var resizeTimer = null;
+  window.addEventListener('resize', function(){
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function(){
+      lastRendered = null;
+      render(false);
+    }, 100);
+  });
+
+  /* ---------- 初始化 ---------- */
+  clearAll();
+  render(false);
+})();
+</script>
+</body>
+</html>

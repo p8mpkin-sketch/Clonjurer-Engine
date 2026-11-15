@@ -1,0 +1,970 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>跳动的爱心</title>
+<style>
+  :root{
+    --bg-0:#12060a;
+    --bg-1:#1e0b12;
+    --heart:#e63950;
+    --heart-hi:#ff7a8a;
+    --text:#f4e6e8;
+    --muted:#8a6a70;
+    --line:rgba(244,230,232,.14);
+    --beat:1.6s;
+  }
+
+  *{box-sizing:border-box;margin:0;padding:0;}
+
+  html,body{height:100%;}
+
+  body{
+    background:
+      radial-gradient(ellipse 90% 70% at 50% 42%, var(--bg-1) 0%, var(--bg-0) 62%, #0b0407 100%);
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* ============ 背景氛围层 ============ */
+  .bg-grid{
+    position:fixed;
+    inset:0;
+    background-image:
+      linear-gradient(to right, rgba(244,230,232,.035) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(244,230,232,.035) 1px, transparent 1px);
+    background-size:64px 64px;
+    mask-image:radial-gradient(ellipse 70% 65% at 50% 45%, #000 20%, transparent 78%);
+    -webkit-mask-image:radial-gradient(ellipse 70% 65% at 50% 45%, #000 20%, transparent 78%);
+    pointer-events:none;
+    z-index:0;
+  }
+
+  .bg-glow{
+    position:fixed;
+    left:50%;
+    top:41%;
+    width:min(120vh,120vw);
+    height:min(120vh,120vw);
+    transform:translate(-50%,-50%);
+    background:radial-gradient(circle, rgba(230,57,80,.16) 0%, rgba(230,57,80,.06) 32%, transparent 62%);
+    pointer-events:none;
+    z-index:0;
+    animation:glowPulse var(--beat) linear infinite;
+  }
+
+  @keyframes glowPulse{
+    0%{opacity:.55;transform:translate(-50%,-50%) scale(.94);}
+    12%{opacity:1;transform:translate(-50%,-50%) scale(1.04);}
+    30%{opacity:.7;transform:translate(-50%,-50%) scale(.99);}
+    100%{opacity:.55;transform:translate(-50%,-50%) scale(.94);}
+  }
+
+  /* 噪点 */
+  .bg-noise{
+    position:fixed;
+    inset:0;
+    z-index:0;
+    pointer-events:none;
+    opacity:.05;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/></filter><rect width='140' height='140' filter='url(%23n)' opacity='.6'/></svg>");
+  }
+
+  /* ============ 舞台 ============ */
+  .stage{
+    position:relative;
+    z-index:2;
+    height:100vh;
+    height:100dvh;
+    display:grid;
+    grid-template-rows:auto 1fr auto;
+    padding:clamp(14px,2.4vh,30px) clamp(16px,3vw,52px);
+    max-width:1680px;
+    margin:0 auto;
+  }
+
+  /* 顶部信息条 */
+  .topbar{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:16px;
+    border-bottom:1px solid var(--line);
+    padding-bottom:clamp(8px,1.4vh,16px);
+  }
+
+  .brand{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:12px;
+    letter-spacing:.22em;
+    color:var(--muted);
+    text-transform:uppercase;
+  }
+
+  .brand .dot{
+    width:7px;height:7px;border-radius:50%;
+    background:var(--heart);
+    box-shadow:0 0 0 0 rgba(230,57,80,.6);
+    animation:dotBlink var(--beat) linear infinite;
+    flex:none;
+  }
+
+  @keyframes dotBlink{
+    0%{opacity:1;transform:scale(1.25);}
+    12%{opacity:1;transform:scale(1.4);}
+    30%{opacity:.55;transform:scale(1);}
+    100%{opacity:.45;transform:scale(.9);}
+  }
+
+  .topbar-right{
+    display:flex;
+    gap:clamp(14px,2.6vw,40px);
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:12px;
+    letter-spacing:.14em;
+    color:var(--muted);
+    text-align:right;
+  }
+
+  .topbar-right b{
+    display:block;
+    color:var(--text);
+    font-weight:500;
+    font-size:13px;
+    letter-spacing:.1em;
+    margin-top:3px;
+  }
+
+  /* 主舞台 */
+  .main{
+    position:relative;
+    display:grid;
+    place-items:center;
+    min-height:0;
+  }
+
+  .heart-wrap{
+    position:relative;
+    width:min(46vh, 46vw, 420px);
+    height:min(46vh, 46vw, 420px);
+    display:grid;
+    place-items:center;
+    cursor:pointer;
+    outline:none;
+    -webkit-tap-highlight-color:transparent;
+  }
+
+  .heart-wrap:focus-visible{
+    outline:2px dashed rgba(255,122,138,.55);
+    outline-offset:14px;
+    border-radius:50%;
+  }
+
+  /* 脉冲环 */
+  .rings{
+    position:absolute;
+    inset:0;
+    display:grid;
+    place-items:center;
+    pointer-events:none;
+  }
+
+  .ring{
+    position:absolute;
+    width:100%;
+    height:100%;
+    border-radius:50%;
+    border:1.5px solid rgba(255,122,138,.55);
+    opacity:0;
+    transform:scale(.62);
+    animation:ringOut var(--beat) cubic-bezier(.16,.7,.3,1) infinite;
+  }
+
+  .ring:nth-child(2){animation-delay:calc(var(--beat) * .5);}
+  .ring:nth-child(3){animation-delay:calc(var(--beat) * .25); opacity:0;}
+
+  @keyframes ringOut{
+    0%{opacity:0;transform:scale(.6);}
+    10%{opacity:.85;transform:scale(.72);}
+    38%{opacity:.32;transform:scale(1.02);}
+    70%{opacity:0;transform:scale(1.28);}
+    100%{opacity:0;transform:scale(1.28);}
+  }
+
+  /* 重击环 */
+  .shock-ring{
+    position:absolute;
+    width:100%;height:100%;
+    border-radius:50%;
+    border:2px solid rgba(255,122,138,.95);
+    opacity:0;
+    pointer-events:none;
+    transform:scale(.7);
+  }
+
+  .shock-ring.run{
+    animation:shockOut .85s cubic-bezier(.12,.72,.28,1) forwards;
+  }
+
+  @keyframes shockOut{
+    0%{opacity:1;transform:scale(.66);border-width:4px;}
+    55%{opacity:.55;transform:scale(1.22);border-width:1.5px;}
+    100%{opacity:0;transform:scale(1.55);border-width:1px;}
+  }
+
+  /* 爱心本体 */
+  .heart-svg{
+    width:100%;
+    height:100%;
+    overflow:visible;
+    transform-origin:50% 52%;
+    animation:beat var(--beat) linear infinite;
+    will-change:transform;
+    filter:drop-shadow(0 22px 42px rgba(230,57,80,.35)) drop-shadow(0 4px 10px rgba(0,0,0,.55));
+  }
+
+  @keyframes beat{
+    0%   {transform:scale(1);}
+    12%  {transform:scale(1.085);}
+    30%  {transform:scale(.968);}
+    52%  {transform:scale(1.012);}
+    100% {transform:scale(1);}
+  }
+
+  /* 悬停加速 */
+  body.hovering{--beat:1.05s;}
+  body.hovering .heart-svg{animation-name:beatFast;}
+  body.hovering .ring{border-color:rgba(255,150,162,.95);}
+  body.hovering .bg-glow{background:radial-gradient(circle, rgba(230,57,80,.24) 0%, rgba(230,57,80,.09) 32%, transparent 62%);}
+
+  @keyframes beatFast{
+    0%   {transform:scale(1);}
+    12%  {transform:scale(1.1);}
+    30%  {transform:scale(.962);}
+    52%  {transform:scale(1.016);}
+    100% {transform:scale(1);}
+  }
+
+  /* 重击 */
+  .heart-svg.hit{
+    animation:hitBeat .8s cubic-bezier(.2,.8,.3,1) 1;
+  }
+
+  @keyframes hitBeat{
+    0%{transform:scale(1);}
+    14%{transform:scale(1.26);}
+    34%{transform:scale(.92);}
+    56%{transform:scale(1.07);}
+    78%{transform:scale(.985);}
+    100%{transform:scale(1);}
+  }
+
+  /* 高光位移 */
+  .sheen{
+    animation:sheenMove var(--beat) linear infinite;
+    transform-origin:center;
+  }
+
+  @keyframes sheenMove{
+    0%{transform:translate(0,0);opacity:.85;}
+    12%{transform:translate(-1.6%,-2.2%);opacity:1;}
+    30%{transform:translate(.8%,1.1%);opacity:.7;}
+    100%{transform:translate(0,0);opacity:.85;}
+  }
+
+  /* 标题层 */
+  .title-block{
+    position:absolute;
+    left:0;
+    top:clamp(4px,2vh,26px);
+    max-width:min(340px,42vw);
+    pointer-events:none;
+  }
+
+  .title-block h1{
+    font-family:Georgia,"Songti SC","Times New Roman",serif;
+    font-weight:400;
+    font-size:clamp(24px,2.4vw,34px);
+    letter-spacing:.06em;
+    line-height:1.15;
+    color:var(--text);
+  }
+
+  .title-block p{
+    margin-top:10px;
+    font-size:clamp(12px,1vw,14px);
+    line-height:1.75;
+    color:var(--muted);
+    letter-spacing:.04em;
+    max-width:30ch;
+  }
+
+  .title-block .rule{
+    width:44px;height:1px;
+    background:linear-gradient(to right,var(--heart),transparent);
+    margin-top:14px;
+  }
+
+  /* 右侧读数 */
+  .readouts{
+    position:absolute;
+    right:0;
+    top:clamp(4px,2vh,26px);
+    display:flex;
+    flex-direction:column;
+    gap:clamp(10px,2vh,22px);
+    text-align:right;
+    pointer-events:none;
+  }
+
+  .readout .label{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:11px;
+    letter-spacing:.2em;
+    color:var(--muted);
+    text-transform:uppercase;
+  }
+
+  .readout .value{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:clamp(22px,2.2vw,32px);
+    letter-spacing:.06em;
+    color:var(--text);
+    line-height:1.15;
+    font-variant-numeric:tabular-nums;
+    transition:color .18s ease;
+  }
+
+  .readout .value .unit{
+    font-size:11px;
+    letter-spacing:.16em;
+    color:var(--muted);
+    margin-left:6px;
+  }
+
+  .readout.pulse .value{
+    color:var(--heart-hi);
+  }
+
+  /* ============ 底部波形区 ============ */
+  .bottom{
+    border-top:1px solid var(--line);
+    padding-top:clamp(8px,1.4vh,16px);
+    display:grid;
+    gap:clamp(8px,1.4vh,14px);
+  }
+
+  .ecg-shell{
+    position:relative;
+    width:100%;
+    height:clamp(58px,10vh,104px);
+    border-radius:4px;
+    background:
+      linear-gradient(to bottom, rgba(230,57,80,.05), rgba(230,57,80,0) 70%),
+      rgba(255,255,255,.012);
+    border:1px solid rgba(244,230,232,.07);
+    overflow:hidden;
+  }
+
+  .ecg-shell::before{
+    content:"";
+    position:absolute;
+    inset:0;
+    background-image:
+      linear-gradient(to right, rgba(244,230,232,.05) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(244,230,232,.05) 1px, transparent 1px);
+    background-size:26px 26px;
+    pointer-events:none;
+  }
+
+  .ecg-svg{
+    position:absolute;
+    inset:0;
+    width:100%;
+    height:100%;
+    display:block;
+  }
+
+  .ecg-line{
+    fill:none;
+    stroke:var(--heart-hi);
+    stroke-width:2;
+    stroke-linecap:round;
+    stroke-linejoin:round;
+    filter:drop-shadow(0 0 6px rgba(255,122,138,.45));
+    vector-effect:non-scaling-stroke;
+  }
+
+  .ecg-line.ghost{
+    stroke:rgba(255,122,138,.22);
+    stroke-width:1.4;
+    filter:none;
+  }
+
+  .ecg-cursor{
+    fill:var(--heart-hi);
+    filter:drop-shadow(0 0 8px rgba(255,122,138,.9));
+  }
+
+  .ecg-meta{
+    position:absolute;
+    left:10px;
+    top:8px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:10px;
+    letter-spacing:.2em;
+    color:var(--muted);
+    pointer-events:none;
+    text-transform:uppercase;
+  }
+
+  .ecg-meta.right{
+    left:auto;right:10px;
+    text-align:right;
+  }
+
+  /* 底部提示与刻度 */
+  .footer{
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    gap:16px;
+    flex-wrap:wrap;
+    font-size:12px;
+    color:var(--muted);
+    letter-spacing:.06em;
+    line-height:1.7;
+  }
+
+  .hint{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-wrap:wrap;
+  }
+
+  .key{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-width:22px;
+    height:20px;
+    padding:0 6px;
+    border:1px solid rgba(244,230,232,.22);
+    border-radius:3px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:10px;
+    letter-spacing:.08em;
+    color:var(--text);
+    background:rgba(255,255,255,.03);
+  }
+
+  .ticks{
+    display:flex;
+    gap:6px;
+    align-items:flex-end;
+    height:18px;
+  }
+
+  .ticks i{
+    display:block;
+    width:1px;
+    background:rgba(244,230,232,.2);
+    height:8px;
+  }
+  .ticks i.tall{height:16px;background:rgba(230,57,80,.6);}
+
+  .corner-note{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:10px;
+    letter-spacing:.2em;
+    color:rgba(138,106,112,.8);
+  }
+
+  /* 响应式 */
+  @media (max-width:820px){
+    .title-block{
+      position:static;
+      max-width:none;
+      margin-bottom:6px;
+    }
+    .title-block p{max-width:none;}
+    .readouts{
+      position:static;
+      flex-direction:row;
+      justify-content:space-between;
+      text-align:left;
+      gap:10px;
+      margin-top:8px;
+      width:100%;
+    }
+    .readout{text-align:left;}
+    .readout .value{font-size:20px;}
+    .main{
+      display:flex;
+      flex-direction:column;
+      justify-content:center;
+      gap:clamp(8px,2vh,18px);
+    }
+    .heart-wrap{
+      width:min(52vw, 44vh, 300px);
+      height:min(52vw, 44vh, 300px);
+    }
+    .topbar-right{display:none;}
+  }
+
+  @media (max-width:480px){
+    .heart-wrap{
+      width:min(64vw, 40vh, 260px);
+      height:min(64vw, 40vh, 260px);
+    }
+    .title-block h1{font-size:22px;}
+    .title-block p{font-size:12px;line-height:1.65;}
+    .footer{font-size:11px;}
+    .ecg-shell{height:56px;}
+  }
+
+  @media (max-height:620px){
+    .title-block p{display:none;}
+    .heart-wrap{width:min(38vh,44vw,300px);height:min(38vh,44vw,300px);}
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    .heart-svg{animation-duration:calc(var(--beat) * 1.6);}
+    .ring{animation-duration:calc(var(--beat) * 1.6);}
+    .bg-glow{animation-duration:calc(var(--beat) * 1.6);}
+    .sheen{animation-duration:calc(var(--beat) * 1.6);}
+  }
+</style>
+</head>
+<body>
+
+<div class="bg-grid"></div>
+<div class="bg-glow"></div>
+<div class="bg-noise"></div>
+
+<div class="stage">
+
+  <!-- 顶部 -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="dot"></span>
+      <span>HEART / 心跳监测</span>
+    </div>
+    <div class="topbar-right">
+      <div>状态<b id="statusText">窦性节律</b></div>
+      <div>导联<b>II · 持续</b></div>
+    </div>
+  </header>
+
+  <!-- 主体 -->
+  <main class="main">
+
+    <div class="title-block">
+      <h1>跳动的爱心</h1>
+      <p>收缩急促，舒张悠长。每一次搏动都带着心电波形一同起伏。</p>
+      <div class="rule"></div>
+    </div>
+
+    <div class="heart-wrap" id="heartWrap" role="button" tabindex="0" aria-label="点击爱心触发一次重击">
+      <div class="rings" aria-hidden="true">
+        <span class="ring"></span>
+        <span class="ring"></span>
+        <span class="ring"></span>
+      </div>
+      <span class="shock-ring" id="shockRing" aria-hidden="true"></span>
+
+      <svg class="heart-svg" id="heartSvg" viewBox="0 0 200 190" aria-hidden="true">
+        <defs>
+          <linearGradient id="heartFill" x1="18%" y1="6%" x2="82%" y2="96%">
+            <stop offset="0%" stop-color="#ff7a8a"/>
+            <stop offset="34%" stop-color="#f04a60"/>
+            <stop offset="70%" stop-color="#e63950"/>
+            <stop offset="100%" stop-color="#a81f36"/>
+          </linearGradient>
+
+          <radialGradient id="heartShade" cx="34%" cy="26%" r="78%">
+            <stop offset="0%" stop-color="#ff9aa6" stop-opacity=".85"/>
+            <stop offset="42%" stop-color="#ff7a8a" stop-opacity=".18"/>
+            <stop offset="100%" stop-color="#7d1226" stop-opacity=".55"/>
+          </radialGradient>
+
+          <radialGradient id="heartSheen" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#ffffff" stop-opacity=".72"/>
+            <stop offset="55%" stop-color="#ffd3d9" stop-opacity=".22"/>
+            <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+          </radialGradient>
+
+          <linearGradient id="heartRim" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#ffb3bd" stop-opacity=".9"/>
+            <stop offset="48%" stop-color="#ff7a8a" stop-opacity=".25"/>
+            <stop offset="100%" stop-color="#5e0c1c" stop-opacity=".85"/>
+          </linearGradient>
+
+          <filter id="softShadow" x="-40%" y="-40%" width="180%" height="200%">
+            <feDropShadow dx="0" dy="14" stdDeviation="14" flood-color="#000000" flood-opacity=".55"/>
+          </filter>
+
+          <clipPath id="heartClip">
+            <path d="M100 178
+                     C 62 148, 14 116, 14 74
+                     C 14 44, 38 22, 64 22
+                     C 82 22, 94 32, 100 44
+                     C 106 32, 118 22, 136 22
+                     C 162 22, 186 44, 186 74
+                     C 186 116, 138 148, 100 178 Z"/>
+          </clipPath>
+        </defs>
+
+        <g filter="url(#softShadow)">
+          <!-- 主体 -->
+          <path d="M100 178
+                   C 62 148, 14 116, 14 74
+                   C 14 44, 38 22, 64 22
+                   C 82 22, 94 32, 100 44
+                   C 106 32, 118 22, 136 22
+                   C 162 22, 186 44, 186 74
+                   C 186 116, 138 148, 100 178 Z"
+                fill="url(#heartFill)"/>
+
+          <!-- 体积明暗 -->
+          <path d="M100 178
+                   C 62 148, 14 116, 14 74
+                   C 14 44, 38 22, 64 22
+                   C 82 22, 94 32, 100 44
+                   C 106 32, 118 22, 136 22
+                   C 162 22, 186 44, 186 74
+                   C 186 116, 138 148, 100 178 Z"
+                fill="url(#heartShade)"/>
+
+          <!-- 边缘描边 -->
+          <path d="M100 178
+                   C 62 148, 14 116, 14 74
+                   C 14 44, 38 22, 64 22
+                   C 82 22, 94 32, 100 44
+                   C 106 32, 118 22, 136 22
+                   C 162 22, 186 44, 186 74
+                   C 186 116, 138 148, 100 178 Z"
+                fill="none" stroke="url(#heartRim)" stroke-width="2.2"/>
+
+          <!-- 高光组 -->
+          <g clip-path="url(#heartClip)">
+            <g class="sheen">
+              <ellipse cx="66" cy="60" rx="30" ry="21" fill="url(#heartSheen)" transform="rotate(-28 66 60)"/>
+              <ellipse cx="140" cy="52" rx="13" ry="8" fill="#ffffff" opacity=".22" transform="rotate(-18 140 52)"/>
+            </g>
+            <!-- 底部反光 -->
+            <ellipse cx="100" cy="150" rx="46" ry="16" fill="#ff7a8a" opacity=".13"/>
+          </g>
+        </g>
+      </svg>
+    </div>
+
+    <div class="readouts">
+      <div class="readout pulse" id="bpmReadout">
+        <div class="label">BPM</div>
+        <div class="value"><span id="bpmValue">75</span><span class="unit">次/分</span></div>
+      </div>
+      <div class="readout">
+        <div class="label">累计跳动</div>
+        <div class="value"><span id="beatCount">0</span><span class="unit">次</span></div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- 底部 -->
+  <footer class="bottom">
+    <div class="ecg-shell">
+      <div class="ecg-meta">ECG · II</div>
+      <div class="ecg-meta right" id="ecgTime">00:00</div>
+      <svg class="ecg-svg" id="ecgSvg" preserveAspectRatio="none" aria-hidden="true">
+        <polyline class="ecg-line ghost" id="ecgGhost" points=""></polyline>
+        <polyline class="ecg-line" id="ecgLine" points=""></polyline>
+        <circle class="ecg-cursor" id="ecgCursor" r="3" cx="0" cy="0"></circle>
+      </svg>
+    </div>
+
+    <div class="footer">
+      <div class="hint">
+        <span class="key">鼠标</span><span>悬停爱心可加速心跳</span>
+        <span class="key">点击</span><span>或</span><span class="key">空格</span><span>触发一次重击</span>
+      </div>
+      <div class="ticks" aria-hidden="true">
+        <i></i><i></i><i class="tall"></i><i></i><i></i><i></i><i class="tall"></i><i></i><i></i><i class="tall"></i><i></i><i></i>
+      </div>
+      <div class="corner-note">RHYTHM · 1.6S</div>
+    </div>
+  </footer>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var body = document.body;
+  var heartWrap = document.getElementById("heartWrap");
+  var heartSvg = document.getElementById("heartSvg");
+  var shockRing = document.getElementById("shockRing");
+  var bpmValue = document.getElementById("bpmValue");
+  var beatCountEl = document.getElementById("beatCount");
+  var statusText = document.getElementById("statusText");
+  var ecgLine = document.getElementById("ecgLine");
+  var ecgGhost = document.getElementById("ecgGhost");
+  var ecgCursor = document.getElementById("ecgCursor");
+  var ecgSvg = document.getElementById("ecgSvg");
+  var ecgTime = document.getElementById("ecgTime");
+
+  var BASE_PERIOD = 1600;      // 正常心跳周期 ms
+  var FAST_PERIOD = 1050;      // 悬停加速周期 ms
+  var BEAT_RATIO = 0.12;       // 收缩峰值位置（与 CSS 12% 对齐）
+
+  var hovering = false;
+  var beatCount = 0;
+  var nextBeatAt = 0;
+  var lastBeatTime = 0;
+  var startTime = 0;
+  var rafId = null;
+
+  var ECG_POINTS = 260;        // 波形采样点
+  var ecgBuffer = new Float32Array(ECG_POINTS);
+  var ecgHead = 0;             // 当前写入位置（环形缓冲）
+  var ecgFilled = 0;
+
+  var reduceMotion = window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function currentPeriod(){
+    var base = hovering ? FAST_PERIOD : BASE_PERIOD;
+    return reduceMotion ? base * 1.6 : base;
+  }
+
+  /* ---------- BPM 与计数 ---------- */
+  function updateBpm(){
+    var period = currentPeriod();
+    var bpm = Math.round(60000 / period);
+    bpmValue.textContent = String(bpm);
+    statusText.textContent = hovering ? "节律加快" : "窦性节律";
+  }
+
+  function registerBeat(now){
+    beatCount++;
+    beatCountEl.textContent = String(beatCount);
+
+    // 心跳峰值写入波形
+    pushEcgPeak();
+
+    // 轻微的数字闪动反馈
+    bpmValue.style.color = "#ffd3d9";
+    window.setTimeout(function(){ bpmValue.style.color = ""; }, 130);
+
+    // 重击状态下的额外视觉
+    if (body.classList.contains("hit-mode")){
+      // 保持
+    }
+  }
+
+  /* ---------- 心电波形 ---------- */
+  function pushEcgPeak(){
+    // 在缓冲中写入一个 QRS 复合波：小下沉、高尖峰、回落
+    var pattern = [
+      0.00, -0.06, -0.10, 0.05, 0.62, 1.00, 0.30, -0.22, -0.08, 0.04, 0.00
+    ];
+    for (var i = 0; i < pattern.length; i++){
+      ecgBuffer[ecgHead] = pattern[i];
+      ecgHead = (ecgHead + 1) % ECG_POINTS;
+      if (ecgFilled < ECG_POINTS) ecgFilled++;
+    }
+  }
+
+  function pushEcgIdle(){
+    // 基线漂移，让波形有生命感
+    var v = Math.sin(performance.now() * 0.0016) * 0.022;
+    ecgBuffer[ecgHead] = v;
+    ecgHead = (ecgHead + 1) % ECG_POINTS;
+    if (ecgFilled < ECG_POINTS) ecgFilled++;
+  }
+
+  function renderEcg(){
+    var w = ecgSvg.clientWidth || 600;
+    var h = ecgSvg.clientHeight || 80;
+    var mid = h * 0.62;
+    var amp = h * 0.62;
+
+    var pts = [];
+    var ghostPts = [];
+    var n = ECG_POINTS;
+
+    for (var i = 0; i < n; i++){
+      // 从旧到新排列
+      var idx = (ecgHead + i) % n;
+      var val = ecgBuffer[idx];
+      var x = (i / (n - 1)) * w;
+      var y = mid - val * amp;
+      pts.push(x.toFixed(2) + "," + y.toFixed(2));
+      ghostPts.push(x.toFixed(2) + "," + (mid - val * amp * 0.55 + 2).toFixed(2));
+    }
+
+    ecgLine.setAttribute("points", pts.join(" "));
+    ecgGhost.setAttribute("points", ghostPts.join(" "));
+
+    // 光标位于最新数据点
+    var lastIdx = (ecgHead - 1 + n) % n;
+    var lastVal = ecgBuffer[lastIdx];
+    ecgCursor.setAttribute("cx", String(w - 2));
+    ecgCursor.setAttribute("cy", String(mid - lastVal * amp));
+  }
+
+  /* ---------- 主循环 ---------- */
+  function tick(now){
+    if (!startTime) startTime = now;
+
+    // 波形推进（每帧写入一个基线点，峰值由心跳写入）
+    if (ecgFilled < ECG_POINTS){
+      // 初始化时填满
+      pushEcgIdle();
+    } else {
+      pushEcgIdle();
+    }
+
+    // 心跳节拍调度
+    if (nextBeatAt === 0){
+      nextBeatAt = now + 120;
+    }
+    if (now >= nextBeatAt){
+      var period = currentPeriod();
+      // 峰值时刻对齐：在周期开始后 BEAT_RATIO 处
+      registerBeat(now);
+      lastBeatTime = now;
+      nextBeatAt = now + period;
+    }
+
+    renderEcg();
+
+    // 时间显示
+    var elapsed = Math.floor((now - startTime) / 1000);
+    var mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
+    var ss = String(elapsed % 60).padStart(2, "0");
+    if (ecgTime.textContent !== mm + ":" + ss){
+      ecgTime.textContent = mm + ":" + ss;
+    }
+
+    rafId = requestAnimationFrame(tick);
+  }
+
+  /* ---------- 交互 ---------- */
+  function setHover(on){
+    if (hovering === on) return;
+    hovering = on;
+    if (on) body.classList.add("hovering");
+    else body.classList.remove("hovering");
+    updateBpm();
+  }
+
+  function triggerHit(){
+    // 重击动画
+    heartSvg.classList.remove("hit");
+    // 强制重排以重启动画
+    void heartSvg.offsetWidth;
+    heartSvg.classList.add("hit");
+
+    shockRing.classList.remove("run");
+    void shockRing.offsetWidth;
+    shockRing.classList.add("run");
+
+    // 重击时额外写入一个更强的峰值
+    ecgBuffer[ecgHead] = 0.55;
+    ecgHead = (ecgHead + 1) % ECG_POINTS;
+    ecgBuffer[ecgHead] = 1.15;
+    ecgHead = (ecgHead + 1) % ECG_POINTS;
+    ecgBuffer[ecgHead] = 0.2;
+    ecgHead = (ecgHead + 1) % ECG_POINTS;
+
+    // 重击后立刻重新对齐节拍
+    nextBeatAt = performance.now() + currentPeriod();
+
+    bpmValue.style.color = "#ffffff";
+    window.setTimeout(function(){ bpmValue.style.color = ""; }, 220);
+  }
+
+  heartWrap.addEventListener("pointerenter", function(){ setHover(true); });
+  heartWrap.addEventListener("pointerleave", function(){ setHover(false); });
+  heartWrap.addEventListener("pointerdown", function(e){
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    triggerHit();
+  });
+  heartWrap.addEventListener("click", function(e){
+    // 键盘触发的 click 也走这里；pointerdown 已处理鼠标/触摸，避免重复
+    if (e.detail === 0) triggerHit();
+  });
+  heartWrap.addEventListener("keydown", function(e){
+    if (e.key === "Enter" || e.key === " " || e.key === "Spacebar"){
+      e.preventDefault();
+      triggerHit();
+    }
+  });
+
+  heartSvg.addEventListener("animationend", function(e){
+    if (e.animationName === "hitBeat"){
+      heartSvg.classList.remove("hit");
+    }
+  });
+
+  shockRing.addEventListener("animationend", function(){
+    shockRing.classList.remove("run");
+  });
+
+  // 全局空格键
+  window.addEventListener("keydown", function(e){
+    if ((e.key === " " || e.key === "Spacebar") && document.activeElement !== heartWrap){
+      e.preventDefault();
+      triggerHit();
+    }
+  });
+
+  // 窗口尺寸变化：波形按容器重绘
+  var resizeTimer = null;
+  window.addEventListener("resize", function(){
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function(){
+      renderEcg();
+    }, 80);
+  });
+
+  // 页面隐藏时暂停节拍推进，恢复时重新对齐
+  document.addEventListener("visibilitychange", function(){
+    if (!document.hidden){
+      nextBeatAt = performance.now() + currentPeriod();
+    }
+  });
+
+  /* ---------- 初始化 ---------- */
+  updateBpm();
+  // 预填充波形缓冲，让首屏就有完整波形
+  for (var k = 0; k < ECG_POINTS; k++){
+    ecgBuffer[k] = Math.sin(k * 0.35) * 0.02;
+  }
+  ecgFilled = ECG_POINTS;
+  ecgHead = 0;
+
+  // 首屏立即来一次心跳峰值
+  pushEcgPeak();
+
+  renderEcg();
+  rafId = requestAnimationFrame(tick);
+
+  window.addEventListener("beforeunload", function(){
+    if (rafId) cancelAnimationFrame(rafId);
+  });
+
+})();
+</script>
+</body>
+</html>

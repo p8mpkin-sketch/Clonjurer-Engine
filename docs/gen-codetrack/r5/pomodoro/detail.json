@@ -1,0 +1,173 @@
+{
+  "score": 80.1,
+  "scoring": "req-fit-v1",
+  "raw": 80.1,
+  "coverage": 0.735,
+  "health": 1.0,
+  "design": 0.8,
+  "caps": [],
+  "items": [
+    {
+      "id": "c1",
+      "text": "页面中央显示一个环形计时器，中心有 25:00 的倒计时数字",
+      "type": "content",
+      "must": true,
+      "verdict": "yes",
+      "evidence": "图1/图3 中央有红色环形计时器，中心显示 25:00，上方有「专注」标签。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c2",
+      "text": "页面上有开始、暂停、重置三个可点击控件（开始与暂停可为同一按钮的两种状态）",
+      "type": "content",
+      "must": true,
+      "verdict": "yes",
+      "evidence": "图3 底部有「开始 Space」「重置 R」「休息」三个按钮；图4 中开始按钮变为「暂停 Space」，符合开始/暂停同按钮两态。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c3",
+      "text": "点击开始后倒计时数字逐秒减少，环形进度弧同步收缩",
+      "type": "interaction",
+      "must": true,
+      "verdict": "partial",
+      "evidence": "点击开始后文字变为 24:58（体检数据），说明数字在减少；但连拍相邻帧变化占比仅 5e-05/1e-05/5e-05，变化区域集中在数字附近，环形进度弧是否同步收缩无法从截图确认，且画面几乎静止。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c4",
+      "text": "计时中点击暂停，数字与进度弧停止变化，再次开始从暂停处继续",
+      "type": "interaction",
+      "must": true,
+      "verdict": "partial",
+      "evidence": "体检数据只记录了点击开始后出现 24/58，未记录暂停后再次开始的连续读数；截图也未展示暂停中间态，无法证明从暂停处继续。",
+      "gate": "现有截图和体检数据无法确认",
+      "soft": true
+    },
+    {
+      "id": "c5",
+      "text": "点击重置后倒计时回到 25:00，进度弧回到满环，计时停止",
+      "type": "interaction",
+      "must": true,
+      "verdict": "partial",
+      "evidence": "点击重置有反应并引出了动画，但截图未展示重置后的画面（图4 是休息态 04:57），无法确认回到 25:00 且满环。",
+      "gate": "现有截图和体检数据无法确认",
+      "soft": true
+    },
+    {
+      "id": "c6",
+      "text": "倒计时归零时页面给出可见的结束提示（数字脉冲或状态文字变化）",
+      "type": "effect",
+      "must": false,
+      "verdict": "partial",
+      "evidence": "页面文字节选含「专注结束」，但没有任何截图展示归零时刻的画面，无法确认可见的结束提示。",
+      "gate": "现有截图和体检数据无法确认",
+      "soft": true
+    },
+    {
+      "id": "c7",
+      "text": "专注态进度环为番茄红，切换到休息态后整体变为叶绿色，过渡平滑",
+      "type": "visual",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "图3 专注态环为番茄红，图4 休息态整体变为叶绿色（环、按钮、标签均变绿），过渡有 43 次 transition 记录。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c8",
+      "text": "每完成一个专注段，底部对应的小番茄圆点点亮",
+      "type": "interaction",
+      "must": false,
+      "verdict": "partial",
+      "evidence": "环下方有 4 个小圆点（0/4），但截图均为 0/4 未点亮状态，无法确认完成专注段后点亮。",
+      "gate": "现有截图和体检数据无法确认",
+      "soft": true
+    },
+    {
+      "id": "c9",
+      "text": "按空格键可开始/暂停，按 R 键可重置，按钮上标有对应键位",
+      "type": "interaction",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "按钮上标有「Space」「R」键位，底部提示「Space 开始/暂停 R 重置」，体检数据中 press 空格有反应。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c10",
+      "text": "剩余时间进入最后一分钟时，数字颜色变为番茄红并有轻微呼吸动画",
+      "type": "motion",
+      "must": false,
+      "verdict": "partial",
+      "evidence": "体检数据有 glowBreathe 动画，但截图未展示最后一分钟（如 00:5x）的画面，无法确认数字变红与呼吸动画。",
+      "gate": "现有截图和体检数据无法确认",
+      "soft": true
+    },
+    {
+      "id": "c11",
+      "text": "页面背景为暖纸色并带极淡噪点纹理，整体不出现紫色渐变或霓虹发光",
+      "type": "visual",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "图1-5 背景为暖纸色，带极淡噪点/光晕，无紫色渐变或霓虹发光。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c12",
+      "text": "倒计时数字使用等宽字体，数字变化时宽度不跳动",
+      "type": "visual",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "图3 与图4 中 25:00 与 04:57 数字字形等宽、冒号居中，数字宽度一致，未见跳动。",
+      "gate": null,
+      "soft": false
+    }
+  ],
+  "review_mode": "vision",
+  "summary": "",
+  "design_comment": "整体视觉完成度高：暖纸色背景、柔和光晕、大号等宽数字、番茄红/叶绿双主题切换，层次与氛围到位，手机端布局也完整。扣分点在于进度弧在静置截图中几乎不可见（满环与背景对比弱），底部小圆点过淡，且缺少对最后一分钟、归零等关键状态的视觉证据。",
+  "issues": [
+    {
+      "severity": "mid",
+      "problem": "环形进度弧在满环时与背景对比很弱，几乎看不出进度弧的存在，计时中收缩效果难以感知",
+      "fix": "加深进度弧颜色或加粗描边，并让未走完的轨道部分用更浅的底色区分"
+    },
+    {
+      "severity": "mid",
+      "problem": "环下方 4 个小番茄圆点过淡（0/4 状态几乎不可见），完成段点亮的效果无从体现",
+      "fix": "提高圆点默认态对比度，点亮态用实心番茄红并加轻微放大/发光"
+    },
+    {
+      "severity": "low",
+      "problem": "手机宽度下顶部「专注」小标签与圆环之间出现一个孤立的小红点，位置突兀",
+      "fix": "检查该装饰元素在窄屏下的定位，或在小屏隐藏"
+    },
+    {
+      "severity": "low",
+      "problem": "底部键位提示与「提示音开」在手机端分两行居中，与桌面端左右分布不一致，略显松散",
+      "fix": "窄屏下统一为一行或明确分组对齐"
+    }
+  ],
+  "facts": {
+    "errors": false,
+    "blank": false,
+    "frozen": false,
+    "external": false,
+    "overflow_desktop": false,
+    "overflow_mobile": false,
+    "motion_none": false,
+    "motion_seen": false,
+    "motion_after": true,
+    "effects_none": false,
+    "interactive_n": 5,
+    "responded_n": 5,
+    "dead_n": 0,
+    "unknown_n": 0
+  },
+  "warnings": []
+}

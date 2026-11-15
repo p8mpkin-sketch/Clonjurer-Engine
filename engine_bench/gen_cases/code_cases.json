@@ -1,0 +1,21 @@
+{
+  "_doc": "代码直写轨(文字需求 → 模型写网页)的真实模型验证用例。只用于验证与回归对比, 严禁为任何一条用例在管线代码里加特判(tests/test_uir_codegen.py 有题材词守卫)。tuned 是开发期看过结果的; holdout 只测不调。",
+  "tuned": [
+    {"id": "heart",    "text": "帮我写一个在跳动的爱心的网页"},
+    {"id": "snake",    "text": "做一个贪吃蛇小游戏"},
+    {"id": "clock",    "text": "一个带指针的模拟时钟，显示当前时间"},
+    {"id": "pomodoro", "text": "番茄钟计时器，可以开始、暂停、重置"},
+    {"id": "stars",    "text": "星空背景，鼠标移动时星星跟随"},
+    {"id": "cafe",     "text": "一家咖啡店的官网首页"},
+    {"id": "ledger",   "text": "个人记账本，能添加收支并统计"}
+  ],
+  "holdout": [
+    {"id": "h_todo",     "text": "待办清单，可以新增、勾选完成、删除，刷新后还在"},
+    {"id": "h_calc",     "text": "一个好看的计算器"},
+    {"id": "h_rain",     "text": "下雨的动画，点击屏幕会出现涟漪"},
+    {"id": "h_resume",   "text": "A personal resume page for a product designer, in English, minimal and typographic"},
+    {"id": "h_2048",     "text": "2048 小游戏"},
+    {"id": "h_weather",  "text": "天气卡片组件，展示未来五天的天气，用示例数据"},
+    {"id": "h_login",    "text": "一个蓝色主题的登录页, 品牌叫 云帆, 标题「欢迎登录云帆控制台」, 有手机号、密码和短信验证码, 底部有注册入口"}
+  ]
+}

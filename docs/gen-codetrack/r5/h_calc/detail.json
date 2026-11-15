@@ -1,0 +1,173 @@
+{
+  "score": 78.6,
+  "scoring": "req-fit-v1",
+  "raw": 78.6,
+  "coverage": 0.711,
+  "health": 1.0,
+  "design": 0.8,
+  "caps": [],
+  "items": [
+    {
+      "id": "c1",
+      "text": "页面打开后可见一块深色圆角计算器，包含显示区和 4 列 × 5 行共 20 个按键（数字 0-9、小数点、+ - × ÷、=、AC、±、%）",
+      "type": "content",
+      "must": true,
+      "verdict": "yes",
+      "evidence": "图1/图3 可见深色圆角计算器，显示区 + 4列×5行共20键：AC ± % ÷ / 7 8 9 × / 4 5 6 − / 1 2 3 + / 0 . ⌫ =，与清单一致。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c2",
+      "text": "计算器在视口中水平垂直居中，高度约占视口 70–80%，背景铺满整个视口而非留白",
+      "type": "visual",
+      "must": true,
+      "verdict": "yes",
+      "evidence": "桌面 1440×900 下计算器水平居中，高度约 620/900≈69%（接近70%）；背景为铺满视口的深色渐变，无留白。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c3",
+      "text": "显示区数字使用等宽数字排版、字号明显大于按键文字，等号键使用铜橙色强调，与其余按键区分",
+      "type": "visual",
+      "must": true,
+      "verdict": "yes",
+      "evidence": "显示区数字 0 字号明显大于按键文字，等号键为铜橙色圆形，与其余深灰按键区分明显。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c4",
+      "text": "点击数字键后显示区出现对应数字，连续点击可拼接多位数",
+      "type": "interaction",
+      "must": true,
+      "verdict": "partial",
+      "evidence": "自动探测点击 7/8/9 均报告文字变化，但截图未捕捉到多位数拼接的画面；图4 显示区为 0，无法直接证明连续点击可拼接多位数。",
+      "gate": "现有截图和体检数据无法确认",
+      "soft": true
+    },
+    {
+      "id": "c5",
+      "text": "输入 12 × 8 后按等号，显示区显示 96",
+      "type": "interaction",
+      "must": true,
+      "verdict": "partial",
+      "evidence": "截图未出现 12 × 8 = 96 的画面；图4 显示区为 0，算式回显为 0 × 0 =，无法验证乘法结果。",
+      "gate": "现有截图和体检数据无法确认",
+      "soft": true
+    },
+    {
+      "id": "c6",
+      "text": "按 AC 清空显示为 0，按 ± 切换当前数字正负，按 % 将当前数字转为百分数，按退格删除最后一位",
+      "type": "interaction",
+      "must": true,
+      "verdict": "partial",
+      "evidence": "AC/±/% 点击均有反应，但截图未展示 ± 变负、% 转百分数、⌫ 退格后的具体读数，无法逐项确认。",
+      "gate": "现有截图和体检数据无法确认",
+      "soft": true
+    },
+    {
+      "id": "c7",
+      "text": "按下任意按键时该键有缩小与内阴影的按压效果，松开后回弹，且屏幕按键与键盘按键触发时表现一致",
+      "type": "interaction",
+      "must": true,
+      "verdict": "partial",
+      "evidence": "图4 中 × 键带橙色描边，说明有按压/焦点反馈；但截图是静态帧，无法确认缩小与内阴影的按压效果及松开回弹，也无法确认键盘与屏幕按键表现一致。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c8",
+      "text": "显示区上方实时显示当前算式回显（如 12 × 8 =），随输入更新",
+      "type": "content",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "图4 显示区上方出现算式回显「0 × 0 =」，图1/图3 为「就绪」，说明回显随输入更新。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c9",
+      "text": "键盘输入数字、+ - * /、Enter、Esc、Backspace 均能操作计算器，且屏幕上对应按键同步出现按压反馈",
+      "type": "interaction",
+      "must": false,
+      "verdict": "partial",
+      "evidence": "体检记录 keydown 监听存在，press 空格/回车/方向键有反应并引出动画；但清单要求的 * / Enter Esc Backspace 是否全部映射、屏幕按键是否同步按压反馈，截图无法证明。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c10",
+      "text": "除以零时显示区出现约 360ms 的左右抖动并显示「无法计算」，随后输入新数字自动恢复正常",
+      "type": "interaction",
+      "must": false,
+      "verdict": "partial",
+      "evidence": "截图未出现除以零的「无法计算」与抖动画面；动效数据中未见抖动相关动画名，无法确认。",
+      "gate": "现有截图和体检数据无法确认",
+      "soft": true
+    },
+    {
+      "id": "c11",
+      "text": "新数字出现时有约 120ms 的上移淡入过渡，等号出结果时数字有一次亮度脉冲",
+      "type": "effect",
+      "must": false,
+      "verdict": "partial",
+      "evidence": "动画事件记录有 digitIn、resPulse 关键帧动画，说明实现了数字入场与结果脉冲；但连拍相邻帧变化占比仅 0.00077/0/0，无法从画面确认 120ms 上移淡入与亮度脉冲的观感。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c12",
+      "text": "页面背景有极淡的径向光晕与细颗粒噪点纹理，计算器机身带柔和投影与 1px 内高光边",
+      "type": "visual",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "图3 可见背景有极淡的径向光晕（计算器后方暖色晕）与细颗粒噪点，机身有柔和投影和 1px 内高光边。",
+      "gate": null,
+      "soft": false
+    }
+  ],
+  "review_mode": "vision",
+  "summary": "深色质感计算器视觉完成度高、布局居中且响应式无溢出，但多项交互细节（拼接、乘法结果、清空/退格、除零抖动、键盘映射）缺少截图证据，仅能判为部分满足或待确认。",
+  "design_comment": "深色磨砂质感、铜橙等号键、径向光晕与噪点纹理层次到位，圆角机身与内高光细节讲究，桌面与手机宽度下均居中且无溢出，整体完成度较高。扣分点：显示区偏空、算式回显字号过小且与「就绪」状态切换略显突兀，键盘提示文字对比度偏低，手机宽度下计算器几乎顶满屏宽、上下留白不均。",
+  "issues": [
+    {
+      "severity": "mid",
+      "problem": "手机 390px 宽度下计算器几乎占满屏宽，上下留白不对称，视觉上偏拥挤",
+      "fix": "为窄屏增加左右安全边距（如 max-width 92vw）并让垂直居中更均衡"
+    },
+    {
+      "severity": "mid",
+      "problem": "底部键盘提示文字字号小、对比度低，在深色背景上不易读",
+      "fix": "提高提示文字亮度/字号，或改为更清晰的次级色"
+    },
+    {
+      "severity": "low",
+      "problem": "显示区上方回显字号过小，与主数字比例悬殊，信息层级弱",
+      "fix": "适当放大回显字号并增加与主数字的间距"
+    },
+    {
+      "severity": "low",
+      "problem": "静置后画面完全静止（相邻帧变化占比 0），背景光晕的呼吸动画在静置时不可见",
+      "fix": "确认 spotBreath 动画持续运行或移除无效动画，避免资源浪费"
+    }
+  ],
+  "facts": {
+    "errors": false,
+    "blank": false,
+    "frozen": false,
+    "external": false,
+    "overflow_desktop": false,
+    "overflow_mobile": false,
+    "motion_none": false,
+    "motion_seen": true,
+    "motion_after": true,
+    "effects_none": false,
+    "interactive_n": 9,
+    "responded_n": 9,
+    "dead_n": 0,
+    "unknown_n": 0
+  },
+  "warnings": []
+}

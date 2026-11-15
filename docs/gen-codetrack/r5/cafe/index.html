@@ -1,0 +1,1440 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>拾光咖啡 · 首页</title>
+<style>
+  :root{
+    --paper:#F4EDE2;
+    --paper-deep:#EDE2D2;
+    --ink:#2B211B;
+    --ink-soft:#5A4A3E;
+    --caramel:#8A5A3B;
+    --caramel-deep:#6E452B;
+    --amber:#C9A227;
+    --olive:#3F4A3A;
+    --serif:"Noto Serif SC","Songti SC","Source Han Serif SC",Georgia,"Times New Roman",serif;
+    --sans:system-ui,-apple-system,"Segoe UI","Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+    --mono:ui-monospace,"SFMono-Regular","Menlo","Consolas",monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html{scroll-behavior:smooth;}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:var(--sans);
+    font-size:17px;
+    line-height:1.7;
+    overflow-x:hidden;
+    position:relative;
+    -webkit-font-smoothing:antialiased;
+  }
+  /* ===== 背景氛围层 ===== */
+  .bg-layer{
+    position:fixed;
+    inset:0;
+    z-index:0;
+    pointer-events:none;
+    overflow:hidden;
+  }
+  .paper-grain{
+    position:absolute;inset:0;
+    background-color:var(--paper);
+    background-image:
+      radial-gradient(circle at 20% 15%, rgba(138,90,59,.055) 0%, transparent 42%),
+      radial-gradient(circle at 82% 30%, rgba(201,162,39,.05) 0%, transparent 38%),
+      radial-gradient(circle at 60% 85%, rgba(63,74,58,.045) 0%, transparent 45%),
+      repeating-linear-gradient(0deg, rgba(43,33,27,.012) 0 1px, transparent 1px 3px),
+      repeating-linear-gradient(90deg, rgba(43,33,27,.012) 0 1px, transparent 1px 3px);
+  }
+  .stain{
+    position:absolute;
+    border-radius:50%;
+    will-change:transform;
+    filter:blur(.4px);
+  }
+  .stain.s1{
+    width:min(46vw,620px);aspect-ratio:1;
+    left:-12vw;top:6vh;
+    background:radial-gradient(circle at 42% 40%, rgba(138,90,59,.16) 0%, rgba(138,90,59,.10) 34%, rgba(138,90,59,.045) 56%, transparent 70%);
+    transform:translate3d(0,0,0);
+  }
+  .stain.s2{
+    width:min(38vw,520px);aspect-ratio:1;
+    right:-8vw;top:52vh;
+    background:radial-gradient(circle at 55% 50%, rgba(201,162,39,.13) 0%, rgba(201,162,39,.07) 38%, transparent 68%);
+    transform:translate3d(0,0,0);
+  }
+  .stain.s3{
+    width:min(30vw,400px);aspect-ratio:1;
+    left:38vw;top:120vh;
+    background:radial-gradient(circle at 50% 50%, rgba(63,74,58,.10) 0%, rgba(63,74,58,.05) 40%, transparent 68%);
+    transform:translate3d(0,0,0);
+  }
+  .steam-ambient{
+    position:absolute;
+    inset:0;
+    will-change:transform;
+  }
+  .steam-ambient svg{position:absolute;opacity:.5;}
+  .steam-ambient .sa1{left:6vw;top:22vh;width:120px;height:220px;}
+  .steam-ambient .sa2{right:12vw;top:64vh;width:100px;height:190px;}
+  .steam-ambient .sa3{left:52vw;top:150vh;width:140px;height:240px;}
+
+  /* ===== 通用容器 ===== */
+  .wrap{
+    position:relative;
+    z-index:2;
+    width:100%;
+    max-width:1440px;
+    margin:0 auto;
+    padding:0 clamp(18px,4vw,64px);
+  }
+
+  /* ===== 顶部导航 ===== */
+  header.nav{
+    position:fixed;
+    top:0;left:0;right:0;
+    z-index:50;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:16px;
+    padding:14px clamp(18px,4vw,64px);
+    background:rgba(244,237,226,.82);
+    backdrop-filter:blur(10px);
+    -webkit-backdrop-filter:blur(10px);
+    border-bottom:1px solid rgba(43,33,27,.09);
+  }
+  .brand{
+    display:flex;align-items:center;gap:10px;
+    font-family:var(--serif);
+    font-weight:700;
+    font-size:19px;
+    letter-spacing:.06em;
+    color:var(--ink);
+    text-decoration:none;
+  }
+  .brand .mark{
+    width:30px;height:30px;flex:0 0 30px;
+    border-radius:50%;
+    background:radial-gradient(circle at 34% 30%, #A9703F 0%, #8A5A3B 42%, #4A2E1D 100%);
+    box-shadow:inset 0 -3px 6px rgba(0,0,0,.35), 0 2px 6px rgba(43,33,27,.22);
+    position:relative;
+  }
+  .brand .mark::after{
+    content:"";
+    position:absolute;inset:7px;
+    border-radius:50%;
+    border:1.5px solid rgba(244,237,226,.55);
+    border-bottom-color:transparent;
+    transform:rotate(-32deg);
+  }
+  nav.links{display:flex;gap:clamp(12px,2.2vw,30px);align-items:center;}
+  nav.links a{
+    font-size:13px;
+    letter-spacing:.14em;
+    color:var(--ink-soft);
+    text-decoration:none;
+    position:relative;
+    padding:4px 0;
+    transition:color .25s ease;
+  }
+  nav.links a::after{
+    content:"";position:absolute;left:0;bottom:0;height:1.5px;width:0;
+    background:var(--caramel);
+    transition:width .3s cubic-bezier(.4,0,.2,1);
+  }
+  nav.links a:hover{color:var(--caramel-deep);}
+  nav.links a:hover::after{width:100%;}
+  .nav-cta{
+    font-size:13px;letter-spacing:.1em;
+    color:var(--paper);
+    background:linear-gradient(160deg,#9A6845,#6E452B);
+    padding:9px 18px;
+    border-radius:999px;
+    text-decoration:none;
+    box-shadow:0 3px 10px rgba(110,69,43,.28), inset 0 1px 0 rgba(255,255,255,.22);
+    transition:transform .22s ease, box-shadow .22s ease;
+    white-space:nowrap;
+  }
+  .nav-cta:hover{transform:translateY(-2px);box-shadow:0 6px 16px rgba(110,69,43,.34), inset 0 1px 0 rgba(255,255,255,.28);}
+  @media(max-width:720px){
+    nav.links a:not(.nav-cta){display:none;}
+  }
+
+  /* ===== 首屏 ===== */
+  .hero{
+    position:relative;
+    min-height:100svh;
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    padding-top:96px;
+    padding-bottom:0;
+  }
+  .hero-grid{
+    display:grid;
+    grid-template-columns:55fr 45fr;
+    align-items:center;
+    gap:clamp(16px,3vw,48px);
+    flex:1;
+    width:100%;
+  }
+  .hero-copy{position:relative;z-index:3;}
+  .eyebrow{
+    display:inline-flex;align-items:center;gap:10px;
+    font-size:12px;
+    letter-spacing:.24em;
+    text-transform:uppercase;
+    color:var(--caramel);
+    margin-bottom:clamp(14px,2vh,26px);
+  }
+  .eyebrow::before{
+    content:"";width:34px;height:1.5px;background:var(--caramel);display:block;
+  }
+  h1.hero-title{
+    font-family:var(--serif);
+    font-weight:900;
+    font-size:clamp(52px,8.6vw,88px);
+    line-height:1.06;
+    letter-spacing:.02em;
+    color:var(--ink);
+    text-shadow:0 1px 0 rgba(255,255,255,.5);
+  }
+  h1.hero-title .accent{
+    color:var(--caramel-deep);
+    position:relative;
+    display:inline-block;
+  }
+  h1.hero-title .accent::after{
+    content:"";position:absolute;left:2%;right:2%;bottom:.06em;height:.09em;
+    background:linear-gradient(90deg, rgba(201,162,39,.75), rgba(201,162,39,.15));
+    border-radius:2px;
+    z-index:-1;
+  }
+  .hero-slogan{
+    margin-top:clamp(16px,2.6vh,28px);
+    font-size:clamp(16px,1.5vw,19px);
+    line-height:1.85;
+    color:var(--ink-soft);
+    max-width:30em;
+  }
+  .hero-slogan strong{color:var(--caramel-deep);font-weight:600;}
+  .hero-meta{
+    display:flex;flex-wrap:wrap;gap:clamp(18px,3vw,40px);
+    margin-top:clamp(20px,3.4vh,36px);
+    padding-top:clamp(16px,2.4vh,24px);
+    border-top:1px solid rgba(43,33,27,.14);
+  }
+  .hero-meta .m-item .k{
+    font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--olive);
+    display:block;margin-bottom:4px;
+  }
+  .hero-meta .m-item .v{
+    font-family:var(--mono);
+    font-size:clamp(16px,1.6vw,20px);
+    color:var(--ink);
+    font-weight:600;
+    letter-spacing:.02em;
+  }
+  .hero-hint{
+    margin-top:clamp(18px,3vh,30px);
+    font-size:12.5px;
+    letter-spacing:.1em;
+    color:var(--olive);
+    display:flex;align-items:center;gap:9px;
+  }
+  .hero-hint .dot{
+    width:7px;height:7px;border-radius:50%;
+    background:var(--amber);
+    box-shadow:0 0 0 0 rgba(201,162,39,.5);
+    animation:pulseDot 2.4s ease-in-out infinite;
+  }
+  @keyframes pulseDot{
+    0%,100%{box-shadow:0 0 0 0 rgba(201,162,39,.45);transform:scale(1);}
+    50%{box-shadow:0 0 0 7px rgba(201,162,39,0);transform:scale(1.18);}
+  }
+
+  /* 插画 */
+  .hero-art{
+    position:relative;
+    display:flex;align-items:center;justify-content:center;
+    min-height:clamp(320px,52vh,560px);
+  }
+  .hero-art svg{
+    width:100%;
+    height:auto;
+    max-width:560px;
+    overflow:visible;
+    filter:drop-shadow(0 22px 34px rgba(74,46,29,.20));
+  }
+  .art-glow{
+    position:absolute;
+    width:78%;aspect-ratio:1;
+    border-radius:50%;
+    background:radial-gradient(circle, rgba(201,162,39,.20) 0%, rgba(201,162,39,.07) 42%, transparent 68%);
+    top:50%;left:50%;
+    transform:translate(-50%,-50%);
+    z-index:-1;
+    animation:glowBreath 7s ease-in-out infinite;
+  }
+  @keyframes glowBreath{
+    0%,100%{opacity:.55;transform:translate(-50%,-50%) scale(.94);}
+    50%{opacity:1;transform:translate(-50%,-50%) scale(1.06);}
+  }
+
+  /* 蒸汽（插画内） */
+  .steam-path{
+    fill:none;
+    stroke:#B9A48C;
+    stroke-width:2.4;
+    stroke-linecap:round;
+    opacity:.15;
+  }
+  .steam-path.p1{animation:steamRise 6s ease-in-out infinite;animation-delay:0s;}
+  .steam-path.p2{animation:steamRise 6s ease-in-out infinite;animation-delay:-1.2s;}
+  .steam-path.p3{animation:steamRise 6s ease-in-out infinite;animation-delay:-2.4s;}
+  @keyframes steamRise{
+    0%{opacity:.15;transform:translateY(6px) scaleY(.92);}
+    45%{opacity:.45;transform:translateY(-8px) scaleY(1.05);}
+    100%{opacity:.15;transform:translateY(6px) scaleY(.92);}
+  }
+  .steam-group{transform-origin:center bottom;}
+
+  /* 水流 */
+  .water-stream{
+    fill:none;
+    stroke:#CBB79E;
+    stroke-width:2.6;
+    stroke-linecap:round;
+    stroke-dasharray:8 118;
+    animation:waterFlow 2.4s cubic-bezier(.4,0,.2,1) infinite;
+  }
+  .water-stream.w2{
+    stroke-width:1.6;
+    stroke:#DCCDB8;
+    stroke-dasharray:5 121;
+    animation:waterFlow 2.4s cubic-bezier(.4,0,.2,1) infinite;
+    animation-delay:.08s;
+  }
+  @keyframes waterFlow{
+    0%{stroke-dashoffset:126;stroke-width:2.6;opacity:.95;}
+    25%{stroke-dashoffset:0;stroke-width:2.6;opacity:1;}
+    55%{stroke-dashoffset:-40;stroke-width:1.9;opacity:.8;}
+    100%{stroke-dashoffset:-126;stroke-width:1.2;opacity:.35;}
+  }
+  .drip-drop{
+    fill:#8A5A3B;
+    animation:dripFall 2.4s cubic-bezier(.4,0,.2,1) infinite;
+    transform-origin:center;
+  }
+  @keyframes dripFall{
+    0%,60%{transform:translateY(0) scaleY(1);opacity:0;}
+    70%{opacity:.9;transform:translateY(2px) scaleY(1.1);}
+    100%{transform:translateY(16px) scaleY(.6);opacity:0;}
+  }
+  .liquid-surface{
+    animation:liquidBreathe 5s ease-in-out infinite;
+    transform-origin:center;
+  }
+  @keyframes liquidBreathe{
+    0%,100%{transform:scaleX(1) translateY(0);}
+    50%{transform:scaleX(1.015) translateY(-1.2px);}
+  }
+
+  /* 信息带 */
+  .ticker{
+    position:relative;
+    z-index:3;
+    margin-top:clamp(14px,2.4vh,26px);
+    border-top:1px solid rgba(43,33,27,.16);
+    border-bottom:1px solid rgba(43,33,27,.16);
+    background:linear-gradient(180deg, rgba(237,226,210,.72), rgba(244,237,226,.4));
+    overflow:hidden;
+    padding:13px 0;
+    width:100%;
+  }
+  .ticker::before,.ticker::after{
+    content:"";position:absolute;top:0;bottom:0;width:70px;z-index:2;pointer-events:none;
+  }
+  .ticker::before{left:0;background:linear-gradient(90deg, var(--paper), transparent);}
+  .ticker::after{right:0;background:linear-gradient(270deg, var(--paper), transparent);}
+  .ticker-track{
+    display:flex;
+    width:max-content;
+    animation:tickerScroll 34s linear infinite;
+  }
+  .ticker:hover .ticker-track{animation-play-state:paused;}
+  .ticker-seq{display:flex;align-items:center;flex:0 0 auto;}
+  .tick{
+    display:inline-flex;align-items:center;gap:10px;
+    padding:0 clamp(16px,2.4vw,34px);
+    font-size:12.5px;
+    letter-spacing:.16em;
+    color:var(--ink-soft);
+    white-space:nowrap;
+  }
+  .tick .sep{
+    width:5px;height:5px;border-radius:50%;background:var(--amber);flex:0 0 5px;
+  }
+  .tick b{color:var(--caramel-deep);font-weight:600;letter-spacing:.1em;}
+  @keyframes tickerScroll{
+    from{transform:translateX(0);}
+    to{transform:translateX(-50%);}
+  }
+
+  /* ===== 段落通用 ===== */
+  section.band{
+    position:relative;
+    z-index:2;
+    padding:clamp(56px,9vh,104px) 0;
+  }
+  .sec-head{
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    gap:24px;
+    flex-wrap:wrap;
+    margin-bottom:clamp(26px,4.4vh,48px);
+  }
+  .sec-head .left{max-width:640px;}
+  .sec-tag{
+    font-size:12px;letter-spacing:.24em;text-transform:uppercase;
+    color:var(--caramel);
+    display:inline-flex;align-items:center;gap:10px;
+    margin-bottom:14px;
+  }
+  .sec-tag::before{content:"";width:26px;height:1.5px;background:var(--caramel);}
+  h2.sec-title{
+    font-family:var(--serif);
+    font-size:clamp(26px,3.4vw,34px);
+    font-weight:800;
+    line-height:1.28;
+    letter-spacing:.02em;
+    color:var(--ink);
+  }
+  .sec-desc{
+    margin-top:12px;
+    color:var(--ink-soft);
+    font-size:15.5px;
+    line-height:1.8;
+    max-width:34em;
+  }
+  .sec-note{
+    font-size:12px;letter-spacing:.14em;color:var(--olive);
+    padding-bottom:6px;
+    border-bottom:1px solid rgba(63,74,58,.3);
+  }
+
+  /* ===== 菜单 ===== */
+  .menu-grid{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:clamp(14px,1.8vw,26px);
+  }
+  .menu-card{
+    position:relative;
+    background:linear-gradient(168deg,#FBF6EE 0%, #F2E8DA 62%, #EADFCE 100%);
+    border:1px solid rgba(43,33,27,.13);
+    border-radius:14px;
+    padding:clamp(20px,2.2vw,30px);
+    box-shadow:0 2px 3px rgba(43,33,27,.05), 0 14px 26px -18px rgba(74,46,29,.4);
+    transition:transform .18s ease-out, box-shadow .18s ease-out, border-color .18s ease-out;
+    transform:translateY(0);
+    overflow:hidden;
+    display:flex;
+    flex-direction:column;
+    min-height:100%;
+  }
+  .menu-card::before{
+    content:"";
+    position:absolute;inset:0;
+    background:radial-gradient(circle at 88% 6%, rgba(201,162,39,.16) 0%, transparent 46%);
+    opacity:0;
+    transition:opacity .28s ease;
+    pointer-events:none;
+  }
+  .menu-card:hover,.menu-card:focus-within{
+    transform:translateY(-4px);
+    box-shadow:0 4px 6px rgba(43,33,27,.06), 0 26px 40px -22px rgba(74,46,29,.5);
+    border-color:rgba(138,90,59,.42);
+  }
+  .menu-card:hover::before,.menu-card:focus-within::before{opacity:1;}
+  .card-top{
+    display:flex;align-items:flex-start;justify-content:space-between;gap:12px;
+    margin-bottom:16px;
+  }
+  .cat-name{
+    font-family:var(--serif);
+    font-size:clamp(19px,1.9vw,23px);
+    font-weight:800;
+    letter-spacing:.04em;
+    color:var(--ink);
+    line-height:1.3;
+  }
+  .cat-en{
+    display:block;
+    font-family:var(--sans);
+    font-size:11px;
+    letter-spacing:.2em;
+    text-transform:uppercase;
+    color:var(--olive);
+    font-weight:500;
+    margin-top:5px;
+  }
+  .num-badge{
+    flex:0 0 auto;
+    width:30px;height:30px;border-radius:50%;
+    display:grid;place-items:center;
+    font-family:var(--mono);
+    font-size:12px;
+    font-weight:700;
+    color:var(--paper);
+    background:radial-gradient(circle at 34% 28%, #A9703F, #6E452B 78%);
+    box-shadow:inset 0 -2px 4px rgba(0,0,0,.3), 0 2px 5px rgba(74,46,29,.25);
+  }
+  .items{display:flex;flex-direction:column;gap:0;margin-top:2px;}
+  .item{
+    padding:13px 0;
+    border-bottom:1px dashed rgba(43,33,27,.16);
+    position:relative;
+  }
+  .item:last-child{border-bottom:none;padding-bottom:2px;}
+  .item-row{
+    display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+  }
+  .item-name{
+    font-size:16px;
+    font-weight:600;
+    color:var(--ink);
+    letter-spacing:.02em;
+  }
+  .item-name small{
+    font-weight:400;font-size:12px;color:var(--olive);
+    margin-left:7px;letter-spacing:.06em;
+  }
+  .item-price{
+    font-family:var(--mono);
+    font-size:20px;
+    font-weight:600;
+    color:var(--caramel-deep);
+    letter-spacing:-.01em;
+    transition:transform .18s ease-out;
+    transform-origin:right center;
+    white-space:nowrap;
+  }
+  .item-price .cur{font-size:13px;margin-right:1px;opacity:.75;}
+  .menu-card:hover .item-price,
+  .menu-card:focus-within .item-price{transform:scale(1.06);}
+  .item-detail{
+    max-height:0;
+    overflow:hidden;
+    opacity:0;
+    transition:max-height .32s cubic-bezier(.4,0,.2,1), opacity .26s ease, margin-top .32s ease;
+    margin-top:0;
+  }
+  .menu-card:hover .item-detail,
+  .menu-card:focus-within .item-detail{
+    max-height:64px;
+    opacity:1;
+    margin-top:7px;
+  }
+  .item-detail .line{
+    display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;
+    font-size:11.5px;
+    letter-spacing:.06em;
+    color:var(--ink-soft);
+  }
+  .tag{
+    display:inline-block;
+    padding:2px 8px;
+    border-radius:999px;
+    background:rgba(63,74,58,.1);
+    color:var(--olive);
+    font-size:11px;
+    letter-spacing:.08em;
+  }
+  .tag.amber{background:rgba(201,162,39,.16);color:#8A6E10;}
+  .card-foot{
+    margin-top:auto;
+    padding-top:16px;
+    font-size:11.5px;
+    letter-spacing:.12em;
+    color:var(--olive);
+    display:flex;align-items:center;gap:8px;
+  }
+  .card-foot .ln{flex:1;height:1px;background:rgba(63,74,58,.22);}
+  @media(max-width:980px){
+    .menu-grid{grid-template-columns:1fr 1fr;}
+    .menu-card:nth-child(3){grid-column:1 / -1;}
+  }
+  @media(max-width:640px){
+    .menu-grid{grid-template-columns:1fr;}
+    .menu-card:nth-child(3){grid-column:auto;}
+  }
+
+  /* ===== 门店故事 ===== */
+  .story{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:clamp(22px,4vw,64px);
+    align-items:stretch;
+  }
+  .story-visual{
+    position:relative;
+    border-radius:16px;
+    overflow:hidden;
+    background:linear-gradient(160deg,#3A2A20 0%, #2B211B 55%, #241C17 100%);
+    box-shadow:0 20px 44px -26px rgba(43,33,27,.7), inset 0 1px 0 rgba(255,255,255,.06);
+    min-height:clamp(300px,44vh,440px);
+    display:flex;
+    align-items:flex-end;
+    padding:clamp(20px,2.6vw,34px);
+    isolation:isolate;
+  }
+  .story-visual .warm{
+    position:absolute;inset:0;z-index:-1;
+    background:
+      radial-gradient(circle at 26% 22%, rgba(201,162,39,.30) 0%, transparent 46%),
+      radial-gradient(circle at 78% 74%, rgba(138,90,59,.42) 0%, transparent 52%);
+    animation:warmShift 11s ease-in-out infinite;
+  }
+  @keyframes warmShift{
+    0%,100%{opacity:.85;transform:scale(1);}
+    50%{opacity:1;transform:scale(1.05);}
+  }
+  .story-visual .win{
+    position:absolute;
+    top:12%;right:9%;
+    width:34%;aspect-ratio:.62;
+    border-radius:6px 6px 0 0;
+    background:linear-gradient(180deg, rgba(244,237,226,.20), rgba(244,237,226,.03));
+    border:1px solid rgba(244,237,226,.18);
+    box-shadow:inset 0 0 26px rgba(201,162,39,.16);
+    z-index:-1;
+  }
+  .story-visual .win::before,.story-visual .win::after{
+    content:"";position:absolute;background:rgba(244,237,226,.2);
+  }
+  .story-visual .win::before{left:50%;top:0;bottom:0;width:1px;}
+  .story-visual .win::after{top:50%;left:0;right:0;height:1px;}
+  .story-caption{
+    position:relative;z-index:2;
+    color:rgba(244,237,226,.92);
+  }
+  .story-caption .big{
+    font-family:var(--serif);
+    font-size:clamp(24px,2.8vw,34px);
+    font-weight:800;
+    line-height:1.3;
+    letter-spacing:.03em;
+    text-shadow:0 2px 12px rgba(0,0,0,.4);
+  }
+  .story-caption .small{
+    margin-top:10px;
+    font-size:12.5px;
+    letter-spacing:.16em;
+    color:rgba(244,237,226,.62);
+  }
+  .story-copy{display:flex;flex-direction:column;justify-content:center;}
+  .story-copy p{
+    color:var(--ink-soft);
+    font-size:15.5px;
+    line-height:1.9;
+    margin-bottom:16px;
+  }
+  .story-copy p:last-of-type{margin-bottom:0;}
+  .info-list{
+    margin-top:clamp(20px,3vh,30px);
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:1px;
+    background:rgba(43,33,27,.14);
+    border:1px solid rgba(43,33,27,.14);
+    border-radius:12px;
+    overflow:hidden;
+  }
+  .info-cell{
+    background:linear-gradient(170deg,#FBF6EE,#F2E8DA);
+    padding:16px 18px;
+  }
+  .info-cell .k{
+    font-size:11px;letter-spacing:.2em;text-transform:uppercase;
+    color:var(--olive);margin-bottom:6px;
+  }
+  .info-cell .v{
+    font-size:15px;font-weight:600;color:var(--ink);line-height:1.55;
+    letter-spacing:.02em;
+  }
+  .info-cell .v.mono{font-family:var(--mono);font-size:16px;color:var(--caramel-deep);}
+  .info-cell .v a{color:inherit;text-decoration:none;border-bottom:1px solid rgba(138,90,59,.4);}
+  .info-cell .v a:hover{color:var(--caramel);}
+  @media(max-width:860px){
+    .story{grid-template-columns:1fr;}
+    .story-visual{min-height:260px;}
+  }
+  @media(max-width:460px){
+    .info-list{grid-template-columns:1fr;}
+  }
+
+  /* ===== 页脚 ===== */
+  footer.site-foot{
+    position:relative;
+    z-index:2;
+    background:linear-gradient(180deg,#2B211B 0%, #221A15 100%);
+    color:rgba(244,237,226,.86);
+    padding:clamp(44px,7vh,80px) 0 26px;
+    margin-top:clamp(20px,4vh,40px);
+    overflow:hidden;
+  }
+  footer.site-foot::before{
+    content:"";position:absolute;inset:0;
+    background:radial-gradient(circle at 14% 8%, rgba(201,162,39,.14) 0%, transparent 46%),
+               radial-gradient(circle at 86% 92%, rgba(138,90,59,.22) 0%, transparent 52%);
+    pointer-events:none;
+  }
+  .foot-grid{
+    position:relative;
+    display:grid;
+    grid-template-columns:1.05fr .95fr;
+    gap:clamp(26px,4vw,60px);
+    align-items:center;
+  }
+  .foot-brand .brand{color:rgba(244,237,226,.95);font-size:21px;margin-bottom:16px;}
+  .foot-brand .brand .mark{box-shadow:inset 0 -3px 6px rgba(0,0,0,.45), 0 2px 8px rgba(0,0,0,.4);}
+  .foot-brand p{
+    font-size:14.5px;line-height:1.85;color:rgba(244,237,226,.62);
+    max-width:30em;
+  }
+  .foot-info{
+    margin-top:22px;
+    display:flex;flex-wrap:wrap;gap:10px 30px;
+    font-size:14px;
+  }
+  .foot-info .fi{display:flex;flex-direction:column;gap:3px;}
+  .foot-info .fi .k{font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;color:rgba(201,162,39,.8);}
+  .foot-info .fi .v{color:rgba(244,237,226,.9);font-weight:500;letter-spacing:.02em;}
+  .foot-info .fi .v.mono{font-family:var(--mono);}
+  .foot-info .fi .v a{color:inherit;text-decoration:none;border-bottom:1px solid rgba(201,162,39,.35);}
+  .foot-info .fi .v a:hover{color:var(--amber);}
+
+  .map-card{
+    position:relative;
+    border-radius:14px;
+    overflow:hidden;
+    background:linear-gradient(165deg,#3A2C22,#2A201A);
+    border:1px solid rgba(244,237,226,.12);
+    padding:clamp(14px,1.8vw,22px);
+    box-shadow:0 22px 44px -28px rgba(0,0,0,.9);
+  }
+  .map-card svg{width:100%;height:auto;display:block;overflow:visible;}
+  .map-label{
+    display:flex;align-items:flex-start;gap:10px;
+    margin-top:14px;
+    padding-top:13px;
+    border-top:1px solid rgba(244,237,226,.12);
+    font-size:12.5px;
+    line-height:1.7;
+    color:rgba(244,237,226,.66);
+  }
+  .map-label .pin-ico{
+    flex:0 0 auto;width:8px;height:8px;border-radius:50%;
+    background:var(--amber);margin-top:7px;
+    box-shadow:0 0 0 0 rgba(201,162,39,.55);
+    animation:pulseDot 2.4s ease-in-out infinite;
+  }
+  .map-label b{color:rgba(244,237,226,.92);font-weight:600;}
+  .map-pulse{
+    transform-origin:center;
+    animation:mapPulse 2.8s cubic-bezier(.4,0,.2,1) infinite;
+  }
+  .map-pulse.r2{animation-delay:.7s;}
+  @keyframes mapPulse{
+    0%{transform:scale(.45);opacity:.85;}
+    70%{transform:scale(1.85);opacity:0;}
+    100%{transform:scale(1.85);opacity:0;}
+  }
+  .map-dash{
+    stroke-dasharray:5 6;
+    animation:dashMove 9s linear infinite;
+  }
+  @keyframes dashMove{
+    to{stroke-dashoffset:-110;}
+  }
+  .foot-bottom{
+    position:relative;
+    margin-top:clamp(30px,5vh,52px);
+    padding-top:20px;
+    border-top:1px solid rgba(244,237,226,.12);
+    display:flex;flex-wrap:wrap;gap:10px 24px;
+    align-items:center;justify-content:space-between;
+    font-size:12px;
+    letter-spacing:.1em;
+    color:rgba(244,237,226,.42);
+  }
+  .foot-bottom .links{display:flex;gap:20px;flex-wrap:wrap;}
+  .foot-bottom a{color:inherit;text-decoration:none;transition:color .2s ease;}
+  .foot-bottom a:hover{color:var(--amber);}
+  @media(max-width:860px){
+    .foot-grid{grid-template-columns:1fr;}
+  }
+
+  /* ===== 入场动画 ===== */
+  .reveal{
+    opacity:0;
+    transform:translateY(16px);
+    animation:revealUp .9s cubic-bezier(.16,.84,.34,1) forwards;
+  }
+  @keyframes revealUp{
+    to{opacity:1;transform:translateY(0);}
+  }
+  .d1{animation-delay:.06s;}
+  .d2{animation-delay:.18s;}
+  .d3{animation-delay:.30s;}
+  .d4{animation-delay:.42s;}
+  .d5{animation-delay:.54s;}
+  .d6{animation-delay:.66s;}
+
+  /* 滚动显现 */
+  .io{
+    opacity:0;
+    transform:translateY(26px);
+    transition:opacity .8s cubic-bezier(.16,.84,.34,1), transform .8s cubic-bezier(.16,.84,.34,1);
+    will-change:opacity,transform;
+  }
+  .io.in{opacity:1;transform:translateY(0);}
+  .io.delay-1{transition-delay:.09s;}
+  .io.delay-2{transition-delay:.18s;}
+  .io.delay-3{transition-delay:.27s;}
+
+  @media (prefers-reduced-motion: reduce){
+    html{scroll-behavior:auto;}
+    .steam-path{animation-duration:12s;opacity:.3;}
+    .water-stream{animation-duration:6s;}
+    .ticker-track{animation-duration:80s;}
+    .art-glow{animation:none;opacity:.7;}
+    .reveal{animation-duration:.01s;animation-delay:0s !important;}
+    .io{transition-duration:.01s;transform:none;}
+    .map-pulse{animation-duration:6s;}
+    .hero-hint .dot{animation-duration:5s;}
+    .stain,.steam-ambient{transform:none !important;}
+    .menu-card:hover,.menu-card:focus-within{transform:translateY(-2px);}
+    .menu-card:hover .item-price,.menu-card:focus-within .item-price{transform:scale(1.03);}
+  }
+</style>
+</head>
+<body>
+
+<!-- 背景氛围层 -->
+<div class="bg-layer" aria-hidden="true">
+  <div class="paper-grain"></div>
+  <div class="stain s1" data-parallax="0.3"></div>
+  <div class="stain s2" data-parallax="0.3"></div>
+  <div class="stain s3" data-parallax="0.3"></div>
+  <div class="steam-ambient" data-parallax="0.6">
+    <svg class="sa1" viewBox="0 0 120 220" fill="none">
+      <path d="M60 210 C40 170 80 150 58 112 C40 80 74 62 58 22" stroke="#B9A48C" stroke-width="2" stroke-linecap="round" opacity=".38"/>
+    </svg>
+    <svg class="sa2" viewBox="0 0 100 190" fill="none">
+      <path d="M50 182 C34 148 68 130 48 96 C32 68 62 52 48 18" stroke="#B9A48C" stroke-width="1.8" stroke-linecap="round" opacity=".3"/>
+    </svg>
+    <svg class="sa3" viewBox="0 0 140 240" fill="none">
+      <path d="M70 230 C46 190 96 168 68 126 C46 92 88 72 68 26" stroke="#B9A48C" stroke-width="2.2" stroke-linecap="round" opacity=".26"/>
+    </svg>
+  </div>
+</div>
+
+<!-- 导航 -->
+<header class="nav">
+  <a class="brand" href="#top">
+    <span class="mark" aria-hidden="true"></span>
+    拾光咖啡
+  </a>
+  <nav class="links" aria-label="主导航">
+    <a href="#menu">招牌菜单</a>
+    <a href="#story">门店故事</a>
+    <a href="#visit">到店指南</a>
+    <a class="nav-cta" href="#visit">查看地址</a>
+  </nav>
+</header>
+
+<main id="top">
+
+  <!-- 首屏 -->
+  <section class="hero">
+    <div class="wrap">
+      <div class="hero-grid">
+        <div class="hero-copy">
+          <span class="eyebrow reveal d1">独立手冲 · 老城区店</span>
+          <h1 class="hero-title reveal d2">
+            拾光<span class="accent">咖啡</span>
+          </h1>
+          <p class="hero-slogan reveal d3">
+            把时间交给一只滤杯。<strong>注水、闷蒸、滴滤</strong>，
+            每一杯都按它自己的节奏落下，我们只是恰好在这里等你。
+          </p>
+          <div class="hero-meta reveal d4">
+            <div class="m-item">
+              <span class="k">今日豆单</span>
+              <span class="v">耶加雪菲 · 浅烘</span>
+            </div>
+            <div class="m-item">
+              <span class="k">营业至</span>
+              <span class="v">20:00</span>
+            </div>
+            <div class="m-item">
+              <span class="k">手冲萃取</span>
+              <span class="v">2'40"</span>
+            </div>
+          </div>
+          <p class="hero-hint reveal d5">
+            <span class="dot" aria-hidden="true"></span>
+            移动指针或滚动页面，香气与光影会跟着你走
+          </p>
+        </div>
+
+        <div class="hero-art reveal d3">
+          <div class="art-glow" aria-hidden="true"></div>
+          <svg viewBox="0 0 460 520" role="img" aria-label="手冲壶向滤杯注水的侧视插画，壶嘴有细水流，杯口有蒸汽上升">
+            <defs>
+              <linearGradient id="kettleBody" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stop-color="#B07A4E"/>
+                <stop offset="38%" stop-color="#8A5A3B"/>
+                <stop offset="100%" stop-color="#4E3220"/>
+              </linearGradient>
+              <linearGradient id="kettleHi" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#E0BE9A" stop-opacity=".85"/>
+                <stop offset="55%" stop-color="#E0BE9A" stop-opacity="0"/>
+              </linearGradient>
+              <linearGradient id="dripperBody" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stop-color="#FBF6EE"/>
+                <stop offset="52%" stop-color="#E8DCC9"/>
+                <stop offset="100%" stop-color="#C9B79C"/>
+              </linearGradient>
+              <linearGradient id="glassBody" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stop-color="#D8C7AE" stop-opacity=".55"/>
+                <stop offset="26%" stop-color="#FBF6EE" stop-opacity=".18"/>
+                <stop offset="72%" stop-color="#FBF6EE" stop-opacity=".10"/>
+                <stop offset="100%" stop-color="#B9A48C" stop-opacity=".45"/>
+              </linearGradient>
+              <linearGradient id="coffeeLiquid" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#8A5A3B"/>
+                <stop offset="45%" stop-color="#5E3A22"/>
+                <stop offset="100%" stop-color="#3A2315"/>
+              </linearGradient>
+              <linearGradient id="woodBase" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#6E452B"/>
+                <stop offset="100%" stop-color="#3F2A1B"/>
+              </linearGradient>
+              <radialGradient id="shadowGrad" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stop-color="#4A2E1D" stop-opacity=".38"/>
+                <stop offset="100%" stop-color="#4A2E1D" stop-opacity="0"/>
+              </radialGradient>
+            </defs>
+
+            <!-- 桌面阴影 -->
+            <ellipse cx="248" cy="486" rx="176" ry="24" fill="url(#shadowGrad)"/>
+
+            <!-- 木质台面 -->
+            <rect x="88" y="452" width="320" height="18" rx="9" fill="url(#woodBase)"/>
+            <rect x="88" y="452" width="320" height="5" rx="2.5" fill="#8A5A3B" opacity=".55"/>
+
+            <!-- 分享壶（下壶） -->
+            <g>
+              <path d="M196 452 L196 372 Q196 356 212 356 L300 356 Q316 356 316 372 L316 452 Z"
+                    fill="url(#glassBody)" stroke="#B9A48C" stroke-width="1.6" stroke-opacity=".7"/>
+              <!-- 咖啡液 -->
+              <path class="liquid-surface" d="M200 452 L200 400 Q200 392 210 392 L302 392 Q312 392 312 400 L312 452 Z"
+                    fill="url(#coffeeLiquid)"/>
+              <ellipse class="liquid-surface" cx="256" cy="392" rx="56" ry="7" fill="#A9703F" opacity=".85"/>
+              <ellipse cx="256" cy="392" rx="56" ry="7" fill="none" stroke="#C9A227" stroke-width="1" stroke-opacity=".45"/>
+              <!-- 高光 -->
+              <path d="M208 448 L208 388" stroke="#FBF6EE" stroke-width="3" stroke-opacity=".35" stroke-linecap="round"/>
+              <path d="M304 448 L304 396" stroke="#FBF6EE" stroke-width="1.6" stroke-opacity=".18" stroke-linecap="round"/>
+              <!-- 把手 -->
+              <path d="M316 388 Q352 392 352 418 Q352 444 316 446" fill="none" stroke="#B9A48C" stroke-width="7" stroke-linecap="round" stroke-opacity=".55"/>
+              <path d="M316 388 Q352 392 352 418 Q352 444 316 446" fill="none" stroke="#FBF6EE" stroke-width="2" stroke-linecap="round" stroke-opacity=".3"/>
+            </g>
+
+            <!-- 滤杯 -->
+            <g>
+              <path d="M204 356 L308 356 L282 292 Q280 286 272 286 L240 286 Q232 286 230 292 Z"
+                    fill="url(#dripperBody)" stroke="#B9A48C" stroke-width="1.6"/>
+              <!-- 滤杯肋条 -->
+              <path d="M222 350 L240 296" stroke="#C9B79C" stroke-width="1.4" stroke-opacity=".85"/>
+              <path d="M240 350 L250 296" stroke="#C9B79C" stroke-width="1.4" stroke-opacity=".85"/>
+              <path d="M258 350 L260 296" stroke="#C9B79C" stroke-width="1.4" stroke-opacity=".85"/>
+              <path d="M276 350 L270 296" stroke="#C9B79C" stroke-width="1.4" stroke-opacity=".85"/>
+              <path d="M292 350 L280 296" stroke="#C9B79C" stroke-width="1.4" stroke-opacity=".85"/>
+              <!-- 滤杯口沿 -->
+              <ellipse cx="256" cy="356" rx="52" ry="9" fill="#FBF6EE" stroke="#B9A48C" stroke-width="1.4"/>
+              <ellipse cx="256" cy="356" rx="44" ry="6.5" fill="#8A5A3B" opacity=".55"/>
+              <!-- 咖啡粉床 -->
+              <ellipse cx="256" cy="352" rx="38" ry="5" fill="#5E3A22"/>
+              <ellipse cx="256" cy="351" rx="30" ry="3.4" fill="#8A5A3B" opacity=".8"/>
+              <!-- 滤杯底座 -->
+              <rect x="238" y="282" width="36" height="8" rx="4" fill="#C9B79C"/>
+            </g>
+
+            <!-- 滴落的水滴 -->
+            <circle class="drip-drop" cx="256" cy="300" r="3.4"/>
+
+            <!-- 蒸汽 -->
+            <g class="steam-group">
+              <path class="steam-path p1" d="M232 272 C220 246 244 232 232 206 C222 184 240 168 232 146"/>
+              <path class="steam-path p2" d="M256 268 C244 240 268 224 256 196 C246 172 264 154 256 130"/>
+              <path class="steam-path p3" d="M280 272 C268 246 292 232 280 206 C270 184 288 168 280 146"/>
+            </g>
+
+            <!-- 手冲壶 -->
+            <g>
+              <!-- 壶身 -->
+              <path d="M118 236 Q118 196 158 190 L206 190 Q246 196 246 236 L242 300 Q240 330 210 332 L154 332 Q124 330 122 300 Z"
+                    fill="url(#kettleBody)"/>
+              <path d="M118 236 Q118 196 158 190 L206 190 Q246 196 246 236 L242 300 Q240 330 210 332 L154 332 Q124 330 122 300 Z"
+                    fill="none" stroke="#3F2A1B" stroke-width="1.6" stroke-opacity=".55"/>
+              <!-- 壶身高光 -->
+              <path d="M134 232 Q134 204 162 200 L176 200 Q148 208 146 240 L146 300 Q146 318 160 322 Q138 318 136 296 Z"
+                    fill="url(#kettleHi)"/>
+              <!-- 壶盖 -->
+              <ellipse cx="182" cy="190" rx="34" ry="9" fill="#6E452B"/>
+              <ellipse cx="182" cy="188" rx="34" ry="9" fill="#9A6845"/>
+              <ellipse cx="182" cy="186" rx="22" ry="5.5" fill="#B07A4E"/>
+              <circle cx="182" cy="180" r="6.5" fill="#4E3220"/>
+              <circle cx="180" cy="178" r="2.4" fill="#E0BE9A" opacity=".7"/>
+              <!-- 壶把 -->
+              <path d="M246 214 Q292 214 292 258 Q292 300 246 302" fill="none" stroke="#4E3220" stroke-width="13" stroke-linecap="round"/>
+              <path d="M246 214 Q292 214 292 258 Q292 300 246 302" fill="none" stroke="#8A5A3B" stroke-width="7" stroke-linecap="round"/>
+              <path d="M250 220 Q284 222 284 256" fill="none" stroke="#C9A227" stroke-width="1.6" stroke-linecap="round" stroke-opacity=".5"/>
+              <!-- 壶嘴 -->
+              <path d="M122 250 Q92 250 78 268 Q70 278 74 288" fill="none" stroke="#4E3220" stroke-width="15" stroke-linecap="round"/>
+              <path d="M122 250 Q92 250 78 268 Q70 278 74 288" fill="none" stroke="#8A5A3B" stroke-width="9" stroke-linecap="round"/>
+              <path d="M120 246 Q94 246 82 264" fill="none" stroke="#C9A227" stroke-width="1.4" stroke-linecap="round" stroke-opacity=".45"/>
+              <!-- 壶嘴口 -->
+              <ellipse cx="75" cy="290" rx="7" ry="4" fill="#3F2A1B" transform="rotate(-24 75 290)"/>
+            </g>
+
+            <!-- 水流：壶嘴 → 滤杯 -->
+            <path class="water-stream" d="M77 292 Q96 300 122 300 Q170 300 200 320 Q232 338 254 350"/>
+            <path class="water-stream w2" d="M77 292 Q96 300 122 300 Q170 300 200 320 Q232 338 254 350"/>
+
+            <!-- 桌面反光 -->
+            <ellipse cx="256" cy="462" rx="120" ry="8" fill="#C9A227" opacity=".10"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- 信息带 -->
+    <div class="ticker" aria-label="营业时间与今日豆单滚动信息">
+      <div class="ticker-track" id="tickerTrack">
+        <div class="ticker-seq">
+          <span class="tick"><span class="sep"></span><b>营业时间</b>周一至周五 08:00 — 20:00</span>
+          <span class="tick"><span class="sep"></span><b>周末</b>09:00 — 21:00</span>
+          <span class="tick"><span class="sep"></span><b>今日豆单</b>耶加雪菲 科契尔 · 浅烘 · 柑橘 / 白花</span>
+          <span class="tick"><span class="sep"></span><b>今日豆单</b>哥伦比亚 慧兰 · 中烘 · 焦糖 / 坚果</span>
+          <span class="tick"><span class="sep"></span><b>地址</b>老城区 · 榆树巷 17 号</span>
+          <span class="tick"><span class="sep"></span><b>手冲</b>每杯现磨 · 约 2'40"</span>
+        </div>
+        <div class="ticker-seq" aria-hidden="true">
+          <span class="tick"><span class="sep"></span><b>营业时间</b>周一至周五 08:00 — 20:00</span>
+          <span class="tick"><span class="sep"></span><b>周末</b>09:00 — 21:00</span>
+          <span class="tick"><span class="sep"></span><b>今日豆单</b>耶加雪菲 科契尔 · 浅烘 · 柑橘 / 白花</span>
+          <span class="tick"><span class="sep"></span><b>今日豆单</b>哥伦比亚 慧兰 · 中烘 · 焦糖 / 坚果</span>
+          <span class="tick"><span class="sep"></span><b>地址</b>老城区 · 榆树巷 17 号</span>
+          <span class="tick"><span class="sep"></span><b>手冲</b>每杯现磨 · 约 2'40"</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 招牌菜单 -->
+  <section class="band" id="menu">
+    <div class="wrap">
+      <div class="sec-head io">
+        <div class="left">
+          <span class="sec-tag">Signature Menu</span>
+          <h2 class="sec-title">三栏招牌，六款常驻</h2>
+          <p class="sec-desc">
+            菜单按冲煮方式分成三栏。把指针停在卡片上，会展开这一款所用的豆子产地与烘焙度——我们更愿意让你先认识豆子，再决定喝什么。
+          </p>
+        </div>
+        <span class="sec-note">价格单位为人民币 · 含税</span>
+      </div>
+      <div class="menu-grid" id="menuGrid"></div>
+    </div>
+  </section>
+
+  <!-- 门店故事 -->
+  <section class="band" id="story">
+    <div class="wrap">
+      <div class="story">
+        <div class="story-visual io">
+          <div class="warm" aria-hidden="true"></div>
+          <div class="win" aria-hidden="true"></div>
+          <div class="story-caption">
+            <div class="big">一间开在<br>老榆树下的店</div>
+            <div class="small">榆树巷 17 号 · 二层小楼 · 靠窗六席</div>
+          </div>
+        </div>
+        <div class="story-copy io delay-1">
+          <span class="sec-tag">Our Place</span>
+          <h2 class="sec-title" style="margin-bottom:18px;">慢一点，才尝得到</h2>
+          <p>
+            拾光咖啡开在榆树巷一栋老房子的二层。木楼梯会响，窗框是原来的，桌椅是隔壁木工房用旧料拼的。
+            我们不赶时间：一杯手冲从磨豆到出杯大约两分四十秒，这段时间里你可以看看窗外，或者什么都不做。
+          </p>
+          <p>
+            豆子每两周烘一次，浅烘做手冲，中烘留给奶咖。甜点每天上午现做，卖完为止。
+            店里没有 Wi-Fi 密码贴在墙上，但你可以问我们。
+          </p>
+          <div class="info-list">
+            <div class="info-cell">
+              <div class="k">地址</div>
+              <div class="v">老城区 榆树巷 17 号 二层</div>
+            </div>
+            <div class="info-cell">
+              <div class="k">营业时间</div>
+              <div class="v">周一至周五 08:00–20:00<br>周六周日 09:00–21:00</div>
+            </div>
+            <div class="info-cell">
+              <div class="k">电话</div>
+              <div class="v mono"><a href="tel:021-6488-1717">021-6488-1717</a></div>
+            </div>
+            <div class="info-cell">
+              <div class="k">座位</div>
+              <div class="v">室内 22 席 · 靠窗 6 席</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- 页脚 / 到店指南 -->
+<footer class="site-foot" id="visit">
+  <div class="wrap">
+    <div class="foot-grid">
+      <div class="foot-brand io">
+        <a class="brand" href="#top">
+          <span class="mark" aria-hidden="true"></span>
+          拾光咖啡
+        </a>
+        <p>
+          老城区榆树巷 17 号，二层靠窗。手冲按杯现磨，甜点每日现做。
+          欢迎随时来坐，不必预约。
+        </p>
+        <div class="foot-info">
+          <div class="fi">
+            <span class="k">Address</span>
+            <span class="v">老城区 榆树巷 17 号 二层</span>
+          </div>
+          <div class="fi">
+            <span class="k">Hours</span>
+            <span class="v">一至五 08:00–20:00 · 周末 09:00–21:00</span>
+          </div>
+          <div class="fi">
+            <span class="k">Tel</span>
+            <span class="v mono"><a href="tel:021-6488-1717">021-6488-1717</a></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="map-card io delay-1">
+        <svg viewBox="0 0 420 260" role="img" aria-label="手绘地图：榆树巷与老街交汇处标出拾光咖啡的位置，并标出地铁站与步行路线">
+          <defs>
+            <linearGradient id="mapBg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#3E2F24"/>
+              <stop offset="100%" stop-color="#2A201A"/>
+            </linearGradient>
+          </defs>
+          <rect x="0" y="0" width="420" height="260" fill="url(#mapBg)" rx="8"/>
+
+          <!-- 街区块 -->
+          <g stroke="#F4EDE2" stroke-opacity=".10" stroke-width="1" fill="#F4EDE2" fill-opacity=".035">
+            <rect x="18" y="18" width="104" height="72" rx="3"/>
+            <rect x="146" y="18" width="120" height="72" rx="3"/>
+            <rect x="290" y="18" width="112" height="72" rx="3"/>
+            <rect x="18" y="118" width="104" height="60" rx="3"/>
+            <rect x="146" y="118" width="120" height="60" rx="3"/>
+            <rect x="290" y="118" width="112" height="60" rx="3"/>
+            <rect x="18" y="204" width="104" height="40" rx="3"/>
+            <rect x="146" y="204" width="120" height="40" rx="3"/>
+            <rect x="290" y="204" width="112" height="40" rx="3"/>
+          </g>
+
+          <!-- 道路 -->
+          <path d="M0 104 L420 104" stroke="#F4EDE2" stroke-opacity=".16" stroke-width="14"/>
+          <path d="M0 104 L420 104" stroke="#C9A227" stroke-opacity=".22" stroke-width="1.4" stroke-dasharray="10 12"/>
+          <path d="M132 0 L132 260" stroke="#F4EDE2" stroke-opacity=".13" stroke-width="11"/>
+          <path d="M276 0 L276 260" stroke="#F4EDE2" stroke-opacity=".13" stroke-width="11"/>
+          <path d="M0 192 L420 192" stroke="#F4EDE2" stroke-opacity=".10" stroke-width="8"/>
+
+          <!-- 榆树巷标注 -->
+          <text x="286" y="98" fill="#F4EDE2" fill-opacity=".42" font-size="10" letter-spacing="2" font-family="system-ui,sans-serif">榆树巷</text>
+          <text x="138" y="60" fill="#F4EDE2" fill-opacity=".32" font-size="10" letter-spacing="2" font-family="system-ui,sans-serif">老街</text>
+          <text x="138" y="176" fill="#F4EDE2" fill-opacity=".32" font-size="10" letter-spacing="2" font-family="system-ui,sans-serif">南巷</text>
+
+          <!-- 步行路线 -->
+          <path class="map-dash" d="M64 214 L64 192 L132 192 L132 104 L206 104 L206 132"
+                fill="none" stroke="#C9A227" stroke-opacity=".8" stroke-width="2.2" stroke-linecap="round"/>
+
+          <!-- 地铁站 -->
+          <g>
+            <circle cx="64" cy="214" r="7" fill="none" stroke="#F4EDE2" stroke-opacity=".55" stroke-width="1.6"/>
+            <circle cx="64" cy="214" r="2.6" fill="#F4EDE2" fill-opacity=".7"/>
+            <text x="78" y="218" fill="#F4EDE2" fill-opacity=".55" font-size="10" letter-spacing="1" font-family="system-ui,sans-serif">地铁 3 号线 · 榆树巷站 B 口</text>
+          </g>
+
+          <!-- 店铺位置：脉动圆点 -->
+          <g transform="translate(206,132)">
+            <circle class="map-pulse" r="16" fill="none" stroke="#C9A227" stroke-width="2"/>
+            <circle class="map-pulse r2" r="16" fill="none" stroke="#C9A227" stroke-width="1.4"/>
+            <circle r="7.5" fill="#C9A227"/>
+            <circle r="7.5" fill="none" stroke="#F4EDE2" stroke-opacity=".7" stroke-width="1.4"/>
+            <circle cx="-2.2" cy="-2.2" r="2.2" fill="#FBF6EE" fill-opacity=".85"/>
+          </g>
+          <text x="206" y="162" fill="#F4EDE2" fill-opacity=".9" font-size="11.5" letter-spacing="1.5" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600">拾光咖啡</text>
+
+          <!-- 指北针 -->
+          <g transform="translate(384,222)" opacity=".55">
+            <circle r="13" fill="none" stroke="#F4EDE2" stroke-opacity=".35" stroke-width="1"/>
+            <path d="M0 -9 L4 3 L0 0 L-4 3 Z" fill="#C9A227"/>
+            <text y="-16" fill="#F4EDE2" fill-opacity=".6" font-size="8" text-anchor="middle" font-family="system-ui,sans-serif">N</text>
+          </g>
+        </svg>
+        <div class="map-label">
+          <span class="pin-ico" aria-hidden="true"></span>
+          <span>
+            <b>步行指引：</b>地铁 3 号线榆树巷站 B 口出，沿南巷向北步行约 120 米，到老街右转，
+            见老榆树后上二层即到，全程约 3 分钟。
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="foot-bottom">
+      <span>© 2024 拾光咖啡 · 老城区榆树巷 17 号</span>
+      <div class="links">
+        <a href="#menu">招牌菜单</a>
+        <a href="#story">门店故事</a>
+        <a href="#top">回到顶部</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ===== 菜单数据 ===== */
+  var MENU = [
+    {
+      num:"01",
+      name:"手冲",
+      en:"Pour Over",
+      foot:"单杯现磨 · 约 2'40\"",
+      items:[
+        {name:"耶加雪菲 科契尔", note:"水洗", price:"38", origin:"埃塞俄比亚 · 科契尔", roast:"浅烘", flavor:"柑橘 / 白花 / 蜂蜜"},
+        {name:"哥伦比亚 慧兰", note:"水洗", price:"36", origin:"哥伦比亚 · 慧兰", roast:"中烘", flavor:"焦糖 / 烤坚果 / 可可"}
+      ]
+    },
+    {
+      num:"02",
+      name:"奶咖",
+      en:"Milk Coffee",
+      foot:"鲜奶每日配送 · 可换燕麦奶",
+      items:[
+        {name:"拿铁", note:"双份浓缩", price:"32", origin:"巴西 · 喜拉多拼配", roast:"中深烘", flavor:"牛奶巧克力 / 榛果"},
+        {name:"澳白", note:"小杯浓醇", price:"34", origin:"巴西 · 喜拉多拼配", roast:"中深烘", flavor:"黑巧 / 焦糖 / 奶油"}
+      ]
+    },
+    {
+      num:"03",
+      name:"甜点",
+      en:"Pastry",
+      foot:"每日上午现做 · 售完为止",
+      items:[
+        {name:"巴斯克芝士", note:"常温回温", price:"28", origin:"本地手作 · 每日现烤", roast:"—", flavor:"香草 / 微焦糖化"},
+        {name:"柠檬磅蛋糕", note:"切片", price:"22", origin:"本地手作 · 每日现烤", roast:"—", flavor:"柠檬皮屑 / 黄油"}
+      ]
+    }
+  ];
+
+  function esc(s){
+    return String(s).replace(/[&<>"']/g, function(c){
+      return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+    });
+  }
+
+  var grid = document.getElementById("menuGrid");
+  if(grid){
+    var html = "";
+    for(var i=0;i<MENU.length;i++){
+      var cat = MENU[i];
+      html += '<article class="menu-card io delay-' + (i+1) + '" tabindex="0" aria-label="' + esc(cat.name) + '分类菜单">';
+      html += '<div class="card-top">';
+      html += '<div><div class="cat-name">' + esc(cat.name) + '<span class="cat-en">' + esc(cat.en) + '</span></div></div>';
+      html += '<span class="num-badge">' + esc(cat.num) + '</span>';
+      html += '</div>';
+      html += '<div class="items">';
+      for(var j=0;j<cat.items.length;j++){
+        var it = cat.items[j];
+        html += '<div class="item">';
+        html += '<div class="item-row">';
+        html += '<span class="item-name">' + esc(it.name) + '<small>' + esc(it.note) + '</small></span>';
+        html += '<span class="item-price"><span class="cur">¥</span>' + esc(it.price) + '</span>';
+        html += '</div>';
+        html += '<div class="item-detail"><div class="line">';
+        html += '<span class="tag">' + esc(it.origin) + '</span>';
+        if(it.roast && it.roast !== "—"){
+          html += '<span class="tag amber">' + esc(it.roast) + '</span>';
+        }
+        html += '<span>' + esc(it.flavor) + '</span>';
+        html += '</div></div>';
+        html += '</div>';
+      }
+      html += '</div>';
+      html += '<div class="card-foot"><span>' + esc(cat.foot) + '</span><span class="ln"></span></div>';
+      html += '</article>';
+    }
+    grid.innerHTML = html;
+  }
+
+  /* ===== 滚动显现 ===== */
+  var ioEls = Array.prototype.slice.call(document.querySelectorAll(".io"));
+  if("IntersectionObserver" in window){
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(en){
+        if(en.isIntersecting){
+          en.target.classList.add("in");
+          io.unobserve(en.target);
+        }
+      });
+    }, {threshold:0.14, rootMargin:"0px 0px -8% 0px"});
+    ioEls.forEach(function(el){ io.observe(el); });
+  } else {
+    ioEls.forEach(function(el){ el.classList.add("in"); });
+  }
+
+  /* ===== 滚动视差（rAF 节流，不监听 scroll 内做重活） ===== */
+  var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var parallaxEls = Array.prototype.slice.call(document.querySelectorAll("[data-parallax]"));
+  var ticking = false;
+
+  function applyParallax(){
+    var y = window.pageYOffset || document.documentElement.scrollTop || 0;
+    for(var i=0;i<parallaxEls.length;i++){
+      var el = parallaxEls[i];
+      var rate = parseFloat(el.getAttribute("data-parallax")) || 0;
+      el.style.transform = "translate3d(0," + (-y * rate).toFixed(2) + "px,0)";
+    }
+    ticking = false;
+  }
+
+  function onScroll(){
+    if(reduceMotion) return;
+    if(!ticking){
+      ticking = true;
+      window.requestAnimationFrame(applyParallax);
+    }
+  }
+
+  if(!reduceMotion && parallaxEls.length){
+    window.addEventListener("scroll", onScroll, {passive:true});
+    applyParallax();
+  }
+
+  /* ===== 指针反馈：插画随指针轻微倾斜，光晕跟随 ===== */
+  var heroArt = document.querySelector(".hero-art");
+  var artSvg = heroArt ? heroArt.querySelector("svg") : null;
+  var glow = document.querySelector(".art-glow");
+
+  if(heroArt && artSvg && !reduceMotion){
+    var targetX = 0, targetY = 0, curX = 0, curY = 0, rafId = null, active = false;
+
+    function loop(){
+      curX += (targetX - curX) * 0.08;
+      curY += (targetY - curY) * 0.08;
+      artSvg.style.transform = "rotate(" + (curX * 2.4).toFixed(3) + "deg) translate3d(" +
+        (curX * 10).toFixed(2) + "px," + (curY * 8).toFixed(2) + "px,0)";
+      if(glow){
+        glow.style.marginLeft = (curX * 16).toFixed(2) + "px";
+        glow.style.marginTop = (curY * 14).toFixed(2) + "px";
+      }
+      if(active || Math.abs(targetX - curX) > 0.001 || Math.abs(targetY - curY) > 0.001){
+        rafId = window.requestAnimationFrame(loop);
+      } else {
+        rafId = null;
+      }
+    }
+
+    function startLoop(){
+      if(rafId === null) rafId = window.requestAnimationFrame(loop);
+    }
+
+    heroArt.addEventListener("pointermove", function(e){
+      var r = heroArt.getBoundingClientRect();
+      if(!r.width || !r.height) return;
+      targetX = ((e.clientX - r.left) / r.width - 0.5) * 2;
+      targetY = ((e.clientY - r.top) / r.height - 0.5) * 2;
+      active = true;
+      startLoop();
+    }, {passive:true});
+
+    heroArt.addEventListener("pointerleave", function(){
+      targetX = 0; targetY = 0; active = false;
+      startLoop();
+    }, {passive:true});
+  }
+
+  /* ===== 键盘可达：卡片聚焦时保持展开（CSS :focus-within 已处理），
+     并让 Enter / Space 在卡片上触发一次轻微反馈 ===== */
+  document.addEventListener("keydown", function(e){
+    if(e.key !== "Enter" && e.key !== " ") return;
+    var card = document.activeElement;
+    if(card && card.classList && card.classList.contains("menu-card")){
+      e.preventDefault();
+      card.style.transition = "transform .18s ease-out";
+      card.style.transform = "translateY(-4px)";
+      window.setTimeout(function(){ card.style.transform = ""; }, 220);
+    }
+  });
+
+  /* ===== 信息带：根据内容宽度自适应时长，保证匀速 ===== */
+  var track = document.getElementById("tickerTrack");
+  if(track && !reduceMotion){
+    var seq = track.querySelector(".ticker-seq");
+    if(seq){
+      var w = seq.getBoundingClientRect().width;
+      if(w > 0){
+        var dur = Math.max(18, w / 42);
+        track.style.animationDuration = dur.toFixed(1) + "s";
+      }
+    }
+  }
+
+  /* ===== 窗口尺寸变化：重算信息带时长 ===== */
+  var resizeTimer = null;
+  window.addEventListener("resize", function(){
+    if(resizeTimer) window.clearTimeout(resizeTimer);
+    resizeTimer = window.setTimeout(function(){
+      if(!track || reduceMotion) return;
+      var s = track.querySelector(".ticker-seq");
+      if(!s) return;
+      var ww = s.getBoundingClientRect().width;
+      if(ww > 0){
+        track.style.animationDuration = Math.max(18, ww / 42).toFixed(1) + "s";
+      }
+    }, 180);
+  }, {passive:true});
+
+})();
+</script>
+</body>
+</html>

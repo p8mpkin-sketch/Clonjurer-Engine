@@ -125,6 +125,12 @@ class GenerateEngine:
                            score=render.score_against_reference, pool=self.pool)
         kind = self.spec.get("kind") or "description"
         target_name = self.spec.get("target") or "html_css"
+        if settings.use_code_track(kind, target_name, self.spec):
+            if kind == "description":
+                return self._execute_code(ai_cfg, budget, target_score, max_rounds, deadline)
+            if ai_cfg:
+                return self._execute_shot(ai_cfg, budget, target_score, max_rounds, deadline)
+            self.log("GEN", "截图生成: 未配置大模型 Key, 回落到确定性版面分析(效果有限, 建议配置 Key)")
         adapter, target = get_input(kind), get_output(target_name)
         self.log("GEN", f"适配器 {kind} → 目标 {target_name}; 预算 {budget}s / {max_rounds} 轮 / 目标分 {target_score}"
                         + ("" if ai_cfg else "; 未配置大模型 Key, 走确定性 Tier 0"))
@@ -272,6 +278,23 @@ class GenerateEngine:
 
         if best is None:
             raise RuntimeError("没有任何一轮产出有效结果")
+        return self._finalize(report, best, kind, target_name)
+
+    def _set_title(self, brief: dict):
+        """任务书里的页面标题作为任务名落库(任务卡、详情页头、各处下拉都显示它, 不再是 generated)。"""
+        title = task_title(brief, self.spec)
+        if title:
+            self.db.update_task(self.task_id, domain=title)
+
+    def _record_tokens(self, report: dict):
+        rows = token_rows(report)
+        if rows and hasattr(self.db, "replace_token_usage"):
+            with suppress(Exception):
+                self.db.replace_token_usage(self.task_id, "generate", rows)
+
+    def _finalize(self, report: dict, best: dict, kind: str, target_name: str) -> dict:
+        """打包产物 + 写报告 + 落库(UIR 轨与代码直写轨共用)。"""
+        self._record_tokens(report)
         self._stage("打包产物", 90)
         detail = best["detail"]
         (self.ws / "similarity_detail.json").write_text(json.dumps(detail, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -279,7 +302,8 @@ class GenerateEngine:
         site_meta = {"task_id": self.task_id, "domain": "generated", "upstream": "", "routes": pages_map,
                      "proxy_enabled": False, "similarity": best["score"], "similarity_detail": detail,
                      "fidelity_score": None, "frames": [], "pattern": "UIR-GENERATE",
-                     "generate": {"kind": kind, "target": target_name, "tier": report["tier"]}}
+                     "generate": {"kind": kind, "target": target_name, "tier": report["tier"],
+                                  "track": report.get("track", "uir"), "scoring": report["scoring"]}}
         (self.ws / "site.json").write_text(json.dumps(site_meta, ensure_ascii=False, indent=2), encoding="utf-8")
         if pages_map:
             zip_path = flask_generator.generate_project(self.task_id, "", self.ws, pages_map, [], False,
@@ -311,6 +335,75 @@ class GenerateEngine:
         with suppress(Exception):
             self.db.increment_completed(self.db.get_task(self.task_id)["batch_id"])
         return report
+
+    def _execute_code(self, ai_cfg, budget: int, target_score: float, max_rounds: int, deadline: float) -> dict:
+        """代码直写轨(core/uir/codegen.py): 文字需求 → 模型写可运行网页 → 体检 → 验收 → 修复。"""
+        from core.uir import codegen
+        if not ai_cfg:
+            # 不再用关键词模板顶替: 交付一张与需求无关的页面比明确报错更糟
+            raise RuntimeError("界面生成需要大模型, 当前没有可用的模型 Key。请在「系统设置 → AI 供应商」配置, "
+                               "或在提交时填写任务级 Key 后重试")
+        judge_cfg = llm.resolve_ai_cfg(self.cfg, role="judge") or ai_cfg
+        desc = (self.spec.get("description") or "").strip()
+        vp = dict(self.spec.get("viewport") or settings.GEN_DEFAULT_VIEWPORT)
+        for stale in ("uir.json", "original_preview.png", "original_text.txt", "diff_preview.png"):
+            with suppress(Exception):
+                (self.ws / stale).unlink()
+        shutil.rmtree(self.ws / "gen_probe", ignore_errors=True)
+        self.log("GEN", f"代码直写轨: 模型 {ai_cfg['model']}"
+                        + (f", 验收模型 {judge_cfg['model']}" if judge_cfg["model"] != ai_cfg["model"] else "")
+                        + f"; 预算 {budget}s / 最多 {max_rounds} 轮 / 目标 {target_score}")
+        out = codegen.run(desc, self.ws, self.pool, ai_cfg, judge_cfg, vp, self.log, self._stage,
+                          deadline, target_score, max_rounds, on_brief=self._set_title)
+        best = out["best"]
+        report = {"kind": "description", "target": "html_css", "track": "code", "tier": "llm-code",
+                  "scoring": codegen.SCORING, "rounds": out["rounds"], "calls": out["calls"], "brief": out["brief"],
+                  "final_score": None, "target_score": target_score, "budget": budget,
+                  "ai_model": ai_cfg["model"], "judge_model": judge_cfg["model"], "reference_text": "none",
+                  "llm_seconds": round(sum(c["elapsed"] for c in out["calls"]), 1),
+                  "tokens": {"in": sum(c.get("in", 0) for c in out["calls"]), "out": sum(c.get("out", 0) for c in out["calls"])},
+                  "remaining_defects": best["defects"]}
+        return self._finalize(report, {"score": best["score"], "detail": best["detail"], "round": best["round"],
+                                       "uir_stats": {}}, "description", "html_css")
+
+    def _execute_shot(self, ai_cfg, budget: int, target_score: float, max_rounds: int, deadline: float) -> dict:
+        """截图代码直写轨(core/uir/shotcode.py): 读图 → 写响应式页面 → 体检(三端) + 原图相似度 → 对照原图验收 → 修复。"""
+        from core.uir import shotcode
+        judge_cfg = llm.resolve_ai_cfg(self.cfg, role="judge") or ai_cfg
+        src = Path(self.spec.get("image_path") or "")
+        if not src.is_file():
+            keep = self.ws / "original_upload.png"
+            if keep.is_file():
+                src = keep
+            else:
+                raise FileNotFoundError("截图输入缺失")
+        keep = self.ws / "original_upload.png"            # 原始上传另存: original_preview.png 会被换成去外框的 CSS 尺寸参考图
+        if src != keep:
+            shutil.copyfile(src, keep)
+        for stale in ("uir.json", "original_text.txt", "diff_preview.png"):
+            with suppress(Exception):
+                (self.ws / stale).unlink()
+        shutil.rmtree(self.ws / "gen_probe", ignore_errors=True)
+        hint = (self.spec.get("description") or "").strip()
+        self.log("GEN", f"截图代码直写轨: 模型 {ai_cfg['model']}"
+                        + (f", 验收模型 {judge_cfg['model']}" if judge_cfg["model"] != ai_cfg["model"] else "")
+                        + (f"; 补充要求: {hint[:80]}" if hint else "")
+                        + f"; 预算 {budget}s / 最多 {max_rounds} 轮 / 目标 {target_score}")
+        out = shotcode.run(keep, hint, self.ws, self.pool, ai_cfg, judge_cfg, self.log, self._stage,
+                           deadline, target_score, max_rounds, on_brief=self._set_title)
+        if (self.ws / "gen_diff.png").is_file():            # 与原图的差异图: 任务详情「差异」视图用
+            shutil.copyfile(self.ws / "gen_diff.png", self.ws / "diff_preview.png")
+        best = out["best"]
+        report = {"kind": "screenshot", "target": "html_css", "track": "code", "tier": "llm-code",
+                  "scoring": shotcode.SCORING, "rounds": out["rounds"], "calls": out["calls"], "brief": out["brief"],
+                  "source": out["prep"], "assets": out["assets"],
+                  "final_score": None, "target_score": target_score, "budget": budget,
+                  "ai_model": ai_cfg["model"], "judge_model": judge_cfg["model"], "reference_text": "model-read",
+                  "llm_seconds": round(sum(c["elapsed"] for c in out["calls"]), 1),
+                  "tokens": {"in": sum(c.get("in", 0) for c in out["calls"]), "out": sum(c.get("out", 0) for c in out["calls"])},
+                  "remaining_defects": best["defects"]}
+        return self._finalize(report, {"score": best["score"], "detail": best["detail"], "round": best["round"],
+                                       "uir_stats": {}}, "screenshot", "html_css")
 
     def _build_binaries(self, build_kind: str) -> dict:
         """apk: flutter_app → release APK; desktop: electron_app → 宿主平台包 + Windows x64 包。
@@ -359,6 +452,29 @@ class GenerateEngine:
         if result.get("gap"):
             self.log("BUILD", f"缺口: {result['gap']}")
         return result
+
+
+def task_title(brief: dict, spec: dict) -> str:
+    """生成任务的显示名: 任务书 title → 需求原话前 24 字 → 「界面截图」。"""
+    t = str((brief or {}).get("title") or "").strip()
+    if not t or (brief or {}).get("fallback"):
+        t = str((spec or {}).get("description") or "").strip()[:24] or t
+    return (t or ("界面截图" if (spec or {}).get("kind") == "screenshot" else "生成页面"))[:60]
+
+
+_STEP_NAMES = {"plan": "规划/读图", "write": "写页面", "repair": "修复", "review": "验收"}
+
+
+def token_rows(report: dict) -> list:
+    """generate_report.json 的 calls → token 流水行(验收用的是验收模型)。"""
+    out = []
+    for c in (report or {}).get("calls") or []:
+        if not (c.get("in") or c.get("out")):
+            continue
+        model = report.get("judge_model") if c.get("step") == "review" else report.get("ai_model")
+        out.append({"model": model or report.get("ai_model") or "", "step": _STEP_NAMES.get(c.get("step"), c.get("step") or ""),
+                    "in": c.get("in") or 0, "out": c.get("out") or 0})
+    return out
 
 
 def run_generation_task(task: dict, db, bus, pool):

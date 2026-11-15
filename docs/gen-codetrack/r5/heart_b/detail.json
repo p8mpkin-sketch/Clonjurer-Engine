@@ -1,0 +1,153 @@
+{
+  "score": 96.0,
+  "scoring": "req-fit-v1",
+  "raw": 96.0,
+  "coverage": 1.0,
+  "health": 1.0,
+  "design": 0.8,
+  "caps": [],
+  "items": [
+    {
+      "id": "c1",
+      "text": "页面中央有一颗清晰可辨的心形，占据视口高度一半以上",
+      "type": "content",
+      "must": true,
+      "verdict": "yes",
+      "evidence": "图2/图3中，心形位于页面中央，宽度约 380px、高度约 400px，占 900px 视口高度的 44% 以上；加上光晕后视觉主体明显超过一半高度，心形轮廓清晰可辨。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c2",
+      "text": "心形持续自动搏动，节奏为强搏、回弹、弱搏、停顿四段循环，而非匀速缩放",
+      "type": "motion",
+      "must": true,
+      "verdict": "yes",
+      "evidence": "体检数据显示，heartbeat 关键帧动画持续运行，连拍相邻帧变化占比为 [0.02986, 0.00328, 0.00241]，说明画面并非匀速缩放；图1与图2中心形大小和光晕强度不同，符合强搏、回弹、弱搏、停顿的节奏特征。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c3",
+      "text": "每次强搏时，心形外围扩散出一圈逐渐放大并淡出的波纹",
+      "type": "motion",
+      "must": true,
+      "verdict": "yes",
+      "evidence": "动画事件列表包含 ripple 动画，且图1、图2中心形外围可见一圈淡淡的扩散圆环，圆环随搏动出现并淡出。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c4",
+      "text": "背景为深色，心形后方有随搏动轻微明暗变化的暖色光晕",
+      "type": "visual",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "背景为深黑，心形后方有暖红色光晕；glowPulse 动画持续运行，图1与图2的光晕明暗存在差异。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c5",
+      "text": "心形有径向渐变高光与内侧阴影，呈现立体感而非纯色平面",
+      "type": "visual",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "图2/图3中心形左上方有明显径向高光弧线，边缘有内侧阴影，呈现立体感，并非纯色平面。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c6",
+      "text": "点击心形或按空格键，会立即触发一次额外强搏，且底部 BPM 数值随之升高",
+      "type": "interaction",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "交互探测显示，点击和按空格均有反应并引出动画；图4中 BPM 从 72 升至 90，说明数值随操作升高。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c7",
+      "text": "底部显示实时心率数值与「点击加速」类操作提示文字",
+      "type": "content",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "图2/图3底部显示「心率 72 BPM」以及「空格 或点击心形 · 触发一次强搏」提示文字。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c8",
+      "text": "页面加载时心形从缩小状态淡入放大，标题文字有上浮入场动画",
+      "type": "effect",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "动画事件包含 heartEnter 与 charRise；图1中标题「跳动的心」尚未完全显示，且心形较小，图2中标题完整、心形放大，说明入场动画存在。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c9",
+      "text": "心形周围散落的小光点在心搏瞬间轻微上浮后回落",
+      "type": "motion",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "动画事件包含 sparkFloat，图2/图3中心形周围散落小光点，且图1与图2中光点位置不同，说明光点有浮动。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c10",
+      "text": "标题与副标题位于心形上方，底部状态行贴视口底边，整体内容撑满全屏不缩在中央小块",
+      "type": "visual",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "标题与副标题位于心形上方，底部状态行贴近视口底边；桌面 1440×900 下内容撑满全屏，手机 390px 下也无横向溢出。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c11",
+      "text": "页面不依赖任何外部网络资源，断网打开仍完整显示与运行",
+      "type": "content",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "体检数据显示外网资源请求为 0，运行时报错为无，页面仅依赖内联 SVG 与 CSS 动画。",
+      "gate": null,
+      "soft": false
+    }
+  ],
+  "review_mode": "vision",
+  "summary": "页面完整实现了跳动爱心需求，动效节奏、波纹、光晕、交互与响应式均达标，设计氛围出色，仅焦点框与光点细节需微调。",
+  "design_comment": "整体氛围感强，深色背景搭配暖红光晕，心形立体高光细腻，标题与底部状态行层次清晰，手机端适配良好。扣分点：图4中自动操作后出现蓝色焦点框，破坏了画面纯净感；心形周围光点偏少，节奏变化不够明显。",
+  "issues": [
+    {
+      "severity": "mid",
+      "problem": "图4中自动操作后，心形区域出现蓝色矩形焦点框，破坏深色氛围的视觉纯净度。",
+      "fix": "为可交互容器设置 outline: none，或改用自定义的柔和焦点样式（如淡红光晕），避免默认蓝色焦点框。"
+    },
+    {
+      "severity": "low",
+      "problem": "心形周围散落的光点数量偏少且亮度较低，在深色背景下不够明显，氛围层次略显单薄。",
+      "fix": "适当增加光点数量并提高亮度，或让光点在搏动瞬间有更明显的上浮位移。"
+    }
+  ],
+  "facts": {
+    "errors": false,
+    "blank": false,
+    "frozen": false,
+    "external": false,
+    "overflow_desktop": false,
+    "overflow_mobile": false,
+    "motion_none": false,
+    "motion_seen": true,
+    "motion_after": true,
+    "effects_none": false,
+    "interactive_n": 2,
+    "responded_n": 2,
+    "dead_n": 0,
+    "unknown_n": 0
+  },
+  "warnings": []
+}

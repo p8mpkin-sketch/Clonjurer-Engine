@@ -19,6 +19,7 @@ REST API:
   GET  /api/tasks/<id>/assets       工作空间静态资产文件树
   GET  /api/tasks/<id>/file         文本资产内容预览
   GET  /api/tasks/<id>/structure    生成的 Flask 工程结构树
+  GET  /api/tasks/<id>/live_code    界面生成: 模型正在写的代码(增量, 任务卡实时展示)
   GET  /api/tasks/<id>/screenshots/<img_type>   原站/克隆/差异图
   GET  /api/stream_logs             SSE 实时日志流
   GET  /api/telemetry               系统遥测(浏览器池/CAS/队列)
@@ -34,6 +35,7 @@ import json
 import secrets
 import os
 import base64
+import html
 import re
 import shutil
 import subprocess
@@ -41,7 +43,7 @@ import threading
 import time
 import zipfile
 from contextlib import suppress
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -204,6 +206,19 @@ SCREENSHOT_FILES = {
     "cloned": "cloned_preview.png",
     "diff": "diff_preview.png",
 }
+# 交互版渲染失败、改交静态版时, 引擎只留下静态版/保真轨截图: 依次回退, 卡片缩略图与对比视图不至于空白
+SCREENSHOT_FALLBACKS = {
+    "cloned": ("cloned_preview.png", "static_preview.png", "fidelity_preview.png"),
+    "diff": ("diff_preview.png", "fidelity_diff.png"),
+    "original": ("original_preview.png",),
+}
+
+
+def _shot_file(ws: Path, img_type: str):
+    for name in SCREENSHOT_FALLBACKS.get(img_type, ()):
+        if (ws / name).is_file():
+            return ws / name
+    return None
 
 HOTPATCH_CSS_RE = re.compile(
     r'<style id="clone-hotpatch">.*?</style>', re.S)
@@ -563,8 +578,53 @@ def list_tasks():
     for task in tasks:
         task["stats"] = _parse_json(task.pop("stats_json", "") or "{}")
         ws = _workspace_of(task)
-        task["has_cloned_preview"] = (ws / "cloned_preview.png").is_file()
+        task["has_cloned_preview"] = _shot_file(ws, "cloned") is not None
+        task["title"] = _display_title(task, ws)
     return jsonify({"tasks": tasks})
+
+
+_TITLE_CACHE: dict = {}
+_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
+
+
+def _display_title(task: dict, ws: Path) -> str:
+    """任务显示名: 生成任务 = 任务记录里的标题(domain 列); 克隆任务 = 克隆页的 <title>(按文件修改时间缓存),
+    取不到时返回空串(前端退回域名)。目录型目标的入口页只是跳转壳, 按 site.json 的路由找与目标路径对应的页面。"""
+    if str(task.get("target_url") or "").startswith("uir:generate:"):
+        return task.get("domain") or ""
+    site = ws / "site.json"
+    try:
+        key = (site.stat().st_mtime if site.is_file() else 0.0, (ws / "index.html").stat().st_mtime)
+    except OSError:
+        return ""
+    hit = _TITLE_CACHE.get(task["id"])
+    if hit and hit[0] == key:
+        return hit[1]
+    pages = ["index.html"]
+    try:
+        routes = (json.loads(site.read_text(encoding="utf-8")).get("routes") or {}) if site.is_file() else {}
+        want = urlsplit(task.get("target_url") or "").path.rstrip("/") or "/"
+        ordered = sorted(routes.items(), key=lambda kv: (kv[0].rstrip("/") or "/") != want)
+        pages = [v for _, v in ordered if str(v).endswith(".html")] + pages
+    except Exception:
+        pass
+    title = ""
+    for rel in dict.fromkeys(pages):
+        f = (ws / rel)
+        if not str(f.resolve()).startswith(str(ws.resolve())) or not f.is_file():
+            continue
+        try:
+            with open(f, "rb") as fh:
+                head = fh.read(524288).decode("utf-8", errors="replace")
+        except OSError:
+            continue
+        m = _TITLE_RE.search(head)
+        if m:
+            title = html.unescape(re.sub(r"\s+", " ", m.group(1))).strip()[:80]
+            if title:
+                break
+    _TITLE_CACHE[task["id"]] = (key, title)
+    return title
 
 
 @app.get("/api/tasks/<int:task_id>")
@@ -575,9 +635,10 @@ def task_detail(task_id):
     site = _load_site_meta(ws)
     task["site"] = site
     task["has_original_preview"] = (ws / "original_preview.png").is_file()
-    task["has_cloned_preview"] = (ws / "cloned_preview.png").is_file()
-    task["has_diff_preview"] = (ws / "diff_preview.png").is_file()
+    task["has_cloned_preview"] = _shot_file(ws, "cloned") is not None
+    task["has_diff_preview"] = _shot_file(ws, "diff") is not None
     task["has_ai_report"] = (ws / "ai_repair_report.json").is_file()
+    task["title"] = _display_title(task, ws)
     return jsonify({"task": task})
 
 
@@ -781,8 +842,8 @@ def task_screenshot(task_id, img_type):
         return jsonify({"error": "img_type 必须是 original / cloned / diff"}), 400
     task = db.get_task(task_id)
     ws = _workspace_of(task)
-    target = ws / filename
-    if not target.is_file():
+    target = _shot_file(ws, img_type)
+    if target is None:
         return jsonify({"error": f"{filename} 尚未生成"}), 404
     # 评分截图可能是 JPEG 编码(config.SHOT_JPEG, 文件名仍 .png), 按内容给类型
     with open(target, "rb") as fh:
@@ -802,8 +863,8 @@ def task_thumb(task_id, img_type):
     if filename is None:
         return jsonify({"error": "img_type 必须是 original / cloned / diff"}), 400
     ws = _workspace_of(task)
-    source = ws / filename
-    if not source.is_file():
+    source = _shot_file(ws, img_type)
+    if source is None:
         return jsonify({"error": f"{filename} 尚未生成"}), 404
     thumb = ws / f"{img_type}_thumb.webp"
     if not thumb.is_file() or thumb.stat().st_mtime < source.stat().st_mtime:
@@ -847,6 +908,65 @@ def task_file(task_id):
     return jsonify({"path": rel, "size": size, "content": content})
 
 
+@app.get("/api/tasks/<int:task_id>/tokens")
+def task_tokens(task_id):
+    """本任务的大模型 token 流水(界面生成各步 / AI 视觉修复各轮)与合计。"""
+    _task_or_404(task_id)
+    rows = db.task_token_usage(task_id)
+    tin = sum(r["tokens_in"] for r in rows)
+    tout = sum(r["tokens_out"] for r in rows)
+    return jsonify({"rows": rows, "tokens_in": tin, "tokens_out": tout, "total": tin + tout,
+                    "models": sorted({r["model"] for r in rows if r["model"]})})
+
+
+@app.get("/api/usage/tokens")
+def usage_tokens():
+    """token 用量汇总: ?group=day|project|model &days=30(0 为全部)。数据来自 token_usage 流水。"""
+    group = request.args.get("group", "day")
+    if group not in ("day", "project", "model"):
+        return jsonify({"error": "group 仅支持 day/project/model"}), 400
+    try:
+        days = max(0, min(3650, int(request.args.get("days", 30))))
+    except ValueError:
+        days = 30
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S") if days else ""
+    rows = db.token_usage_summary(_cur_ws(), group, since)
+    return jsonify({"group": group, "days": days, "rows": rows,
+                    "tokens_in": sum(r["tokens_in"] for r in rows), "tokens_out": sum(r["tokens_out"] for r in rows)})
+
+
+@app.get("/api/tasks/<int:task_id>/diff_regions")
+def task_diff_regions(task_id):
+    """差异视图的结论与差别区域(确定性计算, 带缓存): {area_pct, regions:[{x,y,w,h}(比例)], verdict}。"""
+    from core import diff_regions
+    task = _task_or_404(task_id)
+    try:
+        data = diff_regions.for_workspace(_workspace_of(task))
+    except Exception as exc:
+        return jsonify({"error": f"计算失败: {type(exc).__name__}"}), 500
+    if data is None:
+        return jsonify({"error": "这个任务没有可比较的截图"}), 404
+    return jsonify(data)
+
+
+@app.get("/api/tasks/<int:task_id>/live_code")
+def task_live_code(task_id):
+    """界面生成: 模型正在写的代码(增量)。?epoch=&since=&think_since= 为客户端已收到的位置;
+    epoch 变了(进入新一轮写页面/修复)时从头返回 reset=true。非运行中或非生成任务返回 active=false。"""
+    from core.uir import livecode
+    task = _task_or_404(task_id)
+    if task.get("status") != "running":
+        return jsonify({"active": False})
+
+    def _int(name):
+        try:
+            return max(0, int(request.args.get(name, 0)))
+        except (TypeError, ValueError):
+            return 0
+    out = livecode.read(_workspace_of(task), _int("epoch"), _int("since"), _int("think_since"))
+    return jsonify(out)
+
+
 @app.get("/api/tasks/<int:task_id>/structure")
 def task_structure(task_id):
     task = _task_or_404(task_id)
@@ -868,8 +988,12 @@ def task_structure(task_id):
 # ---------------------------------------------------------------------------
 @app.get("/api/ai/config")
 def ai_config_state():
+    from core.uir import llm as uir_llm
+    gen_cfg = uir_llm.resolve_ai_cfg({})      # 生成侧另认仓库外的 Key 文件
     return jsonify({
         "key_configured": bool(config.AI_API_KEY),
+        "generate_ready": bool(gen_cfg),
+        "generate_model": (gen_cfg or {}).get("model", ""),
         "base_url": config.AI_API_BASE_URL,
         "model": config.AI_MODEL,
         "trigger_score": config.AI_REPAIR_TRIGGER_SCORE,
@@ -1163,6 +1287,11 @@ def api_v4_generate():
            "ai_api_key": str(form.get("ai_api_key") or "").strip()[:4096],
            "ai_base_url": str(form.get("ai_base_url") or "").strip()[:4096],
            "ai_model": str(form.get("ai_model") or "").strip()[:200]}
+    if kind == "description" and gen_settings.use_code_track(kind, target, spec):
+        from core.uir import llm as uir_llm
+        if not uir_llm.resolve_ai_cfg(cfg):
+            # 文字需求只能由模型来写; 没有模型时在提交处就说清楚, 不再入队后交付一张无关的模板页
+            return jsonify({"error": "文字生成需要大模型: 请先在「系统设置 → AI 供应商」配置 Key, 或在提交时填写任务级 Key"}), 400
     project_id = form.get("project_id")
     project_id = int(project_id) if str(project_id or "").isdigit() else None
     if project_id is not None and (db.get_project(project_id) or {}).get("workspace_id") != _cur_ws():
@@ -1172,7 +1301,7 @@ def api_v4_generate():
     blocked = _quota_block(_cur_ws(), "clone", 1)
     if blocked:
         return blocked
-    batch_id = db.create_batch(name, [(target_url, "generated")], cfg, project_id,
+    batch_id = db.create_batch(name, [(target_url, label[:60] or "生成页面")], cfg, project_id,
                                created_by=(_current_user() or {}).get("username", ""),
                                workspace_id=_cur_ws())
     task = db.list_tasks(batch_id=batch_id, limit=1, workspace_id=_cur_ws())
@@ -2814,8 +2943,22 @@ def download_zip(task_id):
             db.update_task(task_id, zip_path=str(zip_path))
         except Exception as exc:
             return jsonify({"error": f"ZIP 重建失败: {exc}"}), 500
-    return send_file(zip_path, as_attachment=True,
-                     download_name=f"clone_{task['domain'] or 'site'}_{task_id}.zip")
+    return send_file(zip_path, as_attachment=True, download_name=_download_name(task, _workspace_of(task)))
+
+
+_UNSAFE_NAME = re.compile(r'[\\/:*?"<>|\x00-\x1f]+')
+
+
+def _download_name(task: dict, ws: Path) -> str:
+    """下载文件名: 页面标题(没有时用 域名+路径) + 任务号, 去掉文件名非法字符, 控制长度。"""
+    title = _display_title(task, ws)
+    if not title:
+        u = urlsplit(task.get("target_url") or "")
+        host = u.netloc or task.get("domain") or "site"
+        title = host + (u.path.rstrip("/").replace("/", "_") if u.path and u.path != "/" else "")
+    name = _UNSAFE_NAME.sub("_", title)
+    name = re.sub(r"[\s_]+", " ", name).strip(" ._")[:60] or "site"
+    return f"{name} #{task['id']}.zip"
 
 
 @app.get("/api/export_all")
@@ -3098,9 +3241,47 @@ def v4_docker_task_action(task_id, action):
     return resp
 
 
+def _backfill_generate_meta():
+    """老的生成任务: 任务名还是 generated 的按任务书标题回填; token 流水按 generate_report.json 的 calls 回填(幂等)。"""
+    from core.uir.generate import task_title, token_rows
+    try:
+        rows = db._conn.execute(
+            "SELECT t.id, t.domain, t.workspace_path, b.name AS batch_name, b.config_json FROM clone_tasks t"
+            " JOIN batch_jobs b ON t.batch_id = b.id WHERE t.target_url LIKE 'uir:generate:%'").fetchall()
+    except Exception:
+        return
+    have = {r[0] for r in db._conn.execute("SELECT DISTINCT task_id FROM token_usage WHERE kind = 'generate'").fetchall()}
+    for r in rows:
+        ws = Path(r["workspace_path"] or "")
+        rep = {}
+        with suppress(Exception):
+            rep = json.loads((ws / "generate_report.json").read_text(encoding="utf-8"))
+        if (r["domain"] or "") in ("", "generated"):
+            spec = (_parse_json(r["config_json"] or "{}").get("gen") or {})
+            title = task_title(rep.get("brief") or {}, spec) if rep.get("brief") else ""
+            if not title:
+                title = (r["batch_name"] or "").replace("生成 · ", "").strip()[:60] or task_title({}, spec)
+            db.update_task(r["id"], domain=title)
+        if r["id"] not in have and rep.get("calls"):
+            with suppress(Exception):
+                db.replace_token_usage(r["id"], "generate", token_rows(rep))
+
+
+def _record_repair_tokens(ws, model, step, usage):
+    """AI 视觉修复每轮的 token 记账(ai_vision_repair.USAGE_SINK); 工作区目录名即任务号。"""
+    name = Path(ws).name
+    if name.isdigit():
+        db.add_token_usage(int(name), "ai_repair", model, step, (usage or {}).get("prompt_tokens") or 0,
+                           (usage or {}).get("completion_tokens") or 0)
+
+
 def _boot():
     db.ensure_default_project()
     _apply_saved_settings()
+    from core import ai_vision_repair
+    ai_vision_repair.USAGE_SINK = _record_repair_tokens
+    with suppress(Exception):
+        _backfill_generate_meta()
     scheduler.start()
     threading.Thread(target=_audit_retention_worker, daemon=True,
                      name="audit-retention").start()

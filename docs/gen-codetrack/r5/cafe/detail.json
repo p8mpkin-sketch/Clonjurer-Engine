@@ -1,0 +1,168 @@
+{
+  "score": 87.2,
+  "scoring": "req-fit-v1",
+  "raw": 87.2,
+  "coverage": 0.853,
+  "health": 1.0,
+  "design": 0.8,
+  "caps": [],
+  "items": [
+    {
+      "id": "c1",
+      "text": "首屏可见店名「拾光咖啡」大字标题与一句 slogan，占据视口主要位置",
+      "type": "content",
+      "must": true,
+      "verdict": "yes",
+      "evidence": "图1/图3首屏左侧有超大号「拾光咖啡」标题，下方一句 slogan「把时间交给一只滤杯。注水、闷蒸、滴滤，每一杯都按它自己的节奏落下，我们只是恰好在这里等你。」，标题占据视口左侧主要位置。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c2",
+      "text": "页面包含招牌菜单区域，至少展示 3 个分类或 6 个单品及价格",
+      "type": "content",
+      "must": true,
+      "verdict": "yes",
+      "evidence": "图3/图5 招牌菜单区分为「手冲 POUR OVER」「奶咖 MILK COFFEE」「甜点 PASTRY」三栏，共 6 个单品并带价格（¥38/¥36/¥32/¥34/¥28/¥22）。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c3",
+      "text": "页面包含门店地址、营业时间与联系电话信息",
+      "type": "content",
+      "must": true,
+      "verdict": "yes",
+      "evidence": "图4 门店信息卡列出地址「老城区 榆树巷 17 号 二层」、营业时间「周一至周五 08:00-20:00 周六周日 09:00-21:00」、电话「021-6488-1717」；页脚也重复了这三项。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c4",
+      "text": "整体配色为米白底 + 深咖啡褐文字 + 焦糖棕强调，无紫色渐变或霓虹发光效果",
+      "type": "visual",
+      "must": true,
+      "verdict": "yes",
+      "evidence": "全站为米白/浅米色底，标题与正文为深咖啡褐色，按钮与强调点为焦糖棕；未见紫色渐变或霓虹发光。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c5",
+      "text": "首屏右侧有手冲壶与滤杯的插画，壶嘴到滤杯之间有细水流线条",
+      "type": "visual",
+      "must": true,
+      "verdict": "yes",
+      "evidence": "图1/图3 首屏右侧有手冲壶与下方滤杯/分享壶插画，壶嘴到滤杯之间有一条细水流线（图2 中水流线可见）。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c6",
+      "text": "页面加载后首屏蒸汽曲线持续上下浮动循环，三条曲线相位错开",
+      "type": "motion",
+      "must": false,
+      "verdict": "partial",
+      "evidence": "插画上方可见三条蒸汽曲线，且体检显示 steamRise 关键帧动画在运行、连拍帧有 0.8%~8% 像素变化；但仅凭静态截图无法确认三条曲线相位是否错开，也无法确认是持续上下浮动循环。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c7",
+      "text": "首屏水流线条以 stroke-dashoffset 循环流动，节奏为先快后慢",
+      "type": "motion",
+      "must": false,
+      "verdict": "partial",
+      "evidence": "体检数据中 waterFlow 动画在运行，水流线存在；但截图无法验证是否使用 stroke-dashoffset 以及「先快后慢」的节奏。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c8",
+      "text": "页面加载时标题与插画依次淡入上移，间隔约 120ms",
+      "type": "effect",
+      "must": false,
+      "verdict": "partial",
+      "evidence": "图1（加载后约 0.5s）标题与插画已基本到位，图2 与图1 差异集中在插画与文字区域，说明有入场/持续动画；但无法从截图确认「依次淡入上移、间隔约 120ms」的具体时序。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c9",
+      "text": "鼠标悬停菜单卡片时卡片上浮约 4px，并展开显示豆子产地与烘焙度小字",
+      "type": "interaction",
+      "must": false,
+      "verdict": "partial",
+      "evidence": "图5 为自动操作后的菜单区，卡片未见展开的产地/烘焙度小字，也未见上浮；但自动探测对 hover 判定为「无法自动判定」，现有截图不能证明悬停效果存在或不存在。",
+      "gate": "现有截图和体检数据无法确认",
+      "soft": true
+    },
+    {
+      "id": "c10",
+      "text": "首屏底部横向信息带持续循环滚动营业时间与今日豆单",
+      "type": "motion",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "首屏底部有一条横向信息带（营业时间、今日豆单、地址），图1 与图2 中该带内容位置发生横向位移，体检也显示 tickerScroll 动画在运行，说明在循环滚动。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c11",
+      "text": "页脚手绘地图上有脉动圆点标出店铺位置，并附步行指引文案",
+      "type": "visual",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "图4 页脚手绘地图上有黄色脉动圆点标注「拾光咖啡」，下方有步行指引文案「地铁 3 号线榆树巷站 B 口出，沿南巷向北步行约 120 米…全程约 3 分钟」，体检显示 pulseDot 动画在运行。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c12",
+      "text": "滚动页面时背景咖啡渍与蒸汽层以不同速度上移，产生视差层次",
+      "type": "interaction",
+      "must": false,
+      "verdict": "partial",
+      "evidence": "页面注册了 scroll 监听且体检显示 warmShift 等动画，但截图均为静态整页图，无法判断背景咖啡渍与蒸汽层是否以不同速度上移形成视差。",
+      "gate": "现有截图和体检数据无法确认",
+      "soft": true
+    }
+  ],
+  "review_mode": "vision",
+  "summary": "一家完成度较高的咖啡店首页，配色、排版、菜单与门店信息齐全，动效与视差细节部分无法从截图完全验证。",
+  "design_comment": "整体完成度高：米白+咖啡褐+焦糖棕的配色统一，首屏大字标题、手冲插画、底部滚动信息带层次清晰，菜单三栏与门店信息卡排版规整，页脚手绘地图与步行指引细节到位，手机宽度下也无溢出。扣分点在于首屏右侧插画与文字区之间留白偏大、菜单卡片悬停展开效果在截图中不可见、部分动效（视差、水流节奏）无法从静态图确认。",
+  "issues": [
+    {
+      "severity": "mid",
+      "problem": "菜单卡片的悬停展开（产地/烘焙度小字）与上浮 4px 在操作后的截图中均未出现，交互反馈可能未生效或触发区域过小。",
+      "fix": "确认卡片 hover 状态样式已绑定，扩大可触发区域，并保证展开内容不撑破卡片高度。"
+    },
+    {
+      "severity": "low",
+      "problem": "首屏右侧插画与左侧文案之间留白较大，视觉重心略偏左，右侧插画显得孤立。",
+      "fix": "适当放大插画或增加背景光晕/咖啡渍层次，使左右视觉重量更均衡。"
+    },
+    {
+      "severity": "low",
+      "problem": "首屏底部滚动信息带在手机宽度下文字被裁切（图6 中「时间 周一至周五 08:00 — 20:00」左侧被截断）。",
+      "fix": "移动端减小字号或调整滚动起始位置，避免首字被裁切。"
+    }
+  ],
+  "facts": {
+    "errors": false,
+    "blank": false,
+    "frozen": false,
+    "external": false,
+    "overflow_desktop": false,
+    "overflow_mobile": false,
+    "motion_none": false,
+    "motion_seen": true,
+    "motion_after": true,
+    "effects_none": false,
+    "interactive_n": 8,
+    "responded_n": 5,
+    "dead_n": 0,
+    "unknown_n": 3
+  },
+  "warnings": []
+}

@@ -1,0 +1,148 @@
+{
+  "score": 93.9,
+  "scoring": "req-fit-v1",
+  "raw": 93.9,
+  "coverage": 0.964,
+  "health": 1.0,
+  "design": 0.8,
+  "caps": [],
+  "items": [
+    {
+      "id": "c1",
+      "text": "页面展示一张天气卡片，卡片内包含未来五天（含今天起连续五天）的天气信息",
+      "type": "content",
+      "must": true,
+      "verdict": "yes",
+      "evidence": "卡片内五列：今天 03/12、周四 03/13、周五 03/14、周六 03/15、周日 03/16，连续五天。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c2",
+      "text": "每一天都显示日期、天气状况文字与最高/最低温度",
+      "type": "content",
+      "must": true,
+      "verdict": "yes",
+      "evidence": "每列均有日期（03/12 等）、天气文字（晴/多云/小雨/雷阵雨/晴间多云）与最高/最低温（24°13° 等）。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c3",
+      "text": "所有天气数据来自页面内置的示例数据，不发起任何网络请求",
+      "type": "content",
+      "must": true,
+      "verdict": "yes",
+      "evidence": "体检数据外网资源请求为 0，页面标注「示例数据」，无网络请求。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c4",
+      "text": "卡片在视口中居中且占据主要面积，页面背景铺满整个视口，不留大片空白",
+      "type": "visual",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "桌面 1440×900 下卡片居中占据主要面积，背景为深色渐变铺满视口；手机 390px 下卡片占满宽度且无横向溢出。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c5",
+      "text": "卡片内有一条连接五天最高温与最低温的曲线，曲线上的点与对应日期列对齐",
+      "type": "visual",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "图 3 静置后可见橙色最高温曲线与蓝色最低温曲线，五个数据点与五列日期对齐。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c6",
+      "text": "打开页面时卡片淡入上浮，温度曲线在约 1.2 秒内绘制完成",
+      "type": "motion",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "图 1（0.5s）曲线仅绘制出左侧一小段，图 2（约 1.2s 后）曲线完整，说明 drawLine 在约 1.2 秒内完成；事件计数含 cardIn、drawLine 关键帧动画。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c7",
+      "text": "鼠标悬停某一天时，该列与曲线上对应的点同时放大高亮",
+      "type": "interaction",
+      "must": false,
+      "verdict": "partial",
+      "evidence": "图 3 中「今天」列有高亮边框，但截图为静态，无法确认悬停时曲线点同步放大；体检数据未提供 hover 探测结果。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c8",
+      "text": "点击某一天后，卡片背景色在 0.5 秒内过渡到该日对应的天空色调",
+      "type": "interaction",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "图 4 点击周日（03/16）后卡片背景变为紫褐色黄昏色调，底部显示「当前天空 黄昏」，与「晴间多云」对应；过渡计数 286 次。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c9",
+      "text": "点击 °C/°F 切换按钮后，所有温度数字与曲线纵轴同步换算，数字带滚动过渡",
+      "type": "interaction",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "图 4 点击 °F 后所有温度变为 69°F/55°F/42°F 等，曲线纵轴刻度变为 81°F/68°F/55°F/42°F，文字变化记录含滚动过渡动画。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c10",
+      "text": "每天列内有一个内联 SVG 天气图标，与当天天气状况文字一致",
+      "type": "visual",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "每列均有内联 SVG 图标：太阳（晴）、云（多云）、雨滴（小雨）、闪电（雷阵雨）、云+太阳（晴间多云），与文字一致。",
+      "gate": null,
+      "soft": false
+    },
+    {
+      "id": "c11",
+      "text": "页面无外部字体、图片或脚本依赖，断网状态下仍完整显示",
+      "type": "content",
+      "must": false,
+      "verdict": "yes",
+      "evidence": "外网资源请求为 0，无外部字体/图片/脚本，断网仍完整显示。",
+      "gate": null,
+      "soft": false
+    }
+  ],
+  "review_mode": "vision",
+  "summary": "",
+  "design_comment": "深色玻璃拟态卡片层次丰富，曲线渐变填充、图标与天空色调联动细节到位，桌面与手机布局均良好；悬停高亮效果在截图中不可见，略有遗憾。",
+  "issues": [
+    {
+      "severity": "low",
+      "problem": "悬停某天时该列与曲线点同步放大的效果在截图中无法确认，可能未实现或效果过弱。",
+      "fix": "增强 hover 时列背景与曲线点的放大/发光反馈，并确保曲线点与列联动。"
+    }
+  ],
+  "facts": {
+    "errors": false,
+    "blank": false,
+    "frozen": false,
+    "external": false,
+    "overflow_desktop": false,
+    "overflow_mobile": false,
+    "motion_none": false,
+    "motion_seen": true,
+    "motion_after": true,
+    "effects_none": false,
+    "interactive_n": 7,
+    "responded_n": 7,
+    "dead_n": 0,
+    "unknown_n": 0
+  },
+  "warnings": []
+}
