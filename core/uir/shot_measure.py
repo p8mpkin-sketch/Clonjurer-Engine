@@ -82,16 +82,23 @@ def measure(path: Path, max_h: int = 2400) -> dict:
         out.append({"y0": y0, "y1": y1, "h": y1 - y0, "bg": _hex(bg), "x0": x0, "x1": x1,
                     "ink": round(float(diff.mean()), 3)})
     cards = _cards(a, out)
+    cols = _columns(a, W, H)
     # 主色: 全图量化色按面积取前 6
     vals, cnt = np.unique(code[::4, ::4], return_counts=True)
     order = cnt.argsort()[::-1][:6]
     palette = [_hex(((int(vals[i]) >> 16) & 255, (int(vals[i]) >> 8) & 255, int(vals[i]) & 255)) for i in order]
-    return {"width": W, "height": H, "bands": out, "palette": palette, "cards": cards}
+    return {"width": W, "height": H, "bands": out, "palette": palette, "cards": cards, "columns": cols}
 
 
 def describe(m: dict, cards: bool = False) -> str:
     """给写代码模型看的测量摘要(CSS 像素)。"""
-    lines = [f"画面宽 {m['width']}px; 主色(按面积): {', '.join(m['palette'])}", "从上到下的区块(背景色带):"]
+    lines = [f"画面宽 {m['width']}px; 主色(按面积): {', '.join(m['palette'])}"]
+    cols = m.get("columns") or []
+    if len(cols) > 1:
+        lines.append("纵向分界(贯穿整页大部分高度的竖向边线/底色交界, 如侧边栏边线、主内容区左右边缘; 各栏横向范围请按此还原):")
+        for c in cols:
+            lines.append(f"  x {c['x0']}~{c['x1']} (宽 {c['w']}px), 背景 {c['bg']}")
+    lines.append("从上到下的区块(背景色带):")
     for i, b in enumerate(m["bands"], 1):
         span = f"内容横向 {b['x0']}~{b['x1']}px" if b["x1"] > b["x0"] else "无明显内容"
         lines.append(f"  {i}. y {b['y0']}~{b['y1']} (高 {b['h']}px), 背景 {b['bg']}, {span}")
@@ -119,6 +126,15 @@ def compare(ref: dict, out: dict, limit: int = 6) -> list:
         rw, ow = r["x1"] - r["x0"], o["x1"] - o["x0"]
         if rw > 80 and ow > 0 and abs(rw - ow) > max(40, rw * 0.12):
             probs.append(f"第 {i} 区块内容宽度: 原图 {r['x0']}~{r['x1']}px(宽 {rw}), 产出 {o['x0']}~{o['x1']}px(宽 {ow})")
+    rc, oc0 = ref.get("columns") or [], out.get("columns") or []
+    if len(rc) > 1 and len(probs) < limit:
+        if len(oc0) != len(rc):
+            probs.append(f"纵向分栏: 原图 {len(rc)} 栏(" + ", ".join(f"宽 {c['w']}px" for c in rc) + f"), 产出 {len(oc0)} 栏")
+        else:
+            for i, (r, o) in enumerate(zip(rc, oc0), 1):
+                if abs(r["w"] - o["w"]) > max(16, r["w"] * 0.1):
+                    probs.append(f"第 {i} 栏宽度: 原图 {r['w']}px(x {r['x0']}~{r['x1']}), 产出 {o['w']}px")
+                    break
     # 卡片: 原图每张较大的卡片, 在产出里找重叠最多的一张, 位置/尺寸差得多就报
     oc = out.get("cards") or []
     for i, r in enumerate((ref.get("cards") or [])[:12], 1):
@@ -194,3 +210,32 @@ def _cards(a, bands, k: int = 3, max_cards: int = 24) -> list:
             out.append({"x": x0 * k, "y": y0 * k, "w": bw * k, "h": bh * k, "bg": "#%02x%02x%02x" % tuple(int(c) for c in col)})
     out.sort(key=lambda c: (c["y"] // 20, c["x"]))
     return out[:max_cards]
+
+def _columns(a, W: int, H: int) -> list:
+    """纵向分栏: 找贯穿页面大部分高度的竖向分界(左右两侧颜色在 ≥70% 的行里都不同, 例如侧边栏的边线或底色交界),
+    按分界切成几栏。典型是后台侧边栏、文档站左目录。没有分栏返回 []。"""
+    import numpy as np
+    step = max(1, H // 400)
+    sub = a[::step].astype(np.int32)
+    d = np.abs(sub[:, 2:] - sub[:, :-2]).max(axis=2) > 3          # x 与 x+2 之间颜色不同
+    frac = d.mean(axis=0)
+    xs = [x + 1 for x in range(len(frac)) if frac[x] >= 0.7]
+    edges = []
+    for x in xs:                                                    # 相邻几像素算同一条分界
+        if edges and x - edges[-1] <= 4:
+            continue
+        edges.append(x)
+    edges = [x for x in edges if 0.06 * W <= x <= 0.94 * W]
+    if not edges or len(edges) > 3:
+        return []
+    cuts = [0] + edges + [W]
+    out = []
+    for x0, x1 in zip(cuts, cuts[1:]):
+        if x1 - x0 < 40:
+            continue
+        mid = sub[:, x0 + 2:x1 - 2].reshape(-1, 3)
+        bg = np.median(mid, axis=0)
+        out.append({"x0": x0, "x1": x1, "w": x1 - x0, "bg": _hex(bg)})
+    if len(out) < 2 or not any(0.08 * W <= c["w"] <= 0.4 * W for c in (out[0], out[-1])):
+        return []
+    return out
