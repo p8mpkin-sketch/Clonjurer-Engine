@@ -642,6 +642,36 @@ html body .proj-sort select option{background:var(--surface);color:var(--fg)}
   .mt-row.lk-row > :last-child{grid-row:1 / span 2;grid-column:3}
   .lk-kpis .pg-kpi-sub{display:none}
 }
+/* 远程发布: 档案表 / 发布中进度条 / 新建编辑弹层两栏表单 */
+.mt-row.rd-row{grid-template-columns:minmax(0,1.6fr) minmax(0,1.2fr) minmax(0,1.3fr) 104px 196px}
+.rd-sub{margin-top:2px;font-size:12px;color:var(--fg-3);font-variant-numeric:tabular-nums}
+.rd-pct{margin-left:4px;color:var(--fg-3);font-size:12px;font-variant-numeric:tabular-nums}
+.rd-bar{margin-top:6px;height:4px;border-radius:2px;background:var(--line);overflow:hidden}
+.rd-bar > i{display:block;height:100%;border-radius:2px;background:var(--accent);transition:width .6s ease}
+.mt-icon:disabled{opacity:.35;cursor:not-allowed}
+.mt-icon:disabled:hover{background:transparent;color:var(--fg-3)}
+.rd-form{max-height:calc(100vh - 32px);overflow-y:auto}
+.rd-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 14px}
+.rd-grid > div{display:flex;flex-direction:column;gap:6px;min-width:0}
+.rd-grid .rd-span{grid-column:1 / -1}
+.rd-grid .mt-input:not(.mt-textarea),.rd-grid .mt-select{flex:none;max-width:none}
+.rd-grid label{margin-top:6px}
+.rd-hint{margin-left:6px;font-weight:400;color:var(--fg-3)}
+.rd-key{min-height:96px}
+.rd-ok{color:rgb(var(--ok-600))}
+@media (max-width:900px){
+  .mt-row.rd-row{grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,1.2fr) 88px 196px;gap:12px}
+}
+@media (max-width:760px){
+  .mt-row.rd-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 196px}
+}
+@media (max-width:600px){
+  .mt-row.rd-row.mt-row-head{display:none}
+  .mt-row.rd-row{grid-template-columns:minmax(0,1fr) auto;row-gap:6px}
+  .mt-row.rd-row > :nth-child(3){grid-row:2;grid-column:1}
+  .mt-row.rd-row > :last-child{grid-row:1 / span 2;grid-column:2;flex-wrap:wrap;max-width:132px}
+  .rd-grid{grid-template-columns:minmax(0,1fr)}
+}
 /* 导入存档 */
 .imp-drop{display:flex;align-items:center;gap:10px;height:56px;margin-top:0;padding:0 14px;border-radius:10px;border:1px dashed var(--line-strong);background:var(--bg);color:var(--fg-3);font-size:13px;font-weight:400;cursor:pointer;transition:border-color .15s,color .15s}
 .imp-drop:hover{border-color:var(--fg-3);color:var(--fg-2)}

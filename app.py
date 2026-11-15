@@ -34,6 +34,13 @@ REST API:
   GET  /api/v4/links/providers      四家缩链服务可用性预检
   GET/POST /api/v4/links            短链列表与单独新建
   GET  /s/<id>                      短链跳转(302)并计点击
+  GET/POST /api/v4/remote/deploys   远程发布档案列表(?q=)与新建
+  GET/PATCH/DELETE /api/v4/remote/deploys/<id>   详情(进度/阶段/日志尾部)/编辑/删除(?purge=1 清远端目录)
+  POST /api/v4/remote/deploys/<id>/deploy        发布(异步, 后台线程)
+  POST /api/v4/remote/deploys/<id>/start|stop    远端服务启停
+  GET  /api/v4/remote/deploys/<id>/logs          部署日志(?kind=deploy) / 运行日志(?kind=runtime&tail=N)
+  GET  /api/v4/remote/deploys/<id>/status        远端服务存活探测
+  POST /api/v4/remote/test-connection            保存前连通性测试(只验证登录)
 """
 import io
 import csv
@@ -3237,6 +3244,255 @@ def short_link_redirect(link_id):
     return resp
 
 # ---------------------------------------------------------------------------
+# 远程发布: 把导出工程包经 SSH 发布到用户自己的服务器长期运行(服务层 core/remote_deploy.py)
+# 与本机部署(上面的 /api/v4/docker, core/deploy.py)互不调用。凭据只以 Fernet 密文落库, 接口只回掩码。
+# ---------------------------------------------------------------------------
+from core import remote_deploy  # noqa: E402
+from core.remote_deploy import RemoteDeployError  # noqa: E402
+
+
+def _remote_package(clone_task_id: int) -> Path:
+    """导出 ZIP 路径: 与「下载 ZIP」同源, 包被存储清理删掉时按同一逻辑重建。"""
+    task = db.get_task(clone_task_id)
+    if task is None:
+        raise RemoteDeployError(f"关联的克隆任务 #{clone_task_id} 不存在")
+    zip_path = Path(task["zip_path"]) if task.get("zip_path") else Path()
+    if zip_path.is_file():
+        return zip_path
+    ws = _workspace_of(task)
+    if task.get("status") != "completed" or not (ws / "site.json").is_file():
+        raise RemoteDeployError(f"克隆任务 #{clone_task_id} 尚未完成或工作空间已清理, 没有可发布的工程包")
+    zip_path = Path(_regenerate_project(task, ws))
+    db.update_task(clone_task_id, zip_path=str(zip_path))
+    return zip_path
+
+
+remote_deployer = remote_deploy.RemoteDeployer(db, _remote_package, security.decrypt_value,
+                                               config.EXPORTS_DIR / "remote")
+
+
+def _remote_visible(rec: dict) -> bool:
+    """档案经关联克隆任务归属工作区: 登录模式下只看得到本区任务的档案。"""
+    if not _auth_required():
+        return True
+    return bool(rec.get("clone_task_id")) and _visible_task(rec["clone_task_id"]) is not None
+
+
+def _remote_or_404(dep_id: int) -> dict:
+    rec = db.get_remote_deploy(dep_id)
+    if rec is None or not _remote_visible(rec):
+        abort(404)
+    return rec
+
+
+def _remote_out(rec: dict, log_tail: int = 0) -> dict:
+    out = remote_deploy.RemoteDeployer.present(rec, log_tail=log_tail)
+    if remote_deployer.is_busy(rec["id"]):
+        out["status"] = "deploying"
+    clone = _visible_task(rec["clone_task_id"]) if rec.get("clone_task_id") else None
+    out["clone_domain"] = (clone or {}).get("domain", "")
+    return out
+
+
+def _remote_form(body: dict, partial: bool) -> dict:
+    """校验档案字段; 返回可直接落库的字段(凭据已加密)。partial=True 时只校验传了的字段。"""
+    out: dict = {}
+    if not partial or "name" in body:
+        name = str(body.get("name") or "").strip()
+        if not 1 <= len(name) <= 120:
+            raise RemoteDeployError("名称需 1~120 个字符")
+        out["name"] = name
+    if not partial or "host" in body:
+        out["host"] = remote_deploy.validate_host(body.get("host"))
+    if not partial or "ssh_port" in body:
+        out["ssh_port"] = remote_deploy.validate_port(body.get("ssh_port", 22), "SSH 端口")
+    if not partial or "username" in body:
+        out["username"] = remote_deploy.validate_username(body.get("username"))
+    if not partial or "remote_port" in body:
+        out["remote_port"] = remote_deploy.validate_port(body.get("remote_port", 8000), "服务端口")
+    if not partial or "auth_type" in body:
+        auth = str(body.get("auth_type") or "password")
+        if auth not in remote_deploy.AUTH_TYPES:
+            raise RemoteDeployError("认证方式只能是 password(口令)或 key(私钥)")
+        out["auth_type"] = auth
+    if not partial or "clone_task_id" in body:
+        try:
+            cid = int(body.get("clone_task_id"))
+        except (TypeError, ValueError):
+            raise RemoteDeployError("请选择要发布的克隆任务") from None
+        task = _visible_task(cid)
+        if task is None:
+            raise RemoteDeployError(f"克隆任务 #{cid} 不存在")
+        if task.get("status") != "completed":
+            raise RemoteDeployError(f"克隆任务 #{cid} 还没有完成, 不能发布")
+        out["clone_task_id"] = cid
+    if not partial or "note" in body:
+        out["note"] = str(body.get("note") or "").strip()[:300]
+    secret = body.get("password")
+    if secret not in (None, ""):
+        secret = str(secret)
+        if len(secret) > 16384:
+            raise RemoteDeployError("口令/私钥过长")
+        out["password_enc"] = security.encrypt_value(secret)
+    elif not partial:
+        raise RemoteDeployError("请填写 SSH 口令或私钥")
+    return out
+
+
+@app.get("/api/v4/remote/deploys")
+def v4_remote_list():
+    q = (request.args.get("q") or "").strip()[:100] or None
+    rows = [r for r in db.list_remote_deploys(q=q) if _remote_visible(r)]
+    return jsonify({"deploys": [_remote_out(r) for r in rows]})
+
+
+@app.post("/api/v4/remote/deploys")
+def v4_remote_create():
+    body = request.get_json(silent=True) or {}
+    try:
+        f = _remote_form(body, partial=False)
+    except RemoteDeployError as e:
+        return jsonify({"error": str(e)}), 400
+    dep_id = db.create_remote_deploy(f["name"], f["host"], f["ssh_port"], f["username"], f["password_enc"],
+                                     f["clone_task_id"], f["remote_port"], f["note"], auth_type=f["auth_type"])
+    _audit("remote.create", f"新建远程发布 #{dep_id} {f['name']} -> {f['username']}@{f['host']}:{f['ssh_port']}"
+                            f"(克隆 #{f['clone_task_id']}, 端口 {f['remote_port']})")
+    started = False
+    if body.get("deploy_now"):
+        try:
+            remote_deployer.start_deploy_thread(dep_id)
+            started = True
+            _audit("remote.deploy", f"发布远程档案 #{dep_id}")
+        except RemoteDeployError:
+            pass
+    return jsonify({"deploy": _remote_out(db.get_remote_deploy(dep_id), log_tail=80), "started": started}), 201
+
+
+@app.get("/api/v4/remote/deploys/<int:dep_id>")
+def v4_remote_detail(dep_id):
+    tail = request.args.get("tail", "200")
+    return jsonify({"deploy": _remote_out(_remote_or_404(dep_id), log_tail=int(tail) if tail.isdigit() else 200)})
+
+
+@app.patch("/api/v4/remote/deploys/<int:dep_id>")
+def v4_remote_update(dep_id):
+    rec = _remote_or_404(dep_id)
+    if remote_deployer.is_busy(dep_id):
+        return jsonify({"error": "正在发布中, 请等发布结束再修改"}), 409
+    body = request.get_json(silent=True) or {}
+    try:
+        f = _remote_form(body, partial=True)
+    except RemoteDeployError as e:
+        return jsonify({"error": str(e)}), 400
+    reset_key = bool(body.get("reset_host_key"))
+    if ("host" in f and f["host"] != rec["host"]) or ("ssh_port" in f and f["ssh_port"] != rec["ssh_port"]):
+        reset_key = True   # 换了服务器: 旧指纹作废, 下次连接重新 TOFU
+    if reset_key and rec.get("host_key"):
+        f["host_key"] = ""
+    if f:
+        db.update_remote_deploy(dep_id, **f)
+    changed = sorted(k if k != "password_enc" else "password" for k in f)
+    _audit("remote.update", f"修改远程发布 #{dep_id}: {', '.join(changed) or '无变化'}")
+    return jsonify({"deploy": _remote_out(db.get_remote_deploy(dep_id), log_tail=80)})
+
+
+@app.delete("/api/v4/remote/deploys/<int:dep_id>")
+def v4_remote_delete(dep_id):
+    """删档案前先停远端服务(不存在也算成功); ?purge=1 同时删远端目录; 连不上时 ?force=1 只删档案。"""
+    rec = _remote_or_404(dep_id)
+    if remote_deployer.is_busy(dep_id):
+        return jsonify({"error": "正在发布中, 请等发布结束再删除"}), 409
+    purge = request.args.get("purge") in ("1", "true")
+    force = request.args.get("force") in ("1", "true")
+    cleaned = False
+    if rec.get("status") != "idle" or purge:
+        try:
+            remote_deployer.teardown(dep_id, purge=purge)
+            cleaned = True
+        except RemoteDeployError as e:
+            if not force:
+                return jsonify({"error": f"清理远端失败: {e}", "can_force": True}), 502
+    db.delete_remote_deploy(dep_id)
+    _audit("remote.delete", f"删除远程发布 #{dep_id} {rec['name']}"
+                            f"({'已清理远端目录' if cleaned and purge else '已停远端服务' if cleaned else '未清理远端'})")
+    return jsonify({"ok": True, "cleaned": cleaned, "purged": cleaned and purge})
+
+
+@app.post("/api/v4/remote/deploys/<int:dep_id>/deploy")
+def v4_remote_deploy(dep_id):
+    _remote_or_404(dep_id)
+    try:
+        remote_deployer.start_deploy_thread(dep_id)
+    except RemoteDeployError as e:
+        code = 409 if remote_deployer.is_busy(dep_id) else 400
+        return jsonify({"error": str(e)}), code
+    _audit("remote.deploy", f"发布远程档案 #{dep_id}")
+    return jsonify({"started": True, "deploy": _remote_out(db.get_remote_deploy(dep_id), log_tail=80)}), 202
+
+
+@app.post("/api/v4/remote/deploys/<int:dep_id>/<action>")
+def v4_remote_action(dep_id, action):
+    _remote_or_404(dep_id)
+    if action not in ("start", "stop"):
+        return jsonify({"error": "不支持的操作"}), 400
+    try:
+        res = remote_deployer.start(dep_id) if action == "start" else remote_deployer.stop(dep_id)
+    except RemoteDeployError as e:
+        return jsonify({"error": str(e)}), 409 if remote_deployer.is_busy(dep_id) else 502
+    _audit("remote." + action, f"远程档案 #{dep_id} {action}")
+    return jsonify(res)
+
+
+@app.get("/api/v4/remote/deploys/<int:dep_id>/logs")
+def v4_remote_logs(dep_id):
+    rec = _remote_or_404(dep_id)
+    tail = request.args.get("tail", "200")
+    n = int(tail) if tail.isdigit() else 200
+    if request.args.get("kind") == "runtime":
+        try:
+            return jsonify({"kind": "runtime", "logs": remote_deployer.runtime_logs(dep_id, n)})
+        except RemoteDeployError as e:
+            return jsonify({"kind": "runtime", "logs": "", "error": str(e)}), 502
+    lines = (rec.get("log") or "").splitlines()[-max(1, min(n, 2000)):]
+    return jsonify({"kind": "deploy", "logs": "\n".join(lines)})
+
+
+@app.get("/api/v4/remote/deploys/<int:dep_id>/status")
+def v4_remote_status(dep_id):
+    rec = _remote_or_404(dep_id)
+    if remote_deployer.is_busy(dep_id):
+        return jsonify({"status": "deploying", "progress": rec.get("progress"), "stage": rec.get("stage")})
+    try:
+        res = remote_deployer.probe(dep_id)
+    except RemoteDeployError as e:
+        return jsonify({"status": rec.get("status"), "error": str(e)}), 502
+    return jsonify({"status": rec.get("status"), **res})
+
+
+@app.post("/api/v4/remote/test-connection")
+def v4_remote_test_connection():
+    """只验证能否登录。编辑已有档案时可传 id 且口令留空: 用库里的凭据与已记录指纹测。"""
+    body = request.get_json(silent=True) or {}
+    secret = str(body.get("password") or "")
+    stored_key = ""
+    auth = str(body.get("auth_type") or "password")
+    if body.get("id"):
+        try:
+            rec = _remote_or_404(int(body["id"]))
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "id 非法"}), 400
+        if not secret:
+            secret = security.decrypt_value(rec.get("password_enc") or "")
+            auth = rec.get("auth_type") or "password"
+        if (str(body.get("host") or rec["host"]).strip() == rec["host"]
+                and str(body.get("ssh_port") or rec["ssh_port"]) == str(rec["ssh_port"])):
+            stored_key = rec.get("host_key") or ""
+    res = remote_deploy.RemoteDeployer.test_connection(body.get("host"), body.get("ssh_port", 22),
+                                                       body.get("username"), secret, auth, stored_key)
+    return jsonify(res), 200 if res["ok"] else 400
+
+
+# ---------------------------------------------------------------------------
 # 沙盒预览(静态文件 + 反向代理兜底)
 # ---------------------------------------------------------------------------
 @app.route("/preview/<int:task_id>/", defaults={"subpath": ""},
@@ -3517,6 +3773,10 @@ def _boot():
                      name="audit-retention").start()
     threading.Thread(target=_schedule_ticker, daemon=True, name="schedule-ticker").start()
     deployer.start_background()
+    with suppress(Exception):   # 上次进程留下的「发布中」记录: 线程已不在, 改为失败
+        n = remote_deployer.recover_after_restart()
+        if n:
+            bus.publish(None, "REMOTE", f"平台重启: {n} 条中断的远程发布已标记为失败")
 
     def _shutdown():
         scheduler.shutdown()
