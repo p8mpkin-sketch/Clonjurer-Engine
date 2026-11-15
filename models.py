@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS remote_deploys (
     ssh_port      INTEGER NOT NULL DEFAULT 22,
     username      TEXT    NOT NULL DEFAULT 'root',
     password_enc  TEXT    NOT NULL DEFAULT '',
+    auth_type     TEXT    NOT NULL DEFAULT 'password',   -- password / key(私钥 PEM, 同样加密存 password_enc)
     clone_task_id INTEGER,
     remote_port   INTEGER NOT NULL DEFAULT 8000,
     note          TEXT    NOT NULL DEFAULT '',
@@ -361,6 +362,12 @@ class Database:
                          ("last_error", "TEXT NOT NULL DEFAULT ''")):
             if dk_cols and col not in dk_cols:
                 self._conn.execute(f"ALTER TABLE docker_containers ADD COLUMN {col} {ddl}")
+        # 远程发布: 认证方式(口令 / 私钥)
+        rd_cols = {r["name"] for r in
+                   self._conn.execute("PRAGMA table_info(remote_deploys)").fetchall()}
+        if rd_cols and "auth_type" not in rd_cols:
+            self._conn.execute(
+                "ALTER TABLE remote_deploys ADD COLUMN auth_type TEXT NOT NULL DEFAULT 'password'")
 
     # ------------------------------------------------------------------
     # 批次
@@ -1602,16 +1609,17 @@ class Database:
 
     def create_remote_deploy(self, name: str, host: str, ssh_port: int,
                              username: str, password_enc: str,
-                             clone_task_id, remote_port: int, note: str) -> int:
+                             clone_task_id, remote_port: int, note: str,
+                             auth_type: str = "password") -> int:
         now = _now()
         with self._lock:
             seq = self._conn.execute(
                 "SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM remote_deploys").fetchone()["n"]
             cur = self._conn.execute(
                 "INSERT INTO remote_deploys (seq, name, host, ssh_port, username,"
-                " password_enc, clone_task_id, remote_port, note, status, created_at, updated_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?)",
-                (seq, name, host, ssh_port, username, password_enc,
+                " password_enc, auth_type, clone_task_id, remote_port, note, status, created_at, updated_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?)",
+                (seq, name, host, ssh_port, username, password_enc, auth_type,
                  clone_task_id, remote_port, note, now, now))
             self._conn.commit()
             return cur.lastrowid
@@ -1647,6 +1655,7 @@ class Database:
             "ssh_port": fields.get("ssh_port"),
             "username": fields.get("username"),
             "password_enc": fields.get("password_enc"),
+            "auth_type": fields.get("auth_type"),
             "clone_task_id": fields.get("clone_task_id"),
             "remote_port": fields.get("remote_port"),
             "note": fields.get("note"),
@@ -1681,6 +1690,20 @@ class Database:
                 "UPDATE remote_deploys SET log = ?, updated_at = ? WHERE id = ?",
                 (text, _now(), dep_id))
             self._conn.commit()
+
+    def fail_stale_remote_deploys(self) -> int:
+        """平台重启: 上次遗留的 deploying 记录改为 failed(部署线程已随进程消失), 返回条数。"""
+        now = _now()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, log FROM remote_deploys WHERE status = 'deploying'").fetchall()
+            for r in rows:
+                text = ((r["log"] or "") + f"[{now}] ERROR 平台重启, 部署被中断, 请重新发布\n")[-12000:]
+                self._conn.execute(
+                    "UPDATE remote_deploys SET status = 'failed', stage = '平台重启, 部署中断',"
+                    " log = ?, updated_at = ? WHERE id = ?", (text, now, r["id"]))
+            self._conn.commit()
+            return len(rows)
 
     def delete_remote_deploy(self, dep_id: int) -> bool:
         with self._lock:

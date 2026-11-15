@@ -15,7 +15,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 <!-- 顶级字体体系: Inter / Plus Jakarta Sans / JetBrains Mono / Noto Sans SC -->
 <link href="/vendor/fonts/fonts.css" rel="stylesheet">
 <!-- UI 改版 P0 规范层: 字号/对比度/焦点/语义色(只换样式) -->
-<link href="/vendor/css/ui-tokens.css?v=24" rel="stylesheet">
+<link href="/vendor/css/ui-tokens.css?v=25" rel="stylesheet">
 
 <script src="/vendor/js/lucide.subset.js?v=8"></script>
 <script>
@@ -981,255 +981,152 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
     </div>
   </div>
 
-  <!-- ======================= 远程部署 ======================= -->
+  <!-- ======================= 远程发布 ======================= -->
   <div v-show="view==='remote'" class="flex-1 min-h-0 overflow-y-auto custom-scroll">
-    <div class="max-w-[1300px] mx-auto px-6 py-6 space-y-5">
-      <div class="flex items-center justify-between flex-wrap gap-3">
+    <div class="pg">
+      <div class="pg-head">
         <div>
-          <h2 class="font-display text-[28px] leading-tight text-slate-100">远程部署</h2>
-          <p class="text-[13px] text-slate-500 mt-1.5">SSH 一键部署已完成的 Clone 工程到 VPS · 打包/上传/依赖/启动/健康检查全自动 · 凭据加密存储</p>
+          <h2 class="pg-title">远程发布</h2>
+          <div class="pg-meta"><span class="live-dot" :class="remoteRunning ? 'on' : ''"></span>[[ remoteRunning ]] 个在运行 · 把克隆好的工程发布到你自己的服务器长期运行 · 凭据加密保存</div>
+        </div>
+        <div class="flex items-center gap-2 flex-wrap">
+          <input v-model="remote.q" @input="loadRemoteSoon()" class="mt-input lk-search" placeholder="搜索名称 / 主机 / 备注" aria-label="搜索远程发布档案">
+          <button v-if="canWrite" type="button" class="mt-btn primary" @click="openRemoteCreate()"><i data-lucide="plus" class="w-4 h-4"></i>新建发布档案</button>
+        </div>
+      </div>
+
+      <section class="mt-panel">
+        <div v-if="remote.list.length" class="mt-row rd-row mt-row-head"><span>名称</span><span class="hide-sm">主机:端口</span><span>最近状态</span><span class="hide-sm">最近部署</span><span></span></div>
+        <div v-for="d in remote.list" :key="d.id" class="mt-row rd-row">
+          <div class="min-w-0">
+            <div class="text-[14px] text-slate-100 truncate">[[ d.name ]]</div>
+            <div class="text-[12px] text-slate-500 truncate tnums">RD-[[ String(d.seq).padStart(3, '0') ]] · 克隆 #[[ d.clone_task_id ]] [[ d.clone_domain ]]</div>
+          </div>
+          <div class="hide-sm min-w-0">
+            <span class="lk-target" :title="d.username + '@' + d.host + ':' + d.ssh_port">[[ d.host ]]:[[ d.ssh_port ]]</span>
+            <div class="rd-sub tnums">服务端口 [[ d.remote_port ]]</div>
+          </div>
+          <div class="min-w-0">
+            <div class="dp-state" :class="remoteStateClass(d.status)">
+              <i v-if="d.status==='deploying'" key="spin" data-lucide="loader" class="w-3.5 h-3.5 animate-spin"></i><span v-else key="dot" class="dot"></span>[[ remoteStatusText(d.status) ]]<span v-if="d.status==='deploying'" class="rd-pct tnums">[[ d.progress ]]%</span>
+            </div>
+            <template v-if="d.status==='deploying'">
+              <div class="rd-bar" role="progressbar" :aria-valuenow="d.progress" aria-valuemin="0" aria-valuemax="100"><i :style="{ width: d.progress + '%' }"></i></div>
+              <div class="rd-sub truncate">[[ d.stage ]]</div>
+            </template>
+            <div v-else-if="d.status==='failed' && d.stage" class="rd-sub lk-err truncate">[[ d.stage ]]</div>
+            <a v-else-if="d.status==='running' && d.service_url" :href="d.service_url" target="_blank" rel="noopener" class="dp-link rd-sub truncate block">[[ d.service_url.replace(/^https?:\/\//, '') ]]</a>
+          </div>
+          <div class="hide-sm text-[12px] text-slate-500 tnums">[[ d.status==='idle' ? '—' : (d.updated_at || '').slice(5, 16) ]]</div>
+          <div class="dp-acts flex items-center justify-end gap-0.5">
+            <template v-if="canWrite">
+              <button type="button" class="mt-icon" :disabled="d.status==='deploying'" title="发布" aria-label="发布" @click="deployRemote(d)"><i data-lucide="rocket" class="w-4 h-4"></i></button>
+              <button v-if="d.status==='running'" key="stop" type="button" class="mt-icon" title="停止" aria-label="停止" @click="remoteAction(d, 'stop')"><i data-lucide="square" class="w-4 h-4"></i></button>
+              <button v-else key="start" type="button" class="mt-icon" :disabled="d.status==='deploying' || d.status==='idle'" title="启动" aria-label="启动" @click="remoteAction(d, 'start')"><i data-lucide="play" class="w-4 h-4"></i></button>
+            </template>
+            <button type="button" class="mt-icon" title="日志" aria-label="日志" @click="openRemoteLog(d)"><i data-lucide="scroll-text" class="w-4 h-4"></i></button>
+            <template v-if="canWrite">
+              <button type="button" class="mt-icon" :disabled="d.status==='deploying'" title="编辑" aria-label="编辑" @click="editRemote(d)"><i data-lucide="pencil" class="w-4 h-4"></i></button>
+              <button type="button" class="mt-icon" :disabled="d.status==='deploying'" title="删除" aria-label="删除" @click="openRemoteDelete(d)"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+            </template>
+          </div>
+        </div>
+        <div v-if="!remote.list.length && remote.q" key="rd-nomatch" class="pg-empty">没有匹配「[[ remote.q ]]」的发布档案</div>
+        <div v-else-if="!remote.list.length" key="rd-empty" class="pg-empty lg">
+          <i data-lucide="cloud-upload" class="w-6 h-6"></i>
+          <div>本机部署适合快速预览；要长期运行，就发布到你自己的云服务器。</div>
+          <button v-if="canWrite" type="button" class="mt-btn primary" @click="openRemoteCreate()">新建发布档案</button>
+        </div>
+      </section>
+    </div>
+
+    <!-- 新建 / 编辑档案 -->
+    <div v-if="remote.modal" class="fixed inset-0 z-[70] flex items-center justify-center bg-black/50" @click.self="remote.modal=false">
+      <form class="mt-modal wide rd-form" @submit.prevent="saveRemote()">
+        <h3>[[ remote.editing ? '编辑发布档案' : '新建发布档案' ]]</h3>
+        <p>工程会放在服务器的 ~/clonjurer_deploy/rd_编号 目录下，用 Python 虚拟环境运行。首次连接会记下服务器指纹，之后指纹变化会拒绝连接。</p>
+        <div class="rd-grid">
+          <div class="rd-span"><label for="rd-name">名称</label>
+            <input id="rd-name" v-model="remote.form.name" class="mt-input" maxlength="120" placeholder="例如：活动页正式环境" required></div>
+          <div class="rd-span"><label for="rd-clone">发布哪个克隆</label>
+            <select id="rd-clone" v-model="remote.form.clone_task_id" class="mt-select" required>
+              <option value="">请选择已完成的克隆任务</option>
+              <option v-for="t in completedTasks" :key="t.id" :value="t.id">#[[ t.id ]] [[ t.domain ]]</option>
+            </select></div>
+          <div><label for="rd-host">服务器地址</label>
+            <input id="rd-host" v-model="remote.form.host" class="mt-input font-mono" spellcheck="false" placeholder="IP 或域名" required></div>
+          <div><label for="rd-sshport">SSH 端口</label>
+            <input id="rd-sshport" v-model.number="remote.form.ssh_port" type="number" min="1" max="65535" class="mt-input font-mono"></div>
+          <div><label for="rd-user">用户名</label>
+            <input id="rd-user" v-model="remote.form.username" class="mt-input font-mono" spellcheck="false" placeholder="root"></div>
+          <div><label for="rd-auth">认证方式</label>
+            <select id="rd-auth" v-model="remote.form.auth_type" class="mt-select">
+              <option value="password">口令</option>
+              <option value="key">私钥</option>
+            </select></div>
+          <div class="rd-span">
+            <label for="rd-secret">[[ remote.form.auth_type==='key' ? '私钥(OpenSSH / PEM, 不支持带口令的私钥)' : '口令' ]]<span v-if="remote.editing && remote.form.has_secret" class="rd-hint">留空表示不修改</span></label>
+            <textarea v-if="remote.form.auth_type==='key'" id="rd-secret" v-model="remote.form.password" class="mt-input mt-textarea font-mono rd-key" spellcheck="false" autocomplete="off" :placeholder="remote.editing && remote.form.has_secret ? '已保存(不显示)' : '-----BEGIN OPENSSH PRIVATE KEY-----'"></textarea>
+            <input v-else id="rd-secret" v-model="remote.form.password" type="password" class="mt-input" autocomplete="new-password" :placeholder="remote.editing && remote.form.has_secret ? '已保存(不显示)' : ''">
+          </div>
+          <div><label for="rd-port">服务端口</label>
+            <input id="rd-port" v-model.number="remote.form.remote_port" type="number" min="1" max="65535" class="mt-input font-mono"></div>
+          <div><label for="rd-note">备注（可选）</label>
+            <input id="rd-note" v-model="remote.form.note" class="mt-input" maxlength="300" placeholder="用途说明"></div>
+        </div>
+        <div class="flex items-center gap-2 flex-wrap">
+          <button type="button" class="mt-btn" :disabled="remote.test.busy || !remote.form.host" @click="testRemoteConn()"><i :data-lucide="remote.test.busy ? 'loader' : 'plug-zap'" :class="remote.test.busy ? 'animate-spin' : ''" class="w-4 h-4"></i>[[ remote.test.busy ? '测试中…' : '测试连接' ]]</button>
+          <span v-if="remote.test.msg" class="text-[12px]" :class="remote.test.ok ? 'rd-ok' : 'lk-err'">[[ remote.test.msg ]]</span>
+        </div>
+        <div v-if="remote.editing && remote.form.host_fingerprint" class="ui-hint">
+          已记录服务器指纹 <span class="font-mono">[[ remote.form.host_fingerprint ]]</span>
+          <label class="flex items-center gap-2 mt-1"><input type="checkbox" v-model="remote.form.reset_host_key">重置主机指纹(服务器确实重装或换过密钥时才勾选)</label>
+        </div>
+        <label v-if="!remote.editing" class="flex items-center gap-2"><input type="checkbox" v-model="remote.form.deploy_now">保存后立即发布</label>
+        <div v-if="remote.error" class="ui-hint lk-err">[[ remote.error ]]</div>
+        <div class="flex justify-end gap-2 mt-2">
+          <button type="button" class="mt-btn" @click="remote.modal=false">取消</button>
+          <button type="submit" class="mt-btn primary" :disabled="remote.busy">[[ remote.busy ? '保存中…' : '保存' ]]</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- 日志 -->
+    <div v-if="remote.log" class="fixed inset-0 z-[70] flex items-center justify-center bg-black/50" @click.self="closeRemoteLog()">
+      <div class="mt-modal wide">
+        <div class="flex items-center gap-3">
+          <h3 class="flex-1 truncate">[[ remote.log.name ]]</h3>
+          <button type="button" class="mt-icon" title="复制日志" aria-label="复制日志" @click="copyText(remoteLogText)"><i data-lucide="copy" class="w-4 h-4"></i></button>
+          <button type="button" class="mt-icon" title="刷新" aria-label="刷新" @click="refreshRemoteLog()"><i data-lucide="refresh-cw" class="w-4 h-4"></i></button>
+          <button type="button" class="mt-icon" title="关闭" aria-label="关闭" @click="closeRemoteLog()"><i data-lucide="x" class="w-4 h-4"></i></button>
+        </div>
+        <p class="tnums">[[ remote.log.username ]]@[[ remote.log.host ]]:[[ remote.log.ssh_port ]] · [[ remote.log.remote_dir ]] · [[ remoteStatusText(remote.log.status) ]]<template v-if="remote.log.host_fingerprint"> · 指纹 [[ remote.log.host_fingerprint ]]</template></p>
+        <div v-if="remote.log.status==='deploying'">
+          <div class="flex items-center justify-between text-[12px] text-slate-500"><span>[[ remote.log.stage ]]</span><span class="tnums">[[ remote.log.progress ]]%</span></div>
+          <div class="rd-bar"><i :style="{ width: remote.log.progress + '%' }"></i></div>
         </div>
         <div class="flex items-center gap-2">
-          <div class="relative">
-            <i data-lucide="search" class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-600"></i>
-            <input v-model="remote.q" @input="loadRemote" placeholder="搜索名称 / 主机 / 备注"
-              class="w-[240px] rounded-lg bg-slate-950/70 border border-white/[0.08] pl-8 pr-3 py-2 text-[11px] text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500/60">
-          </div>
-          <button @click="loadRemote(); iconRefresh()" class="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-white/[0.08] text-[11px] text-slate-400 hover:text-slate-100 transition-all" title="刷新部署列表">
-            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>刷新
-          </button>
-          <button @click="openRemoteCreate" class="flex items-center gap-1.5 px-3 py-2 rounded-xl ui-primary text-[11px] font-semibold text-white shadow-lg transition-all">
-            <i data-lucide="plus" class="w-3.5 h-3.5"></i>新建远程部署
-          </button>
+          <button type="button" class="mt-btn" :class="remote.logKind==='deploy' ? 'primary' : ''" @click="remote.logKind='deploy'">部署日志</button>
+          <button type="button" class="mt-btn" :class="remote.logKind==='runtime' ? 'primary' : ''" @click="remote.logKind='runtime'; loadRemoteRuntimeLogs()">运行日志</button>
+          <a v-if="remote.log.status==='running' && remote.log.service_url" :href="remote.log.service_url" target="_blank" rel="noopener" class="dp-link ml-auto truncate">[[ remote.log.service_url ]]</a>
         </div>
-      </div>
-
-      <!-- 新建/编辑表单 -->
-      <div v-show="remote.creating" class="rounded-2xl border border-white/[0.07] bg-slate-900/70 backdrop-blur-xl p-5 space-y-4">
-        <div class="flex items-center justify-between">
-          <div class="text-xs font-semibold text-slate-300">[[ remote.editing !== null ? '编辑远程部署' : '新建远程部署' ]]</div>
-          <span class="text-[9.5px] text-slate-600">凭据 Fernet 加密存储 · TOFU 主机指纹校验</span>
-        </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <!-- 左卡: 目标服务器 SSH 连接 -->
-          <div class="rounded-xl border border-sky-500/20 bg-slate-950/50 p-3.5 space-y-2.5">
-            <div class="text-[10px] font-semibold text-slate-400 flex items-center gap-1.5 tracking-wide">
-              <i data-lucide="server" class="w-3.5 h-3.5 text-sky-400"></i>目标服务器 · SSH 连接
-            </div>
-            <div>
-              <label class="text-[10px] text-slate-500 mb-1 block">VPS 地址(内网/外网 IP 或域名) <span class="text-rose-400">*</span></label>
-              <input v-model="remote.form.host" spellcheck="false" placeholder="例如: 47.92.75.70 或 vps.example.com"
-                class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-3 py-2 text-xs font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-sky-500/60">
-            </div>
-            <div class="grid grid-cols-2 gap-2">
-              <div>
-                <label class="text-[10px] text-slate-500 mb-1 block">SSH 端口</label>
-                <input v-model.number="remote.form.ssh_port" type="number" min="1" max="65535"
-                  class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-3 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-sky-500/60">
-              </div>
-              <div>
-                <label class="text-[10px] text-slate-500 mb-1 block">SSH 用户名</label>
-                <input v-model="remote.form.username" spellcheck="false" placeholder="root"
-                  class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-sky-500/60">
-              </div>
-            </div>
-            <div>
-              <label class="text-[10px] text-slate-500 mb-1 block">认证方式 · 密码 <span class="text-slate-600">(Fernet 加密存储, 留空保持)</span></label>
-              <div class="relative">
-                <input v-model="remote.form.password" :type="remote.showPwd ? 'text' : 'password'" autocomplete="new-password" placeholder="••••••••"
-                  class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-3 py-2 pr-10 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-sky-500/60">
-                <button type="button" @click="remote.showPwd=!remote.showPwd" :title="remote.showPwd ? '隐藏密码' : '显示密码'"
-                  class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-200 transition-all">
-                  <i :data-lucide="remote.showPwd ? 'eye-off' : 'eye'" class="w-4 h-4"></i>
-                </button>
-              </div>
-            </div>
-            <button @click="testRemoteConn" :disabled="remote.testState.busy || !remote.form.host || !remote.form.password"
-              class="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-sky-500/40 bg-sky-500/10 text-[11px] font-semibold text-sky-300 hover:bg-sky-500/20 disabled:opacity-40 transition-all">
-              <i :data-lucide="remote.testState.busy ? 'loader-2' : 'plug-zap'" :class="remote.testState.busy ? 'animate-spin' : ''" class="w-3.5 h-3.5"></i>
-              [[ remote.testState.busy ? '连接测试中…' : '测试连接' ]]
-            </button>
-            <div v-if="remote.testState.msg" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[10.5px] fade-in"
-              :class="remote.testState.ok ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-rose-500/30 bg-rose-500/10 text-rose-300'">
-              <i :data-lucide="remote.testState.ok ? 'check-circle-2' : 'alert-circle'" class="w-3.5 h-3.5 shrink-0"></i>[[ remote.testState.msg ]]
-            </div>
-          </div>
-          <!-- 右卡: 部署内容 -->
-          <div class="rounded-xl border border-violet-500/20 bg-slate-950/50 p-3.5 space-y-2.5">
-            <div class="text-[10px] font-semibold text-slate-400 flex items-center gap-1.5 tracking-wide">
-              <i data-lucide="rocket" class="w-3.5 h-3.5 text-violet-400"></i>部署内容 · Clone 工程
-            </div>
-            <div>
-              <label class="text-[10px] text-slate-500 mb-1 block">部署名称 <span class="text-rose-400">*</span></label>
-              <input v-model="remote.form.name" spellcheck="false" maxlength="120" placeholder="例如: 产险理赔 VPS 上线"
-                class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500/60">
-            </div>
-            <div>
-              <label class="text-[10px] text-slate-500 mb-1 block">关联 Clone 任务 <span class="text-rose-400">*</span></label>
-              <select v-model="remote.form.clone_task_id" class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500/60">
-                <option value="">请选择已完成的 Clone 任务</option>
-                <option v-for="t in completedTasks" :key="t.id" :value="t.id">#[[ t.id ]] [[ t.domain ]]</option>
-              </select>
-            </div>
-            <div>
-              <label class="text-[10px] text-slate-500 mb-1 block">远端服务端口</label>
-              <input v-model.number="remote.form.remote_port" type="number" min="1" max="65535"
-                class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-3 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-indigo-500/60">
-            </div>
-            <div>
-              <label class="text-[10px] text-slate-500 mb-1 block">备注 <span class="text-slate-600">(可选)</span></label>
-              <input v-model="remote.form.note" spellcheck="false" maxlength="300" placeholder="部署用途说明"
-                class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500/60">
-            </div>
-            <label v-if="remote.editing === null" class="flex items-center gap-2 text-[11px] text-slate-400 cursor-pointer">
-              <button type="button" @click="remote.form.deploy_now=!remote.form.deploy_now"
-                :class="remote.form.deploy_now ? 'bg-indigo-600' : 'bg-slate-700/80'"
-                class="relative w-9 h-5 rounded-full transition-colors shrink-0">
-                <span :class="remote.form.deploy_now ? 'translate-x-4' : 'translate-x-0'"
-                  class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform"></span>
-              </button>创建后立即执行一键推送部署
-            </label>
-          </div>
-        </div>
-        <div class="flex gap-2 pt-1">
-          <button @click="saveRemote" :disabled="remote.busy" class="flex-1 py-2.5 rounded-xl ui-primary text-[11.5px] font-semibold text-white disabled:opacity-50 transition-all">[[ remote.busy ? '处理中…' : (remote.editing !== null ? '保存修改' : '保存配置') ]]</button>
-          <button @click="remote.creating=false; remote.editing=null" class="px-5 py-2.5 rounded-xl border border-white/[0.08] text-[11px] text-slate-400 hover:text-slate-200">取消</button>
-        </div>
-      </div>
-
-      <!-- 部署卡片网格 -->
-      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        <div v-for="d in remote.list" :key="d.id"
-          class="metric-grad rounded-2xl border border-white/[0.06] p-4 relative overflow-hidden cursor-pointer transition-all duration-200 hover:-translate-y-0.5"
-          @click="openRemoteDetail(d)">
-          <div class="absolute top-0 left-0 right-0 h-[3px]" :style="{ background: remoteStatusColor(d.status) }"></div>
-          <div class="flex items-center justify-between gap-2">
-            <div class="flex items-center gap-2 min-w-0">
-              <span class="px-1.5 py-0.5 rounded-md bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 text-[10px] font-mono font-semibold shrink-0">RD-[[ String(d.seq).padStart(3,'0') ]]</span>
-              <span class="text-xs font-bold text-slate-100 truncate">[[ d.name ]]</span>
-            </div>
-            <span class="flex items-center gap-1 text-[10px] shrink-0" :style="{ color: remoteStatusColor(d.status) }">
-              <span class="w-1.5 h-1.5 rounded-full" :class="d.status==='running' ? 'bg-emerald-400 ' : ''" :style="{ background: d.status==='deploying' ? '#FBBF24' : remoteStatusColor(d.status) }"></span>[[ remoteStatusText(d.status) ]]
-            </span>
-          </div>
-          <div class="mt-2 flex items-center justify-between gap-2">
-            <span class="text-[10px] font-mono text-slate-500 truncate">[[ d.username ]]@[[ d.host ]]:[[ d.remote_port ]]</span>
-            <span class="text-[9.5px] font-mono text-slate-600 shrink-0" title="最近一次部署时间">[[ (d.updated_at || '').slice(5, 16) ]]</span>
-          </div>
-          <div class="mt-3">
-            <div class="flex items-center justify-between text-[10px] text-slate-500 mb-1">
-              <span>[[ d.stage || remoteStatusText(d.status) ]]</span>
-              <span v-if="d.status==='deploying'" class="font-mono tnums">[[ d.progress ]]%</span>
-            </div>
-            <div class="h-1.5 rounded-full bg-slate-800/80 overflow-hidden">
-              <div class="h-full rounded-full bg-indigo-500 transition-all duration-700" :style="{width: (d.status==='running' ? 100 : d.progress) + '%'}"></div>
-            </div>
-          </div>
-          <div class="mt-3 flex items-center gap-3 text-[10px] text-slate-500 tnums">
-            <span v-if="d.clone_task_id" class="text-indigo-300">Clone #[[ d.clone_task_id ]]</span>
-            <span class="ml-auto">[[ d.updated_at.slice(5,16) ]]</span>
-          </div>
-        </div>
-        <div v-if="!remote.list.length && !remote.creating" class="col-span-full rounded-2xl border border-dashed border-white/[0.1] py-20 flex flex-col items-center gap-3 text-slate-600">
-          <i data-lucide="cloud-upload" class="w-8 h-8 opacity-40"></i>
-          <div class="text-xs">还没有远程部署任务 — 关联已完成的 Clone 项目, 一键部署到 VPS</div>
+        <div ref="remoteLogBody" class="deploy-term h-[320px] overflow-y-auto overflow-x-hidden">
+          <div v-for="(ln, i) in remoteLogLines(remoteLogText)" :key="i" :class="ln.cls">[[ ln.t ]]</div>
         </div>
       </div>
     </div>
 
-    <!-- 详情抽屉 -->
-    <div v-if="remote.detail" class="detail-modal-backdrop" @click.self="closeRemoteDetail">
-      <div class="detail-modal-card fade-in">
-        <div class="detail-modal-head">
-          <div class="flex items-center gap-2.5 min-w-0">
-            <i data-lucide="server-cog" class="w-4 h-4 text-indigo-400 shrink-0"></i>
-            <span class="font-display font-bold text-sm text-slate-100 truncate">RD-[[ String(remote.detail.seq).padStart(3,'0') ]] · [[ remote.detail.name ]]</span>
-            <span class="flex items-center gap-1 text-[10px] font-semibold shrink-0 px-2 py-0.5 rounded-full"
-              :style="{ color: remoteStatusColor(remote.detail.status), background: remoteStatusColor(remote.detail.status) + '1a', border: '1px solid ' + remoteStatusColor(remote.detail.status) + '44' }">
-              <span class="w-1.5 h-1.5 rounded-full" :style="{ background: remoteStatusColor(remote.detail.status) }"></span>[[ remoteStatusText(remote.detail.status) ]]
-            </span>
-          </div>
-          <button @click="closeRemoteDetail" title="关闭" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-500 hover:text-rose-300 hover:bg-white/[0.05] transition-all shrink-0"><i data-lucide="x" class="w-4 h-4"></i></button>
-        </div>
-        <div class="detail-modal-body">
-
-        <!-- 部署进度 -->
-        <div v-if="remote.detail.status==='deploying'" class="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 mb-4">
-          <div class="flex items-center justify-between text-[11px] mb-1.5">
-            <span class="text-amber-300 font-semibold">[[ remote.detail.stage || '部署中' ]]</span>
-            <span class="font-mono text-amber-200 tnums">[[ remote.detail.progress ]]%</span>
-          </div>
-          <div class="h-2 rounded-full bg-slate-800/80 overflow-hidden">
-            <div class="h-full rounded-full bg-amber-500 transition-all duration-700" :style="{width: remote.detail.progress + '%'}"></div>
-          </div>
-        </div>
-
-        <!-- 部署信息(2 列紧凑灰底小卡) -->
-        <div class="detail-info-grid">
-          <div class="detail-info-card">
-            <div class="di-label">VPS 地址</div>
-            <div class="di-value">[[ remote.detail.username ]]@[[ remote.detail.host ]]:[[ remote.detail.ssh_port ]]</div>
-          </div>
-          <div class="detail-info-card">
-            <div class="di-label">服务地址</div>
-            <a v-if="remote.detail.service_url && remote.detail.status==='running'" :href="remote.detail.service_url" target="_blank" class="di-value link hover:underline">[[ remote.detail.service_url ]]</a>
-            <span v-else class="di-value" style="opacity:.45">未运行</span>
-          </div>
-          <div class="detail-info-card">
-            <div class="di-label">关联 Clone</div>
-            <div class="di-value">#[[ remote.detail.clone_task_id ]] [[ remote.detail.clone_domain || '' ]]</div>
-          </div>
-          <div class="detail-info-card">
-            <div class="di-label">最近部署</div>
-            <div class="di-value">[[ remote.detail.updated_at.slice(0,16) ]]</div>
-          </div>
-          <div v-if="remote.detail.note" class="detail-info-card col-span-2">
-            <div class="di-label">备注</div>
-            <div class="di-value" style="font-weight:500">[[ remote.detail.note ]]</div>
-          </div>
-        </div>
-
-        <div class="detail-toolbar">
-          <button @click="deployRemote" :disabled="remote.busy || remote.detail.status==='deploying'"
-            class="dt-btn ui-primary text-white font-semibold">
-            <i data-lucide="upload-cloud" class="w-3.5 h-3.5"></i>[[ remote.detail.status==='deploying' ? '部署中…' : '一键推送部署' ]]
-          </button>
-          <button @click="remoteAction('start')" :disabled="remote.busy"
-            class="dt-btn border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20">
-            <i data-lucide="play" class="w-3.5 h-3.5"></i>启动
-          </button>
-          <button @click="remoteAction('stop')" :disabled="remote.busy"
-            class="dt-btn border border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20">
-            <i data-lucide="square" class="w-3.5 h-3.5"></i>停止
-          </button>
-          <button @click="editRemote"
-            class="dt-btn border border-white/[0.10] text-slate-400 hover:text-slate-100">
-            <i data-lucide="pencil" class="w-3.5 h-3.5"></i>编辑配置
-          </button>
-          <div class="flex-1"></div>
-          <button @click="deleteRemote"
-            class="dt-btn border border-rose-500/40 bg-rose-500/10 font-semibold text-rose-300 hover:bg-rose-500/20">
-            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>删除部署
-          </button>
-        </div>
-
-        <!-- 部署日志 -->
-        <div>
-          <div class="flex items-center justify-between mb-2 pr-1">
-            <div class="text-xs font-semibold text-slate-300 flex items-center gap-1.5"><i data-lucide="scroll-text" class="w-3.5 h-3.5"></i>部署日志</div>
-            <div class="flex items-center gap-1.5">
-              <div class="flex rounded-md overflow-hidden border border-white/10">
-                <button @click="remote.logKind='deploy'" :class="remote.logKind==='deploy' ? 'ui-chip-on' : 'text-slate-400'" class="text-[9.5px] px-2 py-1">部署</button>
-                <button @click="remote.logKind='runtime'; loadRemoteRuntimeLogs()" :class="remote.logKind==='runtime' ? 'ui-chip-on' : 'text-slate-400'" class="text-[9.5px] px-2 py-1">运行时</button>
-              </div>
-              <button @click="copyText(remote.logKind==='deploy' ? (remote.detail.deploy_log || '') : (remote.runtimeLogs || ''))" class="p-1 rounded-md border border-white/[0.08] text-slate-500 hover:text-slate-100 transition-all" title="复制日志"><i data-lucide="copy" class="w-3 h-3"></i></button>
-              <button @click="remote.logKind==='runtime' ? loadRemoteRuntimeLogs() : loadRemoteDetailLog()" class="p-1 rounded-md border border-white/[0.08] text-slate-500 hover:text-slate-100 transition-all" title="刷新"><i data-lucide="refresh-cw" class="w-3 h-3"></i></button>
-            </div>
-          </div>
-          <div ref="remoteLogBody" class="deploy-term h-[280px] overflow-y-auto overflow-x-hidden">
-            <div v-for="(ln, i) in remoteLogLines(remote.logKind==='deploy' ? (remote.detail.deploy_log || '(暂无部署日志)') : (remote.runtimeLogs || '点击右上角切换后自动加载…'))" :key="i" :class="ln.cls">[[ ln.t ]]</div>
-          </div>
-        </div>
+    <!-- 删除确认 -->
+    <div v-if="remote.del" class="fixed inset-0 z-[70] flex items-center justify-center bg-black/50" @click.self="remote.del=null">
+      <div class="mt-modal">
+        <h3>删除发布档案「[[ remote.del.name ]]」？</h3>
+        <p>会先停掉服务器上的服务，再删除这条档案。克隆任务和导出包不受影响。</p>
+        <label class="flex items-center gap-2"><input type="checkbox" v-model="remote.delPurge">同时删除服务器上的工程目录 [[ remote.del.remote_dir ]]</label>
+        <div v-if="remote.delErr" class="ui-hint lk-err">[[ remote.delErr ]]</div>
+        <div class="flex justify-end gap-2 mt-2">
+          <button type="button" class="mt-btn" @click="remote.del=null">取消</button>
+          <button v-if="remote.delCanForce" type="button" class="mt-btn" :disabled="remote.busy" @click="deleteRemote(true)">只删档案</button>
+          <button type="button" class="mt-btn danger" :disabled="remote.busy" @click="deleteRemote(false)">[[ remote.busy ? '处理中…' : '删除' ]]</button>
         </div>
       </div>
     </div>
@@ -3412,6 +3309,7 @@ const __vueApp = createApp({
         { title: '', items: [
           { id: 'hub', label: '首页', icon: 'house', desc: '粘网址开始克隆，看项目和最近任务' },
           { id: 'docker', label: '部署', icon: 'container', desc: '把克隆好的网站在本机跑起来，拿到访问地址' },
+          { id: 'remote', label: '远程发布', icon: 'cloud-upload', desc: '把克隆好的工程发布到你自己的服务器长期运行' },
           { id: 'scheduler', label: '定时任务', icon: 'calendar-clock', desc: '按时间自动重新克隆，盯住网站变化' },
         ]},
         { title: '工具', items: [
@@ -3465,11 +3363,10 @@ const __vueApp = createApp({
       dockerDetail: null, dockerAutoRefresh: false, refreshing: false,
       cfgActive: 'cfg-api', cfgLimits: {}, cfgLimitNames: {},
       settingsResetBusy: false,
-      remote: { list: [], q: '', busy: false, creating: false, showPwd: false,
-                testState: { busy: false, ok: null, msg: '' },
-                form: { name: '', host: '', ssh_port: 22, username: 'root', password: '', clone_task_id: '', remote_port: 8000, note: '', deploy_now: true },
-                editing: null, editForm: {}, detail: null, detailLoading: false,
-                logKind: 'deploy', runtimeLogs: '' },
+      remote: { list: [], q: '', busy: false, error: '', modal: false, editing: null,
+                test: { busy: false, ok: null, msg: '' }, form: {},
+                log: null, logKind: 'deploy', runtimeLogs: '',
+                del: null, delPurge: false, delErr: '', delCanForce: false },
       links: { tasks: [], q: '', kpis: { tasks: 0, links: 0, clicks: 0 }, providers: [],
               creating: false, busy: false, error: '', detail: null,
               form: { name: '', target_url: '', service: 'all', clone_task_id: '', note: '', generate: true } },
@@ -3680,7 +3577,7 @@ const __vueApp = createApp({
         generate: ['界面生成', '截图或文字描述 → 可运行网站'],
         scheduler: ['定时任务', '按时间自动重新克隆，盯住网站变化'],
         docker: ['部署', '把克隆好的网站在本机跑起来，拿到访问地址'],
-        remote: ['远程一键部署', '推送到你自己的服务器运行'],
+        remote: ['远程发布', '把克隆好的工程发布到你自己的服务器长期运行'],
         admin: ['团队与设置', '成员、用量与操作记录'],
       };
       const t = m[this.view] || ['Clonjurer', ''];
@@ -3765,6 +3662,12 @@ const __vueApp = createApp({
     },
     mockGenLineCount() { return (this.mockGenPretty.match(/\n/g) || []).length + 1; },
     completedTasks() { return this.tasks.filter(t => t.status === 'completed'); },
+    remoteRunning() { return this.remote.list.filter(d => d.status === 'running').length; },
+    remoteLogText() {
+      if (!this.remote.log) return '';
+      if (this.remote.logKind === 'runtime') return this.remote.runtimeLogs || '加载中…';
+      return this.remote.log.deploy_log || '(还没有部署日志)';
+    },
     filteredDocker() {
       if (this.dockerFilter === 'all') return this.docker.list;
       if (this.dockerFilter === 'running') return this.docker.list.filter(c => c.status === 'running');
@@ -3977,7 +3880,7 @@ const __vueApp = createApp({
     consoleState() { this.scrollConsole(); },
     activeTab(v) { if (v === 'deploy') { this.loadDocker(); this.loadStructure(); } },
     'remote.logKind'(v) {
-      if (v === 'runtime' && this.remote.detail) this.loadRemoteRuntimeLogs();
+      if (v === 'runtime' && this.remote.log) this.loadRemoteRuntimeLogs();
     },
     advOpen(v) { try { localStorage.setItem('cloner-adv-open', v ? '1' : '0'); } catch (e) { /* 隐私模式 */ } },
     previewMode(v) { if (v === 'diff') this.loadDiffRegions(this.previewTask); },
@@ -4790,125 +4693,193 @@ const __vueApp = createApp({
       this.openLinkTask(this.links.detail);
     },
     remoteStatusText(s) {
-      return { idle: '待部署', deploying: '部署中', running: '运行中',
-               stopped: '已停止', failed: '失败' }[s] || s;
+      return { idle: '未发布', deploying: '发布中', running: '运行中', stopped: '已停止', failed: '失败' }[s] || s;
     },
-    remoteStatusColor(s) {
-      return { idle: '#94A3B8', deploying: '#FBBF24', running: '#34D399',
-               stopped: '#94A3B8', failed: '#FB7185' }[s] || '#94A3B8';
+    remoteStateClass(s) { return { running: 'running', deploying: 'starting', failed: 'failed' }[s] || ''; },
+    loadRemoteSoon() {
+      clearTimeout(this._remoteSearch);
+      this._remoteSearch = setTimeout(() => this.loadRemote(), 250);
     },
-    async loadRemote() { return;  /* 引擎内核版: 运营功能已移除 */
+    async loadRemote() {
+      clearTimeout(this._remoteTimer);
       try {
         const params = new URLSearchParams();
         if (this.remote.q) params.set('q', this.remote.q);
         const r = await fetch('/api/v4/remote/deploys?' + params.toString());
+        if (r.status === 401) { this.handleAuthExpired(); return; }
+        if (!r.ok) return;
         this.remote.list = (await r.json()).deploys || [];
       } catch (e) { return; }
-      // 部署中的任务自动轮询进度
-      const deploying = this.remote.list.filter(d => d.status === 'deploying');
-      if (deploying.length) {
-        for (const d of deploying) {
-          try {
-            const rr = await fetch('/api/v4/remote/deploys/' + d.id);
-            const data = await rr.json();
-            const i = this.remote.list.findIndex(x => x.id === d.id);
-            if (i >= 0 && data.deploy) {
-              this.remote.list[i].progress = data.deploy.progress;
-              this.remote.list[i].stage = data.deploy.stage;
-              this.remote.list[i].status = data.deploy.status;
-            }
-          } catch (e) {}
-        }
-        if (this.remote.list.some(d => d.status === 'deploying')) setTimeout(() => this.loadRemote(), 2000);
+      this.iconRefresh();
+      // 有发布中的档案: 2 秒后再拉一次, 进度条与阶段文案随之推进
+      if (this.view === 'remote' && this.remote.list.some(d => d.status === 'deploying')) {
+        this._remoteTimer = setTimeout(() => this.loadRemote(), 2000);
       }
     },
+    remoteBlankForm() {
+      return { name: '', host: '', ssh_port: 22, username: 'root', auth_type: 'password', password: '',
+               clone_task_id: '', remote_port: 8000, note: '', deploy_now: true,
+               has_secret: false, host_fingerprint: '', reset_host_key: false };
+    },
     openRemoteCreate() {
-      this.remote.creating = true; this.remote.editing = null;
-      this.remote.form = { name: '', host: '', ssh_port: 22, username: 'root',
-                           password: '', clone_task_id: '', remote_port: 8000,
-                           note: '', deploy_now: true };
+      if (!this.tasks.length) this.refreshTasks();
+      this.remote.editing = null; this.remote.error = '';
+      this.remote.form = this.remoteBlankForm();
+      this.remote.test = { busy: false, ok: null, msg: '' };
+      this.remote.modal = true;
+      this.iconRefresh();
+    },
+    editRemote(d) {
+      if (!this.tasks.length) this.refreshTasks();
+      this.remote.editing = d.id; this.remote.error = '';
+      this.remote.form = Object.assign(this.remoteBlankForm(), {
+        name: d.name, host: d.host, ssh_port: d.ssh_port, username: d.username, auth_type: d.auth_type || 'password',
+        clone_task_id: d.clone_task_id || '', remote_port: d.remote_port, note: d.note || '', deploy_now: false,
+        has_secret: !!d.has_secret, host_fingerprint: d.host_fingerprint || '' });
+      this.remote.test = { busy: false, ok: null, msg: '' };
+      this.remote.modal = true;
       this.iconRefresh();
     },
     async saveRemote() {
       const f = this.remote.form;
-      if (!f.name.trim()) { this.toast('请填写部署名称'); return; }
-      if (!f.host.trim()) { this.toast('请填写 VPS 地址'); return; }
-      if (f.clone_task_id === '' || f.clone_task_id === null) { this.toast('请关联 Clone 任务'); return; }
+      const editing = this.remote.editing;
+      this.remote.error = '';
+      if (!editing && !f.password) { this.remote.error = f.auth_type === 'key' ? '请粘贴私钥' : '请填写口令'; return; }
+      const payload = { name: f.name.trim(), host: f.host.trim(), ssh_port: f.ssh_port || 22,
+                        username: (f.username || 'root').trim(), auth_type: f.auth_type,
+                        clone_task_id: f.clone_task_id === '' ? null : Number(f.clone_task_id),
+                        remote_port: f.remote_port || 8000, note: f.note || '' };
+      if (f.password) payload.password = f.password;
+      if (editing && f.reset_host_key) payload.reset_host_key = true;
+      if (!editing) payload.deploy_now = !!f.deploy_now;
       this.remote.busy = true;
       try {
-        const editing = this.remote.editing !== null;
-        const payload = { name: f.name.trim(), host: f.host.trim(),
-                          ssh_port: f.ssh_port || 22, username: f.username || 'root',
-                          clone_task_id: Number(f.clone_task_id), remote_port: f.remote_port || 8000,
-                          note: f.note, deploy_now: f.deploy_now && !editing };
-        if (f.password) payload.password = f.password;
-        const r = await fetch(editing ? ('/api/v4/remote/deploys/' + this.remote.editing) : '/api/v4/remote/deploys', {
-          method: editing ? 'PATCH' : 'POST',
-          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const r = await fetch(editing ? '/api/v4/remote/deploys/' + editing : '/api/v4/remote/deploys', {
+          method: editing ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         const data = await r.json();
-        if (!r.ok) { this.toast('❌ ' + (data.error || '保存失败')); return; }
-        this.remote.creating = false; this.remote.editing = null; this.remote.form.password = '';
-        this.toast(editing ? '✅ 部署信息已更新' : '✅ 远程部署已创建');
+        if (!r.ok) { this.remote.error = data.error || '保存失败'; return; }
+        f.password = '';
+        this.remote.modal = false;
+        this.toast(editing ? '档案已保存' : (data.started ? '档案已保存，开始发布' : '档案已保存'));
         await this.loadRemote();
-      } catch (e) { this.toast('网络错误: ' + e); }
+      } catch (e) { this.remote.error = '网络错误'; }
       finally { this.remote.busy = false; }
     },
-    async openRemoteDetail(d) {
-      this.remote.detailLoading = true;
-      try {
-        const r = await fetch('/api/v4/remote/deploys/' + d.id);
-        this.remote.detail = (await r.json()).deploy || null;
-      } catch (e) { this.toast('加载失败'); }
-      finally { this.remote.detailLoading = false; }
-      this.iconRefresh();
-      // 部署中: 抽屉内实时轮询(进度条/阶段/日志), 直到离开 deploying 态
-      clearInterval(this._remoteDetailTimer);
-      if (this.remote.detail && this.remote.detail.status === 'deploying') {
-        const depId = this.remote.detail.id;
-        let prevStatus = 'deploying';
-        this._remoteDetailTimer = setInterval(async () => {
-          if (!this.remote.detail || this.remote.detail.id !== depId) {
-            clearInterval(this._remoteDetailTimer); return;
-          }
-          try {
-            const rr = await fetch('/api/v4/remote/deploys/' + depId);
-            const dep = (await rr.json()).deploy;
-            if (!dep) return;
-            if (dep.status !== 'deploying') clearInterval(this._remoteDetailTimer);
-            this.remote.detail.progress = dep.progress;
-            this.remote.detail.stage = dep.stage;
-            this.remote.detail.status = dep.status;
-            this.remote.detail.service_url = dep.service_url;
-            this.remote.detail.deploy_log = dep.deploy_log;
-            const i = this.remote.list.findIndex(x => x.id === depId);
-            if (i >= 0) { this.remote.list[i].status = dep.status;
-                          this.remote.list[i].progress = dep.progress;
-                          this.remote.list[i].stage = dep.stage; }
-            if (dep.status !== prevStatus) {
-              if (dep.status === 'running') this.toast('部署完成, 服务已运行');
-              if (dep.status === 'failed') this.toast('❌ 部署失败, 请查看部署日志');
-              prevStatus = dep.status;
-            }
-            this.$nextTick(() => { const el = this.$refs.remoteLogBody;
-              if (el) el.scrollTop = el.scrollHeight; });
-          } catch (e) {}
-        }, 2000);
+    async testRemoteConn() {
+      const f = this.remote.form;
+      if (!f.password && !(this.remote.editing && f.has_secret)) {
+        this.remote.test = { busy: false, ok: false, msg: f.auth_type === 'key' ? '请先粘贴私钥' : '请先填写口令' }; return;
       }
+      this.remote.test = { busy: true, ok: null, msg: '' };
+      this.iconRefresh();
+      try {
+        const body = { host: f.host, ssh_port: f.ssh_port, username: f.username, auth_type: f.auth_type, password: f.password || '' };
+        if (this.remote.editing) body.id = this.remote.editing;
+        const r = await fetch('/api/v4/remote/test-connection', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const d = await r.json();
+        this.remote.test = { busy: false, ok: !!d.ok,
+          msg: d.ok ? ('登录成功 · ' + (d.latency_ms || 0) + 'ms' + (d.fingerprint ? ' · 指纹 ' + d.fingerprint : '')) : (d.error || '连接失败') };
+      } catch (e) { this.remote.test = { busy: false, ok: false, msg: '网络错误' }; }
+      this.iconRefresh();
     },
-    closeRemoteDetail() {
-      clearInterval(this._remoteDetailTimer);
-      this.remote.detail = null; this.loadRemote(); this.iconRefresh();
+    async deployRemote(d) {
+      if (!confirm('发布「' + d.name + '」到 ' + d.host + '？\n\n会上传工程、安装依赖并重启服务器上的这个服务，首次可能需要几分钟。')) return;
+      try {
+        const r = await fetch('/api/v4/remote/deploys/' + d.id + '/deploy', { method: 'POST' });
+        const data = await r.json();
+        if (!r.ok) { this.toast(data.error || '发布失败'); return; }
+        this.toast('开始发布');
+        await this.loadRemote();
+        if (this.remote.log && this.remote.log.id === d.id) this.refreshRemoteLog();
+      } catch (e) { this.toast('网络错误'); }
     },
-    loadRemoteDetailLog() {
-      if (this.remote.detail) this.openRemoteDetail(this.remote.detail);
+    async remoteAction(d, kind) {
+      if (kind === 'stop' && !confirm('停止「' + d.name + '」在 ' + d.host + ' 上的服务？\n\n停止后外部将无法访问，之后可以再启动。')) return;
+      this.toast(kind === 'stop' ? '正在停止…' : '正在启动…');
+      try {
+        const r = await fetch('/api/v4/remote/deploys/' + d.id + '/' + kind, { method: 'POST' });
+        const data = await r.json();
+        if (!r.ok) { this.toast(data.error || '操作失败'); }
+        else if (kind === 'start') this.toast(data.ok ? '已启动' : '启动后健康检查未通过，请看运行日志');
+        else this.toast('已停止');
+        await this.loadRemote();
+      } catch (e) { this.toast('网络错误'); }
+    },
+    async openRemoteLog(d) {
+      this.remote.log = Object.assign({}, d);
+      this.remote.logKind = 'deploy'; this.remote.runtimeLogs = '';
+      await this.refreshRemoteLog();
+      this.iconRefresh();
+    },
+    async refreshRemoteLog() {
+      clearInterval(this._remoteLogTimer);
+      const id = this.remote.log && this.remote.log.id;
+      if (!id) return;
+      if (this.remote.logKind === 'runtime') { await this.loadRemoteRuntimeLogs(); return; }
+      const pull = async () => {
+        if (!this.remote.log || this.remote.log.id !== id) { clearInterval(this._remoteLogTimer); return; }
+        try {
+          const r = await fetch('/api/v4/remote/deploys/' + id + '?tail=400');
+          if (!r.ok) return;
+          const dep = (await r.json()).deploy;
+          const was = this.remote.log.status;
+          this.remote.log = dep;
+          const i = this.remote.list.findIndex(x => x.id === id);
+          if (i >= 0) this.remote.list[i] = Object.assign({}, this.remote.list[i], dep);
+          if (dep.status !== 'deploying') {
+            clearInterval(this._remoteLogTimer);
+            if (was === 'deploying') this.toast(dep.status === 'running' ? '发布完成' : '发布失败，请看部署日志');
+          }
+          this.$nextTick(() => { const el = this.$refs.remoteLogBody; if (el) el.scrollTop = el.scrollHeight; });
+        } catch (e) {}
+      };
+      await pull();
+      if (this.remote.log && this.remote.log.status === 'deploying') this._remoteLogTimer = setInterval(pull, 2000);
+    },
+    closeRemoteLog() {
+      clearInterval(this._remoteLogTimer);
+      this.remote.log = null;
+    },
+    async loadRemoteRuntimeLogs() {
+      const id = this.remote.log && this.remote.log.id;
+      if (!id) return;
+      this.remote.runtimeLogs = '连接服务器读取中…';
+      try {
+        const r = await fetch('/api/v4/remote/deploys/' + id + '/logs?kind=runtime&tail=300');
+        const data = await r.json();
+        this.remote.runtimeLogs = data.error ? ('读取失败: ' + data.error) : (data.logs || '(还没有运行日志)');
+        this.$nextTick(() => { const el = this.$refs.remoteLogBody; if (el) el.scrollTop = el.scrollHeight; });
+      } catch (e) { this.remote.runtimeLogs = '(读取失败)'; }
+    },
+    openRemoteDelete(d) {
+      this.remote.del = d; this.remote.delPurge = false; this.remote.delErr = ''; this.remote.delCanForce = false;
+    },
+    async deleteRemote(force) {
+      const d = this.remote.del;
+      if (!d) return;
+      this.remote.busy = true; this.remote.delErr = '';
+      try {
+        const qs = new URLSearchParams();
+        if (this.remote.delPurge && !force) qs.set('purge', '1');
+        if (force) qs.set('force', '1');
+        const r = await fetch('/api/v4/remote/deploys/' + d.id + '?' + qs.toString(), { method: 'DELETE' });
+        const data = await r.json();
+        if (!r.ok) { this.remote.delErr = data.error || '删除失败'; this.remote.delCanForce = !!data.can_force; return; }
+        this.remote.del = null;
+        if (this.remote.log && this.remote.log.id === d.id) this.closeRemoteLog();
+        this.toast(data.purged ? '已删除，服务器上的工程目录也已清理' : '已删除');
+        await this.loadRemote();
+      } catch (e) { this.remote.delErr = '网络错误'; }
+      finally { this.remote.busy = false; }
     },
     remoteLogLines(text) {
       return String(text || '').split('\n').map((ln) => {
         let cls = '';
         if (/^\[\d{4}-\d{2}-\d{2}/.test(ln)) cls = 'ln-ts ';
-        if (/WARNING|Failing command|recreate your virtual/i.test(ln)) cls += 'ln-warn';
-        else if (/ERROR|部署失败|Traceback/i.test(ln)) cls += 'ln-err';
-        else if (/Listening|部署完成|健康检查|200|running/i.test(ln)) cls += 'ln-ok';
+        if (/WARNING/i.test(ln)) cls += 'ln-warn';
+        else if (/ERROR|失败|Traceback/i.test(ln)) cls += 'ln-err';
+        else if (/部署完成|健康检查通过|登录成功|访问 .* 正常|Serving/i.test(ln)) cls += 'ln-ok';
         return { t: ln, cls };
       });
     },
@@ -4921,67 +4892,6 @@ const __vueApp = createApp({
         else if (/Listening|started|Running|Booted|200 OK/i.test(ln)) cls += 'ln-ok';
         return { t: ln, cls };
       });
-    },
-    async loadRemoteRuntimeLogs() {
-      const id = this.remote.detail && this.remote.detail.id;
-      if (!id) return;
-      try {
-        const r = await fetch('/api/v4/remote/deploys/' + id + '/logs?kind=runtime');
-        const data = await r.json();
-        this.remote.runtimeLogs = data.logs || '(暂无运行时日志)';
-        this.$nextTick(() => { const el = this.$refs.remoteLogBody;
-          if (el) el.scrollTop = el.scrollHeight; });
-      } catch (e) { this.remote.runtimeLogs = '(读取失败)'; }
-    },
-    async deployRemote() {
-      if (!this.remote.detail) return;
-      if (!confirm('部署到 ' + this.remote.detail.host + '?\n将上传工程并安装依赖, 可能需要数分钟。')) return;
-      this.remote.busy = true;
-      try {
-        const r = await fetch('/api/v4/remote/deploys/' + this.remote.detail.id + '/deploy', { method: 'POST' });
-        const data = await r.json();
-        if (!r.ok && !data.started) { this.toast('❌ ' + (data.error || data.message || '部署失败')); return; }
-        this.toast('正在部署…');
-        this.openRemoteDetail(this.remote.detail);
-      } catch (e) { this.toast('网络错误: ' + e); }
-      finally { this.remote.busy = false; }
-    },
-    async remoteAction(kind) {
-      if (!this.remote.detail) return;
-      const names = { start: '启动远端服务', stop: '关闭远端服务' };
-      if (!confirm(names[kind] + '?')) return;
-      this.remote.busy = true;
-      try {
-        const r = await fetch('/api/v4/remote/deploys/' + this.remote.detail.id + '/' + kind, { method: 'POST' });
-        const data = await r.json();
-        if (!r.ok && !data.ok) { this.toast('❌ ' + (data.error || data.message || '操作失败')); return; }
-        this.toast('' + names[kind] + (data.ok ? '成功' : '指令已下发'));
-        this.openRemoteDetail(this.remote.detail);
-      } catch (e) { this.toast('网络错误: ' + e); }
-      finally { this.remote.busy = false; }
-    },
-    editRemote() {
-      const d = this.remote.detail;
-      this.remote.editing = d.id;
-      this.remote.creating = true;
-      this.remote.form = { name: d.name, host: d.host, ssh_port: d.ssh_port,
-                           username: d.username, password: '', clone_task_id: d.clone_task_id || '',
-                           remote_port: d.remote_port, note: d.note || '', deploy_now: false };
-      // 滚到表单
-      this.$nextTick(() => { const f = document.querySelector('.rounded-2xl.border.border-white\\/\\[0.07\\]'); if (f) f.scrollIntoView({behavior: 'smooth'}); });
-      this.iconRefresh();
-    },
-    async deleteRemote() {
-      const d = this.remote.detail || this.remote.list[0];
-      if (!this.remote.detail) return;
-      if (!confirm('删除远程部署「' + this.remote.detail.name + '」?\n远端服务不会自动停止, 需手动清理。')) return;
-      try {
-        const r = await fetch('/api/v4/remote/deploys/' + this.remote.detail.id, { method: 'DELETE' });
-        if (!r.ok) { this.toast('删除失败'); return; }
-        this.remote.detail = null;
-        await this.loadRemote();
-        this.toast('已删除');
-      } catch (e) { this.toast('网络错误: ' + e); }
     },
     async loadDocker() {
       try {
@@ -5286,20 +5196,6 @@ const __vueApp = createApp({
       if (s === 'deploying' || s === 'starting') return { badge: 'border-amber-500/40 bg-amber-500/10 text-amber-300', dot: 'bg-amber-400 ', label: '启动中' };
       return { badge: 'border-white/[0.08] bg-slate-500/10 text-slate-400', dot: 'bg-slate-500', label: s === 'stopped' || s === 'exited' ? '已停止' : (s === 'missing' ? '容器已不在' : s) };
     },
-    async testRemoteConn() {
-      const f = this.remote.form;
-      if (!f.host || !f.password) { this.toast('请先填写 VPS 地址与密码'); return; }
-      this.remote.testState = { busy: true, ok: null, msg: '' };
-      try {
-        const r = await fetch('/api/v4/remote/test-connection', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ host: f.host, ssh_port: f.ssh_port, username: f.username, password: f.password }),
-        });
-        const d = await r.json();
-        this.remote.testState = { busy: false, ok: !!d.ok,
-          msg: d.ok ? ('连接成功 · ' + (d.latency_ms || 0) + 'ms · 认证通过') : (d.error || '连接失败') };
-      } catch (e) { this.remote.testState = { busy: false, ok: false, msg: '网络错误: ' + e }; }
-    },
     async dockerTaskAction(taskId, action) {
       if (action === 'remove' && !confirm('销毁这个部署？\n\n会删除：容器、独立镜像，并释放端口。\n不会删除：克隆任务和下载包，之后可以重新部署。')) return;
       try {
@@ -5540,7 +5436,7 @@ const __vueApp = createApp({
     },
     stopPolling() {
       clearInterval(this._taskTimer); clearInterval(this._teleTimer);
-      clearInterval(this._verTimer); clearInterval(this._remoteDetailTimer);
+      clearInterval(this._verTimer); clearTimeout(this._remoteTimer); clearInterval(this._remoteLogTimer);
       if (this._es) { this._es.close(); this._es = null; }
     },
     switchView(v) {
