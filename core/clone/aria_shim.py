@@ -15,13 +15,18 @@
 ARIA_SHIM_JS = r"""<script data-clone-preview="aria-shim">(function(){try{
 if(window.__cloneAriaShim)return;window.__cloneAriaShim=1;
 var WAIT=80,opened=[];
-function hiddenEl(e){if(!e)return false;var s=getComputedStyle(e);return e.hidden||s.display==='none'||s.visibility==='hidden'||parseFloat(s.opacity)===0||e.getAttribute('aria-hidden')==='true';}
-function show(e){if(!e)return;e.__shimPrev={h:e.hidden,d:e.style.display,v:e.style.visibility,o:e.style.opacity,a:e.getAttribute('aria-hidden')};
+function hiddenEl(e){if(!e)return false;
+ if(e.checkVisibility&&!e.checkVisibility({opacityProperty:true,visibilityProperty:true}))return true;
+ var s=getComputedStyle(e);return e.hidden||s.display==='none'||s.visibility==='hidden'||parseFloat(s.opacity)===0||e.getAttribute('aria-hidden')==='true';}
+function slotsOf(e){var out=[],sl=e&&e.assignedSlot;while(sl){out.push(sl);sl=sl.assignedSlot;}return out;}
+function show(e){if(!e)return;e.__shimPrev={h:e.hidden,d:e.style.display,v:e.style.visibility,o:e.style.opacity,a:e.getAttribute('aria-hidden'),
+ slots:slotsOf(e).filter(function(sl){return sl.hidden;})};
+ e.__shimPrev.slots.forEach(function(sl){sl.hidden=false;});   // 组件把面板放进隐藏的 slot(影子 DOM): 一并放开
  e.hidden=false;if(e.getAttribute('aria-hidden')==='true')e.setAttribute('aria-hidden','false');
  if(getComputedStyle(e).display==='none')e.style.display='block';
  if(getComputedStyle(e).visibility==='hidden')e.style.visibility='visible';
  if(parseFloat(getComputedStyle(e).opacity)===0)e.style.opacity='1';}
-function hide(e){if(!e)return;var p=e.__shimPrev;if(p){e.hidden=p.h;e.style.display=p.d;e.style.visibility=p.v;e.style.opacity=p.o;
+function hide(e){if(!e)return;var p=e.__shimPrev;if(p){(p.slots||[]).forEach(function(sl){sl.hidden=true;});e.hidden=p.h;e.style.display=p.d;e.style.visibility=p.v;e.style.opacity=p.o;
  if(p.a===null)e.removeAttribute('aria-hidden');else e.setAttribute('aria-hidden',p.a);e.__shimPrev=null;}else{e.hidden=true;}}
 function targetOf(c){var id=c.getAttribute('aria-controls');if(id){var t=document.getElementById(id.split(/\s+/)[0]);if(t)return t;}
  var n=c.nextElementSibling;if(n&&hiddenEl(n))return n;
@@ -50,6 +55,6 @@ document.addEventListener('click',function(ev){
   var reacted=after.ex!==before.ex||after.sel!==before.sel||after.vis!==before.vis||after.cls!==before.cls||(after.muts-before.muts)>3;
   if(reacted)return;
   if(c.getAttribute('role')==='tab')tab(c);else toggle(c);},WAIT);
-},false);
+},true);   // 捕获阶段: 在站点自己的处理函数之前记下「点击前」的状态, 否则站点已改的状态会被当成没反应而被翻回去
 document.addEventListener('keydown',function(ev){if(ev.key==='Escape'&&opened.length)closeAll(null);});
 }catch(e){}})();</script>"""

@@ -17,9 +17,15 @@ PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8">{inject}<style>
 <button role="tab" aria-selected="false" aria-controls="p2">页签二</button></div>
 <div role="tabpanel" id="p1">第一个面板的内容</div><div role="tabpanel" id="p2" hidden>第二个面板的内容</div>
 <button id="c">计数按钮</button><span id="n">0</span>
+<x-drop id="xd"><button slot="btn" aria-expanded="false" aria-controls="xp">组件菜单</button>
+<div slot="panel" id="xp" style="padding:24px">组件菜单面板内容</div></x-drop>
+<script>customElements.define('x-drop',class extends HTMLElement{{constructor(){{super();const r=this.attachShadow({{mode:'open'}});
+r.innerHTML='<slot name="btn"></slot><slot name="panel" hidden></slot>'}}}});</script>
 {script}</body></html>"""
 APP_JS = """<script>
 b.onclick=()=>{const o=b.getAttribute('aria-expanded')!=='true';b.setAttribute('aria-expanded',o);m.hidden=!o;m.style.display=o?'block':'none'};
+xd.querySelector('button').onclick=e=>{const sl=xd.shadowRoot.querySelector('slot[name=panel]');sl.hidden=!sl.hidden;
+ e.currentTarget.setAttribute('aria-expanded',String(!sl.hidden))};
 document.querySelectorAll('[role=tab]').forEach(t=>t.onclick=()=>{document.querySelectorAll('[role=tab]').forEach(x=>{
  const on=x===t;x.setAttribute('aria-selected',on);document.getElementById(x.getAttribute('aria-controls')).hidden=!on})});
 c.onclick=()=>{n.textContent=+n.textContent+1};
@@ -75,8 +81,8 @@ class InteractionCheckTest(unittest.TestCase):
 
     def test_shim_restores_aria_controls(self):
         r = self._run("shim.html")
-        ok = {x for x in ("产品菜单", "页签二") if x not in {f["text"] for f in r["failed"]}}
-        self.assertEqual(ok, {"产品菜单", "页签二"}, r)
+        ok = {x for x in ("产品菜单", "页签二", "组件菜单") if x not in {f["text"] for f in r["failed"]}}
+        self.assertEqual(ok, {"产品菜单", "页签二", "组件菜单"}, r)     # 含影子 DOM 里隐藏 slot 的组件菜单
         self.assertIn("计数按钮", {f["text"] for f in r["failed"]})     # 没有 ARIA 语义的自定义行为兜不了, 如实判失败
 
     def test_shim_does_not_fight_working_scripts(self):
