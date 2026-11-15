@@ -140,7 +140,7 @@ html body ::placeholder{color:rgb(var(--n-600));opacity:1}
 
 /* ---------- 10. 版式: 衬线大标题与大数字(拉开字重和字族对比, 不靠颜色出层次) ---------- */
 .serif,html body h1.font-display,html body h2.font-display{font-family:var(--ui-serif);font-weight:600;letter-spacing:-.01em}
-.serif-num{font-family:'Instrument Serif',Georgia,serif;font-weight:400;letter-spacing:-.02em;font-variant-numeric:lining-nums}
+.serif-num{font-family:var(--ui-font);font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums;white-space:nowrap}
 
 /* ---------- 11. 首页工作台 ---------- */
 .dash{max-width:1120px}
@@ -164,7 +164,7 @@ html body .dash-omni input:focus{box-shadow:none;border:0}
 .dash-kpi{padding:20px 24px 22px;border-left:1px solid var(--line)}
 .dash-kpi:first-child{border-left:0;padding-left:0}
 .dash-kpi-label{font-size:13px;color:var(--fg-3)}
-.dash-kpi-num{margin-top:6px;font-family:'Instrument Serif',Georgia,serif;font-size:52px;line-height:1;letter-spacing:-.02em;color:var(--fg);display:flex;align-items:baseline;gap:6px}
+.dash-kpi-num{margin-top:6px;font-family:var(--ui-font);font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums;font-size:36px;line-height:1;color:var(--fg);display:flex;align-items:baseline;gap:6px}
 .dash-kpi-num small{font-family:var(--ui-font);font-size:14px;color:var(--fg-3);letter-spacing:0}
 .dash-live{width:8px;height:8px;border-radius:99px;background:rgb(var(--ok-400));align-self:center;animation:dash-live 1.6s ease-in-out infinite}
 @keyframes dash-live{0%,100%{opacity:1}50%{opacity:.35}}
@@ -177,7 +177,7 @@ html body .dash-omni input:focus{box-shadow:none;border:0}
 .dash-shot-img img{width:100%;height:100%;object-fit:cover;object-position:top;display:block}
 .dash-shot:hover .dash-shot-img{transform:translateY(-3px);box-shadow:0 18px 36px -18px rgba(16,14,10,.35)}
 .dash-shot-meta{margin-top:10px;display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-size:13px;color:var(--fg-2)}
-.dash-shot-score{font-family:'Instrument Serif',Georgia,serif;font-size:22px;line-height:1;color:var(--fg)}
+.dash-shot-score{font-family:var(--ui-font);font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums;font-size:16px;white-space:nowrap;line-height:1;color:var(--fg)}
 .dash-projects{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}
 .dash-proj{position:relative;border-radius:14px;background:var(--surface);border:1px solid var(--line);cursor:pointer;overflow:hidden;
   transition:border-color .2s,transform .25s cubic-bezier(.2,.7,.2,1),box-shadow .25s}
@@ -188,7 +188,7 @@ html body .dash-omni input:focus{box-shadow:none;border:0}
 .dash-proj-mosaic img:only-child{grid-column:1 / span 2}
 .dash-proj-empty{grid-column:1 / span 2;grid-row:1 / span 2;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
   background:repeating-linear-gradient(135deg,transparent 0 10px,rgba(127,120,110,.05) 10px 11px),var(--surface);color:var(--fg-3);font-size:12px}
-.dash-proj-score{font-family:'Instrument Serif',Georgia,serif;font-size:34px;line-height:1.05;color:var(--fg);margin-top:2px}
+.dash-proj-score{font-family:var(--ui-font);font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums;font-size:24px;white-space:nowrap;line-height:1.05;color:var(--fg);margin-top:2px}
 .dash-proj-new{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-height:280px;background:transparent;
   border-style:dashed;border-color:var(--line-strong);color:var(--fg-2);font-size:14px}
 .dash-proj-new small{font-size:12px;color:var(--fg-3)}
@@ -203,7 +203,7 @@ html body .dash-omni input:focus{box-shadow:none;border:0}
   .dash-kpi{padding:16px 0 16px 16px}
   .dash-kpi:nth-child(3){border-left:0;padding-left:0;border-top:1px solid var(--line)}
   .dash-kpi:nth-child(4){border-top:1px solid var(--line)}
-  .dash-kpi-num{font-size:42px}
+  .dash-kpi-num{font-size:30px}
   .dash-projects{grid-template-columns:minmax(0,1fr)}
   .dash-proj-new{min-height:120px}
   html body .console-pill{display:none}
@@ -294,7 +294,7 @@ html body .proj-sort select option{background:var(--surface);color:var(--fg)}
 .dash-feed-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 .dash-feed-domain{font-size:14px;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dash-feed-sub{font-size:12px;color:var(--fg-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.dash-feed-score{font-family:'Instrument Serif',Georgia,serif;font-size:22px;line-height:1;color:var(--fg);font-variant-numeric:tabular-nums}
+.dash-feed-score{font-family:var(--ui-font);font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums;font-size:15px;line-height:1;color:var(--fg);white-space:nowrap;flex:none}
 .dash-feed-tag{font-size:12px;color:var(--fg-3)}
 .dash-feed-tag.is-bad{color:rgb(var(--bad-500))}
 .dash-feed-empty{padding:16px 0;font-size:13px;color:var(--fg-3)}
