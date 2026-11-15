@@ -242,7 +242,7 @@ AI_MOCK_MAX_FORMS = 10         # 智能 Mock 最多生成的表单路由数
 INTERACTION_SIM = True             # 默认启用: 登录点击提示繁忙 / 验证码 60s 倒计时
 ARIA_SHIM = os.environ.get("CLONER_ARIA_SHIM", "1") != "0"            # 克隆页注入 ARIA 交互兜底层(站点脚本不响应时才接手)
 INTERACTION_CHECK = os.environ.get("CLONER_INTERACTION_CHECK", "1") != "0"   # 克隆完成后做交互可用检查并计入分数
-INTERACTION_CHECK_BUDGET = float(os.environ.get("CLONER_INTERACTION_CHECK_BUDGET", "75"))
+INTERACTION_CHECK_BUDGET = float(os.environ.get("CLONER_INTERACTION_CHECK_BUDGET", "60"))
 SIM_LOGIN_FAIL_MESSAGES = (        # 登录类点击随机提示池
     "网络繁忙，请稍后重试",
     "系统繁忙，请稍后再试",

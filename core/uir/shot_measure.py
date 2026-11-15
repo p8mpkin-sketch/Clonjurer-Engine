@@ -80,19 +80,25 @@ def measure(path: Path, max_h: int = 2400) -> dict:
         x0, x1 = (int(cols[0]), int(cols[-1]) + 1) if len(cols) else (0, 0)
         out.append({"y0": y0, "y1": y1, "h": y1 - y0, "bg": _hex(bg), "x0": x0, "x1": x1,
                     "ink": round(float(diff.mean()), 3)})
+    cards = _cards(a, out)
     # 主色: 全图量化色按面积取前 6
     vals, cnt = np.unique(code[::4, ::4], return_counts=True)
     order = cnt.argsort()[::-1][:6]
     palette = [_hex(((int(vals[i]) >> 16) & 255, (int(vals[i]) >> 8) & 255, int(vals[i]) & 255)) for i in order]
-    return {"width": W, "height": H, "bands": out, "palette": palette}
+    return {"width": W, "height": H, "bands": out, "palette": palette, "cards": cards}
 
 
-def describe(m: dict) -> str:
+def describe(m: dict, cards: bool = False) -> str:
     """给写代码模型看的测量摘要(CSS 像素)。"""
     lines = [f"画面宽 {m['width']}px; 主色(按面积): {', '.join(m['palette'])}", "从上到下的区块(背景色带):"]
     for i, b in enumerate(m["bands"], 1):
         span = f"内容横向 {b['x0']}~{b['x1']}px" if b["x1"] > b["x0"] else "无明显内容"
         lines.append(f"  {i}. y {b['y0']}~{b['y1']} (高 {b['h']}px), 背景 {b['bg']}, {span}")
+    cards = (m.get("cards") or []) if cards else []
+    if cards:
+        lines.append("卡片/面板(与所在区块背景色不同的矩形块; x,y 为左上角):")
+        for i, c in enumerate(cards, 1):
+            lines.append(f"  卡{i}: x {c['x']} y {c['y']}, 宽 {c['w']} 高 {c['h']}, 背景 {c['bg']}")
     return "\n".join(lines)
 
 
@@ -112,9 +118,78 @@ def compare(ref: dict, out: dict, limit: int = 6) -> list:
         rw, ow = r["x1"] - r["x0"], o["x1"] - o["x0"]
         if rw > 80 and ow > 0 and abs(rw - ow) > max(40, rw * 0.12):
             probs.append(f"第 {i} 区块内容宽度: 原图 {r['x0']}~{r['x1']}px(宽 {rw}), 产出 {o['x0']}~{o['x1']}px(宽 {ow})")
+    # 卡片: 原图每张较大的卡片, 在产出里找重叠最多的一张, 位置/尺寸差得多就报
+    oc = out.get("cards") or []
+    for i, r in enumerate((ref.get("cards") or [])[:12], 1):
+        if len(probs) >= limit:
+            break
+        if r["w"] * r["h"] < 120 * 80:
+            continue
+        best, bi = None, 0.0
+        for o in oc:
+            ix = max(0, min(r["x"] + r["w"], o["x"] + o["w"]) - max(r["x"], o["x"]))
+            iy = max(0, min(r["y"] + r["h"], o["y"] + o["h"]) - max(r["y"], o["y"]))
+            u = r["w"] * r["h"] + o["w"] * o["h"] - ix * iy
+            iou = ix * iy / u if u else 0
+            if iou > bi:
+                best, bi = o, iou
+        if best is None or bi < 0.15:
+            probs.append(f"卡{i}(原图 x {r['x']} y {r['y']} 宽 {r['w']} 高 {r['h']}, 背景 {r['bg']}) 在产出的对应位置找不到")
+        elif bi < 0.6:
+            probs.append(f"卡{i} 位置/尺寸: 原图 x {r['x']} y {r['y']} 宽 {r['w']} 高 {r['h']}, "
+                         f"产出 x {best['x']} y {best['y']} 宽 {best['w']} 高 {best['h']}")
     return probs[:limit]
 
 
 def _rgb(h: str):
     h = h.lstrip("#")
     return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def _cards(a, bands, k: int = 3, max_cards: int = 24) -> list:
+    """卡片/面板: 被边缘(描边、阴影、底色变化)围起来、外形接近矩形的区域(缩小 k 倍计算)。
+    卡片常常只靠 1px 描边或阴影和背景区分, 底色几乎一样, 所以按「边缘围出的区域」找而不是按颜色找。
+    返回 [{x,y,w,h,bg}](原图像素), 从上到下、从左到右排序。"""
+    import numpy as np
+    from collections import deque
+    g = a[::k, ::k].astype(np.int32)
+    gray = (g[..., 0] * 299 + g[..., 1] * 587 + g[..., 2] * 114) // 1000
+    H2, W2 = gray.shape
+    edge = np.zeros_like(gray, dtype=bool)
+    edge[:, 1:] |= np.abs(gray[:, 1:] - gray[:, :-1]) > 6
+    edge[1:, :] |= np.abs(gray[1:, :] - gray[:-1, :]) > 6
+    free = ~edge
+    seen = np.zeros_like(free)
+    out = []
+    min_w, min_h = 80 // k, 50 // k
+    for y in range(0, H2, 3):
+        for x in range(0, W2, 3):
+            if not free[y, x] or seen[y, x]:
+                continue
+            q = deque([(y, x)])
+            seen[y, x] = True
+            n, y0, y1, x0, x1 = 0, y, y, x, x
+            while q:
+                cy, cx = q.popleft(); n += 1
+                if cy < y0: y0 = cy
+                if cy > y1: y1 = cy
+                if cx < x0: x0 = cx
+                if cx > x1: x1 = cx
+                for ny, nx in ((cy + 1, cx), (cy - 1, cx), (cy, cx + 1), (cy, cx - 1)):
+                    if 0 <= ny < H2 and 0 <= nx < W2 and free[ny, nx] and not seen[ny, nx]:
+                        seen[ny, nx] = True
+                        q.append((ny, nx))
+            bw, bh = x1 - x0 + 1, y1 - y0 + 1
+            if bw < min_w or bh < min_h or bw > W2 * 0.92 or bh > H2 * 0.9:
+                continue                          # 太小(文字间隙)或几乎整屏(区块背景本身)
+            # 外形接近矩形: 外接框四条边上多数像素属于这块区域; 内部被文字/图标挖掉一部分没关系
+            m = np.zeros((bh, bw), dtype=bool)
+            sub = seen[y0:y1 + 1, x0:x1 + 1] & free[y0:y1 + 1, x0:x1 + 1]
+            m |= sub
+            rim = np.concatenate([m[1, :], m[-2, :], m[:, 1], m[:, -2]]) if bh > 3 and bw > 3 else np.array([0])
+            if rim.mean() < 0.75 or n < bw * bh * 0.45:
+                continue
+            col = g[y0 + bh // 2, x0 + 2]
+            out.append({"x": x0 * k, "y": y0 * k, "w": bw * k, "h": bh * k, "bg": "#%02x%02x%02x" % tuple(int(c) for c in col)})
+    out.sort(key=lambda c: (c["y"] // 20, c["x"]))
+    return out[:max_cards]

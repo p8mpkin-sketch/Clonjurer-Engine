@@ -1221,8 +1221,11 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
                     self.log("INFO", f"原站变化: {ch['verdict']}(对比任务 #{prev['id']})")
         except Exception as exc:   # noqa: BLE001 变化比较不阻断交付
             self.log("INFO", f"原站变化比较跳过: {type(exc).__name__}: {str(exc)[:120]}")
-        # 交互可用检查(确定性): 原站点了有反应的控件, 克隆页同样点一下; 点不动的按比例扣分(最多 8 分)。
-        # 像素还原度量不到「看着一样但点不动」, 这一项把它量出来并计入任务分
+        self._set(status="completed", progress=100, stage="完成",
+                  similarity_score=score, stats_json=json.dumps(stats, ensure_ascii=False),
+                  zip_path=str(zip_path))
+        # 交互可用检查放在任务已标为完成之后: 用户先看到结果, 检查(约 20~60 秒)跑完再补写 stats 并按比例扣分。
+        # 原站点了有反应的控件, 克隆页同样点一下; 点不动的按比例扣分(最多 8 分)。像素还原度量不到「看着一样但点不动」
         if getattr(config, "INTERACTION_CHECK", True) and isinstance(score, (int, float)) and not blocked:
             ic = self._interaction_check(pages_map.get("/", "index.html"))
             if ic is not None:
@@ -1233,9 +1236,7 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
                     stats["interaction_penalty"] = pen
                     score = round(max(0.0, score - pen), 1)
                     self.log("INTERACT", f"交互扣分 {pen}: 还原度 {stats['score_before_interaction']} → {score}")
-        self._set(status="completed", progress=100, stage="完成",
-                  similarity_score=score, stats_json=json.dumps(stats, ensure_ascii=False),
-                  zip_path=str(zip_path))
+                self.db.update_task(self.task_id, similarity_score=score, stats_json=json.dumps(stats, ensure_ascii=False))
         self.db.increment_completed(self.task["batch_id"])
 
     def _detect_blocked(self) -> str:
