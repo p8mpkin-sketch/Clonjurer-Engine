@@ -15,7 +15,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 <!-- 顶级字体体系: Inter / Plus Jakarta Sans / JetBrains Mono / Noto Sans SC -->
 <link href="/vendor/fonts/fonts.css" rel="stylesheet">
 <!-- UI 改版 P0 规范层: 字号/对比度/焦点/语义色(只换样式) -->
-<link href="/vendor/css/ui-tokens.css?v=25" rel="stylesheet">
+<link href="/vendor/css/ui-tokens.css?v=26" rel="stylesheet">
 
 <script src="/vendor/js/lucide.subset.js?v=8"></script>
 <script>
@@ -810,28 +810,29 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       </div>
 
       <section class="mt-panel">
-        <div v-if="links.tasks.length" class="mt-row lk-row mt-row-head"><span>名称</span><span class="hide-sm">目标地址</span><span class="hide-sm">服务商</span><span>状态</span><span class="lk-num">点击</span><span class="hide-sm">时间</span><span></span></div>
+        <div v-if="links.tasks.length" class="mt-row lk-row mt-row-head"><span>名称</span><span class="lk-c-target">目标地址</span><span class="lk-c-svc">服务商</span><span>状态</span><span class="lk-num">点击</span><span class="lk-c-time">创建时间</span><span></span></div>
         <div v-for="st in links.tasks" :key="st.id" class="mt-row lk-row">
           <div class="min-w-0">
             <div class="text-[14px] text-slate-100 truncate">[[ st.name ]]</div>
             <div class="text-[12px] text-slate-500 tnums">SL-[[ String(st.seq).padStart(3, '0') ]] · [[ st.link_count ]] 条短链<template v-if="st.failed_count"> · [[ st.failed_count ]] 家失败</template></div>
           </div>
-          <div class="hide-sm min-w-0"><span class="lk-target" :title="st.target_url">[[ st.target_url.replace(/^https?:\/\//, '') ]]</span></div>
-          <div class="hide-sm lk-svcs">
-            <span v-for="s in (st.services.length ? st.services : [st.service])" :key="s" class="lk-svc" :class="st.services.length ? '' : 'pref'">[[ linkServiceName(s) ]]</span>
+          <div class="lk-c-target min-w-0"><span class="lk-target" :title="st.target_url">[[ st.target_url.replace(/^https?:\/\//, '') ]]</span></div>
+          <div class="lk-c-svc lk-svcs" :title="st.services.length ? st.services.map(linkServiceName).join('、') : ('偏好 ' + linkServiceName(st.service) + '，还没有生成')">
+            <span v-for="s in (st.services.length ? st.services.slice(0, 2) : [st.service])" :key="s" class="lk-svc" :class="st.services.length ? '' : 'pref'">[[ linkServiceName(s) ]]</span>
+            <span v-if="st.services.length > 2" class="lk-svc more tnums">+[[ st.services.length - 2 ]]</span>
           </div>
           <div class="dp-state" :class="st.status">
             <span v-if="st.status==='running'" key="spin" class="inline-flex"><i data-lucide="loader" class="w-3.5 h-3.5 animate-spin"></i></span><span v-else key="dot" class="dot"></span><span>[[ linkStatusText(st.status) ]]</span>
           </div>
           <div class="lk-num">[[ st.total_clicks ]]</div>
-          <div class="hide-sm text-[12px] text-slate-500 tnums">[[ (st.created_at || '').slice(5, 16) ]]</div>
-          <div class="flex items-center justify-end gap-0.5">
+          <div class="lk-c-time text-[12px] text-slate-500 tnums">[[ (st.created_at || '').slice(5, 16) ]]</div>
+          <div class="lk-acts flex items-center justify-end gap-0.5">
             <button type="button" class="mt-icon" title="详情" aria-label="详情" @click="openLinkTask(st)"><i data-lucide="eye" class="w-4 h-4"></i></button>
             <a :href="'/api/v4/link-tasks/' + st.id + '/export?format=csv'" class="mt-icon" title="导出 CSV" aria-label="导出 CSV"><i data-lucide="download" class="w-4 h-4"></i></a>
             <button v-if="canWrite" type="button" class="mt-icon" title="删除" aria-label="删除" @click="deleteLinkTask(st)"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
           </div>
         </div>
-        <div v-if="!links.tasks.length && links.q" key="lk-nomatch" class="pg-empty">没有匹配「[[ links.q ]]」的短链任务</div>
+        <div v-if="!links.tasks.length && links.q.trim()" key="lk-nomatch" class="pg-empty">没有匹配「[[ links.q.trim() ]]」的短链任务</div>
         <div v-else-if="!links.tasks.length" key="lk-empty" class="pg-empty lg">
           <i data-lucide="link" class="w-6 h-6"></i>
           <div>把克隆好的站点地址变成短链，分享出去还能看到点击数。</div>
@@ -842,8 +843,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 
     <!-- 新建短链任务 -->
     <div v-if="links.creating" class="fixed inset-0 z-[70] flex items-center justify-center bg-black/50" @click.self="links.creating=false">
-      <form class="mt-modal" @submit.prevent="createLinkTask()">
-        <h3>新建短链任务</h3>
+      <form class="mt-modal" role="dialog" aria-modal="true" aria-labelledby="lk-create-title" @submit.prevent="createLinkTask()">
+        <h3 id="lk-create-title">新建短链任务</h3>
         <p>选「全部服务」会依次用每家服务各生成一条；指定一家时，失败会自动换下一家。</p>
         <label for="lk-name">名称</label>
         <input id="lk-name" v-model="links.form.name" class="mt-input" maxlength="120" placeholder="例如：活动落地页" required>
@@ -873,13 +874,14 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 
     <!-- 任务详情 -->
     <div v-if="links.detail" class="fixed inset-0 z-[70] flex items-center justify-center bg-black/50" @click.self="closeLinkTask()">
-      <div class="mt-modal wide">
+      <div class="mt-modal wide" role="dialog" aria-modal="true" aria-labelledby="lk-detail-title">
         <div class="flex items-center gap-3">
-          <h3 class="flex-1 truncate">[[ links.detail.name ]]</h3>
+          <h3 id="lk-detail-title" class="flex-1 truncate">[[ links.detail.name ]]</h3>
           <button type="button" class="mt-icon" title="关闭" aria-label="关闭" @click="closeLinkTask()"><i data-lucide="x" class="w-4 h-4"></i></button>
         </div>
         <p class="tnums">SL-[[ String(links.detail.seq).padStart(3, '0') ]] · [[ links.detail.service === 'all' ? '全部服务' : linkServiceName(links.detail.service) ]] · [[ linkStatusText(links.detail.status) ]]<template v-if="links.detail.clone_task_id"> · 克隆 #[[ links.detail.clone_task_id ]] [[ links.detail.clone_domain ]]</template><template v-if="links.detail.note"> · [[ links.detail.note ]]</template></p>
-        <div class="mt-link"><input :value="links.detail.target_url" readonly aria-label="目标地址" @focus="$event.target.select()"></div>
+        <div class="mt-link"><input :value="links.detail.target_url" readonly aria-label="目标地址" @focus="$event.target.select()">
+          <button type="button" class="mt-icon sm" title="复制目标地址" aria-label="复制目标地址" @click="copyText(links.detail.target_url)"><i data-lucide="copy" class="w-3.5 h-3.5"></i></button></div>
         <div class="pg-stats lk-stats">
           <div><span>短链</span><b>[[ links.detail.link_count ]]</b></div>
           <div><span>失败</span><b>[[ links.detail.failed_count ]]</b></div>
@@ -895,12 +897,14 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               </template>
               <div v-else class="lk-sub lk-err truncate" :title="l.extras && l.extras.error">失败：[[ (l.extras && l.extras.error) || '未知原因' ]]</div>
             </div>
-            <span class="lk-num">[[ l.clicks ]]</span>
-            <template v-if="l.ok">
-              <button type="button" class="mt-icon sm" title="复制计数短链" aria-label="复制计数短链" @click="copyText(l.local_url)"><i data-lucide="copy" class="w-3.5 h-3.5"></i></button>
-              <a :href="l.local_url" target="_blank" rel="noopener" class="mt-icon sm" title="打开(计一次点击)" aria-label="打开" @click="bumpLocalClick(l)"><i data-lucide="external-link" class="w-3.5 h-3.5"></i></a>
-            </template>
-            <button v-if="canWrite" type="button" class="mt-icon sm" title="删除这条" aria-label="删除这条" @click="deleteLinkRow(l)"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
+            <span class="lk-num" :title="l.ok ? '点击数' : ''">[[ l.ok ? l.clicks : '—' ]]</span>
+            <div class="lk-line-acts">
+              <template v-if="l.ok">
+                <button type="button" class="mt-icon sm" title="复制计数短链" aria-label="复制计数短链" @click="copyText(l.local_url)"><i data-lucide="copy" class="w-3.5 h-3.5"></i></button>
+                <a :href="l.local_url" target="_blank" rel="noopener" class="mt-icon sm" title="打开（计一次点击）" aria-label="打开计数短链" @click="bumpLocalClick(l)"><i data-lucide="external-link" class="w-3.5 h-3.5"></i></a>
+              </template>
+              <button v-if="canWrite" type="button" class="mt-icon sm" title="删除这条" aria-label="删除这条" @click="deleteLinkRow(l)"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
+            </div>
           </div>
           <div v-if="!links.detail.links.length" class="pg-empty">[[ links.detail.status==='running' ? '正在生成…' : '还没有短链，点「生成」试试' ]]</div>
         </div>
@@ -908,7 +912,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <a :href="'/api/v4/link-tasks/' + links.detail.id + '/export?format=txt'" class="mt-btn">导出 TXT</a>
           <a :href="'/api/v4/link-tasks/' + links.detail.id + '/export?format=csv'" class="mt-btn">导出 CSV</a>
           <button v-if="canWrite && links.detail.status==='running'" key="lk-gen-run" type="button" class="mt-btn primary" disabled><i data-lucide="loader" class="w-4 h-4 animate-spin"></i>生成中…</button>
-          <button v-else-if="canWrite" key="lk-gen" type="button" class="mt-btn primary" @click="regenLinks()"><i data-lucide="refresh-cw" class="w-4 h-4"></i>生成</button>
+          <button v-else-if="canWrite" key="lk-gen" type="button" class="mt-btn primary" @click="regenLinks()"><i data-lucide="refresh-cw" class="w-4 h-4"></i>[[ links.detail.links.length ? '重新生成' : '生成' ]]</button>
         </div>
       </div>
     </div>
@@ -987,7 +991,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <div class="pg-head">
         <div>
           <h2 class="pg-title">远程发布</h2>
-          <div class="pg-meta"><span class="live-dot" :class="remoteRunning ? 'on' : ''"></span>[[ remoteRunning ]] 个在运行 · 把克隆好的工程发布到你自己的服务器长期运行 · 凭据加密保存</div>
+          <div class="pg-meta"><span class="rd-live"><span class="live-dot" :class="remoteRunning ? 'on' : ''"></span>[[ remoteRunning ]] 个在运行</span><span class="rd-desc"><span class="rd-sep">· </span>把克隆好的工程发布到你自己的服务器长期运行 · 凭据加密保存</span></div>
         </div>
         <div class="flex items-center gap-2 flex-wrap">
           <input v-model="remote.q" @input="loadRemoteSoon()" class="mt-input lk-search" placeholder="搜索名称 / 主机 / 备注" aria-label="搜索远程发布档案">
@@ -996,13 +1000,13 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       </div>
 
       <section class="mt-panel">
-        <div v-if="remote.list.length" class="mt-row rd-row mt-row-head"><span>名称</span><span class="hide-sm">主机:端口</span><span>最近状态</span><span class="hide-sm">最近部署</span><span></span></div>
+        <div v-if="remote.list.length" class="mt-row rd-row mt-row-head"><span>名称</span><span class="rd-c-host">服务器</span><span>最近状态</span><span class="rd-c-time">最近更新</span><span></span></div>
         <div v-for="d in remote.list" :key="d.id" class="mt-row rd-row">
           <div class="min-w-0">
             <div class="text-[14px] text-slate-100 truncate">[[ d.name ]]</div>
-            <div class="text-[12px] text-slate-500 truncate tnums">RD-[[ String(d.seq).padStart(3, '0') ]] · 克隆 #[[ d.clone_task_id ]] [[ d.clone_domain ]]</div>
+            <div class="text-[12px] text-slate-500 truncate tnums">RD-[[ String(d.seq).padStart(3, '0') ]] · 克隆 #[[ d.clone_task_id ]] [[ d.clone_domain ]]<span class="rd-host-inline"> · [[ d.host ]]</span></div>
           </div>
-          <div class="hide-sm min-w-0">
+          <div class="rd-c-host min-w-0">
             <span class="lk-target" :title="d.username + '@' + d.host + ':' + d.ssh_port">[[ d.host ]]:[[ d.ssh_port ]]</span>
             <div class="rd-sub tnums">服务端口 [[ d.remote_port ]]</div>
           </div>
@@ -1011,16 +1015,16 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <i v-if="d.status==='deploying'" key="spin" data-lucide="loader" class="w-3.5 h-3.5 animate-spin"></i><span v-else key="dot" class="dot"></span>[[ remoteStatusText(d.status) ]]<span v-if="d.status==='deploying'" class="rd-pct tnums">[[ d.progress ]]%</span>
             </div>
             <template v-if="d.status==='deploying'">
-              <div class="rd-bar" role="progressbar" :aria-valuenow="d.progress" aria-valuemin="0" aria-valuemax="100"><i :style="{ width: d.progress + '%' }"></i></div>
+              <div class="rd-bar" role="progressbar" :aria-valuenow="d.progress" aria-valuemin="0" aria-valuemax="100" :aria-label="d.name + ' 发布进度'"><i :style="{ width: d.progress + '%' }"></i></div>
               <div class="rd-sub truncate">[[ d.stage ]]</div>
             </template>
             <div v-else-if="d.status==='failed' && d.stage" class="rd-sub lk-err truncate">[[ d.stage ]]</div>
             <a v-else-if="d.status==='running' && d.service_url" :href="d.service_url" target="_blank" rel="noopener" class="dp-link rd-sub truncate block">[[ d.service_url.replace(/^https?:\/\//, '') ]]</a>
           </div>
-          <div class="hide-sm text-[12px] text-slate-500 tnums">[[ d.status==='idle' ? '—' : (d.updated_at || '').slice(5, 16) ]]</div>
-          <div class="dp-acts flex items-center justify-end gap-0.5">
+          <div class="rd-c-time text-[12px] text-slate-500 tnums">[[ d.status==='idle' ? '—' : (d.updated_at || '').slice(5, 16) ]]</div>
+          <div class="rd-acts flex items-center justify-end gap-0.5">
             <template v-if="canWrite">
-              <button type="button" class="mt-icon" :disabled="d.status==='deploying'" title="发布" aria-label="发布" @click="deployRemote(d)"><i data-lucide="rocket" class="w-4 h-4"></i></button>
+              <button type="button" class="mt-icon" :disabled="d.status==='deploying'" :title="d.status==='idle' ? '发布' : '重新发布'" aria-label="发布" @click="deployRemote(d)"><i data-lucide="rocket" class="w-4 h-4"></i></button>
               <button v-if="d.status==='running'" key="stop" type="button" class="mt-icon" title="停止" aria-label="停止" @click="remoteAction(d, 'stop')"><i data-lucide="square" class="w-4 h-4"></i></button>
               <button v-else key="start" type="button" class="mt-icon" :disabled="d.status==='deploying' || d.status==='idle'" title="启动" aria-label="启动" @click="remoteAction(d, 'start')"><i data-lucide="play" class="w-4 h-4"></i></button>
             </template>
@@ -1031,7 +1035,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             </template>
           </div>
         </div>
-        <div v-if="!remote.list.length && remote.q" key="rd-nomatch" class="pg-empty">没有匹配「[[ remote.q ]]」的发布档案</div>
+        <div v-if="!remote.list.length && remote.q.trim()" key="rd-nomatch" class="pg-empty">没有匹配「[[ remote.q.trim() ]]」的发布档案</div>
         <div v-else-if="!remote.list.length" key="rd-empty" class="pg-empty lg">
           <i data-lucide="cloud-upload" class="w-6 h-6"></i>
           <div>本机部署适合快速预览；要长期运行，就发布到你自己的云服务器。</div>
@@ -1042,8 +1046,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 
     <!-- 新建 / 编辑档案 -->
     <div v-if="remote.modal" class="fixed inset-0 z-[70] flex items-center justify-center bg-black/50" @click.self="remote.modal=false">
-      <form class="mt-modal wide rd-form" @submit.prevent="saveRemote()">
-        <h3>[[ remote.editing ? '编辑发布档案' : '新建发布档案' ]]</h3>
+      <form class="mt-modal wide rd-form" role="dialog" aria-modal="true" aria-labelledby="rd-form-title" @submit.prevent="saveRemote()">
+        <h3 id="rd-form-title">[[ remote.editing ? '编辑发布档案' : '新建发布档案' ]]</h3>
         <p>工程会放在服务器的 ~/clonjurer_deploy/rd_编号 目录下，用 Python 虚拟环境运行。首次连接会记下服务器指纹，之后指纹变化会拒绝连接。</p>
         <div class="rd-grid">
           <div class="rd-span"><label for="rd-name">名称</label>
@@ -1065,9 +1069,9 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <option value="key">私钥</option>
             </select></div>
           <div class="rd-span">
-            <label for="rd-secret">[[ remote.form.auth_type==='key' ? '私钥(OpenSSH / PEM, 不支持带口令的私钥)' : '口令' ]]<span v-if="remote.editing && remote.form.has_secret" class="rd-hint">留空表示不修改</span></label>
-            <textarea v-if="remote.form.auth_type==='key'" id="rd-secret" v-model="remote.form.password" class="mt-input mt-textarea font-mono rd-key" spellcheck="false" autocomplete="off" :placeholder="remote.editing && remote.form.has_secret ? '已保存(不显示)' : '-----BEGIN OPENSSH PRIVATE KEY-----'"></textarea>
-            <input v-else id="rd-secret" v-model="remote.form.password" type="password" class="mt-input" autocomplete="new-password" :placeholder="remote.editing && remote.form.has_secret ? '已保存(不显示)' : ''">
+            <label for="rd-secret">[[ remote.form.auth_type==='key' ? '私钥' : '口令' ]]<span v-if="remote.form.auth_type==='key'" class="rd-hint">OpenSSH / PEM 格式，不支持带口令的私钥</span><span v-if="remoteKeepSecret" class="rd-hint">· 留空表示不修改</span></label>
+            <textarea v-if="remote.form.auth_type==='key'" id="rd-secret" v-model="remote.form.password" class="mt-input mt-textarea font-mono rd-key" spellcheck="false" autocomplete="off" :placeholder="remoteKeepSecret ? '已保存（不显示）' : '-----BEGIN OPENSSH PRIVATE KEY-----'"></textarea>
+            <input v-else id="rd-secret" v-model="remote.form.password" type="password" class="mt-input" autocomplete="new-password" :placeholder="remoteKeepSecret ? '已保存（不显示）' : ''">
           </div>
           <div><label for="rd-port">服务端口</label>
             <input id="rd-port" v-model.number="remote.form.remote_port" type="number" min="1" max="65535" class="mt-input font-mono"></div>
@@ -1076,11 +1080,11 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         </div>
         <div class="flex items-center gap-2 flex-wrap">
           <button type="button" class="mt-btn" :disabled="remote.test.busy || !remote.form.host" @click="testRemoteConn()"><i :data-lucide="remote.test.busy ? 'loader' : 'plug-zap'" :class="remote.test.busy ? 'animate-spin' : ''" class="w-4 h-4"></i>[[ remote.test.busy ? '测试中…' : '测试连接' ]]</button>
-          <span v-if="remote.test.msg" class="text-[12px]" :class="remote.test.ok ? 'rd-ok' : 'lk-err'">[[ remote.test.msg ]]</span>
+          <span v-if="remote.test.msg" class="rd-test-msg" :class="remote.test.ok ? 'rd-ok' : 'lk-err'" role="status">[[ remote.test.msg ]]</span>
         </div>
-        <div v-if="remote.editing && remote.form.host_fingerprint" class="ui-hint">
+        <div v-if="remote.editing && remote.form.host_fingerprint" class="ui-hint rd-fp">
           已记录服务器指纹 <span class="font-mono">[[ remote.form.host_fingerprint ]]</span>
-          <label class="flex items-center gap-2 mt-1"><input type="checkbox" v-model="remote.form.reset_host_key">重置主机指纹(服务器确实重装或换过密钥时才勾选)</label>
+          <label class="flex items-center gap-2 mt-1"><input type="checkbox" v-model="remote.form.reset_host_key">重置主机指纹（服务器确实重装或换过密钥时才勾选）</label>
         </div>
         <label v-if="!remote.editing" class="flex items-center gap-2"><input type="checkbox" v-model="remote.form.deploy_now">保存后立即发布</label>
         <div v-if="remote.error" class="ui-hint lk-err">[[ remote.error ]]</div>
@@ -1093,22 +1097,24 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 
     <!-- 日志 -->
     <div v-if="remote.log" class="fixed inset-0 z-[70] flex items-center justify-center bg-black/50" @click.self="closeRemoteLog()">
-      <div class="mt-modal wide">
+      <div class="mt-modal wide" role="dialog" aria-modal="true" aria-labelledby="rd-log-title">
         <div class="flex items-center gap-3">
-          <h3 class="flex-1 truncate">[[ remote.log.name ]]</h3>
+          <h3 id="rd-log-title" class="flex-1 truncate">[[ remote.log.name ]]</h3>
           <button type="button" class="mt-icon" title="复制日志" aria-label="复制日志" @click="copyText(remoteLogText)"><i data-lucide="copy" class="w-4 h-4"></i></button>
           <button type="button" class="mt-icon" title="刷新" aria-label="刷新" @click="refreshRemoteLog()"><i data-lucide="refresh-cw" class="w-4 h-4"></i></button>
           <button type="button" class="mt-icon" title="关闭" aria-label="关闭" @click="closeRemoteLog()"><i data-lucide="x" class="w-4 h-4"></i></button>
         </div>
         <p class="tnums">[[ remote.log.username ]]@[[ remote.log.host ]]:[[ remote.log.ssh_port ]] · [[ remote.log.remote_dir ]] · [[ remoteStatusText(remote.log.status) ]]<template v-if="remote.log.host_fingerprint"> · 指纹 [[ remote.log.host_fingerprint ]]</template></p>
         <div v-if="remote.log.status==='deploying'">
-          <div class="flex items-center justify-between text-[12px] text-slate-500"><span>[[ remote.log.stage ]]</span><span class="tnums">[[ remote.log.progress ]]%</span></div>
-          <div class="rd-bar"><i :style="{ width: remote.log.progress + '%' }"></i></div>
+          <div class="flex items-center justify-between text-[12px] text-slate-500"><span class="truncate">[[ remote.log.stage ]]</span><span class="tnums">[[ remote.log.progress ]]%</span></div>
+          <div class="rd-bar" role="progressbar" :aria-valuenow="remote.log.progress" aria-valuemin="0" aria-valuemax="100" aria-label="发布进度"><i :style="{ width: remote.log.progress + '%' }"></i></div>
         </div>
-        <div class="flex items-center gap-2">
-          <button type="button" class="mt-btn" :class="remote.logKind==='deploy' ? 'primary' : ''" @click="remote.logKind='deploy'">部署日志</button>
-          <button type="button" class="mt-btn" :class="remote.logKind==='runtime' ? 'primary' : ''" @click="remote.logKind='runtime'; loadRemoteRuntimeLogs()">运行日志</button>
-          <a v-if="remote.log.status==='running' && remote.log.service_url" :href="remote.log.service_url" target="_blank" rel="noopener" class="dp-link ml-auto truncate">[[ remote.log.service_url ]]</a>
+        <div class="flex items-center gap-3 min-w-0">
+          <div class="ui-seg" role="group" aria-label="日志类型">
+            <button type="button" :aria-pressed="remote.logKind==='deploy' ? 'true' : 'false'" @click="remote.logKind='deploy'">部署日志</button>
+            <button type="button" :aria-pressed="remote.logKind==='runtime' ? 'true' : 'false'" @click="remote.logKind='runtime'">运行日志</button>
+          </div>
+          <a v-if="remote.log.status==='running' && remote.log.service_url" :href="remote.log.service_url" target="_blank" rel="noopener" class="dp-link ml-auto truncate">[[ remote.log.service_url.replace(/^https?:\/\//, '') ]]</a>
         </div>
         <div ref="remoteLogBody" class="deploy-term h-[320px] overflow-y-auto overflow-x-hidden">
           <div v-for="(ln, i) in remoteLogLines(remoteLogText)" :key="i" :class="ln.cls">[[ ln.t ]]</div>
@@ -1118,10 +1124,10 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 
     <!-- 删除确认 -->
     <div v-if="remote.del" class="fixed inset-0 z-[70] flex items-center justify-center bg-black/50" @click.self="remote.del=null">
-      <div class="mt-modal">
-        <h3>删除发布档案「[[ remote.del.name ]]」？</h3>
+      <div class="mt-modal" role="dialog" aria-modal="true" aria-labelledby="rd-del-title">
+        <h3 id="rd-del-title">删除发布档案「[[ remote.del.name ]]」？</h3>
         <p>会先停掉服务器上的服务，再删除这条档案。克隆任务和导出包不受影响。</p>
-        <label class="flex items-center gap-2"><input type="checkbox" v-model="remote.delPurge">同时删除服务器上的工程目录 [[ remote.del.remote_dir ]]</label>
+        <label class="rd-check"><input type="checkbox" v-model="remote.delPurge"><span>同时删除服务器上的工程目录 <span class="font-mono">[[ remote.del.remote_dir ]]</span></span></label>
         <div v-if="remote.delErr" class="ui-hint lk-err">[[ remote.delErr ]]</div>
         <div class="flex justify-end gap-2 mt-2">
           <button type="button" class="mt-btn" @click="remote.del=null">取消</button>
@@ -3663,6 +3669,11 @@ const __vueApp = createApp({
     mockGenLineCount() { return (this.mockGenPretty.match(/\n/g) || []).length + 1; },
     completedTasks() { return this.tasks.filter(t => t.status === 'completed'); },
     remoteRunning() { return this.remote.list.filter(d => d.status === 'running').length; },
+    // 编辑档案且认证方式没变时, 凭据可留空沿用库里的; 换了认证方式(口令 <-> 私钥)必须重新填
+    remoteKeepSecret() {
+      const f = this.remote.form;
+      return !!(this.remote.editing && f.has_secret && f.auth_type === f.orig_auth_type);
+    },
     remoteLogText() {
       if (!this.remote.log) return '';
       if (this.remote.logKind === 'runtime') return this.remote.runtimeLogs || '加载中…';
@@ -4704,7 +4715,7 @@ const __vueApp = createApp({
       clearTimeout(this._remoteTimer);
       try {
         const params = new URLSearchParams();
-        if (this.remote.q) params.set('q', this.remote.q);
+        if (this.remote.q.trim()) params.set('q', this.remote.q.trim());
         const r = await fetch('/api/v4/remote/deploys?' + params.toString());
         if (r.status === 401) { this.handleAuthExpired(); return; }
         if (!r.ok) return;
@@ -4719,7 +4730,7 @@ const __vueApp = createApp({
     remoteBlankForm() {
       return { name: '', host: '', ssh_port: 22, username: 'root', auth_type: 'password', password: '',
                clone_task_id: '', remote_port: 8000, note: '', deploy_now: true,
-               has_secret: false, host_fingerprint: '', reset_host_key: false };
+               has_secret: false, orig_auth_type: '', host_fingerprint: '', reset_host_key: false };
     },
     openRemoteCreate() {
       if (!this.tasks.length) this.refreshTasks();
@@ -4729,13 +4740,20 @@ const __vueApp = createApp({
       this.remote.modal = true;
       this.iconRefresh();
     },
-    editRemote(d) {
+    async editRemote(d) {
       if (!this.tasks.length) this.refreshTasks();
+      // 列表接口不带凭据信息(has_secret 恒为 false), 取详情才知道是否已存凭据
+      let rec = d;
+      try {
+        const r = await fetch('/api/v4/remote/deploys/' + d.id);
+        if (r.ok) rec = (await r.json()).deploy || d;
+      } catch (e) { /* 取不到就按列表数据打开, 保存时后端仍会校验 */ }
+      const auth = rec.auth_type || 'password';
       this.remote.editing = d.id; this.remote.error = '';
       this.remote.form = Object.assign(this.remoteBlankForm(), {
-        name: d.name, host: d.host, ssh_port: d.ssh_port, username: d.username, auth_type: d.auth_type || 'password',
-        clone_task_id: d.clone_task_id || '', remote_port: d.remote_port, note: d.note || '', deploy_now: false,
-        has_secret: !!d.has_secret, host_fingerprint: d.host_fingerprint || '' });
+        name: rec.name, host: rec.host, ssh_port: rec.ssh_port, username: rec.username, auth_type: auth,
+        clone_task_id: rec.clone_task_id || '', remote_port: rec.remote_port, note: rec.note || '', deploy_now: false,
+        has_secret: !!rec.has_secret, orig_auth_type: auth, host_fingerprint: rec.host_fingerprint || '' });
       this.remote.test = { busy: false, ok: null, msg: '' };
       this.remote.modal = true;
       this.iconRefresh();
@@ -4744,7 +4762,9 @@ const __vueApp = createApp({
       const f = this.remote.form;
       const editing = this.remote.editing;
       this.remote.error = '';
-      if (!editing && !f.password) { this.remote.error = f.auth_type === 'key' ? '请粘贴私钥' : '请填写口令'; return; }
+      if (!f.password && !this.remoteKeepSecret) {
+        this.remote.error = (editing && f.has_secret ? '换了认证方式，' : '') + (f.auth_type === 'key' ? '请粘贴私钥' : '请填写口令'); return;
+      }
       const payload = { name: f.name.trim(), host: f.host.trim(), ssh_port: f.ssh_port || 22,
                         username: (f.username || 'root').trim(), auth_type: f.auth_type,
                         clone_task_id: f.clone_task_id === '' ? null : Number(f.clone_task_id),
@@ -4767,7 +4787,7 @@ const __vueApp = createApp({
     },
     async testRemoteConn() {
       const f = this.remote.form;
-      if (!f.password && !(this.remote.editing && f.has_secret)) {
+      if (!f.password && !this.remoteKeepSecret) {
         this.remote.test = { busy: false, ok: false, msg: f.auth_type === 'key' ? '请先粘贴私钥' : '请先填写口令' }; return;
       }
       this.remote.test = { busy: true, ok: null, msg: '' };
@@ -6437,7 +6457,19 @@ const __vueApp = createApp({
   mounted() {
     this._onPaste = (e) => this.onGlobalPaste(e);
     window.addEventListener('paste', this._onPaste);
-    this._onEsc = (e) => { if (e.key === 'Escape' && this.fitDrawer) this.fitDrawer = false; };
+    this._onEsc = (e) => {
+      if (e.key !== 'Escape') return;
+      if (this.fitDrawer) { this.fitDrawer = false; return; }
+      // 短链 / 远程发布的弹层: Esc 关最上面那个(忙碌中的保存/删除不打断)
+      if (this.view === 'remote') {
+        if (this.remote.del && !this.remote.busy) this.remote.del = null;
+        else if (this.remote.modal && !this.remote.busy) this.remote.modal = false;
+        else if (this.remote.log) this.closeRemoteLog();
+      } else if (this.view === 'links') {
+        if (this.links.creating && !this.links.busy) this.links.creating = false;
+        else if (this.links.detail) this.closeLinkTask();
+      }
+    };
     window.addEventListener('keydown', this._onEsc);
     // 窄屏(手机/小平板)默认折叠侧栏, 内容区不被 240px 侧栏挤成一列竖排
     if (window.innerWidth < 900) this.navCollapsed = true;

@@ -514,10 +514,10 @@ html body .proj-sort select option{background:var(--surface);color:var(--fg)}
 .dp-state{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--fg-2)}
 .dp-state .dot{width:7px;height:7px;border-radius:99px;background:var(--fg-3)}
 .dp-state.running .dot{background:rgb(var(--ok-500));box-shadow:0 0 0 3px rgb(var(--ok-500) / .16)}
-.dp-state.failed{color:rgb(var(--bad-500))}.dp-state.failed .dot{background:rgb(var(--bad-500))}
+.dp-state.failed{color:var(--ui-bad)}.dp-state.failed .dot{background:var(--ui-bad)}
 .dp-state.starting{color:var(--fg)}
 .dp-link{font-size:13px;color:var(--fg);text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--line-strong);font-variant-numeric:tabular-nums}
-.dp-err{grid-column:1 / -1;font-size:12px;color:rgb(var(--bad-500));white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-left:68px}
+.dp-err{grid-column:1 / -1;font-size:12px;color:var(--ui-bad);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-left:68px}
 
 /* 克隆进度: 首页条 / 任务卡 / 任务详情 */
 .run-strip{margin-top:40px}
@@ -599,36 +599,50 @@ html body .proj-sort select option{background:var(--surface);color:var(--fg)}
   .bt-line .mt-line-meta{white-space:nowrap;width:auto;min-width:56px}
   .bt-line .hide-sm{display:none}
 }
-/* 短链管理: KPI 三栏 / 任务表 / 服务商徽章 / 详情短链行; 数字统一界面字体等宽数字 */
+/* 短链管理: KPI 三栏 / 任务表 / 服务商徽章 / 详情短链行; 数字统一界面字体等宽数字
+   列按可用宽度逐级收起(侧栏展开时内容区比视口窄 232px): 创建时间 -> 服务商 -> 目标地址 -> 手机叠排 */
 .pg-kpis.lk-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
 .lk-kpis .pg-kpi-num{font-family:var(--ui-font);font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums;font-size:36px;white-space:nowrap}
 .lk-search{width:240px;flex:none}
-.mt-row.lk-row{grid-template-columns:minmax(0,1.4fr) minmax(0,1.5fr) 150px 96px 64px 92px 112px}
+.mt-row.lk-row{grid-template-columns:minmax(0,1.4fr) minmax(0,1.4fr) 168px 96px 64px 92px 104px}
 .lk-num{font-size:13px;color:var(--fg);text-align:right;font-variant-numeric:tabular-nums;font-feature-settings:"tnum";white-space:nowrap}
 .mt-row-head .lk-num{color:var(--fg-3);font-size:12px}
 .lk-target{display:block;font-size:13px;color:var(--fg-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-.lk-svcs{display:flex;flex-wrap:wrap;gap:4px;min-width:0}
+.lk-svcs{display:flex;flex-wrap:nowrap;gap:4px;min-width:0;overflow:hidden}
 .lk-svc{display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:6px;font-size:12px;color:var(--fg-2);background:rgba(127,120,110,.1);white-space:nowrap;flex:none}
 .lk-svc.pref{background:transparent;border:1px dashed var(--line-strong);color:var(--fg-3)}
+.lk-svc.more{color:var(--fg-3);background:transparent;border:1px solid var(--line);padding:0 6px}
 .dp-state.done .dot{background:rgb(var(--ok-500));box-shadow:0 0 0 3px rgb(var(--ok-500) / .16)}
-.dp-state.partial{color:rgb(var(--warn-600))}.dp-state.partial .dot{background:rgb(var(--warn-500))}
+.dp-state.partial{color:var(--ui-warn)}.dp-state.partial .dot{background:var(--ui-warn)}
 .dp-state.running{color:var(--fg)}
 .lk-stats{border:1px solid var(--line);border-radius:10px}
 .lk-links{max-height:320px;overflow-y:auto;border:1px solid var(--line);border-radius:10px}
 .lk-links > .mt-line:first-child{border-top:0}
 .lk-line{padding:8px 12px;gap:10px}
 .lk-line .lk-svc{min-width:64px;justify-content:center}
+.lk-line .lk-num{min-width:36px}
+.lk-line-acts{display:flex;align-items:center;justify-content:flex-end;gap:2px;width:76px;flex:none}
 .lk-sub{margin-top:2px;font-size:12px;color:var(--fg-3)}
-.lk-err{color:rgb(var(--bad-500))}
-.lk-line.bad .lk-svc{color:rgb(var(--bad-500));background:rgb(var(--bad-500) / .08)}
+.lk-err{color:var(--ui-bad)}
+.lk-line.bad .lk-svc{color:var(--ui-bad);background:rgb(var(--bad-500) / .08)}
+.lk-line.bad .lk-num{color:var(--fg-3)}
+.mt-link .mt-icon{flex:none}
+@media (max-width:1280px){
+  .mt-row.lk-row{grid-template-columns:minmax(0,1.3fr) minmax(0,1.2fr) 168px 96px 64px 104px}
+  .lk-c-time{display:none}
+}
+@media (max-width:1100px){
+  .mt-row.lk-row{grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) 96px 64px 104px;gap:12px}
+  .lk-c-svc{display:none}
+}
 @media (max-width:900px){
-  .mt-row.lk-row{grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) 120px 88px 56px 80px 112px;gap:12px}
+  .mt-row.lk-row{grid-template-columns:minmax(0,1fr) 96px 64px 104px;gap:12px}
+  .mt-row.lk-row .lk-c-target{display:none}
   .pg-kpis.lk-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
   .pg-kpis.lk-kpis .pg-kpi{border-top:0}
   .pg-kpis.lk-kpis .pg-kpi:nth-child(3){border-left:1px solid var(--line);padding-left:22px}
 }
 @media (max-width:760px){
-  .mt-row.lk-row{grid-template-columns:minmax(0,1fr) 88px 48px 104px}
   .lk-search{width:100%}
   .lk-kpis .pg-kpi-num{font-size:28px}
 }
@@ -641,16 +655,21 @@ html body .proj-sort select option{background:var(--surface);color:var(--fg)}
   .mt-row.lk-row > :nth-child(5){grid-row:1 / span 2;grid-column:2}
   .mt-row.lk-row > :last-child{grid-row:1 / span 2;grid-column:3}
   .lk-kpis .pg-kpi-sub{display:none}
+  .lk-line .lk-svc{min-width:0}
 }
-/* 远程发布: 档案表 / 发布中进度条 / 新建编辑弹层两栏表单 */
-.mt-row.rd-row{grid-template-columns:minmax(0,1.6fr) minmax(0,1.2fr) minmax(0,1.3fr) 104px 196px}
+/* 远程发布: 档案表 / 发布中进度条 / 新建编辑弹层两栏表单
+   列逐级收起: 最近更新 -> 服务器(并入名称副行) -> 手机叠排(操作单独一行) */
+.mt-row.rd-row{grid-template-columns:minmax(0,1.5fr) minmax(0,1.2fr) minmax(0,1.3fr) 92px 184px}
+.rd-live{display:inline-flex;align-items:center;white-space:nowrap;color:var(--fg-2)}
+.rd-host-inline{display:none}
 .rd-sub{margin-top:2px;font-size:12px;color:var(--fg-3);font-variant-numeric:tabular-nums}
 .rd-pct{margin-left:4px;color:var(--fg-3);font-size:12px;font-variant-numeric:tabular-nums}
-.rd-bar{margin-top:6px;height:4px;border-radius:2px;background:var(--line);overflow:hidden}
-.rd-bar > i{display:block;height:100%;border-radius:2px;background:var(--accent);transition:width .6s ease}
+.rd-bar{margin-top:6px;height:4px;border-radius:99px;background:rgba(127,120,110,.16);overflow:hidden}
+.rd-bar > i{display:block;height:100%;min-width:2px;border-radius:99px;background:var(--fg-2);transition:width .6s ease}
+.rd-acts{flex-wrap:nowrap}
 .mt-icon:disabled{opacity:.35;cursor:not-allowed}
 .mt-icon:disabled:hover{background:transparent;color:var(--fg-3)}
-.rd-form{max-height:calc(100vh - 32px);overflow-y:auto}
+.rd-form{max-height:calc(100dvh - 32px);overflow-y:auto}
 .rd-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 14px}
 .rd-grid > div{display:flex;flex-direction:column;gap:6px;min-width:0}
 .rd-grid .rd-span{grid-column:1 / -1}
@@ -658,18 +677,27 @@ html body .proj-sort select option{background:var(--surface);color:var(--fg)}
 .rd-grid label{margin-top:6px}
 .rd-hint{margin-left:6px;font-weight:400;color:var(--fg-3)}
 .rd-key{min-height:96px}
-.rd-ok{color:rgb(var(--ok-600))}
-@media (max-width:900px){
-  .mt-row.rd-row{grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,1.2fr) 88px 196px;gap:12px}
+.rd-ok{color:var(--ui-ok)}
+.rd-test-msg{font-size:12px;line-height:1.5;min-width:0;overflow-wrap:anywhere}
+.rd-fp .font-mono{overflow-wrap:anywhere}
+.mt-modal label.rd-check{display:flex;align-items:flex-start;gap:8px;line-height:1.6}
+.rd-check input{margin-top:4px;flex:none}
+.rd-check .font-mono{overflow-wrap:anywhere}
+@media (max-width:1280px){
+  .mt-row.rd-row{grid-template-columns:minmax(0,1.4fr) minmax(0,1.1fr) minmax(0,1.3fr) 184px}
+  .rd-c-time{display:none}
 }
-@media (max-width:760px){
-  .mt-row.rd-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 196px}
+@media (max-width:1100px){
+  .mt-row.rd-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 184px;gap:12px}
+  .mt-row.rd-row .rd-c-host{display:none}
+  .rd-host-inline{display:inline}
 }
 @media (max-width:600px){
   .mt-row.rd-row.mt-row-head{display:none}
-  .mt-row.rd-row{grid-template-columns:minmax(0,1fr) auto;row-gap:6px}
-  .mt-row.rd-row > :nth-child(3){grid-row:2;grid-column:1}
-  .mt-row.rd-row > :last-child{grid-row:1 / span 2;grid-column:2;flex-wrap:wrap;max-width:132px}
+  .mt-row.rd-row{grid-template-columns:minmax(0,1fr);row-gap:8px}
+  .mt-row.rd-row .rd-acts{justify-content:flex-start;margin-left:-6px}
+  .pg-meta .rd-desc{flex-basis:100%}
+  .rd-sep{display:none}
   .rd-grid{grid-template-columns:minmax(0,1fr)}
 }
 /* 导入存档 */
