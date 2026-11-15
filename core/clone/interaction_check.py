@@ -155,7 +155,9 @@ class _Side:
             return True, "地址锚点变化"
         if cnt > idle * 1.5 + 3:
             return True, f"页面结构变化 {int(cnt)}"
-        if not getattr(self, "text_churn", False) and cnt > idle and p.evaluate(_TEXT_JS) != t0:
+        # 可见文字变了就算有反应, 不要求 DOM 变动: 纯 CSS 的 :hover/:focus-within 下拉(脚本被剥离后克隆页常见)
+        # 只改样式不产生变动记录; 空闲时文字自己会变的页面(时钟、轮播)已由 text_churn 排除
+        if not getattr(self, "text_churn", False) and p.evaluate(_TEXT_JS) != t0:
             return True, "可见文字变化"
         if px > 0.004 and cnt > idle:
             return True, f"画面变化 {px:.1%}"
