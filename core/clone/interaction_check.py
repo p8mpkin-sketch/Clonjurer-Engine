@@ -19,6 +19,7 @@ from __future__ import annotations
 import io
 import time
 from contextlib import suppress
+from typing import Any
 
 _COLLECT_JS = r"""
 (limit) => {
@@ -167,7 +168,7 @@ def check(ctx_factory, original_url: str, clone_url: str, viewport: dict = None,
     clone_url 是克隆页的本地地址(沙盒服务器), 原站 original_url 需要外网。"""
     t0 = time.monotonic()
     vp = viewport or {"width": 1440, "height": 900}
-    res = {"checked": 0, "ok": 0, "failed": [], "skipped": [], "elapsed": 0.0, "version": 1}
+    res: dict[str, Any] = {"checked": 0, "ok": 0, "failed": [], "skipped": [], "elapsed": 0.0, "version": 1}
     # 同一个浏览器上下文里开两页(原站 / 克隆页不同源, 互不影响): 只占浏览器池一个名额, 满载时不会互相等待
     with ctx_factory(vp) as ctx:
         op, cp = ctx.new_page(), ctx.new_page()
