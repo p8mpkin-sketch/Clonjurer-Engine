@@ -15,7 +15,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 <!-- 顶级字体体系: Inter / Plus Jakarta Sans / JetBrains Mono / Noto Sans SC -->
 <link href="/vendor/fonts/fonts.css" rel="stylesheet">
 <!-- UI 改版 P0 规范层: 字号/对比度/焦点/语义色(只换样式) -->
-<link href="/vendor/css/ui-tokens.css?v=23" rel="stylesheet">
+<link href="/vendor/css/ui-tokens.css?v=24" rel="stylesheet">
 
 <script src="/vendor/js/lucide.subset.js?v=8"></script>
 <script>
@@ -789,283 +789,129 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 <!-- 重命名弹窗结束 -->
 
   <!-- ======================= Docker 容器运维控制台 ======================= -->
-  <!-- ======================= 短链管理(任务制) ======================= -->
+  <!-- ======================= 短链管理 ======================= -->
   <div v-show="view==='links'" class="flex-1 min-h-0 overflow-y-auto custom-scroll">
-    <div class="max-w-[1300px] mx-auto px-6 py-6 space-y-5">
-
-      <!-- ===== 列表视图 ===== -->
-      <div v-if="!links.detail">
-        <div class="grid grid-cols-2 xl:grid-cols-4 gap-3">
-          <div class="metric-grad rounded-2xl border border-white/[0.06] p-4">
-            <div class="flex items-center gap-2 text-[10px] text-slate-500"><i data-lucide="message-square-text" class="w-3.5 h-3.5 text-emerald-400"></i>累计捕获表单提交</div>
-            <div class="text-2xl font-bold text-slate-100 tnums mt-1">[[ opsKpis.tracker_total ]]</div>
-            <div class="text-[9.5px] text-slate-600 mt-0.5">logs/tracker.log 全量留痕</div>
-          </div>
-          <div class="metric-grad rounded-2xl border border-white/[0.06] p-4">
-            <div class="flex items-center gap-2 text-[10px] text-slate-500"><i data-lucide="link" class="w-3.5 h-3.5 text-indigo-400"></i>活跃短链总数</div>
-            <div class="text-2xl font-bold text-slate-100 tnums mt-1">[[ opsKpis.links_total ]]</div>
-            <div class="text-[9.5px] text-slate-600 mt-0.5">含任务制与快捷短链</div>
-          </div>
-          <div class="metric-grad rounded-2xl border border-white/[0.06] p-4">
-            <div class="flex items-center gap-2 text-[10px] text-slate-500"><i data-lucide="mouse-pointer-click" class="w-3.5 h-3.5 text-sky-400"></i>总点击量</div>
-            <div class="text-2xl font-bold text-slate-100 tnums mt-1">[[ opsKpis.clicks_total ]]</div>
-            <div class="text-[9.5px] text-slate-600 mt-0.5">/s/&lt;id&gt; 跳转累计</div>
-          </div>
-          <div class="metric-grad rounded-2xl border border-white/[0.06] p-4">
-            <div class="flex items-center gap-2 text-[10px] text-slate-500"><i data-lucide="list-checks" class="w-3.5 h-3.5 text-amber-400"></i>运行中定时任务</div>
-            <div class="text-2xl font-bold text-slate-100 tnums mt-1">[[ opsKpis.scheduler_running ]]</div>
-            <div class="text-[9.5px] mt-0.5" :class="opsKpis.scheduler_paused ? 'text-amber-400' : 'text-slate-600'">[[ opsKpis.scheduler_paused ? '调度器已暂停' : '待执行 ' + opsKpis.scheduler_pending + ' · 调度器运行中' ]]</div>
-          </div>
+    <div class="pg">
+      <div class="pg-head">
+        <div>
+          <h2 class="pg-title">短链管理</h2>
+          <div class="pg-meta">把站点地址变成便于分享的短链 · 从本站 /s/编号 打开的访问会计入点击</div>
         </div>
-        <div class="flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <h2 class="font-display text-[28px] leading-tight text-slate-100">短链任务</h2>
-            <p class="text-[13px] text-slate-500 mt-1.5">每个短链任务聚合一组短链(SL-序号)· 支持多服务批量生成 · 一键复制与导出</p>
-          </div>
-          <div class="flex items-center gap-2 flex-wrap max-w-full">
-            <div class="relative">
-              <i data-lucide="search" class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-600"></i>
-              <input v-model="links.q" @input="loadLinks" placeholder="搜索任务名 / 目标 / 备注"
-                class="w-[240px] rounded-lg bg-slate-950/70 border border-white/[0.08] pl-8 pr-3 py-2 text-[11px] text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500/60">
-            </div>
-            <button @click="openLinkCreate" class="shrink-0 whitespace-nowrap flex items-center gap-1.5 px-3 py-2 rounded-xl ui-primary text-[11px] font-semibold text-white shadow-lg transition-all">
-              <i data-lucide="plus" class="w-3.5 h-3.5"></i>新建短链任务
-            </button>
-          </div>
-        </div>
-
-        <!-- 快捷短链工具条 + 独立短链列表 -->
-        <div class="rounded-2xl border border-white/[0.07] bg-slate-900/70 backdrop-blur-xl overflow-hidden">
-          <div class="p-4 space-y-3">
-            <div class="flex items-center gap-2 flex-wrap">
-              <span class="text-[10px] text-slate-500 tracking-[0.16em] font-semibold shrink-0">快捷短链 QUICK SHORTener</span>
-              <div class="flex-1 flex items-center gap-2 flex-wrap" style="min-width:min(420px,100%)">
-                <input v-model="linksQuick.url" spellcheck="false" placeholder="粘贴长链接, 回车生成短链"
-                  @keydown.enter="quickGenLink()"
-                  class="flex-1 rounded-lg bg-slate-950/80 border border-white/[0.08] px-3 py-2 text-xs font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500/60">
-                <select v-model="linksQuick.service" class="rounded-lg bg-slate-950/80 border border-white/[0.08] px-2 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500/60">
-                  <option value="all">自动适配</option><option value="tinyurl">TinyURL</option><option value="clckru">clck.ru</option><option value="lnkua">lnk.ua</option>
-                </select>
-                <button @click="quickGenLink()" :disabled="linksQuick.busy || !linksQuick.url.trim()"
-                  class="px-4 py-2 rounded-lg ui-primary text-xs font-semibold text-white disabled:opacity-40 transition-all whitespace-nowrap">
-                  [[ linksQuick.busy ? '生成中…' : '生成短链' ]]</button>
-              </div>
-            </div>
-            <div v-if="linksQuick.lastShort" class="flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-500/30 bg-emerald-500/[0.07] fade-in">
-              <i data-lucide="check-circle-2" class="w-3.5 h-3.5 text-emerald-400 shrink-0"></i>
-              <span class="text-[10.5px] text-slate-400 shrink-0">已生成:</span>
-              <a :href="linksQuick.lastShort" target="_blank" class="font-mono text-[11px] text-emerald-300 hover:underline">[[ linksQuick.lastShort ]]</a>
-            </div>
-          </div>
-          <table class="w-full text-[11px] border-t border-white/[0.06]">
-            <thead><tr class="text-slate-500 border-b border-white/[0.06]">
-              <th class="text-left px-4 py-2.5 font-medium">原始链接</th>
-              <th class="text-left px-3 py-2.5 font-medium">短链地址</th>
-              <th class="text-left px-3 py-2.5 font-medium w-[70px]">点击</th>
-              <th class="text-left px-3 py-2.5 font-medium w-[90px]">生成时间</th>
-              <th class="w-[150px]"></th>
-            </tr></thead>
-            <tbody>
-              <tr v-for="l in linksStandalone" :key="l.id" class="border-b border-white/[0.04] hover:bg-white/[0.02]">
-                <td class="px-4 py-2 text-slate-400 truncate max-w-[280px]" :title="l.target_url">[[ l.target_url ]]</td>
-                <td class="px-3 py-2">
-                  <div class="flex items-center gap-1.5">
-                    <a v-if="l.short_url" :href="l.short_url" target="_blank" class="font-mono text-indigo-300 hover:underline truncate max-w-[220px]">[[ l.short_url ]]</a>
-                    <span class="relative">
-                      <button @click="copyShortLink(l)" title="一键复制"
-                        class="p-1 rounded-md border border-white/[0.08] text-slate-500 hover:text-slate-100 transition-all">
-                        <i data-lucide="copy" class="w-3 h-3"></i></button>
-                      <span v-if="linkCopied === l.id"
-                        class="absolute -top-7 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-md bg-emerald-500/90 text-white text-[9px] whitespace-nowrap shadow-lg">已复制</span>
-                    </span>
-                    <span class="relative">
-                      <button @click="qrShow = qrShow === l.id ? null : l.id" title="二维码预览"
-                        class="p-1 rounded-md border border-white/[0.08] text-slate-500 hover:text-slate-100 transition-all">
-                        <i data-lucide="qr-code" class="w-3 h-3"></i></button>
-                      <div v-if="qrShow === l.id" class="absolute z-30 top-6 right-0 p-2 rounded-xl bg-slate-900 border border-white/[0.1] shadow-2xl">
-                        <img :src="'https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=' + encodeURIComponent(l.short_url)"
-                          class="w-[140px] h-[140px] rounded-lg bg-white" alt="QR">
-                        <div class="text-[9px] text-slate-500 text-center mt-1 truncate max-w-[140px]">[[ l.short_url ]]</div>
-                      </div>
-                    </span>
-                  </div>
-                </td>
-                <td class="px-3 py-2"><span class="font-mono tnums px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-300">[[ l.clicks ]]</span></td>
-                <td class="px-3 py-2 font-mono text-slate-600 tnums">[[ (l.created_at || '').slice(5, 16) ]]</td>
-                <td class="px-3 py-2 text-right">
-                  <button @click="deleteStandaloneLink(l)" class="px-2 py-1 rounded-md text-slate-500 hover:text-rose-300 hover:bg-rose-500/10 transition-all" title="删除">删除</button>
-                </td>
-              </tr>
-              <tr v-if="!linksStandalone.length"><td colspan="5" class="px-4 py-6 text-center text-slate-600">暂无快捷短链 — 上方粘贴长链接即可生成</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-
-        <!-- 新建表单 -->
-        <div v-if="links.creating" class="fixed inset-0 z-50 flex items-center justify-center p-6 bg-[rgba(15,23,42,0.55)] backdrop-blur-[6px]" @click.self="links.creating=false">
-          <div class="w-[560px] max-w-[92vw] rounded-2xl border border-white/[0.10] bg-slate-900 backdrop-blur-2xl p-5 space-y-3 shadow-2xl"
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <label class="text-[11px] text-slate-400 mb-1 block">任务名称 <span class="text-rose-400">*</span></label>
-              <input v-model="links.form.name" spellcheck="false" maxlength="120" placeholder="例如: 产险理赔外链分发"
-                class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500/60">
-            </div>
-            <div>
-              <label class="text-[11px] text-slate-400 mb-1 block">目标地址 <span class="text-rose-400">*</span></label>
-              <input v-model="links.form.target_url" spellcheck="false" placeholder="http://47.92.75.70/cas/... 或 https://domain/path"
-                class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-3 py-2 text-xs font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500/60">
-            </div>
-            <div>
-              <label class="text-[11px] text-slate-400 mb-1 block">短链服务</label>
-              <select v-model="links.form.service" class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500/60">
-                <option value="all">自动适配(全部适用服务各生成一条)</option>
-                <option v-for="pv in links.providers" :key="pv.key" :value="pv.key">[[ pv.name ]][[ pv.supports_ip ? '' : '(仅域名)' ]]</option>
-              </select>
-            </div>
-            <div>
-              <label class="text-[11px] text-slate-400 mb-1 block">关联 Clone 任务 <span class="text-slate-600">(可选)</span></label>
-              <select v-model="links.form.clone_task_id" class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500/60">
-                <option value="">不关联</option>
-                <option v-for="t in tasks" :key="t.id" :value="t.id">#[[ t.id ]] [[ t.domain ]]</option>
-              </select>
-            </div>
-            <div class="md:col-span-2">
-              <label class="text-[11px] text-slate-400 mb-1 block">备注 <span class="text-slate-600">(可选)</span></label>
-              <input v-model="links.form.note" spellcheck="false" maxlength="300" placeholder="用途说明, 便于审计"
-                class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500/60">
-            </div>
-          </div>
-          <label class="flex items-center gap-2 text-[11px] text-slate-400">
-            <input type="checkbox" v-model="links.form.generate" class="accent-indigo-500">创建后立即生成短链
-          </label>
-          <div class="flex gap-2 pt-1">
-            <button @click="createLinkTask" :disabled="links.busy" class="flex-1 py-2.5 rounded-xl ui-primary text-[11.5px] font-semibold text-white disabled:opacity-50 transition-all">[[ links.busy ? '生成中…' : '创建任务' ]]</button>
-            <button @click="links.creating=false" class="px-5 py-2.5 rounded-xl border border-white/[0.08] text-[11px] text-slate-400 hover:text-slate-200">取消</button>
-          </div>
-        </div>
-
-        <!-- 任务卡片网格 -->
-        <div class="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          <div v-for="st in links.tasks" :key="st.id"
-            class="metric-grad rounded-2xl border border-white/[0.06] p-4 relative overflow-hidden cursor-pointer transition-all duration-200 hover:-translate-y-0.5"
-            @click="openLinkTask(st)">
-            <div class="absolute top-0 left-0 right-0 h-[3px]" :style="{ background: statusColor(st.status) }"></div>
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2 min-w-0">
-                <span class="px-1.5 py-0.5 rounded-md bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 text-[10px] font-mono font-semibold">SL-[[ String(st.seq).padStart(3,'0') ]]</span>
-                <span class="text-xs font-bold text-slate-100 truncate">[[ st.name ]]</span>
-              </div>
-              <span class="w-2 h-2 rounded-full shrink-0" :style="{ background: statusColor(st.status) }"></span>
-            </div>
-            <div class="mt-2 text-[10px] font-mono text-slate-500 truncate" :title="st.target_url">[[ st.target_url ]]</div>
-            <div class="mt-3 flex items-center gap-3 text-[10px] text-slate-500 tnums">
-              <span class="flex items-center gap-1"><i data-lucide="link" class="w-3 h-3"></i>[[ st.link_count ]] 条</span>
-              <span class="flex items-center gap-1"><i data-lucide="mouse-pointer-click" class="w-3 h-3"></i>[[ st.total_clicks ]] 点击</span>
-              <span class="ml-auto">[[ st.created_at.slice(5,16) ]]</span>
-            </div>
-            <div class="mt-3 flex items-center justify-between">
-              <span class="px-2 py-0.5 rounded-md border text-[9.5px] font-semibold" :style="{ color: statusColor(st.status), borderColor: statusColor(st.status)+'55', background: statusColor(st.status)+'14' }">[[ linkStatusText(st.status) ]]</span>
-              <div class="flex items-center gap-1" @click.stop>
-                <button @click="copyLinks(st)" :disabled="!st.link_count" title="复制全部短链" class="p-1.5 rounded-md border border-white/[0.08] text-slate-400 hover:text-slate-100 disabled:opacity-30 transition-all"><i data-lucide="copy" class="w-3 h-3"></i></button>
-                <a :href="'/api/v4/link-tasks/' + st.id + '/export?format=txt'" :title="'导出 txt'" @click.stop class="p-1.5 rounded-md border border-white/[0.08] text-slate-400 hover:text-slate-100 transition-all"><i data-lucide="download" class="w-3 h-3"></i></a>
-                <button @click.stop="deleteLinkTask(st)" title="删除(级联短链)" class="p-1.5 rounded-md border border-rose-500/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 transition-all"><i data-lucide="trash-2" class="w-3 h-3"></i></button>
-              </div>
-            </div>
-          </div>
-          <div v-if="!links.tasks.length && !links.creating" class="col-span-full rounded-2xl border border-dashed border-white/[0.1] py-20 flex flex-col items-center gap-3 text-slate-600">
-            <i data-lucide="link" class="w-8 h-8 opacity-40"></i>
-            <div class="text-xs">还没有短链任务 — 点击右上角「新建短链任务」</div>
-          </div>
+        <div class="flex items-center gap-2 flex-wrap">
+          <input v-model="links.q" @input="loadLinksSoon()" class="mt-input lk-search" placeholder="搜索名称 / 目标地址 / 备注" aria-label="搜索短链任务">
+          <button v-if="canWrite" type="button" class="mt-btn primary" @click="openLinkCreate()"><i data-lucide="plus" class="w-4 h-4"></i>新建短链任务</button>
         </div>
       </div>
 
-      <!-- ===== 详情视图 ===== -->
-      <div v-else>
-        <button @click="closeLinkTask" class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-white/[0.08] text-[11px] text-slate-400 hover:text-slate-100 transition-all mb-4">
-          <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i>返回任务列表
-        </button>
+      <div class="pg-kpis lk-kpis">
+        <div class="pg-kpi"><div class="pg-kpi-label">短链任务</div><div class="pg-kpi-num">[[ links.kpis.tasks ]]</div></div>
+        <div class="pg-kpi"><div class="pg-kpi-label">短链</div><div class="pg-kpi-num">[[ links.kpis.links ]]</div><div class="pg-kpi-sub">只算生成成功的</div></div>
+        <div class="pg-kpi"><div class="pg-kpi-label">总点击</div><div class="pg-kpi-num">[[ links.kpis.clicks ]]</div><div class="pg-kpi-sub">经 /s/编号 跳转累计</div></div>
+      </div>
 
-        <!-- 任务信息卡 -->
-        <div class="rounded-2xl border border-white/[0.07] bg-slate-900/70 backdrop-blur-xl p-5">
-          <div class="flex items-start justify-between flex-wrap gap-3">
-            <div class="min-w-0">
-              <div class="flex items-center gap-2">
-                <span class="px-2 py-0.5 rounded-md bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 text-[11px] font-mono font-bold">SL-[[ String(links.detail.seq).padStart(3,'0') ]]</span>
-                <span v-if="links.editing===-1" class="text-lg font-bold"><input v-model="links.editForm.name" maxlength="120" class="bg-transparent border-b border-indigo-500/60 text-slate-100 font-display text-lg font-bold outline-none"></span>
-                <span v-else class="font-display text-lg font-bold text-slate-100">[[ links.detail.name ]]</span>
-                <span class="px-2 py-0.5 rounded-md border text-[10px] font-semibold" :style="{ color: statusColor(links.detail.status), borderColor: statusColor(links.detail.status)+'55', background: statusColor(links.detail.status)+'14' }">[[ linkStatusText(links.detail.status) ]]</span>
-              </div>
-              <div class="mt-2 text-[11px] font-mono text-slate-400 break-all">[[ links.detail.target_url ]]</div>
-              <div class="mt-1.5 flex items-center gap-3 text-[10px] text-slate-500 tnums">
-                <span>创建: [[ links.detail.created_at.slice(0,16) ]]</span>
-                <span v-if="links.detail.clone_task_id">关联 Clone: <span class="text-indigo-300">#[[ links.detail.clone_task_id ]]</span> [[ links.detail.clone_domain || '' ]]</span>
-                <span v-if="links.detail.note">备注: [[ links.detail.note ]]</span>
-              </div>
-            </div>
-            <div class="flex items-center gap-1.5 shrink-0" @click.stop>
-              <button v-if="links.editing!==-1" @click="startLinkTaskEdit" class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-white/[0.08] text-[11px] text-slate-400 hover:text-slate-100 transition-all"><i data-lucide="pencil" class="w-3 h-3"></i>编辑</button>
-              <button v-if="links.editing===-1" @click="saveLinkTaskEdit" class="flex items-center gap-1 px-3 py-1.5 rounded-lg ui-primary text-[11px] font-semibold">保存</button>
-              <button v-if="links.editing===-1" @click="links.editing=null" class="px-3 py-1.5 rounded-lg border border-white/[0.08] text-[11px] text-slate-400">取消</button>
-              <button @click="regenLinks" :disabled="links.busy" class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-[11px] text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50 transition-all"><i data-lucide="refresh-cw" class="w-3 h-3"></i>[[ links.busy ? '生成中…' : '重新生成' ]]</button>
-            </div>
+      <section class="mt-panel">
+        <div v-if="links.tasks.length" class="mt-row lk-row mt-row-head"><span>名称</span><span class="hide-sm">目标地址</span><span class="hide-sm">服务商</span><span>状态</span><span class="lk-num">点击</span><span class="hide-sm">时间</span><span></span></div>
+        <div v-for="st in links.tasks" :key="st.id" class="mt-row lk-row">
+          <div class="min-w-0">
+            <div class="text-[14px] text-slate-100 truncate">[[ st.name ]]</div>
+            <div class="text-[12px] text-slate-500 tnums">SL-[[ String(st.seq).padStart(3, '0') ]] · [[ st.link_count ]] 条短链<template v-if="st.failed_count"> · [[ st.failed_count ]] 家失败</template></div>
           </div>
-          <div class="mt-4 grid grid-cols-3 gap-3">
-            <div class="rounded-xl bg-slate-950/50 border border-white/[0.05] p-3 text-center">
-              <div class="text-[10px] text-slate-500">短链总数</div>
-              <div class="text-xl font-bold text-slate-100 tnums">[[ links.detail.links.length ]]</div>
-            </div>
-            <div class="rounded-xl bg-slate-950/50 border border-white/[0.05] p-3 text-center">
-              <div class="text-[10px] text-slate-500">总点击</div>
-              <div class="text-xl font-bold text-emerald-300 tnums">[[ links.detail.links.reduce((a,l)=>a+l.clicks,0) ]]</div>
-            </div>
-            <div class="rounded-xl bg-slate-950/50 border border-white/[0.05] p-3 text-center">
-              <div class="text-[10px] text-slate-500">服务数</div>
-              <div class="text-xl font-bold text-sky-300 tnums">[[ new Set(links.detail.links.map(l=>l.service)).size ]]</div>
-            </div>
+          <div class="hide-sm min-w-0"><span class="lk-target" :title="st.target_url">[[ st.target_url.replace(/^https?:\/\//, '') ]]</span></div>
+          <div class="hide-sm lk-svcs">
+            <span v-for="s in (st.services.length ? st.services : [st.service])" :key="s" class="lk-svc" :class="st.services.length ? '' : 'pref'">[[ linkServiceName(s) ]]</span>
+          </div>
+          <div class="dp-state" :class="st.status">
+            <span v-if="st.status==='running'" key="spin" class="inline-flex"><i data-lucide="loader" class="w-3.5 h-3.5 animate-spin"></i></span><span v-else key="dot" class="dot"></span><span>[[ linkStatusText(st.status) ]]</span>
+          </div>
+          <div class="lk-num">[[ st.total_clicks ]]</div>
+          <div class="hide-sm text-[12px] text-slate-500 tnums">[[ (st.created_at || '').slice(5, 16) ]]</div>
+          <div class="flex items-center justify-end gap-0.5">
+            <button type="button" class="mt-icon" title="详情" aria-label="详情" @click="openLinkTask(st)"><i data-lucide="eye" class="w-4 h-4"></i></button>
+            <a :href="'/api/v4/link-tasks/' + st.id + '/export?format=csv'" class="mt-icon" title="导出 CSV" aria-label="导出 CSV"><i data-lucide="download" class="w-4 h-4"></i></a>
+            <button v-if="canWrite" type="button" class="mt-icon" title="删除" aria-label="删除" @click="deleteLinkTask(st)"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
           </div>
         </div>
+        <div v-if="!links.tasks.length && links.q" key="lk-nomatch" class="pg-empty">没有匹配「[[ links.q ]]」的短链任务</div>
+        <div v-else-if="!links.tasks.length" key="lk-empty" class="pg-empty lg">
+          <i data-lucide="link" class="w-6 h-6"></i>
+          <div>把克隆好的站点地址变成短链，分享出去还能看到点击数。</div>
+          <button v-if="canWrite" type="button" class="mt-btn primary" @click="openLinkCreate()">新建短链任务</button>
+        </div>
+      </section>
+    </div>
 
-        <!-- 短链表 -->
-        <div class="mt-4 rounded-2xl border border-white/[0.06] bg-slate-900/60 overflow-hidden">
-          <div class="flex items-center justify-between px-5 py-3 border-b border-white/[0.05]">
-            <div class="text-xs font-semibold text-slate-300">短链列表</div>
-            <div class="flex items-center gap-1.5">
-              <button @click="copyLinks(links.detail)" :disabled="!links.detail.links.length" class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-white/[0.08] text-[10.5px] text-slate-300 hover:text-slate-100 disabled:opacity-40 transition-all"><i data-lucide="copy" class="w-3 h-3"></i>一键复制</button>
-              <a :href="'/api/v4/link-tasks/' + links.detail.id + '/export?format=txt'" class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-white/[0.08] text-[10.5px] text-slate-300 hover:text-slate-100 transition-all"><i data-lucide="file-text" class="w-3 h-3"></i>TXT</a>
-              <a :href="'/api/v4/link-tasks/' + links.detail.id + '/export?format=csv'" class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-white/[0.08] text-[10.5px] text-slate-300 hover:text-slate-100 transition-all"><i data-lucide="sheet" class="w-3 h-3"></i>CSV</a>
-              <a :href="'/api/v4/link-tasks/' + links.detail.id + '/export?format=json'" class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-white/[0.08] text-[10.5px] text-slate-300 hover:text-slate-100 transition-all"><i data-lucide="braces" class="w-3 h-3"></i>JSON</a>
+    <!-- 新建短链任务 -->
+    <div v-if="links.creating" class="fixed inset-0 z-[70] flex items-center justify-center bg-black/50" @click.self="links.creating=false">
+      <form class="mt-modal" @submit.prevent="createLinkTask()">
+        <h3>新建短链任务</h3>
+        <p>选「全部服务」会依次用每家服务各生成一条；指定一家时，失败会自动换下一家。</p>
+        <label for="lk-name">名称</label>
+        <input id="lk-name" v-model="links.form.name" class="mt-input" maxlength="120" placeholder="例如：活动落地页" required>
+        <label for="lk-target">目标地址</label>
+        <input id="lk-target" v-model="links.form.target_url" class="mt-input font-mono" spellcheck="false" placeholder="https://example.com/page" required>
+        <label for="lk-service">偏好服务</label>
+        <select id="lk-service" v-model="links.form.service" class="mt-select">
+          <option value="all">全部服务（每家各生成一条）</option>
+          <option v-for="pv in links.providers" :key="pv.key" :value="pv.key">[[ pv.name ]][[ pv.supports_ip ? '' : '（不支持 IP 地址）' ]][[ pv.available === false ? ' · 预检不通' : '' ]]</option>
+        </select>
+        <div v-if="linkTargetIsIp && links.form.service==='urlasia'" class="ui-hint">目标是 IP 地址，url.asia 不收，会自动换下一家。</div>
+        <label for="lk-clone">关联克隆任务（可选）</label>
+        <select id="lk-clone" v-model="links.form.clone_task_id" class="mt-select">
+          <option value="">不关联</option>
+          <option v-for="t in tasks" :key="t.id" :value="t.id">#[[ t.id ]] [[ t.domain ]]</option>
+        </select>
+        <label for="lk-note">备注（可选）</label>
+        <input id="lk-note" v-model="links.form.note" class="mt-input" maxlength="300" placeholder="用途说明">
+        <label class="flex items-center gap-2"><input type="checkbox" v-model="links.form.generate">创建后立即生成</label>
+        <div v-if="links.error" class="ui-hint lk-err">[[ links.error ]]</div>
+        <div class="flex justify-end gap-2 mt-2">
+          <button type="button" class="mt-btn" @click="links.creating=false">取消</button>
+          <button type="submit" class="mt-btn primary" :disabled="links.busy">[[ links.busy ? '创建中…' : '创建' ]]</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- 任务详情 -->
+    <div v-if="links.detail" class="fixed inset-0 z-[70] flex items-center justify-center bg-black/50" @click.self="closeLinkTask()">
+      <div class="mt-modal wide">
+        <div class="flex items-center gap-3">
+          <h3 class="flex-1 truncate">[[ links.detail.name ]]</h3>
+          <button type="button" class="mt-icon" title="关闭" aria-label="关闭" @click="closeLinkTask()"><i data-lucide="x" class="w-4 h-4"></i></button>
+        </div>
+        <p class="tnums">SL-[[ String(links.detail.seq).padStart(3, '0') ]] · [[ links.detail.service === 'all' ? '全部服务' : linkServiceName(links.detail.service) ]] · [[ linkStatusText(links.detail.status) ]]<template v-if="links.detail.clone_task_id"> · 克隆 #[[ links.detail.clone_task_id ]] [[ links.detail.clone_domain ]]</template><template v-if="links.detail.note"> · [[ links.detail.note ]]</template></p>
+        <div class="mt-link"><input :value="links.detail.target_url" readonly aria-label="目标地址" @focus="$event.target.select()"></div>
+        <div class="pg-stats lk-stats">
+          <div><span>短链</span><b>[[ links.detail.link_count ]]</b></div>
+          <div><span>失败</span><b>[[ links.detail.failed_count ]]</b></div>
+          <div><span>点击</span><b>[[ links.detail.total_clicks ]]</b></div>
+        </div>
+        <div class="lk-links">
+          <div v-for="l in links.detail.links" :key="l.id" class="mt-line lk-line" :class="l.ok ? '' : 'bad'">
+            <span class="lk-svc">[[ linkServiceName(l.service) ]]</span>
+            <div class="min-w-0 flex-1">
+              <template v-if="l.ok">
+                <a :href="l.short_url" target="_blank" rel="noopener" class="dp-link truncate block" :title="l.short_url">[[ l.short_url.replace(/^https?:\/\//, '') ]]</a>
+                <div class="lk-sub truncate">计数入口 [[ l.local_url ]]<template v-if="l.extras && l.extras.fallback"> · 指定的 [[ linkServiceName(l.extras.requested) ]] 失败，已顺延</template></div>
+              </template>
+              <div v-else class="lk-sub lk-err truncate" :title="l.extras && l.extras.error">失败：[[ (l.extras && l.extras.error) || '未知原因' ]]</div>
             </div>
+            <span class="lk-num">[[ l.clicks ]]</span>
+            <template v-if="l.ok">
+              <button type="button" class="mt-icon sm" title="复制计数短链" aria-label="复制计数短链" @click="copyText(l.local_url)"><i data-lucide="copy" class="w-3.5 h-3.5"></i></button>
+              <a :href="l.local_url" target="_blank" rel="noopener" class="mt-icon sm" title="打开(计一次点击)" aria-label="打开" @click="bumpLocalClick(l)"><i data-lucide="external-link" class="w-3.5 h-3.5"></i></a>
+            </template>
+            <button v-if="canWrite" type="button" class="mt-icon sm" title="删除这条" aria-label="删除这条" @click="deleteLinkRow(l)"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
           </div>
-          <table class="w-full text-[11px]">
-            <thead><tr class="text-slate-500 text-left border-b border-white/[0.05]">
-              <th class="px-5 py-2.5 font-medium">#</th><th class="px-3 py-2.5 font-medium">短链</th>
-              <th class="px-3 py-2.5 font-medium">服务</th><th class="px-3 py-2.5 font-medium">点击</th>
-              <th class="px-3 py-2.5 font-medium">生成时间</th><th class="px-5 py-2.5 font-medium text-right">操作</th>
-            </tr></thead>
-            <tbody>
-              <tr v-for="(l, i) in links.detail.links" :key="l.id" class="border-b border-white/[0.03] hover:bg-white/[0.02]">
-                <td class="px-5 py-2.5 font-mono text-slate-500">[[ i+1 ]]</td>
-                <td class="px-3 py-2.5">
-                  <a :href="l.short_url" target="_blank" rel="noopener" class="text-indigo-300 hover:text-slate-100 font-mono">[[ l.short_url ]]</a>
-                </td>
-                <td class="px-3 py-2.5 text-slate-400">[[ l.service ]]</td>
-                <td class="px-3 py-2.5 font-mono text-slate-300 tnums">[[ l.clicks ]]</td>
-                <td class="px-3 py-2.5 text-slate-500 font-mono text-[10px]">[[ l.created_at.slice(5,16) ]]</td>
-                <td class="px-5 py-2.5 text-right">
-                  <button @click="copyOne(l)" title="复制" class="inline-flex px-2 py-1 rounded-md border border-white/[0.08] text-slate-400 hover:text-slate-100 mr-1 transition-all"><i data-lucide="copy" class="w-3 h-3"></i></button>
-                  <a :href="'/s/' + l.id" target="_blank" title="本地跳转(+计数)" class="inline-flex px-2 py-1 rounded-md border border-white/[0.08] text-slate-400 hover:text-slate-100 mr-1 transition-all"><i data-lucide="external-link" class="w-3 h-3"></i></a>
-                  <button @click="deleteLinkRow(l)" title="删除此条" class="inline-flex px-2 py-1 rounded-md border border-rose-500/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 transition-all"><i data-lucide="trash-2" class="w-3 h-3"></i></button>
-                </td>
-              </tr>
-              <tr v-if="!links.detail.links.length"><td colspan="6" class="px-5 py-10 text-center text-slate-600">尚无短链 — 点上方「重新生成」</td></tr>
-            </tbody>
-          </table>
+          <div v-if="!links.detail.links.length" class="pg-empty">[[ links.detail.status==='running' ? '正在生成…' : '还没有短链，点「生成」试试' ]]</div>
+        </div>
+        <div class="flex items-center justify-end gap-2 mt-2">
+          <a :href="'/api/v4/link-tasks/' + links.detail.id + '/export?format=txt'" class="mt-btn">导出 TXT</a>
+          <a :href="'/api/v4/link-tasks/' + links.detail.id + '/export?format=csv'" class="mt-btn">导出 CSV</a>
+          <button v-if="canWrite && links.detail.status==='running'" key="lk-gen-run" type="button" class="mt-btn primary" disabled><i data-lucide="loader" class="w-4 h-4 animate-spin"></i>生成中…</button>
+          <button v-else-if="canWrite" key="lk-gen" type="button" class="mt-btn primary" @click="regenLinks()"><i data-lucide="refresh-cw" class="w-4 h-4"></i>生成</button>
         </div>
       </div>
     </div>
-
-    <!-- 新建弹窗已内联为表单, 无弹窗 -->
   </div>
 
   <div v-show="view==='docker'" class="flex-1 min-h-0 overflow-y-auto custom-scroll">
@@ -3572,6 +3418,7 @@ const __vueApp = createApp({
           { id: 'generate', label: '界面生成', icon: 'wand-2', desc: '一句话或一张截图，生成可运行的网页' },
           { id: 'ai', label: '视觉修复', icon: 'flask-conical', desc: '还原度不够的克隆，自动修细节' },
           { id: 'mockgen', label: 'Mock 数据', icon: 'database', desc: '给克隆站的接口造模拟数据，离线也能显示' },
+          { id: 'links', label: '短链管理', icon: 'link', desc: '把站点地址变成短链，分享出去还能统计点击' },
         ]},
       ],
       schedulerBatches: [],
@@ -3595,8 +3442,6 @@ const __vueApp = createApp({
       trackerEnabledOnly: false, trackerRowSearch: '', trackerRowPage: 1, trackerPageSize: 10,
       trackerSearch: '', trackerRange: 'all', trackerExpanded: -1,
       trackerModal: { open: false, time: '', json: '', html: '', lines: 0 },
-      linksQuick: { url: '', service: 'tinyurl', busy: false, lastShort: '' },
-      linksStandalone: [], linkCopied: null, qrShow: null,
       cron: { preset: 'daily', hour: 9, minute: 0, dow: '1' },
       live: { at: 0, workers: [], tasks: [], pending: [], pending_total: 0, queue: {}, throughput: { completed: 0, failed: 0 },
               browser: { active: 0, max: 4 }, procs: { count: 0, rss_mb: 0, cpu: 0 }, host: { load_pct: 0, cpus: 0, disk: {} },
@@ -3625,10 +3470,9 @@ const __vueApp = createApp({
                 form: { name: '', host: '', ssh_port: 22, username: 'root', password: '', clone_task_id: '', remote_port: 8000, note: '', deploy_now: true },
                 editing: null, editForm: {}, detail: null, detailLoading: false,
                 logKind: 'deploy', runtimeLogs: '' },
-      links: { tasks: [], q: '', creating: false, busy: false,
-              form: { name: '', target_url: '', service: 'all', clone_task_id: '', note: '', generate: true },
-              editing: null, editForm: {},
-              detail: null, detailLoading: false, copying: false },
+      links: { tasks: [], q: '', kpis: { tasks: 0, links: 0, clicks: 0 }, providers: [],
+              creating: false, busy: false, error: '', detail: null,
+              form: { name: '', target_url: '', service: 'all', clone_task_id: '', note: '', generate: true } },
       themeMode: 'system', themeMenu: false, moreMenu: false,
       themeOptions: [
         { id: 'system', label: '跟随系统', icon: 'monitor' },
@@ -3786,6 +3630,10 @@ const __vueApp = createApp({
       const used = new Set(this.docker.list.map(c => c.task_id));
       return this.tasks.filter(t => ['completed', 'partial'].includes(t.status) && !used.has(t.id))
         .filter(t => !q || (t.domain + ' #' + t.id).toLowerCase().includes(q)).slice(0, 40);
+    },
+    linkTargetIsIp() {
+      const m = /^https?:\/\/(\[[0-9a-f:.]+\]|\d{1,3}(?:\.\d{1,3}){3})(?:[:/?#]|$)/i.exec((this.links.form.target_url || '').trim());
+      return !!m;
     },
     activeModule() {
       const map = { create: 'create', tasks: 'hub', task: 'hub', dashboard: 'hub',
@@ -4815,121 +4663,131 @@ const __vueApp = createApp({
     },
 
     /* ---------- M3 Docker 一键部署 ---------- */
-    async loadLinks() { return;  /* 引擎内核版: 运营功能已移除 */
+    /* ---------- 短链管理 ---------- */
+    async loadLinks() {
       try {
         const params = new URLSearchParams();
-        if (this.links.q) params.set('q', this.links.q);
+        if (this.links.q.trim()) params.set('q', this.links.q.trim());
         const r = await fetch('/api/v4/link-tasks?' + params.toString());
-        this.links.tasks = (await r.json()).tasks || [];
+        if (r.status === 401) { this.handleAuthExpired(); return; }
+        if (!r.ok) return;
+        const data = await r.json();
+        this.links.tasks = data.tasks || [];
+        this.links.kpis = data.kpis || { tasks: 0, links: 0, clicks: 0 };
       } catch (e) { return; }
+      this.iconRefresh();
+      // 列表里有正在生成的任务: 过一会儿再刷, 状态与条数自己更新
+      clearTimeout(this._linksPoll);
+      if (this.view === 'links' && this.links.tasks.some(t => t.status === 'running')) {
+        this._linksPoll = setTimeout(() => this.loadLinks(), 1500);
+      }
+    },
+    loadLinksSoon() {
+      clearTimeout(this._linksSearch);
+      this._linksSearch = setTimeout(() => this.loadLinks(), 250);
+    },
+    async loadLinkProviders() {
+      if (!this.links.providers.length) this.links.providers = this.linkProviderList();
       try {
-        const pr = await fetch('/api/v4/links/providers');
-        if (pr.ok) this.links.providers = (await pr.json()).providers || [];
+        const r = await fetch('/api/v4/links/providers');
+        if (r.ok) this.links.providers = (await r.json()).providers || this.links.providers;
       } catch (e) { return; }
+    },
+    linkProviderList() {
+      return [{ key: 'tinyurl', name: 'TinyURL', supports_ip: true }, { key: 'clckru', name: 'clck.ru', supports_ip: true },
+              { key: 'lnkua', name: 'lnk.ua', supports_ip: true }, { key: 'urlasia', name: 'url.asia', supports_ip: false }];
+    },
+    linkServiceName(k) {
+      if (k === 'all') return '全部服务';
+      const p = this.linkProviderList().find(x => x.key === k);
+      return p ? p.name : (k || '—');
     },
     linkStatusText(s) {
-      return { pending: '待生成', partial: '部分完成', done: '已完成', failed: '失败' }[s] || s;
-    },
-    statusColor(s) {
-      return { pending: '#94A3B8', partial: '#FBBF24', done: '#34D399', failed: '#FB7185' }[s] || '#94A3B8';
+      return { pending: '待生成', running: '生成中', partial: '部分成功', done: '已完成', failed: '失败' }[s] || s;
     },
     openLinkCreate() {
-      this.links.creating = true;
       this.links.form = { name: '', target_url: '', service: 'all', clone_task_id: '', note: '', generate: true };
+      this.links.error = '';
+      this.links.creating = true;
+      this.loadLinkProviders();
       this.iconRefresh();
     },
     async createLinkTask() {
       const f = this.links.form;
-      if (!f.name.trim()) { this.toast('请填写任务名称'); return; }
-      if (!f.target_url.trim().startsWith('http')) { this.toast('目标地址必须以 http(s):// 开头'); return; }
+      this.links.error = '';
+      if (!f.name.trim()) { this.links.error = '请填写名称'; return; }
+      if (!/^https?:\/\//i.test(f.target_url.trim())) { this.links.error = '目标地址必须以 http:// 或 https:// 开头'; return; }
       this.links.busy = true;
       try {
-        const payload = { name: f.name.trim(), target_url: f.target_url.trim(),
-                          service: f.service, note: f.note, generate: f.generate };
+        const payload = { name: f.name.trim(), target_url: f.target_url.trim(), service: f.service,
+                          note: f.note.trim(), generate: f.generate };
         if (f.clone_task_id !== '') payload.clone_task_id = Number(f.clone_task_id);
         const r = await fetch('/api/v4/link-tasks', { method: 'POST',
           headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         const data = await r.json();
-        if (!r.ok) { this.toast('❌ ' + (data.error || '创建失败')); return; }
+        if (!r.ok) { this.links.error = data.error || '创建失败'; return; }
         this.links.creating = false;
-        this.toast('短链任务 SL-' + String(data.task.seq).padStart(3, '0') + ' 已创建'
-                   + (f.generate ? ', 短链已生成' : ''));
+        this.toast('已创建 SL-' + String(data.task.seq).padStart(3, '0') + (f.generate ? '，正在生成短链' : ''));
         await this.loadLinks();
         if (f.generate) this.openLinkTask(data.task);
-      } catch (e) { this.toast('网络错误: ' + e); }
+      } catch (e) { this.links.error = '网络错误，请重试'; }
       finally { this.links.busy = false; }
     },
     async openLinkTask(st) {
-      this.links.detailLoading = true;
       try {
         const r = await fetch('/api/v4/link-tasks/' + st.id);
-        const data = await r.json();
-        this.links.detail = data.task || null;
-      } catch (e) { this.toast('加载失败'); }
-      finally { this.links.detailLoading = false; }
+        if (!r.ok) { this.toast('这个短链任务已不存在'); this.loadLinks(); return; }
+        this.links.detail = (await r.json()).task || null;
+      } catch (e) { this.toast('加载失败'); return; }
       this.iconRefresh();
+      clearTimeout(this._linkDetailPoll);
+      if (this.links.detail && this.links.detail.status === 'running') {
+        this._linkDetailPoll = setTimeout(() => {
+          if (this.links.detail && this.links.detail.id === st.id) this.openLinkTask(st);
+        }, 1200);
+      } else {
+        this.loadLinks();
+      }
     },
-    closeLinkTask() { this.links.detail = null; this.links.editing = null; this.loadLinks(); this.iconRefresh(); },
-    startLinkTaskEdit() {
-      const d = this.links.detail;
-      this.links.editForm = { name: d.name, target_url: d.target_url,
-                              note: d.note || '', clone_task_id: d.clone_task_id || '' };
-      this.links.editing = -1;
-      this.iconRefresh();
-    },
-    async saveLinkTaskEdit() {
-      const f = this.links.editForm;
-      try {
-        const payload = { name: f.name, target_url: f.target_url, note: f.note,
-                          clone_task_id: (f.clone_task_id === '' ? null : Number(f.clone_task_id)) };
-        const r = await fetch('/api/v4/link-tasks/' + this.links.detail.id, {
-          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload) });
-        const data = await r.json();
-        if (!r.ok) { this.toast(data.error || '保存失败'); return; }
-        this.links.detail = data.task;
-        this.links.editing = null;
-        this.toast('任务已更新');
-      } catch (e) { this.toast('网络错误: ' + e); }
-      this.iconRefresh();
+    closeLinkTask() {
+      clearTimeout(this._linkDetailPoll);
+      this.links.detail = null;
+      this.loadLinks();
     },
     async regenLinks() {
-      this.links.busy = true;
+      const d = this.links.detail;
       try {
-        const r = await fetch('/api/v4/link-tasks/' + this.links.detail.id + '/generate', { method: 'POST' });
+        const r = await fetch('/api/v4/link-tasks/' + d.id + '/generate', { method: 'POST' });
         const data = await r.json();
-        if (data.task) this.links.detail = data.task;
-        const n = (data.created || []).length;
-        this.toast(n ? ('✅ 新生成 ' + n + ' 条短链') : '⚠️ 无服务生成成功: ' + (data.failed || []).join(' / '));
-      } catch (e) { this.toast('网络错误: ' + e); }
-      finally { this.links.busy = false; }
+        if (!r.ok) { this.toast(data.error || '生成失败'); return; }
+        this.links.detail = data.task;
+      } catch (e) { this.toast('网络错误，请重试'); return; }
+      this.openLinkTask(d);
+    },
+    bumpLocalClick(l) {
+      // 计数在服务端 /s/<id> 跳转时完成; 稍后刷新详情把新点击数带回来
+      const d = this.links.detail;
+      setTimeout(() => { if (this.links.detail && this.links.detail.id === d.id) this.openLinkTask(d); }, 800);
     },
     async deleteLinkTask(st) {
-      if (!confirm('删除短链任务 SL-' + String(st.seq).padStart(3, '0') + '「' + st.name + '」?\n其下 ' + st.link_count + ' 条短链将级联删除。')) return;
+      const n = st.link_count + (st.failed_count || 0);
+      if (!confirm('删除短链任务「' + st.name + '」？' + (n ? '\n其下 ' + n + ' 条记录会一起删除，已分享出去的计数短链将失效。' : ''))) return;
       try {
         const r = await fetch('/api/v4/link-tasks/' + st.id, { method: 'DELETE' });
-        if (!r.ok) { const d = await r.json(); this.toast(d.error || '删除失败'); return; }
-        await this.loadLinks();
-        this.toast('任务已删除');
-      } catch (e) { this.toast('网络错误: ' + e); }
+        const data = await r.json();
+        if (!r.ok) { this.toast(data.error || '删除失败'); return; }
+        if (this.links.detail && this.links.detail.id === st.id) this.links.detail = null;
+        this.toast('已删除');
+      } catch (e) { this.toast('网络错误，请重试'); }
+      this.loadLinks();
     },
     async deleteLinkRow(l) {
-      if (!confirm('删除此条短链 ' + l.short_url + ' ?')) return;
+      if (!confirm(l.ok ? ('删除短链 ' + l.short_url + '？计数短链 ' + l.local_url + ' 将失效。') : '删除这条失败记录？')) return;
       try {
         const r = await fetch('/api/v4/links/' + l.id, { method: 'DELETE' });
         if (!r.ok) { this.toast('删除失败'); return; }
-        const d = await fetch('/api/v4/link-tasks/' + this.links.detail.id).json();
-        this.links.detail = d.task;
-        this.toast('已删除');
-      } catch (e) { this.toast('网络错误: ' + e); }
-    },
-    copyOne(l) { this.copyText(l.short_url); },
-    async copyLinks(st) {
-      let links = st.links;
-      if (!links && this.links.detail && this.links.detail.id === st.id) links = this.links.detail.links;
-      if (!links || !links.length) { this.toast('该任务暂无短链'); return; }
-      const text = links.map((l, i) => (i + 1) + '. ' + l.short_url).join('\n');
-      this.copyText(text);
+      } catch (e) { this.toast('网络错误，请重试'); return; }
+      this.openLinkTask(this.links.detail);
     },
     remoteStatusText(s) {
       return { idle: '待部署', deploying: '部署中', running: '运行中',
@@ -5727,7 +5585,6 @@ const __vueApp = createApp({
       if (id === 'scheduler') this.loadSchedules();
       if (id === 'ai') { this.loadAiJobs(); if (!this.previewTaskId && this.aiList.length) this.aiPick(this.aiList[0]); }
       if (id === 'tracker') { this.loadTrackerOverview(); this.loadOpsKpis(); }
-      if (id === 'links') { this.loadOpsKpis(); this.loadLinks(); this.loadLinksStandalone(); }
       if (id === 'scheduler') this.refreshTelemetry().then(() => { this.schedulerBatches = this.batches; });
       if (id === 'mockgen') { this.refreshTasks().then(() => { this.mockGenTasks = (this.tasks || []).filter(t => t.status === 'completed'); }); if (this.mockGen.taskId) this.loadMockGenList(); }
       this.iconRefresh();
@@ -5823,46 +5680,6 @@ const __vueApp = createApp({
       a.href = URL.createObjectURL(blob); a.download = name; a.click();
       URL.revokeObjectURL(a.href);
       this.toast('已导出 ' + rows.length + ' 条');
-    },
-    async quickGenLink() {
-      const u = this.linksQuick.url.trim();
-      if (!u) { this.toast('请粘贴长链接'); return; }
-      this.linksQuick.busy = true;
-      try {
-        const r = await fetch('/api/v4/links', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ target_url: u, service: this.linksQuick.service }),
-        });
-        const data = await r.json();
-        if (!r.ok) { this.toast('❌ ' + (data.error || '生成失败')); return; }
-        this.linksQuick.lastShort = (data.link && data.link.short_url) || '';
-        this.toast('短链已生成');
-        await this.loadLinksStandalone();
-        await this.loadOpsKpis();
-      } catch (e) { this.toast('网络错误: ' + e); }
-      finally { this.linksQuick.busy = false; }
-    },
-    async loadLinksStandalone() { return;  /* 引擎内核版: 运营功能已移除 */
-      try {
-        const r = await fetch('/api/v4/links');
-        if (r.status === 401) { this.handleAuthExpired(); return; }
-        this.linksStandalone = (await r.json()).links || [];
-      } catch (e) {}
-    },
-    async copyShortLink(l) {
-      try { await navigator.clipboard.writeText(l.short_url); } catch (e) {}
-      this.linkCopied = l.id;
-      setTimeout(() => { if (this.linkCopied === l.id) this.linkCopied = null; }, 1500);
-    },
-    async deleteStandaloneLink(l) {
-      if (!confirm('删除短链 ' + l.short_url + ' ?')) return;
-      try {
-        const r = await fetch('/api/v4/links/' + l.id, { method: 'DELETE' });
-        if (!r.ok) { this.toast('删除失败'); return; }
-        this.loadLinksStandalone();
-        this.loadOpsKpis();
-        this.toast('已删除');
-      } catch (e) { this.toast('网络错误'); }
     },
     async toggleTrackerEnabled(it) {
       if (it.enabled) {
