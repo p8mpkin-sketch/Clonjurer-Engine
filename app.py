@@ -557,6 +557,14 @@ def vendor_asset(filename):
     return resp
 
 
+@app.get("/favicon.ico")
+def favicon():
+    """浏览器/书签/RSS 阅读器会不看 <link> 直接请求根路径 /favicon.ico; 生成脚本见 tools/brand/。"""
+    resp = send_from_directory("static_vendor/brand", "favicon.ico", mimetype="image/x-icon")
+    resp.headers["Cache-Control"] = "public, max-age=604800"
+    return resp
+
+
 @app.get("/")
 def index_page():
     # Referer 兜底: 克隆页 JS 整页导航逃逸到平台根时(其 Referer 必含

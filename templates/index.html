@@ -4,7 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Clonjurer</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231c1c1e'/%3E%3Crect x='14' y='14' width='26' height='26' rx='5' fill='none' stroke='%23fff' stroke-width='4.5' opacity='.45'/%3E%3Crect x='24' y='24' width='26' height='26' rx='5' fill='none' stroke='%23fff' stroke-width='4.5'/%3E%3C/svg%3E">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/svg+xml" href="/vendor/brand/favicon.svg">
+<link rel="apple-touch-icon" href="/vendor/brand/apple-touch-icon.png">
+<link rel="manifest" href="/vendor/brand/site.webmanifest">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#121110">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f4f2ed">
 <script>
 /* 主题预载: 首帧前确定 data-theme, 避免闪烁 */
 (function(){try{var m=localStorage.getItem('cloner-theme')||'system';
@@ -147,14 +152,19 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
     border:1px solid transparent;transition:background .15s,color .15s;white-space:nowrap}
   .detail-toolbar .dt-btn:disabled{opacity:.5;cursor:not-allowed}
 
-  /* ===== 登录屏: 素净底色 + 一张卡 ===== */
+  /* ===== 登录屏: 素净底色 + 线框底纹 + 一张实底卡 ===== */
   .login-screen{position:fixed;inset:0;z-index:90;display:flex;align-items:center;justify-content:center;
     overflow:hidden;background:var(--bg)}
+  .login-art{position:absolute;inset:0;width:100%;height:100%;color:var(--fg);pointer-events:none}
+  .login-art .la-dots{opacity:.13}
+  .login-art .la-frames{opacity:.16}
+  .login-art .la-marks{stroke:var(--accent);opacity:.7}
+  @media (max-width:640px){.login-art .la-frames{opacity:.11}}
   .login-card{width:400px;max-width:90vw;padding:32px;border-radius:14px;position:relative;z-index:10;
     background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-pop)}
   .login-badge{width:40px;height:40px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center;
-    background:var(--ink);color:var(--on-ink)}
-  .login-badge svg{color:var(--on-ink)!important}
+    background:var(--ui-brand);color:#fff}
+  .login-badge svg{color:#fff!important}
   .login-field{position:relative}
   .login-field .lf-icon{position:absolute;left:12px;top:50%;transform:translateY(-50%);
     width:16px;height:16px;color:var(--fg-3);pointer-events:none}
@@ -278,7 +288,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
     <div class="relative flex items-center gap-1 h-11 mb-2" :class="navCollapsed ? 'justify-center' : ''">
       <button type="button" class="ws-switch" :class="navCollapsed ? 'justify-center' : ''" @click="wsMenu = !wsMenu; $nextTick(() => iconRefresh())" :aria-expanded="wsMenu ? 'true' : 'false'" :title="workspace.name" aria-label="切换工作区">
         <span class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" class="w-4 h-4"><rect x="3.5" y="3.5" width="11" height="11" rx="2" opacity=".45"/><rect x="9.5" y="9.5" width="11" height="11" rx="2"/></svg>
+          <svg viewBox="0 0 64 64" class="w-5 h-5"><path d="M39.1 17.9A15 15 0 1 0 39.1 39.1" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" opacity=".42"/><path d="M46.1 24.9A15 15 0 1 0 46.1 46.1" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/></svg>
         </span>
         <span v-show="!navCollapsed" class="ws-text">
           <b>[[ workspace.name ]]</b>
@@ -297,7 +307,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           </button>
         </template>
         <div v-else class="ws-menu-cur">
-          <span class="brand-mark sm" aria-hidden="true"></span>
+          <span class="brand-mark sm" aria-hidden="true"><svg viewBox="0 0 64 64" width="13" height="13"><path d="M39.1 17.9A15 15 0 1 0 39.1 39.1" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" opacity=".42"/><path d="M46.1 24.9A15 15 0 1 0 46.1 46.1" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/></svg></span>
           <span class="flex-1 min-w-0 truncate">[[ workspace.name ]]</span>
           <i data-lucide="check" class="w-4 h-4"></i>
         </div>
@@ -449,11 +459,18 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 
   <!-- ======================= 登录门(强制登录模式) ======================= -->
   <div v-if="auth.required && !auth.user" class="login-screen">
+    <!-- 背景: 点阵 + 两组浏览器线框及其虚线错位副本(原件/克隆件), 只铺在卡片外; 卡片实底, 表单对比度不受影响 -->
+    <svg class="login-art" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+      <defs><pattern id="login-dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1" fill="currentColor"/></pattern></defs>
+      <rect class="la-dots" width="1440" height="900" fill="url(#login-dots)"/>
+      <g class="la-frames" fill="none" stroke="currentColor" stroke-width="1.5"><g><rect x="860" y="470" width="720" height="480" rx="14"/><path d="M860 510H1580"/><circle cx="882" cy="490" r="5"/><circle cx="900" cy="490" r="5"/><circle cx="918" cy="490" r="5"/><rect x="900" y="546" width="302" height="22" rx="5"/><rect x="900" y="582" width="202" height="12" rx="4"/><rect x="900" y="630" width="200" height="270" rx="9"/><rect x="1120" y="630" width="200" height="270" rx="9"/><rect x="1340" y="630" width="200" height="270" rx="9"/></g><g stroke-dasharray="6 7"><rect x="892" y="502" width="720" height="480" rx="14"/><path d="M892 542H1612"/><circle cx="914" cy="522" r="5"/><circle cx="932" cy="522" r="5"/><circle cx="950" cy="522" r="5"/><rect x="932" y="578" width="302" height="22" rx="5"/><rect x="932" y="614" width="202" height="12" rx="4"/><rect x="932" y="662" width="200" height="270" rx="9"/><rect x="1152" y="662" width="200" height="270" rx="9"/><rect x="1372" y="662" width="200" height="270" rx="9"/></g><g><rect x="-200" y="-120" width="560" height="400" rx="14"/><path d="M-200 -80H360"/><circle cx="-178" cy="-100" r="5"/><circle cx="-160" cy="-100" r="5"/><circle cx="-142" cy="-100" r="5"/><rect x="-160" y="-44" width="235" height="22" rx="5"/><rect x="-160" y="-8" width="157" height="12" rx="4"/><rect x="-160" y="40" width="147" height="190" rx="9"/><rect x="7" y="40" width="147" height="190" rx="9"/><rect x="173" y="40" width="147" height="190" rx="9"/></g><g stroke-dasharray="6 7"><rect x="-168" y="-88" width="560" height="400" rx="14"/><path d="M-168 -48H392"/><circle cx="-146" cy="-68" r="5"/><circle cx="-128" cy="-68" r="5"/><circle cx="-110" cy="-68" r="5"/><rect x="-128" y="-12" width="235" height="22" rx="5"/><rect x="-128" y="24" width="157" height="12" rx="4"/><rect x="-128" y="72" width="147" height="190" rx="9"/><rect x="39" y="72" width="147" height="190" rx="9"/><rect x="205" y="72" width="147" height="190" rx="9"/></g></g>
+      <g class="la-marks" fill="none" stroke-width="1.5"><path d="M851 470h18M860 461v18"/><circle cx="860" cy="470" r="4"/><path d="M883 502h18M892 493v18"/><circle cx="892" cy="502" r="4"/><path d="M351 280h18M360 271v18"/><circle cx="360" cy="280" r="4"/><path d="M383 312h18M392 303v18"/><circle cx="392" cy="312" r="4"/></g>
+    </svg>
     <div class="relative z-10 flex flex-col items-center">
       <div class="login-card">
         <div class="flex items-center gap-3 mb-5">
           <div class="login-badge">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" style="width:20px;height:20px"><rect x="3.5" y="3.5" width="11" height="11" rx="2" opacity=".45"/><rect x="9.5" y="9.5" width="11" height="11" rx="2"/></svg>
+            <svg viewBox="0 0 64 64" style="width:28px;height:28px"><path d="M39.1 17.9A15 15 0 1 0 39.1 39.1" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" opacity=".42"/><path d="M46.1 24.9A15 15 0 1 0 46.1 46.1" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/></svg>
           </div>
           <div>
             <div class="font-display font-bold text-slate-100">[[ authMode==='invite' ? '加入「' + invite.info.workspace + '」' : (authMode==='bootstrap' ? '初始化平台' : '登录') ]]</div>
