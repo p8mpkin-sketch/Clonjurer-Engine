@@ -362,6 +362,20 @@ class Database:
                          ("last_error", "TEXT NOT NULL DEFAULT ''")):
             if dk_cols and col not in dk_cols:
                 self._conn.execute(f"ALTER TABLE docker_containers ADD COLUMN {col} {ddl}")
+        # 用户管理: 登录失败计数 / 临时锁定 / 会话版本(强制下线、改密后旧会话失效) / 最近登录 IP
+        u_cols = {r["name"] for r in
+                  self._conn.execute("PRAGMA table_info(users)").fetchall()}
+        for col, ddl in (("failed_logins", "INTEGER NOT NULL DEFAULT 0"),
+                         ("last_failed_at", "TEXT NOT NULL DEFAULT ''"),
+                         ("locked_until", "TEXT NOT NULL DEFAULT ''"),
+                         ("session_ver", "INTEGER NOT NULL DEFAULT 0"),
+                         ("last_login_ip", "TEXT NOT NULL DEFAULT ''")):
+            if u_cols and col not in u_cols:
+                self._conn.execute(f"ALTER TABLE users ADD COLUMN {col} {ddl}")
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_audit_ws_id ON audit_logs(workspace_id, id)")
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_logs(username, id)")
         # 远程发布: 认证方式(口令 / 私钥)
         rd_cols = {r["name"] for r in
                    self._conn.execute("PRAGMA table_info(remote_deploys)").fetchall()}
@@ -894,7 +908,8 @@ class Database:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT u.id, u.username, u.display_name, u.is_active, u.last_login_at,"
-                " u.created_at, m.role, m.joined_at FROM memberships m"
+                " u.last_login_ip, u.locked_until, u.failed_logins, u.role AS account_role,"
+                " u.created_at, m.role, m.joined_at, m.invited_by FROM memberships m"
                 " JOIN users u ON u.id = m.user_id WHERE m.workspace_id = ?"
                 " ORDER BY m.joined_at, u.id", (workspace_id,)).fetchall()
             return [dict(r) for r in rows]
@@ -1168,27 +1183,58 @@ class Database:
                                (*allowed.values(), user_id))
             self._conn.commit()
 
-    def touch_login(self, user_id: int):
+    def touch_login(self, user_id: int, ip: str = ""):
+        """登录成功: 记时间与来源 IP, 并清零失败计数与锁定。"""
         with self._lock:
             self._conn.execute(
-                "UPDATE users SET last_login_at = ? WHERE id = ?",
-                (_now(), user_id))
+                "UPDATE users SET last_login_at = ?, last_login_ip = ?, failed_logins = 0,"
+                " last_failed_at = '', locked_until = '' WHERE id = ?",
+                (_now(), (ip or "")[:64], user_id))
             self._conn.commit()
+
+    def record_login_failure(self, user_id: int, count: int, at: str, locked_until: str = ""):
+        with self._lock:
+            self._conn.execute(
+                "UPDATE users SET failed_logins = ?, last_failed_at = ?,"
+                " locked_until = CASE WHEN ? != '' THEN ? ELSE locked_until END WHERE id = ?",
+                (count, at, locked_until, locked_until, user_id))
+            self._conn.commit()
+
+    def reset_login_failures(self, user_id: int):
+        with self._lock:
+            self._conn.execute(
+                "UPDATE users SET failed_logins = 0, last_failed_at = '', locked_until = ''"
+                " WHERE id = ?", (user_id,))
+            self._conn.commit()
+
+    def bump_session_ver(self, user_id: int) -> int:
+        """让该账号所有已登录会话失效(强制下线 / 改密 / 停用), 返回新版本号。"""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE users SET session_ver = session_ver + 1 WHERE id = ?", (user_id,))
+            self._conn.commit()
+            row = self._conn.execute(
+                "SELECT session_ver FROM users WHERE id = ?", (user_id,)).fetchone()
+            return row["session_ver"] if row else 0
 
     # ------------------------------------------------------------------
     # 审计日志
     # ------------------------------------------------------------------
+    audit_max_rows = 200000   # 全库硬上限(由 app 按 config.AUDIT_MAX_ROWS 覆盖); 主策略是按天保留
+    _audit_inserts = 0
+
     def log_audit(self, username: str, action: str, detail: str, ip: str,
                   workspace_id: int = 1):
         with self._lock:
-            self._conn.execute(
+            cur = self._conn.execute(
                 "INSERT INTO audit_logs (username, action, detail, ip, created_at, workspace_id)"
                 " VALUES (?, ?, ?, ?, ?, ?)",
                 (username, action, detail[:2000], ip, _now(), workspace_id))
-            self._conn.execute(
-                "DELETE FROM audit_logs WHERE id < ("
-                " SELECT MIN(id) FROM (SELECT id FROM audit_logs"
-                "  ORDER BY id DESC LIMIT 5000))")
+            # 硬上限修剪按 id 区间做, 每 200 次写入检查一次(不在每次写入时扫全表)
+            self._audit_inserts += 1
+            if self._audit_inserts % 200 == 1:
+                self._conn.execute("DELETE FROM audit_logs WHERE id <= ?",
+                                   (cur.lastrowid - max(1000, int(self.audit_max_rows)),))
             self._conn.commit()
 
     def list_audit(self, limit: int = 100, action: str = "", q: str = "",
@@ -1209,6 +1255,98 @@ class Database:
             rows = self._conn.execute(
                 f"SELECT * FROM audit_logs{clause}"
                 " ORDER BY id DESC LIMIT ?", params).fetchall()
+            return [dict(r) for r in rows]
+
+    @staticmethod
+    def _audit_where(workspace_id, q="", username="", ip="", actions=None,
+                     exclude_actions=(), since="", until="") -> tuple:
+        where, params = [], []
+        if workspace_id is not None:
+            where.append("workspace_id = ?")
+            params.append(workspace_id)
+        if actions is not None:
+            where.append("action IN (%s)" % ",".join("?" * len(actions)))
+            params.extend(actions)
+        if exclude_actions:
+            where.append("action NOT IN (%s)" % ",".join("?" * len(exclude_actions)))
+            params.extend(exclude_actions)
+        if username:
+            where.append("username = ?")
+            params.append(username)
+        if ip:
+            where.append("ip = ?")
+            params.append(ip)
+        if since:
+            where.append("created_at >= ?")
+            params.append(since)
+        if until:
+            where.append("created_at <= ?")
+            params.append(until)
+        if q:
+            like = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            where.append("(username LIKE ? ESCAPE '\\' OR detail LIKE ? ESCAPE '\\'"
+                         " OR ip LIKE ? ESCAPE '\\' OR action LIKE ? ESCAPE '\\')")
+            params.extend([like] * 4)
+        return (" WHERE " + " AND ".join(where)) if where else "", params
+
+    def query_audit(self, workspace_id, *, limit: int = 50, offset: int = 0, **filters) -> tuple:
+        """多条件审计查询 -> (本页记录, 命中总数)。filters 见 _audit_where。"""
+        clause, params = self._audit_where(workspace_id, **filters)
+        limit = max(1, min(5000, int(limit)))
+        offset = max(0, int(offset))
+        with self._lock:
+            total = self._conn.execute(
+                f"SELECT COUNT(*) AS c FROM audit_logs{clause}", params).fetchone()["c"]
+            rows = self._conn.execute(
+                f"SELECT * FROM audit_logs{clause} ORDER BY id DESC LIMIT ? OFFSET ?",
+                [*params, limit, offset]).fetchall()
+            return [dict(r) for r in rows], total
+
+    def get_audit(self, workspace_id, entry_id: int):
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM audit_logs WHERE id = ? AND workspace_id = ?",
+                (entry_id, workspace_id)).fetchone()
+            return dict(row) if row else None
+
+    def audit_actions(self, workspace_id) -> list:
+        """该区实际出现过的动作码。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT DISTINCT action FROM audit_logs WHERE workspace_id = ?",
+                (workspace_id,)).fetchall()
+            return sorted(r["action"] for r in rows)
+
+    def audit_usernames(self, workspace_id, limit: int = 200) -> list:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT username, COUNT(*) AS c FROM audit_logs WHERE workspace_id = ?"
+                " GROUP BY username ORDER BY c DESC LIMIT ?", (workspace_id, limit)).fetchall()
+            return [r["username"] for r in rows]
+
+    def audit_rows_since(self, workspace_id, since: str) -> list:
+        """统计用的轻量行(不含详情)。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT action, username, ip, created_at FROM audit_logs"
+                " WHERE workspace_id = ? AND created_at >= ?", (workspace_id, since)).fetchall()
+            return [dict(r) for r in rows]
+
+    def audit_counts_by_user(self, workspace_id, since: str) -> dict:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT username, COUNT(*) AS c FROM audit_logs WHERE workspace_id = ?"
+                " AND created_at >= ? AND action NOT IN ('login.failed', 'login.blocked', 'login.locked')"
+                " GROUP BY username", (workspace_id, since)).fetchall()
+            return {r["username"]: r["c"] for r in rows}
+
+    def user_audit(self, username: str, *, workspace_id=None, actions=None, limit: int = 20) -> list:
+        """某账号的审计记录; workspace_id 为空表示跨区(仅用于该账号自己的登录记录)。"""
+        clause, params = self._audit_where(workspace_id, username=username, actions=actions)
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT * FROM audit_logs{clause} ORDER BY id DESC LIMIT ?",
+                [*params, max(1, min(200, limit))]).fetchall()
             return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------
