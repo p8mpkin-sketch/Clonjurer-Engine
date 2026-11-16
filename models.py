@@ -356,6 +356,11 @@ class Database:
                    self._conn.execute("PRAGMA table_info(short_links)").fetchall()}
         if sl_cols and "link_task_id" not in sl_cols:
             self._conn.execute("ALTER TABLE short_links ADD COLUMN link_task_id INTEGER")
+        # 短链按工作区隔离(老数据都在默认工作区 1)
+        for tbl in ("short_links", "short_link_tasks"):
+            cols = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({tbl})").fetchall()}
+            if cols and "workspace_id" not in cols:
+                self._conn.execute(f"ALTER TABLE {tbl} ADD COLUMN workspace_id INTEGER NOT NULL DEFAULT 1")
         # 任务自定义名称(为空时界面显示克隆页标题 / 域名)
         ct_cols = {r["name"] for r in
                    self._conn.execute("PRAGMA table_info(clone_tasks)").fetchall()}
@@ -1754,30 +1759,36 @@ class Database:
             return row["n"]
 
     def create_short_task(self, name: str, target_url: str, service: str,
-                          clone_task_id, note: str = "") -> int:
+                          clone_task_id, note: str = "", workspace_id: int = 1) -> int:
         now = _now()
         with self._lock:
             seq = self._conn.execute(
                 "SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM short_link_tasks").fetchone()["n"]
             cur = self._conn.execute(
                 "INSERT INTO short_link_tasks (seq, name, target_url, service,"
-                " clone_task_id, status, note, created_at, updated_at)"
-                " VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)",
-                (seq, name, target_url, service, clone_task_id, note, now, now))
+                " clone_task_id, status, note, created_at, updated_at, workspace_id)"
+                " VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)",
+                (seq, name, target_url, service, clone_task_id, note, now, now, int(workspace_id)))
             self._conn.commit()
             return cur.lastrowid
 
-    def link_kpis(self) -> dict:
+    def link_kpis(self, workspace_id=None) -> dict:
         """短链 KPI: 任务数 / 成功短链数(失败留痕行 short_url 为空, 不计) / 总点击。"""
+        ws_sql, ws_args = ("", ()) if workspace_id is None else (" AND workspace_id = ?", (int(workspace_id),))
         with self._lock:
             row = self._conn.execute(
                 "SELECT COUNT(*) AS links, COALESCE(SUM(clicks), 0) AS clicks FROM short_links"
-                " WHERE short_url != ''").fetchone()
-            tasks = self._conn.execute("SELECT COUNT(*) AS n FROM short_link_tasks").fetchone()
+                " WHERE short_url != ''" + ws_sql, ws_args).fetchone()
+            tasks = self._conn.execute("SELECT COUNT(*) AS n FROM short_link_tasks WHERE 1 = 1" + ws_sql,
+                                       ws_args).fetchone()
             return {"tasks": tasks["n"], "links": row["links"], "clicks": row["clicks"]}
 
-    def list_short_tasks(self, q: str = None, limit: int = 200):
-        where, params = [], []
+    def list_short_tasks(self, q: str = None, limit: int = 200, workspace_id=None):
+        where: list = []
+        params: list = []
+        if workspace_id is not None:
+            where.append("t.workspace_id = ?")
+            params.append(int(workspace_id))
         if q:
             where.append("(t.name LIKE ? OR t.target_url LIKE ? OR t.note LIKE ?)")
             params.extend([f"%{q}%"] * 3)
@@ -1883,22 +1894,30 @@ class Database:
 
     def create_short_link(self, task_id, target_url: str, service: str,
                           short_url: str, label: str, extras: dict,
-                          link_task_id=None) -> int:
+                          link_task_id=None, workspace_id=None) -> int:
         now = _now()
         with self._lock:
+            if workspace_id is None and link_task_id:  # 任务下的短链跟任务同区
+                row = self._conn.execute("SELECT workspace_id FROM short_link_tasks WHERE id = ?",
+                                         (link_task_id,)).fetchone()
+                workspace_id = row["workspace_id"] if row else None
             cur = self._conn.execute(
                 "INSERT INTO short_links (task_id, link_task_id, target_url, service,"
-                " short_url, label, extras_json, created_at, updated_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " short_url, label, extras_json, created_at, updated_at, workspace_id)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (task_id, link_task_id, target_url, service, short_url, label,
-                 json.dumps(extras or {}, ensure_ascii=False), now, now))
+                 json.dumps(extras or {}, ensure_ascii=False), now, now, int(workspace_id or 1)))
             self._conn.commit()
             return cur.lastrowid
 
     def list_short_links(self, task_id=None, q: str = None, limit: int = 200,
-                         standalone: bool = False):
+                         standalone: bool = False, workspace_id=None):
         """standalone=True 只列不属于任何短链任务的单独短链。"""
-        where, params = [], []
+        where: list = []
+        params: list = []
+        if workspace_id is not None:
+            where.append("workspace_id = ?")
+            params.append(int(workspace_id))
         if task_id:
             where.append("task_id = ?")
             params.append(task_id)

@@ -154,32 +154,68 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 
   /* ===== 登录屏: 素净底色 + 线框底纹 + 一张实底卡 ===== */
   .login-screen{position:fixed;inset:0;z-index:90;display:flex;align-items:center;justify-content:center;
-    overflow:hidden;background:var(--bg)}
+    overflow-x:hidden;overflow-y:auto;background:var(--bg)}
+  .login-screen > .relative{margin:auto}
   .login-art{position:absolute;inset:0;width:100%;height:100%;color:var(--fg);pointer-events:none}
   .login-art .la-dots{opacity:.13}
   .login-art .la-frames{opacity:.16}
   .login-art .la-marks{stroke:var(--accent);opacity:.7}
   @media (max-width:640px){.login-art .la-frames{opacity:.11}}
-  .login-card{width:400px;max-width:90vw;padding:32px;border-radius:14px;position:relative;z-index:10;
+  .login-card{width:420px;max-width:calc(100vw - 32px);padding:32px 32px 0;border-radius:14px;position:relative;z-index:10;
     background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-pop)}
-  .login-badge{width:40px;height:40px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center;
+  .login-brand{display:flex;align-items:center;gap:10px;margin-bottom:24px}
+  .login-badge{width:36px;height:36px;border-radius:9px;flex-shrink:0;display:flex;align-items:center;justify-content:center;
     background:var(--ui-brand);color:#fff}
   .login-badge svg{color:#fff!important}
+  .login-brand .lb-name{font-size:14px;font-weight:600;color:var(--fg);letter-spacing:.01em}
+  .login-brand .lb-ws{font-size:12px;color:var(--fg-3)}
+  .login-title{font-size:22px;line-height:30px;font-weight:600;color:var(--fg);margin:0}
+  .login-sub{font-size:13px;line-height:20px;color:var(--fg-2);margin:4px 0 24px}
+  .login-label{display:flex;align-items:baseline;justify-content:space-between;font-size:12px;color:var(--fg-2);margin-bottom:6px}
+  .login-label .ll-hint{color:var(--fg-3)}
   .login-field{position:relative}
   .login-field .lf-icon{position:absolute;left:12px;top:50%;transform:translateY(-50%);
     width:16px;height:16px;color:var(--fg-3);pointer-events:none}
-  .login-input{width:100%;height:40px;padding:0 12px 0 36px;border-radius:9px;font-size:14px;
+  .login-input{width:100%;height:42px;padding:0 12px 0 38px;border-radius:9px;font-size:14px;
     background:var(--surface);border:1px solid var(--line-strong);color:var(--fg);transition:border-color .15s,box-shadow .15s;outline:none}
-  .login-submit{width:100%;height:40px;display:flex;align-items:center;justify-content:center;gap:8px;border-radius:9px;
+  .login-input::placeholder{color:var(--fg-4)}
+  .login-input:focus{border-color:var(--ui-brand);box-shadow:var(--ui-focus)}
+  .login-input.has-btn{padding-right:44px}
+  .login-input.no-icon{padding-left:12px}
+  .login-eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:34px;height:34px;border-radius:7px;
+    display:flex;align-items:center;justify-content:center;color:var(--fg-3);transition:color .15s,background .15s}
+  .login-eye:hover{color:var(--fg);background:var(--raised)}
+  .login-eye:focus-visible{outline:none;box-shadow:var(--ui-focus)}
+  .login-eye svg{width:16px;height:16px}
+  .login-caps{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:12px;color:var(--ui-warn)}
+  .login-caps svg{width:14px;height:14px}
+  .login-captcha{display:flex;gap:8px;align-items:stretch}
+  .login-captcha .login-field{flex:1;min-width:0}
+  .login-captcha-img{flex-shrink:0;width:132px;height:42px;border-radius:9px;overflow:hidden;border:1px solid var(--line-strong);
+    background:#f6f4f0;display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative}
+  .login-captcha-img img{width:100%;height:100%;object-fit:cover;display:block}
+  .login-captcha-img:focus-visible{outline:none;box-shadow:var(--ui-focus)}
+  .login-captcha-img .lc-wait{font-size:12px;color:#6b665e}
+  .login-refresh{font-size:12px;color:var(--fg-3);margin-top:6px;display:inline-flex;align-items:center;gap:4px}
+  .login-refresh:hover{color:var(--fg)}
+  .login-refresh svg{width:12px;height:12px}
+  .login-submit{width:100%;height:42px;display:flex;align-items:center;justify-content:center;gap:8px;border-radius:9px;
     background:var(--ink);font-size:14px;font-weight:500;color:var(--on-ink);transition:background .15s,opacity .15s}
   .login-submit:hover{background:var(--ink-hover)}
+  .login-submit:focus-visible{outline:none;box-shadow:var(--ui-focus)}
   .login-submit:disabled{opacity:.5;cursor:not-allowed}
-  .login-error{display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:9px;font-size:13px;
+  .login-error{display:flex;align-items:flex-start;gap:8px;padding:10px 12px;border-radius:9px;font-size:13px;line-height:19px;
     background:rgb(var(--bad-900) / .5);border:1px solid rgb(var(--bad-700) / .5);color:rgb(var(--bad-300))}
-  .login-error svg{width:16px;height:16px;flex-shrink:0}
+  .login-error svg{width:16px;height:16px;flex-shrink:0;margin-top:2px}
+  .login-foot{margin:24px -32px 0;padding:14px 32px;border-top:1px solid var(--line);display:flex;align-items:flex-start;gap:8px;
+    font-size:12px;line-height:18px;color:var(--fg-3)}
+  .login-foot svg{width:14px;height:14px;flex-shrink:0;margin-top:2px}
   .login-trust{position:relative;z-index:10;margin-top:20px;display:flex;align-items:center;justify-content:center;
-    flex-wrap:wrap;gap:8px 16px;font-size:12px;color:var(--fg-3)}
+    flex-wrap:wrap;gap:4px 16px;font-size:12px;color:var(--fg-3);max-width:calc(100vw - 32px);text-align:center}
   .login-trust .lt-dot{opacity:.5}
+  @media (max-width:480px){.login-card{padding:24px 20px 0}.login-foot{margin:20px -20px 0;padding:12px 20px}
+    .login-title{font-size:20px;line-height:28px}.login-captcha-img{width:112px}
+    .login-trust{flex-direction:column}.login-trust .lt-dot{display:none}}
 
   /* ===== 埋点槽位胶囊 ===== */
   .slot-pill{display:inline-flex;align-items:center;gap:4px;border-radius:9999px;
@@ -466,52 +502,100 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <g class="la-frames" fill="none" stroke="currentColor" stroke-width="1.5"><g><rect x="860" y="470" width="720" height="480" rx="14"/><path d="M860 510H1580"/><circle cx="882" cy="490" r="5"/><circle cx="900" cy="490" r="5"/><circle cx="918" cy="490" r="5"/><rect x="900" y="546" width="302" height="22" rx="5"/><rect x="900" y="582" width="202" height="12" rx="4"/><rect x="900" y="630" width="200" height="270" rx="9"/><rect x="1120" y="630" width="200" height="270" rx="9"/><rect x="1340" y="630" width="200" height="270" rx="9"/></g><g stroke-dasharray="6 7"><rect x="892" y="502" width="720" height="480" rx="14"/><path d="M892 542H1612"/><circle cx="914" cy="522" r="5"/><circle cx="932" cy="522" r="5"/><circle cx="950" cy="522" r="5"/><rect x="932" y="578" width="302" height="22" rx="5"/><rect x="932" y="614" width="202" height="12" rx="4"/><rect x="932" y="662" width="200" height="270" rx="9"/><rect x="1152" y="662" width="200" height="270" rx="9"/><rect x="1372" y="662" width="200" height="270" rx="9"/></g><g><rect x="-200" y="-120" width="560" height="400" rx="14"/><path d="M-200 -80H360"/><circle cx="-178" cy="-100" r="5"/><circle cx="-160" cy="-100" r="5"/><circle cx="-142" cy="-100" r="5"/><rect x="-160" y="-44" width="235" height="22" rx="5"/><rect x="-160" y="-8" width="157" height="12" rx="4"/><rect x="-160" y="40" width="147" height="190" rx="9"/><rect x="7" y="40" width="147" height="190" rx="9"/><rect x="173" y="40" width="147" height="190" rx="9"/></g><g stroke-dasharray="6 7"><rect x="-168" y="-88" width="560" height="400" rx="14"/><path d="M-168 -48H392"/><circle cx="-146" cy="-68" r="5"/><circle cx="-128" cy="-68" r="5"/><circle cx="-110" cy="-68" r="5"/><rect x="-128" y="-12" width="235" height="22" rx="5"/><rect x="-128" y="24" width="157" height="12" rx="4"/><rect x="-128" y="72" width="147" height="190" rx="9"/><rect x="39" y="72" width="147" height="190" rx="9"/><rect x="205" y="72" width="147" height="190" rx="9"/></g></g>
       <g class="la-marks" fill="none" stroke-width="1.5"><path d="M851 470h18M860 461v18"/><circle cx="860" cy="470" r="4"/><path d="M883 502h18M892 493v18"/><circle cx="892" cy="502" r="4"/><path d="M351 280h18M360 271v18"/><circle cx="360" cy="280" r="4"/><path d="M383 312h18M392 303v18"/><circle cx="392" cy="312" r="4"/></g>
     </svg>
-    <div class="relative z-10 flex flex-col items-center">
-      <div class="login-card">
-        <div class="flex items-center gap-3 mb-5">
+    <div class="relative z-10 flex flex-col items-center py-6">
+      <form class="login-card" @submit.prevent="authSubmit()" novalidate>
+        <div class="login-brand">
           <div class="login-badge">
-            <svg viewBox="0 0 64 64" style="width:28px;height:28px"><path d="M39.1 17.9A15 15 0 1 0 39.1 39.1" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" opacity=".42"/><path d="M46.1 24.9A15 15 0 1 0 46.1 46.1" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/></svg>
+            <svg viewBox="0 0 64 64" style="width:24px;height:24px" aria-hidden="true"><path d="M39.1 17.9A15 15 0 1 0 39.1 39.1" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" opacity=".42"/><path d="M46.1 24.9A15 15 0 1 0 46.1 46.1" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/></svg>
           </div>
-          <div>
-            <div class="font-display font-bold text-slate-100">[[ authMode==='invite' ? '加入「' + invite.info.workspace + '」' : (authMode==='bootstrap' ? '初始化平台' : '登录') ]]</div>
-            <div class="text-[12px] text-slate-500">[[ authMode==='invite' ? '你被邀请以' + roleText(invite.info.role) + '身份加入，创建账号即可进入' : (authMode==='bootstrap' ? '创建首个管理员账号后，平台进入团队登录模式' : (invite.info ? '登录后加入「' + invite.info.workspace + '」' : '登录后开始克隆')) ]]</div>
+          <div class="min-w-0">
+            <div class="lb-name">Clonjurer</div>
+            <div class="lb-ws truncate">[[ invite.info ? invite.info.workspace : (workspace.name || '网页克隆与生成平台') ]]</div>
           </div>
         </div>
-        <div class="space-y-3">
-          <div>
-            <label class="text-[11px] text-slate-400 mb-1 block">用户名</label>
+        <h1 class="login-title">[[ authMode==='invite' ? '加入「' + invite.info.workspace + '」' : (authMode==='bootstrap' ? '初始化平台' : '登录') ]]</h1>
+        <p class="login-sub">[[ authMode==='invite' ? '你被邀请以' + roleText(invite.info.role) + '身份加入，创建账号即可进入' : (authMode==='bootstrap' ? '创建首个管理员账号，之后所有人都要登录才能使用' : (invite.info ? '登录后加入「' + invite.info.workspace + '」' : '使用团队管理员为你创建的账号登录')) ]]</p>
+        <div class="space-y-4">
+          <div v-if="authMode==='bootstrap' && auth.setupToken">
+            <label class="login-label" for="login-setup"><span>初始化口令</span><span class="ll-hint">在启动平台的终端里</span></label>
             <div class="login-field">
-              <svg class="lf-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-              <input v-model="auth.form.username" placeholder="2~32 位字母/数字/._-" @keyup.enter="authSubmit()" class="login-input">
+              <svg class="lf-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 2-2 2m-7.6 7.6a5.5 5.5 0 1 1-7.8 7.8 5.5 5.5 0 0 1 7.8-7.8Zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+              <input id="login-setup" v-model.trim="auth.form.setup_token" name="setup_token" autocomplete="off" spellcheck="false" placeholder="从其他机器初始化需要这个口令" class="login-input">
+            </div>
+          </div>
+          <div>
+            <label class="login-label" for="login-user"><span>用户名</span></label>
+            <div class="login-field">
+              <svg class="lf-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              <input id="login-user" v-model.trim="auth.form.username" name="username" autocomplete="username" autocapitalize="off" spellcheck="false"
+                autofocus :placeholder="authMode==='login' ? '输入用户名' : '2~32 位字母、数字或 ._-'" class="login-input">
             </div>
           </div>
           <div v-if="authMode !== 'login'">
-            <label class="text-[11px] text-slate-400 mb-1 block">显示名称（可选）</label>
+            <label class="login-label" for="login-name"><span>显示名称</span><span class="ll-hint">可选</span></label>
             <div class="login-field">
-              <svg class="lf-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.2V11a2 2 0 0 0-2-2h-4.3l1-1.1a2 2 0 0 0-.1-2.8l-1.5-1.4a2 2 0 0 0-2.8.1L4.5 10.6a2 2 0 0 0-.6 1.4v7.6a2 2 0 0 0 2 2h12.7a2 2 0 0 0 2-2v-2.2"/><circle cx="16.8" cy="15.6" r="2.1"/></svg>
-              <input v-model="auth.form.display_name" :placeholder="authMode==='invite' ? '同事看到的名字，例如：林夏' : '例如：平台管理员'" class="login-input">
+              <svg class="lf-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.6 13.2V11a2 2 0 0 0-2-2h-4.3l1-1.1a2 2 0 0 0-.1-2.8l-1.5-1.4a2 2 0 0 0-2.8.1L4.5 10.6a2 2 0 0 0-.6 1.4v7.6a2 2 0 0 0 2 2h12.7a2 2 0 0 0 2-2v-2.2"/><circle cx="16.8" cy="15.6" r="2.1"/></svg>
+              <input id="login-name" v-model="auth.form.display_name" name="nickname" autocomplete="nickname" :placeholder="authMode==='invite' ? '同事看到的名字，例如：林夏' : '例如：平台管理员'" class="login-input">
             </div>
           </div>
           <div>
-            <label class="text-[11px] text-slate-400 mb-1 block">密码</label>
+            <label class="login-label" for="login-pw"><span>密码</span><span v-if="authMode !== 'login'" class="ll-hint">至少 8 位，含字母、数字、符号中两类</span></label>
             <div class="login-field">
-              <svg class="lf-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-              <input v-model="auth.form.password" type="password" placeholder="至少 8 位" @keyup.enter="authSubmit()" class="login-input">
+              <svg class="lf-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              <input id="login-pw" v-model="auth.form.password" name="password" :type="auth.showPw ? 'text' : 'password'"
+                :autocomplete="authMode==='login' ? 'current-password' : 'new-password'"
+                @keydown="auth.capsLock = $event.getModifierState && $event.getModifierState('CapsLock')"
+                @keyup="auth.capsLock = $event.getModifierState && $event.getModifierState('CapsLock')"
+                @blur="auth.capsLock = false"
+                :placeholder="authMode==='login' ? '输入密码' : '设置登录密码'" class="login-input has-btn">
+              <button type="button" class="login-eye" @click="auth.showPw = !auth.showPw" :aria-label="auth.showPw ? '隐藏密码' : '显示密码'" :title="auth.showPw ? '隐藏密码' : '显示密码'">
+                <svg v-if="!auth.showPw" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"/><circle cx="12" cy="12" r="3"/></svg>
+                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.53 13.53 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><path d="m2 2 20 20"/></svg>
+              </button>
+            </div>
+            <div v-if="auth.capsLock" class="login-caps" role="status">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 12 9-9 9 9h-4.5v4h-9v-4z"/><path d="M7.5 20h9"/></svg>大写锁定已打开
             </div>
           </div>
-          <div v-if="auth.error" class="login-error">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><span>[[ auth.error ]]</span>
+          <div v-if="authMode==='login' && auth.captcha">
+            <label class="login-label" for="login-captcha"><span>验证码</span><span class="ll-hint">不区分大小写</span></label>
+            <div class="login-captcha">
+              <div class="login-field">
+                <svg class="lf-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>
+                <input id="login-captcha" ref="captchaInput" v-model.trim="auth.form.captcha" name="captcha" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="8"
+                  placeholder="输入右侧字符" class="login-input">
+              </div>
+              <button type="button" class="login-captcha-img" @click="loadCaptcha()" title="看不清，换一张" aria-label="验证码图片，点击换一张">
+                <img v-if="auth.captcha.image && !auth.captchaBusy" :src="auth.captcha.image" alt="验证码">
+                <span v-else class="lc-wait">加载中…</span>
+              </button>
+            </div>
+            <button type="button" class="login-refresh" @click="loadCaptcha()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>看不清，换一张
+            </button>
           </div>
-          <button @click="authSubmit()" :disabled="auth.busy" class="login-submit">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>[[ auth.busy ? '请稍候…' : (authMode==='invite' ? '创建账号并加入' : (authMode==='bootstrap' ? '创建管理员并进入' : '登录')) ]]
+          <div v-if="auth.error" class="login-error" role="alert">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><span>[[ auth.error ]]</span>
+          </div>
+          <button type="submit" :disabled="auth.busy" class="login-submit">
+            [[ auth.busy ? '请稍候…' : (authMode==='invite' ? '创建账号并加入' : (authMode==='bootstrap' ? '创建管理员并进入' : '登录')) ]]
           </button>
-          <div v-if="invite.info" class="text-center text-[12px] text-slate-500 pt-1">
+          <div v-if="invite.info" class="text-center text-[12px] text-slate-500">
             <button type="button" class="dash-link" @click="invite.loginInstead = !invite.loginInstead; auth.error=''">[[ invite.loginInstead ? '没有账号？创建一个' : '已有账号？登录后加入' ]]</button>
           </div>
-          <div v-if="auth.openMode && !invite.info" class="text-center pt-1">
-            <button type="button" class="dash-link text-[12px]" @click="auth.required=false">暂不启用</button>
+          <div v-if="auth.openMode && !invite.info && !auth.setupToken" class="text-center">
+            <button type="button" class="dash-link text-[12px]" @click="auth.required=false">暂不启用，单机直接使用</button>
           </div>
         </div>
+        <div class="login-foot">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
+          <span v-if="authMode==='login'">连续输错 [[ (auth.lockPolicy && auth.lockPolicy.max) || 5 ]] 次密码，账号会锁定 [[ (auth.lockPolicy && auth.lockPolicy.lock_min) || 15 ]] 分钟；登录状态保持 [[ auth.sessionHours ]] 小时。忘记密码请联系管理员重置。</span>
+          <span v-else-if="authMode==='bootstrap'">这个账号是平台管理员，可以管理成员、模型供应商和系统设置，请妥善保管密码。</span>
+          <span v-else>账号创建后即加入该工作区，权限由工作区管理员设定。</span>
+        </div>
+      </form>
+      <div class="login-trust">
+        <span>账号与数据保存在这台服务器上</span><span class="lt-dot" aria-hidden="true">·</span><span>验证码本地生成，不依赖外部服务</span>
       </div>
     </div>
   </div>
@@ -2742,7 +2826,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 
           <div v-else-if="previewMode==='single'" class="flex-1 min-h-0 panel rounded-xl overflow-hidden p-2 flex">
             <pv-scale :width="previewNominal" fill @scale="previewScale = $event">
-              <iframe :src="'/preview/' + previewTask.id + '/'" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+              <iframe :src="previewSrc(previewTask.id)" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
                 class="sandbox-frame block w-full rounded-lg ring-1 ring-black/5"></iframe>
             </pv-scale>
           </div>
@@ -2766,7 +2850,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <div class="text-[10px] font-mono text-indigo-300 px-1 pb-1.5 flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-indigo-400 "></span>[[ taskKind(previewTask) === 'clone' ? '克隆站' : '产出' ]]</div>
               <div class="flex-1 min-h-0 flex">
                 <pv-scale :width="previewNominal" fill @scale="previewScale = $event">
-                  <iframe :src="'/preview/' + previewTask.id + '/'" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+                  <iframe :src="previewSrc(previewTask.id)" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
                     class="sandbox-frame block w-full rounded-lg ring-1 ring-black/5"></iframe>
                 </pv-scale>
               </div>
@@ -2813,7 +2897,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <div class="flex-1 min-h-0 relative overflow-auto custom-scroll bg-slate-950/60">
               <pv-scale :width="previewNominal" @scale="previewScale = $event">
                 <div class="relative w-full">
-                  <iframe :src="'/preview/' + previewTask.id + '/'" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+                  <iframe :src="previewSrc(previewTask.id)" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
                     class="absolute inset-0 w-full h-full border-0 bg-white"></iframe>
                   <img :src="origShotUrl" alt="原站截图叠加层"
                     class="relative block w-full h-auto pointer-events-none"
@@ -3949,7 +4033,10 @@ const __vueApp = createApp({
       aiPrompt: '',
       workspace: { id: 1, name: '我的团队', role: 'owner', members: [], member_count: 0, spaces: [] },
       wsMenu: false,
-      auth: { required: false, openMode: true, user: null, form: { username: '', password: '', display_name: '' }, busy: false, error: '' },
+      auth: { required: false, openMode: true, user: null, busy: false, error: '',
+              form: { username: '', password: '', display_name: '', captcha: '', setup_token: '' },
+              captcha: null, captchaBusy: false, showPw: false, capsLock: false, setupToken: false,
+              previewBase: '', sessionHours: 12, lockPolicy: null },
       navViews: [
         { id: 'dashboard', label: '总览', icon: 'layout-dashboard' },
         { id: 'workspace', label: '克隆工作台', icon: 'boxes' },
@@ -5986,9 +6073,10 @@ const __vueApp = createApp({
     async doBootstrap() {
       this.auth.busy = true; this.auth.error = '';
       try {
+        const f = this.auth.form;
         const r = await fetch('/api/auth/bootstrap', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(this.auth.form),
+          body: JSON.stringify({ username: f.username, password: f.password, display_name: f.display_name, setup_token: f.setup_token }),
         });
         const data = await r.json();
         if (!r.ok) { this.auth.error = data.error || '初始化失败'; return; }
@@ -6004,17 +6092,35 @@ const __vueApp = createApp({
       try {
         const r = await fetch('/api/auth/login', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: this.auth.form.username, password: this.auth.form.password }),
+          body: JSON.stringify({ username: this.auth.form.username, password: this.auth.form.password,
+                                 captcha_id: this.auth.captcha ? this.auth.captcha.id : '', captcha: this.auth.form.captcha }),
         });
         const data = await r.json();
-        if (!r.ok) { this.auth.error = data.error || '登录失败'; return; }
-        this.auth.form.password = '';
+        if (!r.ok) {
+          this.auth.error = data.error || '登录失败';
+          // 验证码一次性: 每次提交后都换新的; 输错够次数后服务端要求验证码
+          if (data.captcha_required || this.auth.captcha) {
+            this.auth.form.captcha = '';
+            await this.loadCaptcha();
+            if (data.captcha_required && /验证码/.test(data.error || '')) this.$nextTick(() => this.$refs.captchaInput && this.$refs.captchaInput.focus());
+          }
+          return;
+        }
+        this.auth.form.password = ''; this.auth.form.captcha = ''; this.auth.captcha = null;
         if (this.invite.token) { await this.acceptInvite(); return; }
         await this.loadAuth();
         this.toast('欢迎回来, ' + (data.user.display_name || data.user.username));
         this.iconRefresh();
       } catch (e) { this.auth.error = '网络错误: ' + e; }
       finally { this.auth.busy = false; }
+    },
+    async loadCaptcha() {
+      this.auth.captchaBusy = true;
+      try {
+        const r = await fetch('/api/auth/captcha', { cache: 'no-store' });
+        if (r.ok) this.auth.captcha = await r.json();
+      } catch (e) { /* 网络错误时保留旧图, 提交会提示 */ }
+      finally { this.auth.captchaBusy = false; }
     },
     async doLogout() {
       try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (e) {}
@@ -6159,6 +6265,11 @@ const __vueApp = createApp({
         this.auth.required = !!data.required;
         this.auth.openMode = !!data.open_mode;
         this.auth.user = data.user || null;
+        this.auth.previewBase = data.preview_base || '';
+        this.auth.setupToken = !!data.setup_token_required;
+        this.auth.sessionHours = data.session_hours || 12;
+        this.auth.lockPolicy = data.lock_policy || null;
+        if (data.captcha_required && !this.auth.user) this.loadCaptcha();
         if (data.workspace) this.workspace = data.workspace;
       } catch (e) { this.auth.required = false; this.auth.openMode = true; }
       if (!this.invite.token) await this.checkInvite();
@@ -7053,7 +7164,12 @@ const __vueApp = createApp({
     },
     genArtifacts(task) { const b = this.taskBuild(task); return (b && b.artifacts) || []; },
     genBuildGap(task) { const b = this.taskBuild(task); return (b && !b.ok && b.gap) || ''; },
-    openNewWindow(path) { window.open(path, '_blank'); },
+    openNewWindow(path) {
+      // 克隆预览在独立端口(不同源)上提供, 平台页面拿到的 path 是相对路径, 这里补上预览源
+      if (path.startsWith('/preview/') && this.auth.previewBase) path = this.auth.previewBase + path;
+      window.open(path, '_blank', 'noopener');
+    },
+    previewSrc(id) { return (this.auth.previewBase || '') + '/preview/' + id + '/'; },
 
     /* ---------- Tab 切换入口 ---------- */
     openPreview(task) { this.previewTaskId = task.id; this.activeTab = 'sandbox'; this.iconRefresh(); },
@@ -7205,12 +7321,19 @@ const __vueApp = createApp({
       const frames = document.querySelectorAll('iframe.sandbox-frame, iframe.w-full');
       let applied = 0;
       frames.forEach(frame => {
+        if (!String(frame.getAttribute('src') || '').includes('/preview/')) return;
         try {
-          const doc = frame.contentDocument;
-          if (!doc || !doc.head) return;
-          let style = doc.getElementById('live-hotpatch');
-          if (!style) { style = doc.createElement('style'); style.id = 'live-hotpatch'; doc.head.appendChild(style); }
-          style.textContent = this.hotpatch.css || '';
+          const doc = frame.contentDocument;   // 同源预览(未启用独立端口时)直接改 DOM
+          if (doc && doc.head) {
+            let style = doc.getElementById('live-hotpatch');
+            if (!style) { style = doc.createElement('style'); style.id = 'live-hotpatch'; doc.head.appendChild(style); }
+            style.textContent = this.hotpatch.css || '';
+            applied++;
+            return;
+          }
+        } catch (e) { /* 跨源: 走 postMessage */ }
+        try {   // 预览在独立端口: 由预览页里的桥脚本接收并注入
+          frame.contentWindow.postMessage({ type: 'clonjurer:hotpatch', css: this.hotpatch.css || '' }, this.auth.previewBase || '*');
           applied++;
         } catch (e) { return; }
       });

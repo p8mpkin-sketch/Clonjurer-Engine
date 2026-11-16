@@ -21,6 +21,7 @@ SCRIPT = textwrap.dedent(r'''
     config.WORKSPACE_ROOT = tmp / "ws"; config.WORKSPACE_ROOT.mkdir()
     config.EXPORTS_DIR = tmp / "ex"; config.EXPORTS_DIR.mkdir()
     config.LOGIN_FAIL_MAX = 3
+    config.CAPTCHA_MODE = "off"            # 这里测账号锁定本身; 验证码另见 test_websec
     import app as A
     A.scheduler.start = lambda *a, **k: None
     A.time.sleep = lambda s: None          # 跳过登录失败节流

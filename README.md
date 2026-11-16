@@ -57,7 +57,25 @@ python app.py                                   # 默认 127.0.0.1:8899
 CLONER_PORT=8897 python app.py
 ```
 
-打开浏览器访问 `http://127.0.0.1:8899/`：提交一个 URL → 等待克隆完成 → 查看原站/克隆/差异截图与还原度评分 → 需要时点「AI 修复」。数据库为空时为开放模式，无需登录。
+打开浏览器访问 `http://127.0.0.1:8899/`：提交一个 URL → 等待克隆完成 → 查看原站/克隆/差异截图与还原度评分 → 需要时点「AI 修复」。数据库为空时为开放模式，无需登录（只限本机访问；从其他机器初始化管理员要用启动时终端里打印的一次性口令）。
+
+### 安全相关配置
+
+克隆预览默认在独立端口（主端口 + 1，即 8900）上提供，克隆站里的脚本和平台不同源，拿不到平台会话、也调不了平台接口。对外部署时两个端口都要放通；经反向代理或容器端口映射访问时按下表配置。
+
+| 环境变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `CLONER_PREVIEW_PORT` | 主端口 + 1 | 预览端口；`0` 关闭隔离（预览回到与平台同源，不推荐） |
+| `CLONER_PREVIEW_URL` | 空 | 预览对外地址，如 `https://preview.example.com`；留空按访问平台的主机名 + 预览端口推断 |
+| `CLONER_TRUSTED_ORIGINS` | 空 | 反向代理改写了 Host 时，平台页面的对外地址（逗号分隔），用于跨站请求校验 |
+| `CLONER_ALLOWED_HOSTS` | 空 | 额外允许的 Host 头；监听 127.0.0.1 时只认本机主机名（防 DNS 重绑定） |
+| `CLONER_TRUSTED_PROXIES` | 空 | 采信 `X-Forwarded-For` 的上游代理地址；本机回环地址默认可信 |
+| `CLONER_COOKIE_SECURE` | 关 | 全程 HTTPS 访问时设为 `1`，会话 Cookie 只走 HTTPS |
+| `CLONER_OPEN_MODE_LOCAL_ONLY` | 开 | 设为 `0` 恢复旧行为：没有账号时任何机器都能免登录使用 |
+| `CLONER_CAPTCHA` | `auto` | 登录验证码：`auto` 输错后才出现，`always` 每次都要，`off` 关闭 |
+| `CLONER_CAPTCHA_AFTER` / `CLONER_CAPTCHA_IP_AFTER` | 2 / 5 | 同一用户名 / 同一 IP 输错几次后要求验证码 |
+| `CLONER_LOGIN_IP_MAX` | 30 | 同一 IP 在失败窗口内失败这么多次后暂停该 IP 登录 |
+| `CLONER_SESSION_HOURS` | 12 | 登录有效期（小时） |
 
 ## 测试与基准（训练效率 / 完成度的量具）
 

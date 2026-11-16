@@ -272,7 +272,8 @@ def _try(service: str, target: str) -> tuple[Optional[str], Extras, str]:
 # 生成入口(落库)
 # ---------------------------------------------------------------------------
 def shorten(db: Any, target_url: str, prefer: str = "all", *, label: str = "",
-            task_id: Optional[int] = None, link_task_id: Optional[int] = None) -> dict:
+            task_id: Optional[int] = None, link_task_id: Optional[int] = None,
+            workspace_id: Optional[int] = None) -> dict:
     """生成一条短链: prefer 指定的服务先试, 失败按 ORDER 顺延; prefer=all 即从第一家开始。
 
     成功落一行(service = 实际用的服务, extras.requested / fallback / attempts 留痕);
@@ -293,13 +294,13 @@ def shorten(db: Any, target_url: str, prefer: str = "all", *, label: str = "",
         record = {**extras, "ok": True, "requested": prefer,
                   "fallback": prefer != "all" and service != prefer, "attempts": attempts}
         link_id = db.create_short_link(task_id, target, service, short, label, record,
-                                       link_task_id=link_task_id)
+                                       link_task_id=link_task_id, workspace_id=workspace_id)
         return {"ok": True, "link_id": link_id, "service": service, "short_url": short,
                 "requested": prefer, "fallback": record["fallback"], "attempts": attempts}
     error = "全部服务生成失败" if chain else "没有可用的短链服务"
     record = {"ok": False, "requested": prefer, "error": error, "attempts": attempts}
     link_id = db.create_short_link(task_id, target, prefer, "", label, record,
-                                   link_task_id=link_task_id)
+                                   link_task_id=link_task_id, workspace_id=workspace_id)
     return {"ok": False, "link_id": link_id, "service": prefer, "short_url": "",
             "requested": prefer, "error": error, "attempts": attempts}
 
