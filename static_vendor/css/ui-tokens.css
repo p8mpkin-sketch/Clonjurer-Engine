@@ -242,7 +242,7 @@ html body .proj-sort select option{background:var(--surface);color:var(--fg)}
 .dash-proj{overflow:visible}
 .dash-proj-mosaic{border-radius:13px 13px 0 0;overflow:hidden}
 .proj-table{border:1px solid var(--line);border-radius:14px;background:var(--surface);overflow:visible}
-.proj-row{display:grid;grid-template-columns:72px minmax(0,2.2fr) 140px 84px minmax(120px,1.2fr) 100px 40px;align-items:center;gap:20px;
+.proj-row{display:grid;grid-template-columns:72px minmax(0,2.2fr) 140px 88px minmax(176px,1.2fr) 100px 40px;align-items:center;gap:20px;
   padding:12px 16px;border-top:1px solid var(--line);cursor:pointer;transition:background .15s;position:relative}
 .proj-row:hover{background:rgba(127,120,110,.05)}
 .proj-row:first-child{border-top:0}
@@ -250,9 +250,28 @@ html body .proj-sort select option{background:var(--surface);color:var(--fg)}
 .proj-head button{text-align:inherit;color:var(--fg-3);font-size:12px}
 .proj-head button:hover,.proj-head button.on{color:var(--fg)}
 .proj-head button.on::after{content:' ↓'}
+.proj-head button.text-right{text-align:right}
+/* 分数后的「分」: 和数字留 3px, 字号小一档、按基线对齐, 不再贴成「79.1分」 */
+.score-unit{margin-left:3px;font-size:12px;font-weight:400;color:var(--fg-3)}
 .proj-thumb{width:72px;height:45px;border-radius:6px;overflow:hidden;border:1px solid var(--line);background:rgba(127,120,110,.08);display:flex;align-items:center;justify-content:center;color:var(--fg-3)}
 .proj-thumb img{width:100%;height:100%;object-fit:cover;object-position:top}
 .proj-none{padding:48px 0;text-align:center;font-size:13px;color:var(--fg-3)}
+/* 「平均还原度」右对齐的大数字和「任务」进度条之间, 在列间距之外再留 16px: 两列视觉上不再粘连 */
+.proj-row > .proj-tasks{padding-left:16px}
+/* 成功/失败比: 进度条下一行两端对齐, 数字与单位分层, 永不折行(原先「581/593 成功 · 12 失败」挤在一行折成两截) */
+.ratio-meta{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-top:8px;font-size:12px;line-height:16px;color:var(--fg-3);white-space:nowrap;font-variant-numeric:tabular-nums}
+.ratio-meta b{font-weight:500;color:var(--fg-2)}
+.ratio-meta .is-bad,.ratio-meta .is-bad b{color:var(--ui-bad)}
+/* 中等宽度(右侧动态栏已折到下方、但还没到手机): 先收「负责人」, 再收「最近更新」, 保证项目名和成功/失败比都放得下 */
+@media (min-width:761px) and (max-width:1180px){
+  .proj-row{grid-template-columns:56px minmax(0,1fr) 76px minmax(160px,.8fr) 80px 28px;gap:16px}
+  .proj-thumb{width:56px;height:36px}
+  .proj-row .proj-col-owner{display:none}
+}
+@media (min-width:761px) and (max-width:1024px){
+  .proj-row{grid-template-columns:56px minmax(0,1fr) 72px minmax(160px,.8fr) 28px}
+  .proj-row .proj-col-recent{display:none}
+}
 @media (max-width:760px){
   .proj-row{grid-template-columns:56px minmax(0,1fr) 64px 32px;gap:12px}
   .proj-thumb{width:56px;height:36px}
@@ -306,7 +325,7 @@ html body .proj-sort select option{background:var(--surface);color:var(--fg)}
 @media (max-width:1024px){.dash-main .dash-projects{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:640px){.dash-main .dash-projects{grid-template-columns:minmax(0,1fr)}.dash-body{margin-top:40px}}
 @media (min-width:1181px){
-  .dash-main .proj-row{grid-template-columns:56px minmax(0,2fr) 124px 72px minmax(104px,1fr) 76px 28px;gap:16px}
+  .dash-main .proj-row{grid-template-columns:56px minmax(0,2fr) 112px 76px minmax(164px,1fr) 76px 28px;gap:16px}
   .dash-main .proj-thumb{width:56px;height:36px}
 }
 
@@ -464,7 +483,7 @@ html body .proj-sort select option{background:var(--surface);color:var(--fg)}
 .sc-run.ok{background:rgb(var(--ok-500))}.sc-run.warn{background:rgb(var(--warn-500))}.sc-run.bad{background:rgb(var(--bad-500))}
 .sc-run.run{background:var(--fg-2);animation:live-blink 1.2s ease-in-out infinite}
 @keyframes live-blink{50%{opacity:.35}}
-.sc-score{margin-left:6px;font-size:13px;color:var(--fg-2);font-variant-numeric:tabular-nums}
+.sc-score{margin-left:10px;font-size:13px;color:var(--fg-2);font-variant-numeric:tabular-nums}
 .sw{position:relative;width:34px;height:20px;border-radius:99px;background:var(--line-strong);transition:background .15s;flex:none;margin-right:4px}
 .sw span{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:99px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:transform .15s}
 .sw.on{background:var(--ink)}
@@ -494,7 +513,7 @@ html body .proj-sort select option{background:var(--surface);color:var(--fg)}
 .ai-row input{accent-color:var(--ink)}
 .ai-row img,.ai-row .pick-ph{width:52px;height:34px;border-radius:5px;object-fit:cover;object-position:top;flex:none;border:1px solid var(--line)}
 .ai-row b{font-size:13px;font-weight:500;color:var(--fg)}
-.ai-row small{font-size:12px;color:var(--fg-3)}
+.ai-row small{display:block;font-size:12px;color:var(--fg-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ai-run{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--fg-2);font-variant-numeric:tabular-nums}
 .score-pill{min-width:44px;text-align:center;padding:2px 6px;border-radius:6px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--fg-2);background:rgba(127,120,110,.1)}
 .score-pill.ok{color:var(--ui-ok)}.score-pill.low{color:var(--ui-bad);background:rgb(var(--bad-500) / .1)}.score-pill.mid{color:var(--ui-warn)}
