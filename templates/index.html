@@ -15,7 +15,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 <!-- 顶级字体体系: Inter / Plus Jakarta Sans / JetBrains Mono / Noto Sans SC -->
 <link href="/vendor/fonts/fonts.css" rel="stylesheet">
 <!-- UI 改版 P0 规范层: 字号/对比度/焦点/语义色(只换样式) -->
-<link href="/vendor/css/ui-tokens.css?v=28" rel="stylesheet">
+<link href="/vendor/css/ui-tokens.css?v=29" rel="stylesheet">
 
 <script src="/vendor/js/lucide.subset.js?v=8"></script>
 <script>
@@ -629,9 +629,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                 </div>
                 <div v-if="p.task_cnt" class="flex-1 min-w-0 pb-1">
                   <div class="proj-rate"><span :style="{ width: projMeta[p.id].rate + '%' }"></span><i v-if="p.fail_cnt" :style="{ width: projMeta[p.id].failRate + '%' }"></i></div>
-                  <div class="flex justify-between mt-1.5 text-[12px] text-slate-500 tnums">
-                    <span>[[ p.ok_cnt ]]/[[ p.task_cnt ]] 成功</span><span v-if="p.fail_cnt" class="text-rose-400">[[ p.fail_cnt ]] 失败</span>
-                  </div>
+                  <div class="ratio-meta"><span><b>[[ p.ok_cnt || 0 ]]</b> / [[ p.task_cnt ]] 成功</span><span v-if="p.fail_cnt" class="is-bad"><b>[[ p.fail_cnt ]]</b> 失败</span></div>
                 </div>
               </div>
               <div class="proj-foot">
@@ -661,10 +659,10 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <div class="proj-row proj-head" role="row">
             <span></span>
             <button type="button" @click="projSort='name'" :class="projSort==='name' ? 'on' : ''">项目</button>
-            <span class="hide-sm">负责人</span>
+            <span class="hide-sm proj-col-owner">负责人</span>
             <button type="button" @click="projSort='score'" :class="projSort==='score' ? 'on' : ''" class="text-right">平均还原度</button>
-            <button type="button" @click="projSort='tasks'" :class="projSort==='tasks' ? 'on' : ''" class="hide-sm">任务</button>
-            <button type="button" @click="projSort='recent'" :class="projSort==='recent' ? 'on' : ''" class="hide-sm">最近更新</button>
+            <button type="button" @click="projSort='tasks'" :class="projSort==='tasks' ? 'on' : ''" class="hide-sm proj-tasks">任务</button>
+            <button type="button" @click="projSort='recent'" :class="projSort==='recent' ? 'on' : ''" class="hide-sm proj-col-recent">最近更新</button>
             <span></span>
           </div>
           <div v-for="p in dashProjects" :key="p.id" class="proj-row" role="row" @click="enterProject(p)">
@@ -680,7 +678,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               </div>
               <div class="text-[12px] text-slate-500 truncate mt-0.5">[[ p.description || '暂无描述' ]]</div>
             </div>
-            <div class="hide-sm min-w-0">
+            <div class="hide-sm proj-col-owner min-w-0">
               <div v-if="projPeople(p).length" class="proj-owner" :title="projPeople(p).join('、')">
                 <span class="av-stack">
                   <span v-for="n in projPeople(p).slice(0, 3)" :key="n" class="av" :class="avTone(n)">[[ n.slice(0, 1) ]]</span>
@@ -690,11 +688,11 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <span v-else class="text-[13px] text-slate-600">—</span>
             </div>
             <div class="text-right serif-num text-[24px] leading-none" :class="p.avg_score == null ? 'text-slate-600' : 'text-slate-100'">[[ p.avg_score != null ? p.avg_score.toFixed(1) : '—' ]]</div>
-            <div class="hide-sm">
+            <div class="hide-sm proj-tasks" :title="(p.ok_cnt || 0) + ' 个成功, ' + (p.fail_cnt || 0) + ' 个失败, 共 ' + p.task_cnt + ' 个任务'">
               <div class="proj-rate"><span :style="{ width: projMeta[p.id].rate + '%' }"></span><i v-if="p.fail_cnt" :style="{ width: projMeta[p.id].failRate + '%' }"></i></div>
-              <div class="text-[12px] text-slate-500 mt-1 tnums">[[ p.ok_cnt || 0 ]]/[[ p.task_cnt ]] 成功<template v-if="p.fail_cnt"> · <span class="text-rose-400">[[ p.fail_cnt ]] 失败</span></template></div>
+              <div class="ratio-meta"><span><b>[[ p.ok_cnt || 0 ]]</b> / [[ p.task_cnt ]] 成功</span><span v-if="p.fail_cnt" class="is-bad"><b>[[ p.fail_cnt ]]</b> 失败</span></div>
             </div>
-            <div class="text-[13px] text-slate-400 hide-sm">[[ relTime(projMeta[p.id].last) ]]</div>
+            <div class="text-[13px] text-slate-400 hide-sm proj-col-recent">[[ relTime(projMeta[p.id].last) ]]</div>
             <div class="relative flex justify-end">
               <button v-if="canWrite" @click.stop="projectMenu = (projectMenu===p.id ? null : p.id)" title="项目操作" aria-label="项目操作"
                 class="w-7 h-7 flex items-center justify-center rounded-md text-slate-500 hover:text-slate-100 hover:bg-white/[0.06] transition-colors">
@@ -788,6 +786,29 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
     </div>
 <!-- 重命名弹窗结束 -->
 
+    <!-- 编辑任务(单个: 名称 + 项目; 多个: 移动到项目) -->
+    <div v-if="taskEdit.open" class="fixed inset-0 z-[70] flex items-center justify-center bg-black/50" @click.self="taskEdit.open=false">
+      <form class="mt-modal" role="dialog" aria-modal="true" aria-labelledby="te-title" @submit.prevent="saveTaskEdit()">
+        <h3 id="te-title">[[ taskEdit.one ? '编辑任务' : '移动 ' + taskEdit.ids.length + ' 个任务' ]]</h3>
+        <p v-if="taskEdit.one">#[[ taskEdit.ids[0] ]] · 名称只改列表里的显示，不影响克隆内容；留空就用网页标题。</p>
+        <p v-else>移到另一个项目，克隆结果和部署都不变。</p>
+        <template v-if="taskEdit.one">
+          <label for="te-name">名称</label>
+          <input id="te-name" v-model="taskEdit.name" class="mt-input" maxlength="80" :placeholder="taskEdit.auto || '使用网页标题'">
+        </template>
+        <label for="te-proj">所属项目</label>
+        <select id="te-proj" v-model="taskEdit.project_id" class="mt-select">
+          <option v-if="!taskEdit.one" value="" disabled>选择项目…</option>
+          <option v-for="p in projects" :key="p.id" :value="p.id">[[ p.name ]]</option>
+        </select>
+        <div v-if="taskEdit.error" class="ui-hint lk-err">[[ taskEdit.error ]]</div>
+        <div class="flex justify-end gap-2 mt-2">
+          <button type="button" class="mt-btn" @click="taskEdit.open=false">取消</button>
+          <button type="submit" class="mt-btn primary" :disabled="taskEdit.busy || (!taskEdit.one && !taskEdit.project_id)">[[ taskEdit.busy ? '保存中…' : '保存' ]]</button>
+        </div>
+      </form>
+    </div>
+
   <!-- ======================= Docker 容器运维控制台 ======================= -->
   <!-- ======================= 短链管理 ======================= -->
   <div v-show="view==='links'" class="flex-1 min-h-0 overflow-y-auto custom-scroll">
@@ -828,6 +849,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <div class="lk-c-time text-[12px] text-slate-500 tnums">[[ (st.created_at || '').slice(5, 16) ]]</div>
           <div class="lk-acts flex items-center justify-end gap-0.5">
             <button type="button" class="mt-icon" title="详情" aria-label="详情" @click="openLinkTask(st)"><i data-lucide="eye" class="w-4 h-4"></i></button>
+            <button v-if="canWrite" type="button" class="mt-icon" title="编辑" aria-label="编辑" :disabled="st.status==='running'" @click="openLinkEdit(st)"><i data-lucide="pencil" class="w-4 h-4"></i></button>
             <a :href="'/api/v4/link-tasks/' + st.id + '/export?format=csv'" class="mt-icon" title="导出 CSV" aria-label="导出 CSV"><i data-lucide="download" class="w-4 h-4"></i></a>
             <button v-if="canWrite" type="button" class="mt-icon" title="删除" aria-label="删除" @click="deleteLinkTask(st)"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
           </div>
@@ -842,10 +864,11 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
     </div>
 
     <!-- 新建短链任务 -->
-    <div v-if="links.creating" class="fixed inset-0 z-[70] flex items-center justify-center bg-black/50" @click.self="links.creating=false">
-      <form class="mt-modal" role="dialog" aria-modal="true" aria-labelledby="lk-create-title" @submit.prevent="createLinkTask()">
-        <h3 id="lk-create-title">新建短链任务</h3>
-        <p>选「全部服务」会依次用每家服务各生成一条；指定一家时，失败会自动换下一家。</p>
+    <div v-if="links.creating" class="fixed inset-0 flex items-center justify-center bg-black/50" style="z-index:75" @click.self="links.creating=false">
+      <form class="mt-modal" role="dialog" aria-modal="true" aria-labelledby="lk-create-title" @submit.prevent="links.editId ? saveLinkEdit() : createLinkTask()">
+        <h3 id="lk-create-title">[[ links.editId ? '编辑短链任务' : '新建短链任务' ]]</h3>
+        <p v-if="links.editId">改目标地址不会影响已经生成的短链，它们仍指向原地址；重新生成后用新地址。</p>
+        <p v-else>选「全部服务」会依次用每家服务各生成一条；指定一家时，失败会自动换下一家。</p>
         <label for="lk-name">名称</label>
         <input id="lk-name" v-model="links.form.name" class="mt-input" maxlength="120" placeholder="例如：活动落地页" required>
         <label for="lk-target">目标地址</label>
@@ -863,11 +886,11 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         </select>
         <label for="lk-note">备注（可选）</label>
         <input id="lk-note" v-model="links.form.note" class="mt-input" maxlength="300" placeholder="用途说明">
-        <label class="flex items-center gap-2"><input type="checkbox" v-model="links.form.generate">创建后立即生成</label>
+        <label v-if="!links.editId" class="flex items-center gap-2"><input type="checkbox" v-model="links.form.generate">创建后立即生成</label>
         <div v-if="links.error" class="ui-hint lk-err">[[ links.error ]]</div>
         <div class="flex justify-end gap-2 mt-2">
           <button type="button" class="mt-btn" @click="links.creating=false">取消</button>
-          <button type="submit" class="mt-btn primary" :disabled="links.busy">[[ links.busy ? '创建中…' : '创建' ]]</button>
+          <button type="submit" class="mt-btn primary" :disabled="links.busy">[[ links.editId ? (links.busy ? '保存中…' : '保存') : (links.busy ? '创建中…' : '创建') ]]</button>
         </div>
       </form>
     </div>
@@ -909,6 +932,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <div v-if="!links.detail.links.length" class="pg-empty">[[ links.detail.status==='running' ? '正在生成…' : '还没有短链，点「生成」试试' ]]</div>
         </div>
         <div class="flex items-center justify-end gap-2 mt-2">
+          <button v-if="canWrite && links.detail.status!=='running'" type="button" class="mt-btn" @click="openLinkEdit(links.detail)"><i data-lucide="pencil" class="w-4 h-4"></i>编辑</button>
           <a :href="'/api/v4/link-tasks/' + links.detail.id + '/export?format=txt'" class="mt-btn">导出 TXT</a>
           <a :href="'/api/v4/link-tasks/' + links.detail.id + '/export?format=csv'" class="mt-btn">导出 CSV</a>
           <button v-if="canWrite && links.detail.status==='running'" key="lk-gen-run" type="button" class="mt-btn primary" disabled><i data-lucide="loader" class="w-4 h-4 animate-spin"></i>生成中…</button>
@@ -1165,6 +1189,15 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <select v-model="aiSort" class="mt-select" aria-label="排序"><option value="score_asc">分低优先</option><option value="recent">最新</option></select>
             <label class="flex items-center gap-1.5 text-[12px] text-slate-400 whitespace-nowrap"><input type="checkbox" v-model="aiAll" class="accent-indigo-500">显示全部</label>
           </div>
+          <div v-if="aiSel.size" class="ai-sel">
+            <div class="sel-bar">
+              <b class="tnums">已选 [[ aiSel.size ]] 项</b>
+              <button v-if="canWrite" type="button" @click="openTaskEdit(aiSelTasks)"><i data-lucide="folder-input" class="w-3.5 h-3.5"></i>移动到项目</button>
+              <button v-if="canWrite" type="button" class="danger" @click="deleteTasks(aiSelTasks)"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i>删除</button>
+              <button type="button" @click="aiSel = new Set(aiList.map(t => t.id))">全选</button>
+              <button type="button" @click="aiSel = new Set()" title="取消选择" aria-label="取消选择"><i data-lucide="x" class="w-3.5 h-3.5"></i></button>
+            </div>
+          </div>
           <div class="ai-rows custom-scroll">
             <div v-for="t in aiList" :key="t.id" class="ai-row" :class="previewTaskId===t.id ? 'on' : ''" @click="aiPick(t)">
               <input type="checkbox" :checked="aiSel.has(t.id)" @click.stop="aiToggle(t)" :aria-label="'选择 ' + t.domain">
@@ -1180,7 +1213,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         <section v-if="aiCur" class="mt-panel ai-bench">
           <div class="mt-head">
             <div class="min-w-0">
-              <h3 class="truncate">[[ aiCur.domain ]]</h3>
+              <h3 class="truncate" :title="aiCur.target_url">[[ taskTitle(aiCur) ]]</h3>
               <p>#[[ aiCur.id ]] · 还原度 <b class="text-slate-100">[[ aiCur.similarity_score != null ? Number(aiCur.similarity_score).toFixed(1) : '—' ]]</b>
                 <template v-if="aiReport.data && aiReport.data.final_score != null"> · 上次修复 [[ aiReport.data.trigger_score ]] → [[ aiReport.data.final_score ]]</template></p>
             </div>
@@ -1190,6 +1223,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                 <button type="button" :aria-pressed="aiView==='diff' ? 'true' : 'false'" @click="aiView='diff'">差异</button>
               </div>
               <button type="button" class="mt-btn" @click="openTaskDetail(aiCur)">详情</button>
+              <button v-if="canWrite" type="button" class="mt-icon" title="编辑名称和所属项目" aria-label="编辑" @click="openTaskEdit([aiCur])"><i data-lucide="pencil" class="w-4 h-4"></i></button>
+              <button v-if="canWrite" type="button" class="mt-icon danger" title="删除这个克隆" aria-label="删除" :disabled="aiJobById[aiCur.id] && aiJobById[aiCur.id].state==='running'" @click="deleteTasks([aiCur])"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
             </div>
           </div>
           <div class="ai-shots">
@@ -2023,7 +2058,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <span class="px-2 py-1 rounded-md bg-slate-950/60 border border-white/[0.06] text-[10px] text-slate-400">批次 <b class="text-slate-200 tnums">[[ currentProject.batch_cnt ]]</b></span>
           <span class="px-2 py-1 rounded-md bg-slate-950/60 border border-white/[0.06] text-[10px] text-slate-400">任务 <b class="text-slate-200 tnums">[[ currentProject.task_cnt ]]</b></span>
           <span class="px-2 py-1 rounded-md bg-slate-950/60 border border-white/[0.06] text-[10px] text-slate-400">成功 <b class="text-emerald-300 tnums">[[ currentProject.ok_cnt ]]</b></span>
-          <span class="px-2 py-1 rounded-md bg-slate-950/60 border border-white/[0.06] text-[10px] text-slate-400">均分 <b :class="avgClass(currentProject.avg_score)" class="tnums">[[ currentProject.avg_score != null ? currentProject.avg_score.toFixed(1) : '—' ]]</b></span>
+          <span v-if="currentProject.fail_cnt" class="px-2 py-1 rounded-md bg-slate-950/60 border border-white/[0.06] text-[10px] text-slate-400">失败 <b class="text-rose-400 tnums">[[ currentProject.fail_cnt ]]</b></span>
+          <span class="px-2 py-1 rounded-md bg-slate-950/60 border border-white/[0.06] text-[10px] text-slate-400">平均还原度 <b :class="avgClass(currentProject.avg_score)" class="tnums">[[ currentProject.avg_score != null ? currentProject.avg_score.toFixed(1) : '—' ]]</b></span>
         </div>
         <div class="flex-1"></div>
         <button @click="switchView('dashboard')" class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-white/[0.08] text-[10.5px] text-slate-400 hover:text-slate-100 transition-all">
@@ -2087,7 +2123,22 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <button v-if="taskKind(selectedTask) === 'clone'" type="button" role="menuitem" @click="headMore = false; openTrackerConfig()"><i data-lucide="radio" class="w-4 h-4"></i>表单推送<span v-if="trackerEnabled" class="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-400"></span></button>
               <button v-if="dockerInfo && dockerInfo.status==='running'" type="button" role="menuitem" @click="headMore = false; dockerAction('stop')"><i data-lucide="square" class="w-4 h-4"></i>停止部署</button>
               <button type="button" role="menuitem" @click="headMore = false; openNewWindow('/preview/' + selectedTask.id + '/')"><i data-lucide="external-link" class="w-4 h-4"></i>新窗口打开预览</button>
+              <template v-if="canWrite">
+                <hr>
+                <button type="button" role="menuitem" @click="headMore = false; openTaskEdit([selectedTask])"><i data-lucide="pencil" class="w-4 h-4"></i>编辑名称和项目</button>
+                <button type="button" role="menuitem" class="danger" @click="headMore = false; deleteTasks([selectedTask])"><i data-lucide="trash-2" class="w-4 h-4"></i>删除任务</button>
+              </template>
             </div>
+          </div>
+        </div>
+        <div v-else-if="selectedTask.status !== 'running' && canWrite" class="relative">
+          <button type="button" @click="headMore = !headMore" class="flex items-center gap-1 h-8 px-2.5 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white transition-all" :aria-expanded="headMore" aria-label="更多操作">
+            更多<i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
+          </button>
+          <div v-if="headMore" class="fixed inset-0 z-[60]" @click="headMore = false"></div>
+          <div v-if="headMore" class="head-menu z-[61]" role="menu">
+            <button type="button" role="menuitem" @click="headMore = false; openTaskEdit([selectedTask])"><i data-lucide="pencil" class="w-4 h-4"></i>编辑名称和项目</button>
+            <button type="button" role="menuitem" class="danger" @click="headMore = false; deleteTasks([selectedTask])"><i data-lucide="trash-2" class="w-4 h-4"></i>删除任务</button>
           </div>
         </div>
       </div>
@@ -2214,6 +2265,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <b class="tnums">已选 [[ selectedIds.size ]] 项</b>
               <button v-if="canWrite" @click="batchRebuild" :disabled="batchBusy"><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>[[ batchBusy ? '入队中…' : '重建' ]]</button>
               <button @click="archiveSelected"><i data-lucide="archive" class="w-3.5 h-3.5"></i>打包存档</button>
+              <button v-if="canWrite" @click="openTaskEdit(selTasks)"><i data-lucide="folder-input" class="w-3.5 h-3.5"></i>移动到项目</button>
+              <button v-if="canWrite" class="danger" @click="deleteTasks(selTasks)"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i>删除</button>
               <button @click="selectAllVisible">全选</button>
               <button @click="selectedIds = new Set()" title="取消选择" aria-label="取消选择"><i data-lucide="x" class="w-3.5 h-3.5"></i></button>
             </div>
@@ -2280,7 +2333,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                   <!-- 已完成: 还原度大数字即状态; 其他状态才显示状态徽标 -->
                   <span v-if="task.status==='completed' && task.similarity_score != null" class="tnums leading-none text-right" :title="scoreLabel(task) + ' ' + task.similarity_score + ' 分'"
                     >
-                    <span class="text-base font-semibold tnums" :class="scoreTone(task.similarity_score)">[[ Number(task.similarity_score).toFixed(1) ]]</span><span class="text-[12px] text-slate-500 ml-0.5">分</span>
+                    <span class="text-base font-semibold tnums" :class="scoreTone(task.similarity_score)">[[ Number(task.similarity_score).toFixed(1) ]]</span><span class="score-unit">分</span>
                   </span>
                   <span v-else class="inline-flex items-center gap-1 text-[9px] font-medium px-2 py-0.5 rounded-full border"
                     :class="task.status==='completed' ? 'bg-emerald-500/10 text-emerald-300/90 border-emerald-500/25' : statusBadge(task.status)">
@@ -2340,6 +2393,15 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                 <button @click="rebuild(task)" class="flex items-center gap-1.5 px-3 h-8 rounded-lg text-[13px] font-medium text-slate-200 border border-white/[0.1] hover:border-white/[0.2] transition-colors">
                   <i data-lucide="rotate-cw" class="w-3.5 h-3.5"></i>重试
                 </button>
+                <div class="flex-1"></div>
+                <button v-if="canWrite" @click="openTaskEdit([task])" title="编辑名称和所属项目" aria-label="编辑" class="icon-btn2"><i data-lucide="pencil" class="w-3.5 h-3.5"></i></button>
+                <button v-if="canWrite" @click="deleteTasks([task])" title="删除" aria-label="删除" class="icon-btn2 danger"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
+              </div>
+              <!-- 排队中: 也能直接删 / 改 -->
+              <div v-else-if="task.status==='pending' && canWrite" class="flex items-center gap-1.5 pt-0.5 border-t border-white/[0.05] mt-auto">
+                <div class="flex-1"></div>
+                <button @click="openTaskEdit([task])" title="编辑名称和所属项目" aria-label="编辑" class="icon-btn2"><i data-lucide="pencil" class="w-3.5 h-3.5"></i></button>
+                <button @click="deleteTasks([task])" title="取消并删除" aria-label="删除" class="icon-btn2 danger"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
               </div>
               <!-- 操作栏: 运行中/排队中只看进度, 不摆灰掉的按钮 -->
               <div v-else-if="['completed','partial'].includes(task.status)" class="flex items-center gap-1.5 pt-0.5 border-t border-white/[0.05] mt-auto">
@@ -2358,6 +2420,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                 <button @click="rebuild(task)" :disabled="task.status==='running'" :title="taskKind(task) === 'clone' ? '重新克隆' : '重新生成'" :aria-label="taskKind(task) === 'clone' ? '重新克隆' : '重新生成'" class="icon-btn2">
                   <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
                 </button>
+                <button v-if="canWrite" @click="openTaskEdit([task])" title="编辑名称和所属项目" aria-label="编辑" class="icon-btn2"><i data-lucide="pencil" class="w-3.5 h-3.5"></i></button>
+                <button v-if="canWrite" @click="deleteTasks([task])" title="删除" aria-label="删除" class="icon-btn2 danger"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
               </div>
             </div>
           </div>
@@ -2555,6 +2619,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                     <span v-if="!mockCreating" class="text-[10px] font-mono ml-auto tnums" :class="activeMock.status < 400 ? 'text-emerald-400' : 'text-rose-400'">HTTP [[ activeMock.status ]]</span>
                     <button v-if="!mockCreating" @click="formatMockJson"
                       class="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] border border-white/10 bg-slate-800/60 text-slate-400 hover:text-cyan-300 transition-all"><i data-lucide="braces" class="w-3 h-3"></i>格式化 JSON</button>
+                    <button v-if="!mockCreating && canWrite" @click="deleteMock(mockEntries, mockIndex, selectedTaskId)" title="删除这个接口的模拟数据"
+                      class="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] border border-white/10 bg-slate-800/60 text-slate-400 hover:text-rose-300 transition-all"><i data-lucide="trash-2" class="w-3 h-3"></i>删除</button>
                     <button v-if="!mockCreating" @click="startNewMock"
                       class="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 transition-all"><i data-lucide="plus" class="w-3 h-3"></i>新增 Mock 路由</button>
                     <button v-else @click="cancelNewMock"
@@ -2762,7 +2828,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <div class="pg-kpi">
             <div class="pg-kpi-label">近 1 小时</div>
             <div class="pg-kpi-num">[[ live.throughput.completed ]]<small>完成</small></div>
-            <div class="pg-kpi-sub"><template v-if="live.throughput.failed">失败 [[ live.throughput.failed ]] · </template>单站中位 [[ live.median_s ? fmtDur(live.median_s) : '—' ]]</div>
+            <div class="pg-kpi-sub"><template v-if="live.throughput.failed"><span class="text-rose-400">[[ live.throughput.failed ]] 失败</span> · </template>单站中位 [[ live.median_s ? fmtDur(live.median_s) : '—' ]]</div>
           </div>
           <div class="pg-kpi">
             <div class="pg-kpi-label">浏览器进程</div>
@@ -2979,11 +3045,12 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <div class="pt-3 border-t border-white/[0.06]">
               <div class="text-[10px] text-slate-500 mb-1.5">已注入该任务的规则</div>
               <div class="space-y-1 max-h-[180px] overflow-auto custom-scroll">
-                <div v-for="(m, i) in mockGen.list" :key="i" class="flex items-center gap-2 text-[10px] px-2 py-1.5 rounded-lg bg-slate-950/60 border border-white/[0.04]">
+                <div v-for="(m, i) in mockGen.list" :key="i" class="mock-row flex items-center gap-2 text-[10px] px-2 py-1.5 rounded-lg bg-slate-950/60 border border-white/[0.04]">
                   <span class="px-1 py-0.5 rounded border font-mono text-[8.5px]"
                     :class="m.method === 'GET' ? 'border-emerald-500/40 text-emerald-300' : 'border-amber-500/40 text-amber-300'">[[ m.method ]]</span>
                   <span class="font-mono text-slate-400 truncate flex-1">[[ m.path ]]</span>
                   <span class="font-mono text-slate-600">[[ m.status ]]</span>
+                  <button v-if="canWrite" type="button" class="mock-del mt-icon sm danger" :title="'删除 ' + m.method + ' ' + m.path" aria-label="删除这条规则" @click="deleteMock(mockGen.list, i, mockGen.taskId)"><i data-lucide="trash-2" class="w-3 h-3"></i></button>
                 </div>
                 <div v-if="!mockGen.list.length" class="text-[10px] text-slate-600 text-center py-2">暂无规则</div>
               </div>
@@ -3193,7 +3260,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <div class="hide-sm sc-runs">
               <span v-for="r in sc.runs.slice(0, 6).reverse()" :key="r.batch_id" class="sc-run" :class="runTone(r)"
                 :title="whenText(r.at) + ' · 成功 ' + (r.completed || 0) + ' / 失败 ' + (r.failed || 0) + (r.avg_score != null ? ' · 均分 ' + r.avg_score : '')"></span>
-              <span v-if="sc.runs.length && sc.runs[0].avg_score != null" class="sc-score">[[ sc.runs[0].avg_score ]]</span>
+              <span v-if="sc.runs.length && sc.runs[0].avg_score != null" class="sc-score" title="最近一次的平均还原度">[[ sc.runs[0].avg_score ]]</span>
               <span v-if="!sc.runs.length" class="text-[12px] text-slate-500">还没运行过</span>
             </div>
             <div class="flex items-center justify-end gap-1">
@@ -3604,6 +3671,7 @@ const __vueApp = createApp({
       ],
       projectQ: '', projectMenu: null,
       renameModal: { open: false, id: null, name: '', description: '', busy: false, error: '' },
+      taskEdit: { open: false, one: true, ids: [], name: '', auto: '', project_id: '', cur_project: '', busy: false, error: '' },
       archiveJob: null,
       importModal: { open: false, file: null, project: '', busy: false, pct: 0, result: null, error: '' },
       aiPrompt: '',
@@ -3752,6 +3820,8 @@ const __vueApp = createApp({
       return xs.slice(0, 120);
     },
     aiJobById() { const m = {}; this.aiJobs.forEach(j => { if (!m[j.task_id]) m[j.task_id] = j; }); return m; },
+    aiSelTasks() { return this.tasks.filter(t => this.aiSel.has(t.id)); },
+    selTasks() { return this.tasks.filter(t => this.selectedIds.has(t.id)); },
     aiCur() { return this.tasks.find(t => t.id === this.previewTaskId) || null; },
     deployCandidates() {
       const q = this.deployModal.q.trim().toLowerCase();
@@ -4332,7 +4402,7 @@ const __vueApp = createApp({
       } catch (e) { /* 下次再取 */ }
     },
     aiPick(t) { this.previewTaskId = t.id; this.aiPrompt = ''; this.loadAiReportData(); this.$nextTick(() => this.iconRefresh()); },
-    aiToggle(t) { const s = new Set(this.aiSel); if (s.has(t.id)) s.delete(t.id); else s.add(t.id); this.aiSel = s; },
+    aiToggle(t) { const s = new Set(this.aiSel); if (s.has(t.id)) s.delete(t.id); else s.add(t.id); this.aiSel = s; this.iconRefresh(); },
     async aiRepair(id, prompt) {
       const { ok, data } = await this.apiJson('/api/v4/ai/playground-repair', { method: 'POST', body: JSON.stringify({ task_id: id, prompt: prompt || '' }) });
       if (!ok) { this.toast(data.error || '启动失败'); return false; }
@@ -4344,6 +4414,66 @@ const __vueApp = createApp({
       let n = 0;
       for (const id of ids) { if (await this.aiRepair(id, '')) n++; }
       this.toast('已开始修复 ' + n + ' 个'); this.aiSel = new Set();
+    },
+
+    /* ---------- 任务编辑 / 删除(视觉修复、任务列表、任务详情共用) ---------- */
+    openTaskEdit(list) {
+      const xs = (list || []).filter(Boolean);
+      if (!xs.length) return;
+      const one = xs.length === 1 ? xs[0] : null;
+      const cur = one && one.project_id != null ? one.project_id : '';
+      this.taskEdit = { open: true, one: !!one, ids: xs.map(t => t.id),
+        name: one ? (one.alias || '') : '', auto: one ? (one.alias ? '' : (one.title || one.domain || '')) : '',
+        project_id: cur, cur_project: cur, busy: false, error: '' };
+      if (!this.projects.length) this.loadProjects();
+      this.iconRefresh();
+    },
+    async saveTaskEdit() {
+      const m = this.taskEdit; m.busy = true; m.error = '';
+      try {
+        let res;
+        if (m.one) {
+          const body = { alias: m.name.trim() };
+          if (m.project_id !== '' && String(m.project_id) !== String(m.cur_project)) body.project_id = m.project_id;
+          res = await this.apiJson('/api/tasks/' + m.ids[0], { method: 'PATCH', body: JSON.stringify(body) });
+        } else {
+          res = await this.apiJson('/api/tasks/batch/move', { method: 'POST', body: JSON.stringify({ task_ids: m.ids, project_id: m.project_id }) });
+        }
+        if (!res.ok) { m.error = res.data.error || '保存失败'; return; }
+        m.open = false;
+        if (m.one) this.toast('已保存');
+        else { this.toast('已移动 ' + (res.data.moved || 0) + ' 个任务'); this.selectedIds = new Set(); this.aiSel = new Set(); }
+        await this.refreshTasks();
+        this.loadProjects();
+      } catch (e) { m.error = '网络错误: ' + e; }
+      finally { m.busy = false; }
+    },
+    async deleteTasks(list) {
+      const all = (list || []).filter(Boolean);
+      const xs = all.filter(t => t.status !== 'running' && !((this.aiJobById[t.id] || {}).state === 'running'));
+      const busy = all.length - xs.length;
+      if (!xs.length) { this.toast('运行中或正在修复的任务不能删除，等它结束后再删'); return false; }
+      const one = xs.length === 1 ? xs[0] : null;
+      const deployed = xs.filter(t => this.docker.list.some(c => c.task_id === t.id)).length;
+      const msg = (one ? '删除任务「' + this.taskTitle(one) + '」？' : '删除选中的 ' + xs.length + ' 个任务？')
+        + '\n克隆文件和下载包会一起删除' + (deployed ? '，' + deployed + ' 个本机部署会被销毁' : '') + '，不能恢复。'
+        + (busy ? '\n另有 ' + busy + ' 个运行中的任务会跳过。' : '');
+      if (!confirm(msg)) return false;
+      const { ok, data } = await this.apiJson('/api/tasks/batch/delete', { method: 'POST', body: JSON.stringify({ task_ids: xs.map(t => t.id) }) });
+      if (!ok) { this.toast(data.error || '删除失败'); return false; }
+      const gone = new Set(data.deleted || []);
+      const skipped = data.skipped || [];
+      this.toast('已删除 ' + gone.size + ' 个任务' + (skipped.length ? '，' + skipped.length + ' 个跳过（' + [...new Set(skipped.map(s => s.reason))].join('、') + '）' : ''));
+      const keep = s => new Set([...s].filter(id => !gone.has(id)));
+      this.selectedIds = keep(this.selectedIds);
+      this.aiSel = keep(this.aiSel);
+      this.tasks = this.tasks.filter(t => !gone.has(t.id));
+      if (gone.has(this.previewTaskId)) this.previewTaskId = null;
+      if (gone.has(this.selectedTaskId) && this.view === 'task') { this.activeTab = 'matrix'; this.goModule('tasks'); }
+      this.refreshTasks();
+      this.loadProjects();
+      if (deployed) this.loadDocker();
+      return true;
     },
 
     /* ---------- 部署 ---------- */
@@ -4988,6 +5118,7 @@ const __vueApp = createApp({
     openLinkCreate() {
       this.links.form = { name: '', target_url: '', service: 'all', clone_task_id: '', note: '', generate: true };
       this.links.error = '';
+      this.links.editId = null;
       this.links.creating = true;
       this.loadLinkProviders();
       this.iconRefresh();
@@ -5010,6 +5141,35 @@ const __vueApp = createApp({
         this.toast('已创建 SL-' + String(data.task.seq).padStart(3, '0') + (f.generate ? '，正在生成短链' : ''));
         await this.loadLinks();
         if (f.generate) this.openLinkTask(data.task);
+      } catch (e) { this.links.error = '网络错误，请重试'; }
+      finally { this.links.busy = false; }
+    },
+    openLinkEdit(st) {
+      this.links.form = { name: st.name || '', target_url: st.target_url || '', service: st.service || 'all',
+                          clone_task_id: st.clone_task_id != null ? st.clone_task_id : '', note: st.note || '', generate: false };
+      this.links.error = '';
+      this.links.editId = st.id;
+      this.links.creating = true;
+      this.loadLinkProviders();
+      this.iconRefresh();
+    },
+    async saveLinkEdit() {
+      const f = this.links.form, id = this.links.editId;
+      this.links.error = '';
+      if (!f.name.trim()) { this.links.error = '请填写名称'; return; }
+      if (!/^https?:\/\//i.test(f.target_url.trim())) { this.links.error = '目标地址必须以 http:// 或 https:// 开头'; return; }
+      this.links.busy = true;
+      try {
+        const payload = { name: f.name.trim(), target_url: f.target_url.trim(), service: f.service, note: f.note.trim(),
+                          clone_task_id: f.clone_task_id === '' ? '' : Number(f.clone_task_id) };
+        const { ok, data } = await this.apiJson('/api/v4/link-tasks/' + id, { method: 'PATCH', body: JSON.stringify(payload) });
+        if (!ok) { this.links.error = data.error || '保存失败'; return; }
+        this.links.creating = false;
+        this.links.editId = null;
+        this.toast('已保存');
+        await this.loadLinks();
+        if (this.links.detail && this.links.detail.id === id) this.links.detail = data.task;
+        this.iconRefresh();
       } catch (e) { this.links.error = '网络错误，请重试'; }
       finally { this.links.busy = false; }
     },
@@ -6016,6 +6176,19 @@ const __vueApp = createApp({
         this.trackerOverview = await r.json();
       } catch (e) {}
       this.iconRefresh();
+    },
+    async deleteMock(list, i, taskId) {
+      const m = list && list[i];
+      if (!m || !taskId) return;
+      if (!confirm('删除接口 ' + m.method + ' ' + m.path + ' 的模拟数据？\n克隆站里这个接口不再返回它，下载包会同步更新。')) return;
+      const idx = m.index != null ? m.index : i;
+      const q = '?path=' + encodeURIComponent(m.path || '') + '&method=' + encodeURIComponent(m.method || 'GET');
+      const { ok, data } = await this.apiJson('/api/tasks/' + taskId + '/mock/' + idx + q, { method: 'DELETE' });
+      if (!ok) { this.toast(data.error || '删除失败'); return; }
+      this.toast('已删除 ' + m.method + ' ' + m.path);
+      if (String(taskId) === String(this.mockGen.taskId)) this.loadMockGenList();
+      if (String(taskId) === String(this.selectedTaskId)) this.loadMock();
+      this.refreshTasks();
     },
     async loadMockGenList() {
       if (!this.mockGen.taskId) { this.mockGen.list = []; return; }

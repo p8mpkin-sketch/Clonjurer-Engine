@@ -285,7 +285,7 @@ CREATE TABLE IF NOT EXISTS docker_containers (
 _TASK_COLUMNS = {
     "batch_id", "target_url", "domain", "status", "progress", "stage",
     "similarity_score", "stats_json", "error_msg", "workspace_path",
-    "zip_path", "created_at", "updated_at",
+    "zip_path", "created_at", "updated_at", "alias",
 }
 
 
@@ -352,6 +352,11 @@ class Database:
                    self._conn.execute("PRAGMA table_info(short_links)").fetchall()}
         if sl_cols and "link_task_id" not in sl_cols:
             self._conn.execute("ALTER TABLE short_links ADD COLUMN link_task_id INTEGER")
+        # 任务自定义名称(为空时界面显示克隆页标题 / 域名)
+        ct_cols = {r["name"] for r in
+                   self._conn.execute("PRAGMA table_info(clone_tasks)").fetchall()}
+        if ct_cols and "alias" not in ct_cols:
+            self._conn.execute("ALTER TABLE clone_tasks ADD COLUMN alias TEXT NOT NULL DEFAULT ''")
         # 部署(Docker)扩展列: 启动方式 / 绑定地址 / 自动销毁时间 / 内存上限 / 最近错误
         dk_cols = {r["name"] for r in
                    self._conn.execute("PRAGMA table_info(docker_containers)").fetchall()}
@@ -532,7 +537,7 @@ class Database:
     def get_task(self, task_id: int):
         with self._lock:
             row = self._conn.execute(
-                "SELECT t.*, b.name AS batch_name, b.created_by AS created_by, b.workspace_id AS workspace_id,"
+                "SELECT t.*, b.name AS batch_name, b.project_id AS project_id, b.created_by AS created_by, b.workspace_id AS workspace_id,"
                 " COALESCE((SELECT NULLIF(u.display_name, '') FROM users u WHERE u.username = b.created_by), b.created_by) AS creator_name FROM clone_tasks t"
                 " LEFT JOIN batch_jobs b ON t.batch_id = b.id WHERE t.id = ?",
                 (task_id,),
@@ -562,13 +567,96 @@ class Database:
         params.append(limit)
         with self._lock:
             rows = self._conn.execute(
-                "SELECT t.*, b.name AS batch_name, b.created_by AS created_by, b.workspace_id AS workspace_id,"
+                "SELECT t.*, b.name AS batch_name, b.project_id AS project_id, b.created_by AS created_by, b.workspace_id AS workspace_id,"
                 " COALESCE((SELECT NULLIF(u.display_name, '') FROM users u WHERE u.username = b.created_by), b.created_by) AS creator_name FROM clone_tasks t"
                 f" LEFT JOIN batch_jobs b ON t.batch_id = b.id{clause}"
                 " ORDER BY t.id DESC LIMIT ?",
                 params,
             ).fetchall()
             return [dict(r) for r in rows]
+
+    def _resync_batches(self, batch_ids) -> None:
+        """任务被删除 / 移走后按剩余任务重算批次计数; 空批次直接删掉(调用方已持锁)。"""
+        for bid in set(batch_ids):
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS n, COALESCE(SUM(status = 'completed'), 0) AS ok"
+                " FROM clone_tasks WHERE batch_id = ?", (bid,)).fetchone()
+            if not row["n"]:
+                self._conn.execute("DELETE FROM batch_jobs WHERE id = ?", (bid,))
+            else:
+                self._conn.execute(
+                    "UPDATE batch_jobs SET total_urls = ?, completed_urls = ? WHERE id = ?",
+                    (row["n"], row["ok"], bid))
+
+    def delete_tasks(self, task_ids) -> list:
+        """删除任务记录(运行中的跳过), 返回实际删掉的 id。
+
+        同一把锁内先筛再删, 与 claim_next_task 互斥: 不会删掉刚被领走开跑的任务。
+        一并清掉挂在任务上的埋点配置 / 部署记录 / 存档导入映射; 短链任务与远程发布只解除关联。
+        token / 用量流水保留(计费与统计的历史)。工作空间与 ZIP 由调用方删。"""
+        ids = sorted({int(i) for i in task_ids})
+        if not ids:
+            return []
+        marks = ",".join("?" * len(ids))
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT id, batch_id FROM clone_tasks WHERE id IN ({marks}) AND status != 'running'",
+                ids).fetchall()
+            gone = [r["id"] for r in rows]
+            if not gone:
+                return []
+            gm = ",".join("?" * len(gone))
+            self._conn.execute(f"DELETE FROM clone_tasks WHERE id IN ({gm})", gone)
+            self._conn.execute(f"DELETE FROM tracker_configs WHERE task_id IN ({gm})", gone)
+            self._conn.execute(f"DELETE FROM docker_containers WHERE task_id IN ({gm})", gone)
+            self._conn.execute(f"DELETE FROM archive_imports WHERE task_id IN ({gm})", gone)
+            self._conn.execute(
+                f"UPDATE short_link_tasks SET clone_task_id = NULL WHERE clone_task_id IN ({gm})", gone)
+            self._conn.execute(
+                f"UPDATE remote_deploys SET clone_task_id = NULL WHERE clone_task_id IN ({gm})", gone)
+            self._resync_batches(r["batch_id"] for r in rows)
+            self._conn.commit()
+        return gone
+
+    def move_tasks_to_project(self, task_ids, project_id: int) -> int:
+        """把任务挪到另一个项目(同一工作区内)。整批都选中时直接改批次归属;
+        只选了批次里的一部分时, 在目标项目下拆出一个同名新批次承接。返回移动的任务数。"""
+        ids = sorted({int(i) for i in task_ids})
+        proj = self.get_project(project_id)
+        if not ids or proj is None:
+            return 0
+        marks = ",".join("?" * len(ids))
+        moved = 0
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT t.id, t.batch_id, b.project_id, b.workspace_id FROM clone_tasks t"
+                f" JOIN batch_jobs b ON b.id = t.batch_id WHERE t.id IN ({marks})", ids).fetchall()
+            by_batch: dict = {}
+            for r in rows:
+                if r["workspace_id"] != proj["workspace_id"] or r["project_id"] == project_id:
+                    continue
+                by_batch.setdefault(r["batch_id"], []).append(r["id"])
+            touched = []
+            for bid, tids in by_batch.items():
+                total = self._conn.execute(
+                    "SELECT COUNT(*) AS n FROM clone_tasks WHERE batch_id = ?", (bid,)).fetchone()["n"]
+                if total == len(tids):
+                    self._conn.execute("UPDATE batch_jobs SET project_id = ? WHERE id = ?", (project_id, bid))
+                else:
+                    src = self._conn.execute("SELECT * FROM batch_jobs WHERE id = ?", (bid,)).fetchone()
+                    cur = self._conn.execute(
+                        "INSERT INTO batch_jobs (project_id, name, total_urls, completed_urls,"
+                        " config_json, created_at, created_by, workspace_id) VALUES (?, ?, 0, 0, ?, ?, ?, ?)",
+                        (project_id, src["name"], src["config_json"], src["created_at"],
+                         src["created_by"], src["workspace_id"]))
+                    tm = ",".join("?" * len(tids))
+                    self._conn.execute(
+                        f"UPDATE clone_tasks SET batch_id = ? WHERE id IN ({tm})", (cur.lastrowid, *tids))
+                    touched += [bid, cur.lastrowid]
+                moved += len(tids)
+            self._resync_batches(touched)
+            self._conn.commit()
+        return moved
 
     def queue_counts(self, workspace_id=None) -> dict:
         counts = {"pending": 0, "running": 0, "completed": 0, "failed": 0}
@@ -1580,6 +1668,8 @@ class Database:
             "note": fields.get("note"),
             "status": fields.get("status"),
         }.items() if v is not None}
+        if allowed.get("clone_task_id") == 0:   # 0 = 解除关联
+            allowed["clone_task_id"] = None
         if not allowed:
             return False
         allowed["updated_at"] = _now()

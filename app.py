@@ -626,7 +626,10 @@ _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
 
 def _display_title(task: dict, ws: Path) -> str:
     """任务显示名: 生成任务 = 任务记录里的标题(domain 列); 克隆任务 = 克隆页的 <title>(按文件修改时间缓存),
-    取不到时返回空串(前端退回域名)。目录型目标的入口页只是跳转壳, 按 site.json 的路由找与目标路径对应的页面。"""
+    取不到时返回空串(前端退回域名)。目录型目标的入口页只是跳转壳, 按 site.json 的路由找与目标路径对应的页面。
+    用户改过名(alias)时一律以改的名字为准。"""
+    if (task.get("alias") or "").strip():
+        return task["alias"].strip()
     if str(task.get("target_url") or "").startswith("uir:generate:"):
         return task.get("domain") or ""
     site = ws / "site.json"
@@ -731,6 +734,126 @@ def rebuild_task(task_id):
 
 
 # ---------------------------------------------------------------------------
+# 任务删除 / 编辑(改名、移动到其他项目)
+# ---------------------------------------------------------------------------
+def _task_ids_arg(data: dict):
+    ids = data.get("task_ids")
+    if not isinstance(ids, list) or not ids:
+        return None
+    out = []
+    for raw in ids[:500]:
+        with suppress(TypeError, ValueError):
+            out.append(int(raw))
+    return out or None
+
+
+def _delete_tasks(task_ids) -> tuple:
+    """删除一组任务: 运行中 / 正在视觉修复的跳过; 先下线部署, 再删记录, 最后删工作空间与 ZIP。
+    返回 (已删 id 列表, 跳过 [{id, reason}])。"""
+    skipped, cands = [], []
+    for tid in dict.fromkeys(task_ids):
+        task = _visible_task(tid)
+        if task is None:
+            skipped.append({"id": tid, "reason": "不存在"})
+        elif task["status"] == "running":
+            skipped.append({"id": tid, "reason": "执行中"})
+        elif (_ai_jobs.get(tid) or {}).get("state") == "running":
+            skipped.append({"id": tid, "reason": "正在视觉修复"})
+        else:
+            cands.append(task)
+    for task in cands:
+        if db.get_docker(task["id"]):   # 先下线部署(容器/本机进程), 否则会留下没人管的站点和端口
+            with suppress(Exception):
+                deployer.destroy(task["id"])
+    gone = set(db.delete_tasks([t["id"] for t in cands]))
+    for task in cands:
+        if task["id"] not in gone:   # 删之前一瞬被调度器领走开跑了
+            skipped.append({"id": task["id"], "reason": "执行中"})
+            continue
+        shutil.rmtree(_workspace_of(task), ignore_errors=True)
+        if task.get("zip_path"):
+            with suppress(OSError):
+                Path(task["zip_path"]).unlink(missing_ok=True)
+        _TITLE_CACHE.pop(task["id"], None)
+        with _ai_jobs_lock:
+            _ai_jobs.pop(task["id"], None)
+    return sorted(gone), skipped
+
+
+@app.delete("/api/tasks/<int:task_id>")
+def delete_task(task_id):
+    task = _task_or_404(task_id)
+    deleted, skipped = _delete_tasks([task_id])
+    if not deleted:
+        reason = skipped[0]["reason"] if skipped else "无法删除"
+        return jsonify({"error": f"任务{reason}, 暂时不能删除"}), 409
+    _audit("task.delete", f"删除任务 #{task_id}: {task['target_url']}")
+    return jsonify({"ok": True, "deleted": deleted})
+
+
+@app.post("/api/tasks/batch/delete")
+def batch_delete_tasks():
+    ids = _task_ids_arg(request.get_json(silent=True) or {})
+    if ids is None:
+        return jsonify({"error": "请提供 task_ids 数组"}), 400
+    deleted, skipped = _delete_tasks(ids)
+    _audit("task.batch_delete", f"批量删除 {len(deleted)} 个任务(跳过 {len(skipped)})"
+           + (f": #{', #'.join(map(str, deleted[:20]))}" if deleted else ""))
+    return jsonify({"ok": True, "deleted": deleted, "skipped": skipped})
+
+
+def _target_project(raw):
+    """校验目标项目属于当前工作区, 返回项目 id; 非法返回 None。"""
+    try:
+        pid = int(raw)
+    except (TypeError, ValueError):
+        return None
+    proj = db.get_project(pid)
+    return pid if proj and proj.get("workspace_id") == _cur_ws() else None
+
+
+@app.patch("/api/tasks/<int:task_id>")
+def update_task_meta(task_id):
+    """编辑任务: alias 自定义名称(空串 = 恢复自动标题), project_id 移到其他项目。"""
+    task = _task_or_404(task_id)
+    data = request.get_json(silent=True) or {}
+    changed = []
+    if "alias" in data:
+        alias = re.sub(r"\s+", " ", str(data.get("alias") or "")).strip()
+        if len(alias) > 80:
+            return jsonify({"error": "名称最多 80 个字符"}), 400
+        db.update_task(task_id, alias=alias)
+        _TITLE_CACHE.pop(task_id, None)
+        changed.append(f"名称「{alias}」" if alias else "名称恢复为自动")
+    if data.get("project_id") not in (None, ""):
+        pid = _target_project(data.get("project_id"))
+        if pid is None:
+            return jsonify({"error": "目标项目不存在"}), 400
+        if db.move_tasks_to_project([task_id], pid):
+            changed.append(f"移到项目 #{pid}")
+    _audit("task.update", f"编辑任务 #{task_id}: {'; '.join(changed) or '无变更'}")
+    out = _visible_task(task_id) or task
+    out["stats"] = _parse_json(out.pop("stats_json", "") or "{}")
+    out["title"] = _display_title(out, _workspace_of(out))
+    return jsonify({"task": out})
+
+
+@app.post("/api/tasks/batch/move")
+def batch_move_tasks():
+    data = request.get_json(silent=True) or {}
+    ids = _task_ids_arg(data)
+    if ids is None:
+        return jsonify({"error": "请提供 task_ids 数组"}), 400
+    pid = _target_project(data.get("project_id"))
+    if pid is None:
+        return jsonify({"error": "目标项目不存在"}), 400
+    visible = [i for i in ids if _visible_task(i) is not None]
+    moved = db.move_tasks_to_project(visible, pid)
+    _audit("task.batch_move", f"{moved} 个任务移到项目 #{pid}")
+    return jsonify({"ok": True, "moved": moved})
+
+
+# ---------------------------------------------------------------------------
 # Mock API 在线编辑与新增
 # ---------------------------------------------------------------------------
 @app.get("/api/tasks/<int:task_id>/mock")
@@ -784,21 +907,47 @@ def save_mock(task_id):
     else:
         return jsonify({"error": "接口索引越界"}), 400
 
+    _write_mocks(task, ws, entries)
+    bus.publish(task_id, "MOCK-API", f"已{action} 并重建 ZIP")
+    _audit("mock.save", f"任务 #{task_id} {action}")
+    return jsonify({"ok": True, "index": new_index, "entry": entries[new_index]})
+
+
+def _write_mocks(task: dict, ws: Path, entries: list) -> None:
+    """写回 mock_data.json 并同步到 Flask 工程 ZIP。"""
+    task_id = task["id"]
     serialized = json.dumps(entries, ensure_ascii=False, indent=2)
     (ws / "mock_data.json").write_text(serialized, encoding="utf-8")
-
     build_dir = ws / "flask_app"
     if build_dir.is_dir():
         (build_dir / "mock_data.json").write_text(serialized, encoding="utf-8")
         zip_path = config.EXPORTS_DIR / f"{task_id}.zip"
         flask_generator.build_zip(build_dir, zip_path, f"clone_site_{task_id}")
-        db.update_task(task_id, zip_path=str(zip_path))
     else:
         zip_path = _regenerate_project(task, ws)
-        db.update_task(task_id, zip_path=str(zip_path))
+    db.update_task(task_id, zip_path=str(zip_path))
+
+
+@app.delete("/api/tasks/<int:task_id>/mock/<int:index>")
+def delete_mock(task_id, index):
+    task = _task_or_404(task_id)
+    ws = _workspace_of(task)
+    entries = _read_mock_entries(ws)
+    if not 0 <= index < len(entries):
+        return jsonify({"error": "接口索引越界"}), 400
+    # 防止列表在别处被改过后按旧序号误删: 前端带上 method + path 做校验
+    entry = entries[index]
+    want_path = request.args.get("path")
+    want_method = request.args.get("method")
+    if (want_path is not None and want_path != entry.get("path")) or \
+            (want_method is not None and want_method.upper() != str(entry.get("method", "GET")).upper()):
+        return jsonify({"error": "接口列表已变化, 请刷新后再删"}), 409
+    entries.pop(index)
+    _write_mocks(task, ws, entries)
+    action = f"删除 Mock {entry.get('method', 'GET')} {entry.get('path', '')}"
     bus.publish(task_id, "MOCK-API", f"已{action} 并重建 ZIP")
-    _audit("mock.save", f"任务 #{task_id} {action}")
-    return jsonify({"ok": True, "index": new_index, "entry": entries[new_index]})
+    _audit("mock.delete", f"任务 #{task_id} {action}")
+    return jsonify({"ok": True, "count": len(entries)})
 
 
 # ---------------------------------------------------------------------------
@@ -3405,6 +3554,47 @@ def v4_link_task_generate(task_row_id):
         return jsonify({"error": "该任务正在生成中"}), 409
     _audit("links.generate", f"生成短链任务 #{task_row_id} {task['name']}")
     return jsonify({"task": _short_task_out(db.get_short_task(task_row_id), with_links=True)}), 202
+
+
+@app.patch("/api/v4/link-tasks/<int:task_row_id>")
+def v4_link_task_update(task_row_id):
+    """编辑短链任务: 名称 / 目标地址 / 偏好服务 / 关联克隆 / 备注。
+    改目标地址不影响已生成的短链(各自记着生成时的地址), 重新生成后用新地址。"""
+    task = _short_task_or_404(task_row_id)
+    if task_row_id in _link_gen_running:
+        return jsonify({"error": "该任务正在生成中, 请稍后再改"}), 409
+    body = request.get_json(silent=True) or {}
+    fields = {}
+    if "name" in body:
+        name = str(body.get("name") or "").strip()
+        if not 1 <= len(name) <= 120:
+            return jsonify({"error": "任务名称需 1~120 个字符"}), 400
+        fields["name"] = name
+    try:
+        if "target_url" in body:
+            fields["target_url"] = link_shortener.validate_target(body.get("target_url"))
+        if "service" in body:
+            fields["service"] = link_shortener.normalize_service(body.get("service"), "all")
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    if "clone_task_id" in body:
+        clone_id = body.get("clone_task_id")
+        if clone_id in ("", None, 0):
+            fields["clone_task_id"] = 0
+        else:
+            try:
+                clone_id = int(clone_id)
+            except (TypeError, ValueError):
+                return jsonify({"error": "clone_task_id 非法"}), 400
+            if _visible_task(clone_id) is None:
+                return jsonify({"error": f"克隆任务 #{clone_id} 不存在"}), 400
+            fields["clone_task_id"] = clone_id
+    if "note" in body:
+        fields["note"] = str(body.get("note") or "").strip()[:300]
+    if fields:
+        db.update_short_task(task_row_id, **fields)
+    _audit("links.task_update", f"编辑短链任务 #{task_row_id} {task['name']}: {', '.join(fields) or '无变更'}")
+    return jsonify({"task": _short_task_out(db.get_short_task(task_row_id), with_links=True)})
 
 
 @app.delete("/api/v4/link-tasks/<int:task_row_id>")
