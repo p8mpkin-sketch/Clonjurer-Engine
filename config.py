@@ -282,6 +282,9 @@ PREVIEW_PORT = int(os.environ.get("CLONER_PREVIEW_PORT", str(PORT + 1)))
 # 预览对外地址(反向代理/容器端口映射时显式配置, 如 https://preview.example.com);
 # 留空按访问平台用的主机名 + PREVIEW_PORT 推断
 PREVIEW_PUBLIC_URL = os.environ.get("CLONER_PREVIEW_URL", "").strip().rstrip("/")
+# 平台对外地址(如 https://clone.example.com): 本站短链 /s/<短码> 按它拼成完整地址, 公共缩链服务也指向它。
+# 留空按访问平台时的地址推断。
+PUBLIC_URL = os.environ.get("CLONER_PUBLIC_URL", "").strip().rstrip("/")
 # 开放模式(还没有任何账号时免登录)只允许本机访问: 监听在对外地址时, 非本机请求须先初始化管理员
 OPEN_MODE_LOCAL_ONLY = os.environ.get("CLONER_OPEN_MODE_LOCAL_ONLY", "1") != "0"
 # 额外允许的 Host 头(逗号分隔主机名): 监听回环地址时防 DNS 重绑定; 对外监听时设置后即只认这些

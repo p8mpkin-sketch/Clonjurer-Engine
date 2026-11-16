@@ -1,4 +1,4 @@
-"""短链服务层: 四家服务的响应解析、失败顺延、IP 目标排除 url.asia、目标校验、落库留痕。
+"""短链服务层: 本站短码(默认, 不外呼)、四家公共服务的响应解析、失败顺延、IP 目标排除 url.asia、目标校验、落库留痕。
 
 所有外呼都 mock 在 requests.request 上(测试不打真实网络); 落库用临时 SQLite 的真 Database。"""
 import tempfile
@@ -150,10 +150,10 @@ class IpTargetTests(DbCase):
         tid = self.db.create_short_task("ip", "http://47.92.75.70/cas/", "all", None)
         res = ls.shorten_multi(self.db, "http://47.92.75.70/cas/", link_task_id=tid)
         self.assertFalse(any("url.asia" in u for _, u, _ in fake.calls))
-        self.assertEqual(res["created"], 3)
+        self.assertEqual(res["created"], 4)   # 本站 + 3 家
         skipped = [r for r in res["results"] if r.get("skipped")]
         self.assertEqual([r["service"] for r in skipped], ["urlasia"])
-        self.assertEqual(len(self.db.list_links_of_short_task(tid)), 3)
+        self.assertEqual(len(self.db.list_links_of_short_task(tid)), 4)
 
     def test_prefer_urlasia_with_ip_falls_through(self):
         fake = self.patch(OK_ALL)
@@ -220,7 +220,8 @@ class FallbackTests(DbCase):
         with self.assertRaises(ValueError):
             ls.normalize_service("bitly")
         self.assertEqual(ls.normalize_service("clck.ru"), "clckru")
-        self.assertEqual(ls.normalize_service(""), "all")
+        self.assertEqual(ls.normalize_service(""), "local")
+        self.assertEqual(ls.normalize_service("本站"), "local")
 
 
 class MultiAndTaskTests(DbCase):
@@ -228,15 +229,15 @@ class MultiAndTaskTests(DbCase):
         self.patch({**OK_ALL, "lnk.ua": FakeResp(text="<html>captcha</html>")})
         tid = self.db.create_short_task("t", "https://a.example/", "all", None)
         res = ls.generate_for_task(self.db, tid)
-        self.assertEqual((res["created"], res["failed"]), (3, 1))
+        self.assertEqual((res["created"], res["failed"]), (4, 1))
         rows = {l["service"]: l for l in self.db.list_links_of_short_task(tid)}
-        self.assertEqual(set(rows), {"tinyurl", "clckru", "lnkua", "urlasia"})
+        self.assertEqual(set(rows), {"local", "tinyurl", "clckru", "lnkua", "urlasia"})
         self.assertEqual(rows["lnkua"]["short_url"], "")
         self.assertIn("不是合法短链", rows["lnkua"]["extras"]["error"])
         self.assertEqual(self.db.get_short_task(tid)["status"], "partial")
         t = self.db.list_short_tasks()[0]
-        self.assertEqual((t["link_count"], t["failed_count"]), (3, 1))
-        self.assertEqual(set(t["services"].split(",")), {"tinyurl", "clckru", "urlasia"})
+        self.assertEqual((t["link_count"], t["failed_count"]), (4, 1))
+        self.assertEqual(set(t["services"].split(",")), {"local", "tinyurl", "clckru", "urlasia"})
 
     def test_regenerate_only_retries_failed_services(self):
         fake = self.patch({**OK_ALL, "lnk.ua": FakeResp(500, "x")})
@@ -248,7 +249,7 @@ class MultiAndTaskTests(DbCase):
         self.assertEqual([c.args[1] for c in req.call_args_list], ["https://lnk.ua/api/v1/link/create"])
         self.assertEqual((res["created"], res["failed"]), (1, 0))
         links = self.db.list_links_of_short_task(tid)
-        self.assertEqual(len(links), 4)
+        self.assertEqual(len(links), 5)
         self.assertTrue(all(l["short_url"] for l in links))  # 上一轮失败行已清掉
         self.assertEqual(self.db.get_short_task(tid)["status"], "done")
 
@@ -256,9 +257,9 @@ class MultiAndTaskTests(DbCase):
         self.patch({k: requests.ConnectionError() for k in OK_ALL})
         tid = self.db.create_short_task("t", "https://a.example/", "all", None)
         res = ls.generate_for_task(self.db, tid)
-        self.assertEqual((res["created"], res["failed"]), (0, 4))
-        self.assertEqual(self.db.get_short_task(tid)["status"], "failed")
-        self.assertEqual(self.db.link_kpis(), {"tasks": 1, "links": 0, "clicks": 0})
+        self.assertEqual((res["created"], res["failed"]), (1, 4))   # 本站短码不受外网影响
+        self.assertEqual(self.db.get_short_task(tid)["status"], "partial")
+        self.assertEqual(self.db.link_kpis(), {"tasks": 1, "links": 1, "clicks": 0})
 
     def test_single_service_task(self):
         self.patch({**OK_ALL, "tinyurl.com": FakeResp(text="Error")})
@@ -266,6 +267,16 @@ class MultiAndTaskTests(DbCase):
         ls.generate_for_task(self.db, tid)
         (link,) = self.db.list_links_of_short_task(tid)
         self.assertEqual((link["service"], link["task_id"], link["label"]), ("clckru", 7, "t"))
+        self.assertEqual(self.db.get_short_task(tid)["status"], "done")
+
+    def test_local_task_needs_no_network(self):
+        with mock.patch.object(ls.requests, "request") as req:
+            tid = self.db.create_short_task("t", "https://a.example/", "local", None)
+            res = ls.generate_for_task(self.db, tid)
+        req.assert_not_called()
+        (link,) = self.db.list_links_of_short_task(tid)
+        self.assertEqual((res["created"], link["service"]), (1, "local"))
+        self.assertEqual(link["short_url"], "/s/" + link["code"])
         self.assertEqual(self.db.get_short_task(tid)["status"], "done")
 
     def test_task_missing(self):
@@ -291,6 +302,58 @@ class PreflightTests(unittest.TestCase):
             self.assertEqual(req.call_count, 4)  # 缓存内不再外呼
             ls.preflight(force=True)
             self.assertEqual(req.call_count, 8)
+
+
+
+class LocalCodeTests(DbCase):
+    def test_codes_are_random_and_not_numeric(self):
+        codes = {ls.new_code() for _ in range(500)}
+        self.assertEqual(len(codes), 500)
+        self.assertTrue(all(len(c) == 8 and not c.isdigit() and ls.valid_code(c) for c in codes))
+        self.assertFalse(ls.valid_code("ab/cd"))
+        self.assertFalse(ls.valid_code("x"))
+
+    def test_base_is_public(self):
+        for base in ("http://127.0.0.1:8899", "http://localhost:8899", "http://192.168.1.5", "http://myhost",
+                     "http://10.0.0.2:80", "http://box.local"):
+            self.assertFalse(ls.base_is_public(base), base)
+        for base in ("https://clone.example.com", "http://47.92.75.70:8899"):
+            self.assertTrue(ls.base_is_public(base), base)
+
+    def test_public_service_shortens_local_code_when_reachable(self):
+        fake = self.patch(OK_ALL)
+        res = ls.shorten(self.db, "https://a.example/", "tinyurl", base_url="https://clone.example.com")
+        link = self.db.get_short_link(res["link_id"])
+        self.assertEqual(fake.calls[0][2]["params"]["url"], "https://clone.example.com/s/" + link["code"])
+        self.assertTrue(link["extras"]["via_local"])
+
+    def test_public_service_falls_back_to_target_when_base_is_private(self):
+        fake = self.patch(OK_ALL)
+        res = ls.shorten(self.db, "https://a.example/", "tinyurl", base_url="http://127.0.0.1:8899")
+        link = self.db.get_short_link(res["link_id"])
+        self.assertEqual(fake.calls[0][2]["params"]["url"], "https://a.example/")
+        self.assertFalse(link["extras"]["via_local"])
+
+    def test_legacy_rows_get_codes_on_migration(self):
+        import sqlite3
+        path = Path(self.tmp.name) / "old.db"
+        con = sqlite3.connect(path)
+        con.execute("CREATE TABLE short_links (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id INTEGER,"
+                    " target_url TEXT NOT NULL, service TEXT NOT NULL DEFAULT '', short_url TEXT NOT NULL,"
+                    " label TEXT NOT NULL DEFAULT '', extras_json TEXT NOT NULL DEFAULT '{}',"
+                    " clicks INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)")
+        con.execute("INSERT INTO short_links (target_url, service, short_url, created_at, updated_at)"
+                    " VALUES ('https://a.example/', 'tinyurl', 'https://tinyurl.com/x', 'now', 'now')")
+        con.commit()
+        con.close()
+        db = Database(path)
+        try:
+            row = db.get_short_link(1)
+            self.assertEqual(row["legacy_numeric"], 1)
+            self.assertTrue(ls.valid_code(row["code"]))
+            self.assertEqual(db.get_short_link_by_code(row["code"])["id"], 1)
+        finally:
+            db.close()
 
 
 if __name__ == "__main__":

@@ -78,7 +78,9 @@ CREATE TABLE IF NOT EXISTS short_links (
     extras_json TEXT    NOT NULL DEFAULT '{}',
     clicks      INTEGER NOT NULL DEFAULT 0,
     created_at  TEXT    NOT NULL,
-    updated_at  TEXT    NOT NULL
+    updated_at  TEXT    NOT NULL,
+    code        TEXT,                              -- 本站随机短码 /s/<code>
+    legacy_numeric INTEGER NOT NULL DEFAULT 0      -- 1 = 改版前的老短链, 仍认 /s/<编号>
 );
 
 CREATE INDEX IF NOT EXISTS idx_short_links_task ON short_links(task_id);
@@ -361,6 +363,20 @@ class Database:
             cols = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({tbl})").fetchall()}
             if cols and "workspace_id" not in cols:
                 self._conn.execute(f"ALTER TABLE {tbl} ADD COLUMN workspace_id INTEGER NOT NULL DEFAULT 1")
+        # 本站随机短码(/s/<code>): 老短链补发短码, 并标记 legacy_numeric 让老的 /s/<编号> 链接继续可用
+        sl_cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(short_links)").fetchall()}
+        if sl_cols and "code" not in sl_cols:
+            import secrets as _secrets
+            import string as _string
+            self._conn.execute("ALTER TABLE short_links ADD COLUMN code TEXT")
+            self._conn.execute("ALTER TABLE short_links ADD COLUMN legacy_numeric INTEGER NOT NULL DEFAULT 0")
+            alphabet = _string.ascii_letters + _string.digits
+            for r in self._conn.execute("SELECT id FROM short_links").fetchall():
+                code = "".join(_secrets.choice(alphabet) for _ in range(8))
+                self._conn.execute("UPDATE short_links SET code = ?, legacy_numeric = 1 WHERE id = ?",
+                                   (code, r["id"]))
+        if sl_cols:
+            self._conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_short_links_code ON short_links(code)")
         # 任务自定义名称(为空时界面显示克隆页标题 / 域名)
         ct_cols = {r["name"] for r in
                    self._conn.execute("PRAGMA table_info(clone_tasks)").fetchall()}
@@ -1894,7 +1910,7 @@ class Database:
 
     def create_short_link(self, task_id, target_url: str, service: str,
                           short_url: str, label: str, extras: dict,
-                          link_task_id=None, workspace_id=None) -> int:
+                          link_task_id=None, workspace_id=None, code=None) -> int:
         now = _now()
         with self._lock:
             if workspace_id is None and link_task_id:  # 任务下的短链跟任务同区
@@ -1903,10 +1919,10 @@ class Database:
                 workspace_id = row["workspace_id"] if row else None
             cur = self._conn.execute(
                 "INSERT INTO short_links (task_id, link_task_id, target_url, service,"
-                " short_url, label, extras_json, created_at, updated_at, workspace_id)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " short_url, label, extras_json, created_at, updated_at, workspace_id, code)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (task_id, link_task_id, target_url, service, short_url, label,
-                 json.dumps(extras or {}, ensure_ascii=False), now, now, int(workspace_id or 1)))
+                 json.dumps(extras or {}, ensure_ascii=False), now, now, int(workspace_id or 1), code))
             self._conn.commit()
             return cur.lastrowid
 
@@ -1941,6 +1957,11 @@ class Database:
                     item["extras"] = {}
                 out.append(item)
             return out
+
+    def get_short_link_by_code(self, code: str):
+        with self._lock:
+            row = self._conn.execute("SELECT id FROM short_links WHERE code = ?", (code,)).fetchone()
+        return self.get_short_link(row["id"]) if row else None
 
     def get_short_link(self, link_id: int):
         with self._lock:

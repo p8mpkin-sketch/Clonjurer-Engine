@@ -33,7 +33,7 @@ REST API:
   GET  /api/v4/link-tasks/<id>/export    导出 txt / csv
   GET  /api/v4/links/providers      四家缩链服务可用性预检
   GET/POST /api/v4/links            短链列表与单独新建
-  GET  /s/<id>                      短链跳转(302)并计点击
+  GET  /s/<短码>                    短链跳转(302)并计点击(老短链也认 /s/<编号>)
   GET/POST /api/v4/remote/deploys   远程发布档案列表(?q=)与新建
   GET/PATCH/DELETE /api/v4/remote/deploys/<id>   详情(进度/阶段/日志尾部)/编辑/删除(?purge=1 清远端目录)
   POST /api/v4/remote/deploys/<id>/deploy        发布(异步, 后台线程)
@@ -4006,10 +4006,24 @@ _link_gen_running: set = set()
 _link_gen_lock = threading.Lock()
 
 
+def _public_base() -> str:
+    """平台对外地址: CLONER_PUBLIC_URL 优先, 否则按这次访问的地址。"""
+    return config.PUBLIC_URL or request.host_url.rstrip("/")
+
+
 def _short_link_out(item: dict) -> dict:
     out = dict(item)
+    out.pop("legacy_numeric", None)
     out["ok"] = bool(item.get("short_url"))
-    out["local_url"] = request.host_url.rstrip("/") + f"/s/{item['id']}" if out["ok"] else ""
+    if item.get("code"):
+        path = link_shortener.local_path(item["code"])
+    elif item.get("legacy_numeric"):
+        path = f"/s/{item['id']}"
+    else:
+        path = ""
+    out["local_url"] = _public_base() + path if out["ok"] and path else ""
+    if out["ok"] and str(item.get("short_url") or "").startswith("/"):  # 本站短码存相对路径, 展示时补全
+        out["short_url"] = _public_base() + item["short_url"]
     return out
 
 
@@ -4040,6 +4054,7 @@ def _short_task_or_404(task_row_id: int) -> dict:
 
 def _start_link_generation(task_row_id: int) -> bool:
     """后台生成; 同一任务已在生成中返回 False。"""
+    base_url = _public_base()  # 后台线程里没有请求上下文, 先取好
     with _link_gen_lock:
         if task_row_id in _link_gen_running:
             return False
@@ -4047,7 +4062,7 @@ def _start_link_generation(task_row_id: int) -> bool:
 
     def run():
         try:
-            res = link_shortener.generate_for_task(db, task_row_id)
+            res = link_shortener.generate_for_task(db, task_row_id, base_url=base_url)
             bus.publish(None, "LINK", f"短链任务 #{task_row_id} 生成完成: 成功 {res.get('created', 0)},"
                                       f" 失败 {res.get('failed', 0)}")
         except Exception as exc:  # noqa: BLE001 - 后台线程: 任何失败都要落到任务状态上
@@ -4077,7 +4092,7 @@ def v4_link_task_create():
         return jsonify({"error": "任务名称需 1~120 个字符"}), 400
     try:
         target = link_shortener.validate_target(body.get("target_url"))
-        service = link_shortener.normalize_service(body.get("service"), "all")
+        service = link_shortener.normalize_service(body.get("service"), link_shortener.LOCAL)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     clone_id = body.get("clone_task_id")
@@ -4130,7 +4145,7 @@ def v4_link_task_update(task_row_id):
         if "target_url" in body:
             fields["target_url"] = link_shortener.validate_target(body.get("target_url"))
         if "service" in body:
-            fields["service"] = link_shortener.normalize_service(body.get("service"), "all")
+            fields["service"] = link_shortener.normalize_service(body.get("service"), link_shortener.LOCAL)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     if "clone_task_id" in body:
@@ -4220,11 +4235,12 @@ def v4_link_create():
     body = request.get_json(silent=True) or {}
     try:
         target = link_shortener.validate_target(body.get("target_url"))
-        service = link_shortener.normalize_service(body.get("service"), "all")
+        service = link_shortener.normalize_service(body.get("service"), link_shortener.LOCAL)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     label = str(body.get("label") or "").strip()[:120]
-    res = link_shortener.shorten(db, target, service, label=label, workspace_id=_cur_ws())
+    res = link_shortener.shorten(db, target, service, label=label, workspace_id=_cur_ws(),
+                                 base_url=_public_base())
     link = _short_link_out(db.get_short_link(res["link_id"]))
     _audit("links.create", f"单独短链 #{res['link_id']} {target} -> {res['short_url'] or '失败'}")
     if not res["ok"]:
@@ -4245,17 +4261,24 @@ def v4_link_delete(link_id):
     return jsonify({"ok": True})
 
 
-@app.get("/s/<int:link_id>")
-def short_link_redirect(link_id):
-    """短链跳转: 302 到目标地址并计一次点击。失败留痕行(没有短链)不跳转。"""
-    link = db.get_short_link(link_id)
+@app.get("/s/<code>")
+def short_link_redirect(code):
+    """短链跳转: 302 到目标地址并计一次点击。失败留痕行(没有短链)不跳转。
+    新短链只认随机短码; 纯数字按老编号查, 且只对改版前的老短链生效(新短链不可枚举)。"""
+    link = None
+    if code.isdigit() and len(code) <= 12:
+        link = db.get_short_link(int(code))
+        if link is not None and not link.get("legacy_numeric"):
+            link = None
+    elif link_shortener.valid_code(code):
+        link = db.get_short_link_by_code(code)
     if link is None or not link.get("short_url"):
         return Response("短链不存在", status=404, mimetype="text/plain; charset=utf-8")
     try:
         target = link_shortener.validate_target(link.get("target_url"))
     except ValueError:
         return Response("短链目标地址无效", status=410, mimetype="text/plain; charset=utf-8")
-    db.bump_short_link_click(link_id)
+    db.bump_short_link_click(link["id"])
     resp = redirect(target, code=302)
     resp.headers["Cache-Control"] = "no-store"  # 每次点击都要回到这里计数
     return resp

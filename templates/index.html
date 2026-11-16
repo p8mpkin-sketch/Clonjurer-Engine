@@ -918,7 +918,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <div class="pg-head">
         <div>
           <h2 class="pg-title">短链管理</h2>
-          <div class="pg-meta">把站点地址变成便于分享的短链 · 从本站 /s/编号 打开的访问会计入点击</div>
+          <div class="pg-meta">把站点地址变成便于分享的短链 · 默认用本站短码，不依赖外网，每次打开都计入点击</div>
         </div>
         <div class="flex items-center gap-2 flex-wrap">
           <input v-model="links.q" @input="loadLinksSoon()" class="mt-input lk-search" placeholder="搜索名称 / 目标地址 / 备注" aria-label="搜索短链任务">
@@ -970,14 +970,15 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <form class="mt-modal" role="dialog" aria-modal="true" aria-labelledby="lk-create-title" @submit.prevent="links.editId ? saveLinkEdit() : createLinkTask()">
         <h3 id="lk-create-title">[[ links.editId ? '编辑短链任务' : '新建短链任务' ]]</h3>
         <p v-if="links.editId">改目标地址不会影响已经生成的短链，它们仍指向原地址；重新生成后用新地址。</p>
-        <p v-else>选「全部服务」会依次用每家服务各生成一条；指定一家时，失败会自动换下一家。</p>
+        <p v-else>默认生成本站短码，不依赖外网，每次点击都计数。也可以再用公共缩链服务生成一条，它会指向本站短码，点击同样计数；指定一家失败时自动换下一家。</p>
         <label for="lk-name">名称</label>
         <input id="lk-name" v-model="links.form.name" class="mt-input" maxlength="120" placeholder="例如：活动落地页" required>
         <label for="lk-target">目标地址</label>
         <input id="lk-target" v-model="links.form.target_url" class="mt-input font-mono" spellcheck="false" placeholder="https://example.com/page" required>
         <label for="lk-service">偏好服务</label>
         <select id="lk-service" v-model="links.form.service" class="mt-select">
-          <option value="all">全部服务（每家各生成一条）</option>
+          <option value="local">本站短码（推荐，不依赖外网）</option>
+          <option value="all">本站短码 + 每家公共服务各一条</option>
           <option v-for="pv in links.providers" :key="pv.key" :value="pv.key">[[ pv.name ]][[ pv.supports_ip ? '' : '（不支持 IP 地址）' ]][[ pv.available === false ? ' · 预检不通' : '' ]]</option>
         </select>
         <div v-if="linkTargetIsIp && links.form.service==='urlasia'" class="ui-hint">目标是 IP 地址，url.asia 不收，会自动换下一家。</div>
@@ -1004,7 +1005,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <h3 id="lk-detail-title" class="flex-1 truncate">[[ links.detail.name ]]</h3>
           <button type="button" class="mt-icon" title="关闭" aria-label="关闭" @click="closeLinkTask()"><i data-lucide="x" class="w-4 h-4"></i></button>
         </div>
-        <p class="tnums">SL-[[ String(links.detail.seq).padStart(3, '0') ]] · [[ links.detail.service === 'all' ? '全部服务' : linkServiceName(links.detail.service) ]] · [[ linkStatusText(links.detail.status) ]]<template v-if="links.detail.clone_task_id"> · 克隆 #[[ links.detail.clone_task_id ]] [[ links.detail.clone_domain ]]</template><template v-if="links.detail.note"> · [[ links.detail.note ]]</template></p>
+        <p class="tnums">SL-[[ String(links.detail.seq).padStart(3, '0') ]] · [[ linkServiceName(links.detail.service) ]] · [[ linkStatusText(links.detail.status) ]]<template v-if="links.detail.clone_task_id"> · 克隆 #[[ links.detail.clone_task_id ]] [[ links.detail.clone_domain ]]</template><template v-if="links.detail.note"> · [[ links.detail.note ]]</template></p>
         <div class="mt-link"><input :value="links.detail.target_url" readonly aria-label="目标地址" @focus="$event.target.select()">
           <button type="button" class="mt-icon sm" title="复制目标地址" aria-label="复制目标地址" @click="copyText(links.detail.target_url)"><i data-lucide="copy" class="w-3.5 h-3.5"></i></button></div>
         <div class="pg-stats lk-stats">
@@ -1018,7 +1019,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <div class="min-w-0 flex-1">
               <template v-if="l.ok">
                 <a :href="l.short_url" target="_blank" rel="noopener" class="dp-link truncate block" :title="l.short_url">[[ l.short_url.replace(/^https?:\/\//, '') ]]</a>
-                <div class="lk-sub truncate">计数入口 [[ l.local_url ]]<template v-if="l.extras && l.extras.fallback"> · 指定的 [[ linkServiceName(l.extras.requested) ]] 失败，已顺延</template></div>
+                <div v-if="l.service !== 'local'" class="lk-sub truncate"><template v-if="l.extras && l.extras.via_local === false">平台地址是本机或内网，这条公共短链直接指向目标，点击不计数；计数请用 [[ l.local_url ]]</template><template v-else>指向本站 [[ l.local_url ]]，点击计数</template><template v-if="l.extras && l.extras.fallback"> · 指定的 [[ linkServiceName(l.extras.requested) ]] 失败，已顺延</template></div>
               </template>
               <div v-else class="lk-sub lk-err truncate" :title="l.extras && l.extras.error">失败：[[ (l.extras && l.extras.error) || '未知原因' ]]</div>
             </div>
@@ -4018,7 +4019,7 @@ const __vueApp = createApp({
                 del: null, delPurge: false, delErr: '', delCanForce: false },
       links: { tasks: [], q: '', kpis: { tasks: 0, links: 0, clicks: 0 }, providers: [],
               creating: false, busy: false, error: '', detail: null,
-              form: { name: '', target_url: '', service: 'all', clone_task_id: '', note: '', generate: true } },
+              form: { name: '', target_url: '', service: 'local', clone_task_id: '', note: '', generate: true } },
       themeMode: 'system', themeMenu: false, moreMenu: false,
       themeOptions: [
         { id: 'system', label: '跟随系统', icon: 'monitor' },
@@ -5498,7 +5499,8 @@ const __vueApp = createApp({
               { key: 'lnkua', name: 'lnk.ua', supports_ip: true }, { key: 'urlasia', name: 'url.asia', supports_ip: false }];
     },
     linkServiceName(k) {
-      if (k === 'all') return '全部服务';
+      if (k === 'local') return '本站短码';
+      if (k === 'all') return '本站 + 公共服务';
       const p = this.linkProviderList().find(x => x.key === k);
       return p ? p.name : (k || '—');
     },
@@ -5506,7 +5508,7 @@ const __vueApp = createApp({
       return { pending: '待生成', running: '生成中', partial: '部分成功', done: '已完成', failed: '失败' }[s] || s;
     },
     openLinkCreate() {
-      this.links.form = { name: '', target_url: '', service: 'all', clone_task_id: '', note: '', generate: true };
+      this.links.form = { name: '', target_url: '', service: 'local', clone_task_id: '', note: '', generate: true };
       this.links.error = '';
       this.links.editId = null;
       this.links.creating = true;
