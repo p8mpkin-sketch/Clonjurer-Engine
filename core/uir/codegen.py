@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 import time
 from pathlib import Path
 
+from core import llm_usage
 from core.uir import livecode, llm, probe, settings
 
 SCORING = "req-fit-v2"
@@ -756,7 +757,8 @@ def _run(desc: str, ws: Path, pool, ai_cfg: dict, judge_cfg: dict, viewport: dic
     stage(prof.plan_stage, 8)
     t0, usage = time.monotonic(), {}
     try:
-        brief = prof.plan(ai_cfg, desc, wall(settings.CODE_PLAN_WALL), usage)
+        with llm_usage.step("规划/读图"):
+            brief = prof.plan(ai_cfg, desc, wall(settings.CODE_PLAN_WALL), usage)
         note("plan", t0, usage)
     except Exception as exc:
         brief = prof.fallback(desc)
@@ -805,7 +807,8 @@ def _run(desc: str, ws: Path, pool, ai_cfg: dict, judge_cfg: dict, viewport: dic
         elif left() > 8:
             t0, usage = time.monotonic(), {}
             try:
-                rev = prof.review(judge_cfg or ai_cfg, desc, brief, rep, html, wall(settings.CODE_REVIEW_WALL), usage)
+                with llm_usage.step("验收"):
+                    rev = prof.review(judge_cfg or ai_cfg, desc, brief, rep, html, wall(settings.CODE_REVIEW_WALL), usage)
                 with lock:
                     note("review", t0, usage, mode=rev["mode"])
                 if rev.get("fallback"):
@@ -826,8 +829,9 @@ def _run(desc: str, ws: Path, pool, ai_cfg: dict, judge_cfg: dict, viewport: dic
         """写一稿; 多稿并行时只把第一稿接到实时代码通道, 其余换温度另写。"""
         t0 = time.monotonic()
         feed = live.feed if k == 0 else None
-        html, meta = prof.write(ai_cfg, desc, brief, wall(settings.CODE_WRITE_WALL), note=note_text, on_delta=feed,
-                                **({"temperature_bump": 0.15 * k} if k else {}))
+        with llm_usage.step("写页面"):
+            html, meta = prof.write(ai_cfg, desc, brief, wall(settings.CODE_WRITE_WALL), note=note_text, on_delta=feed,
+                                    **({"temperature_bump": 0.15 * k} if k else {}))
         with lock:
             note("write", t0, meta["usage"], draft=k)
         return html, meta
@@ -865,9 +869,10 @@ def _run(desc: str, ws: Path, pool, ai_cfg: dict, judge_cfg: dict, viewport: dic
                 problems = prof.problems(best["defects"], best["detail"], best["rep"])
                 log("GEN", f"修复目标 {len(problems)} 项: " + " | ".join(p[:60] for p in problems[:4]))
                 live.begin(f"修复第 {rnd - 1} 轮" + (" · 整页重写" if stalled else ""))
-                html, meta = prof.repair(ai_cfg, desc, brief, best["html"], problems, wall(settings.CODE_WRITE_WALL),
-                                         shot=(best["rep"].get("shots") or {}).get("f0"), stalled=stalled,
-                                         on_delta=live.feed)
+                with llm_usage.step("修复"):
+                    html, meta = prof.repair(ai_cfg, desc, brief, best["html"], problems, wall(settings.CODE_WRITE_WALL),
+                                             shot=(best["rep"].get("shots") or {}).get("f0"), stalled=stalled,
+                                             on_delta=live.feed)
                 note(action, t0, meta["usage"], **({"mode": meta["mode"]} if meta.get("mode") else {}))
                 if meta.get("mode") == "patch":
                     log("GEN", f"局部修改: 应用 {meta['patches']} 块" + (f", {meta['patches_failed']} 块未匹配" if meta.get("patches_failed") else ""))

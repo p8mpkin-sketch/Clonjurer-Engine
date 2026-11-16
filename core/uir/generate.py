@@ -286,15 +286,9 @@ class GenerateEngine:
         if title:
             self.db.update_task(self.task_id, domain=title)
 
-    def _record_tokens(self, report: dict):
-        rows = token_rows(report)
-        if rows and hasattr(self.db, "replace_token_usage"):
-            with suppress(Exception):
-                self.db.replace_token_usage(self.task_id, "generate", rows)
-
     def _finalize(self, report: dict, best: dict, kind: str, target_name: str) -> dict:
-        """打包产物 + 写报告 + 落库(UIR 轨与代码直写轨共用)。"""
-        self._record_tokens(report)
+        """打包产物 + 写报告 + 落库(UIR 轨与代码直写轨共用)。
+        token 流水不在这里写: 每次模型请求发生时就由 core/llm_usage 记账(失败的任务、重试的请求也算在内)。"""
         self._stage("打包产物", 90)
         detail = best["detail"]
         (self.ws / "similarity_detail.json").write_text(json.dumps(detail, ensure_ascii=False, indent=2), encoding="utf-8")

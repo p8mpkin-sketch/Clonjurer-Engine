@@ -28,6 +28,7 @@ import requests
 from PIL import Image
 
 import config
+from core import llm_usage
 
 AI_PATCH_LINK = '<link id="ai-vision-patch" rel="stylesheet" href="/static/css/ai_patch.css">'
 AI_HTML_MARKER = "<!--ai-vision-html-->"
@@ -97,7 +98,6 @@ def _downscale_copy(image_path: Path, max_edge: int) -> bytes:
             return buf.read()
 
 
-USAGE_SINK = None   # (ws, model, step, usage) → None; 由 app 启动时注册, 记 token 流水
 
 
 def _chat_vision(ai_cfg: dict, original: Path, cloned: Path,
@@ -142,11 +142,14 @@ def _chat_vision(ai_cfg: dict, original: Path, cloned: Path,
         )
         resp.raise_for_status()
         try:
-            return resp.json()
+            payload = resp.json()
         except ValueError:
             raise RuntimeError(
                 f"上游返回非 JSON(HTTP {resp.status_code}): {resp.text[:160]!r} "
                 f"— 请在模型配置中心执行三段式测试核实 base_url/model/key")
+        # 每次请求都记账(升档重试也按 token 计费); 归属由 run_vision_repair 的 scope 给出
+        llm_usage.record(ai_cfg, payload.get("usage") if isinstance(payload, dict) else None, kind="ai_repair")
+        return payload
 
     # max_tokens 梯度: 推理模型的思考 token 计入补全预算, 预算太小会被
     # reasoning 全额吃掉(finish_reason=length 且 content 为空), 必须升档重试
@@ -272,15 +275,12 @@ def _restore(snap: dict):
             path.write_bytes(data)
 
 
-def _sink_usage(ws, ai_cfg, round_no, used):
-    if USAGE_SINK is None or not used:
-        return
-    tot = {"prompt_tokens": sum(int(u.get("prompt_tokens") or 0) for u in used),
-           "completion_tokens": sum(int(u.get("completion_tokens") or 0) for u in used)}
-    try:
-        USAGE_SINK(ws, ai_cfg.get("model") or "", f"视觉修复第 {round_no} 轮", tot)
-    except Exception:
-        pass
+def _ws_scope(ws) -> dict:
+    """工作区目录名即任务号: 线程上下文里没有任务归属时(手动/批量修复)据此补上。"""
+    name = Path(ws).name
+    if llm_usage.current().get("task_id") or not name.isdigit():
+        return {}
+    return {"task_id": int(name)}
 
 
 def run_vision_repair(ws: Path, ai_cfg: dict, detail: dict, log,
@@ -302,16 +302,15 @@ def run_vision_repair(ws: Path, ai_cfg: dict, detail: dict, log,
         hints = region_hints(region_cells, detail or {})
         used = []
         try:
-            patch = _chat_vision(ai_cfg, ws / "original_preview.png",
-                                 ws / "cloned_preview.png",
-                                 _html_summary(ws, page_file), detail or {},
-                                 hints=hints, diff_image=ws / "diff_preview.png", usage_out=used)
+            with llm_usage.scope(**_ws_scope(ws), kind="ai_repair"), llm_usage.step(f"视觉修复第 {round_no} 轮"):
+                patch = _chat_vision(ai_cfg, ws / "original_preview.png",
+                                     ws / "cloned_preview.png",
+                                     _html_summary(ws, page_file), detail or {},
+                                     hints=hints, diff_image=ws / "diff_preview.png", usage_out=used)
         except Exception as exc:
-            _sink_usage(ws, ai_cfg, round_no, used)
             log("AI-VISION", f"大模型调用失败: {type(exc).__name__}: {str(exc)[:200]}")
             report["rounds"].append({"round": round_no, "error": str(exc)[:300]})
             break
-        _sink_usage(ws, ai_cfg, round_no, used)
         diagnosis = str(patch.get("diagnosis") or "")[:500]
         log("AI-VISION", f"诊断: {diagnosis or '(未提供)'}")
         snap = _snapshot(ws, page_file)

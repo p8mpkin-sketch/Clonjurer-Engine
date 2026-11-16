@@ -218,7 +218,9 @@ CREATE TABLE IF NOT EXISTS usage_events (
 
 CREATE INDEX IF NOT EXISTS idx_usage_ws_time ON usage_events(workspace_id, kind, at);
 
--- 大模型 token 用量流水(界面生成各步 / AI 视觉修复各轮): 任务详情的分步明细与按天/按项目汇总都从这里算
+-- 大模型 token 用量流水: 每次上游请求一行(core/llm_usage 在请求层记账; 早期数据是按步骤汇总的行)。
+-- 任务详情的分步明细、模型消耗页的总览 / 按天 / 按模型 / 按项目 / 按成员汇总都从这里算。
+-- username 为发起人(任务提交人或手动触发人); cost 为按当时单价估算的费用, NULL = 该模型未定价。
 CREATE TABLE IF NOT EXISTS token_usage (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     workspace_id INTEGER NOT NULL DEFAULT 1,
@@ -229,7 +231,9 @@ CREATE TABLE IF NOT EXISTS token_usage (
     step         TEXT    NOT NULL DEFAULT '',
     tokens_in    INTEGER NOT NULL DEFAULT 0,
     tokens_out   INTEGER NOT NULL DEFAULT 0,
-    at           TEXT    NOT NULL
+    at           TEXT    NOT NULL,
+    username     TEXT    NOT NULL DEFAULT '',
+    cost         REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_token_ws_time ON token_usage(workspace_id, at);
@@ -381,6 +385,19 @@ class Database:
             "CREATE INDEX IF NOT EXISTS idx_audit_ws_id ON audit_logs(workspace_id, id)")
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_logs(username, id)")
+        # 模型消耗: 发起人 + 估算费用(老行按任务的提交人补上发起人; 费用由 app 启动时按单价表补算)
+        tk_cols = {r["name"] for r in
+                   self._conn.execute("PRAGMA table_info(token_usage)").fetchall()}
+        if tk_cols and "username" not in tk_cols:
+            self._conn.execute("ALTER TABLE token_usage ADD COLUMN username TEXT NOT NULL DEFAULT ''")
+            self._conn.execute(
+                "UPDATE token_usage SET username = COALESCE((SELECT b.created_by FROM clone_tasks t"
+                " JOIN batch_jobs b ON t.batch_id = b.id WHERE t.id = token_usage.task_id), '')"
+                " WHERE task_id IS NOT NULL")
+        if tk_cols and "cost" not in tk_cols:
+            self._conn.execute("ALTER TABLE token_usage ADD COLUMN cost REAL")
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_token_ws_pj ON token_usage(workspace_id, project_id, at)")
         # 远程发布: 认证方式(口令 / 私钥)
         rd_cols = {r["name"] for r in
                    self._conn.execute("PRAGMA table_info(remote_deploys)").fetchall()}
@@ -654,6 +671,11 @@ class Database:
                         f"UPDATE clone_tasks SET batch_id = ? WHERE id IN ({tm})", (cur.lastrowid, *tids))
                     touched += [bid, cur.lastrowid]
                 moved += len(tids)
+            moved_ids = [t for tids in by_batch.values() for t in tids]
+            if moved_ids:   # 模型消耗跟着任务走: 项目页的消耗统计按任务当前所在项目算
+                mm = ",".join("?" * len(moved_ids))
+                self._conn.execute(
+                    f"UPDATE token_usage SET project_id = ? WHERE task_id IN ({mm})", (project_id, *moved_ids))
             self._resync_batches(touched)
             self._conn.commit()
         return moved
@@ -1175,18 +1197,25 @@ class Database:
             " WHERE t.id = ?", (task_id,)).fetchone()
         return (row["ws"] or 1, row["pj"]) if row else (1, None)
 
+    def _task_creator(self, task_id) -> str:
+        row = self._conn.execute(
+            "SELECT b.created_by AS u FROM clone_tasks t JOIN batch_jobs b ON t.batch_id = b.id WHERE t.id = ?",
+            (task_id,)).fetchone()
+        return (row["u"] or "") if row else ""
+
     def replace_token_usage(self, task_id: int, kind: str, rows: list, at: str = None):
         """一个任务某类(generate / ai_repair)的 token 流水整体替换(幂等: 回填与重建重复写不会累加)。
         rows: [{"model","step","in","out"}]。"""
         with self._lock:
             ws, pj = self._task_scope(task_id)
+            user = self._task_creator(task_id)
             self._conn.execute("DELETE FROM token_usage WHERE task_id = ? AND kind = ?", (task_id, kind))
             for r in rows:
                 self._conn.execute(
-                    "INSERT INTO token_usage (workspace_id, project_id, task_id, kind, model, step, tokens_in, tokens_out, at)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO token_usage (workspace_id, project_id, task_id, kind, model, step, tokens_in, tokens_out,"
+                    " at, username) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (ws, pj, task_id, kind, str(r.get("model") or "")[:80], str(r.get("step") or "")[:40],
-                     int(r.get("in") or 0), int(r.get("out") or 0), at or _now()))
+                     int(r.get("in") or 0), int(r.get("out") or 0), at or _now(), user))
             self._conn.commit()
 
     def add_token_usage(self, task_id: int, kind: str, model: str, step: str, tokens_in: int, tokens_out: int):
@@ -1198,10 +1227,124 @@ class Database:
                 (ws, pj, task_id, kind, (model or "")[:80], (step or "")[:40], int(tokens_in or 0), int(tokens_out or 0), _now()))
             self._conn.commit()
 
+    def add_llm_call(self, rec: dict):
+        """core/llm_usage.SINK: 记一次上游请求。有任务时工作区/项目/发起人从任务推出(显式给出的发起人优先)。
+        返回记到的工作区 id(预算提醒据此判断)。"""
+        task_id = rec.get("task_id")
+        with self._lock:
+            ws, pj = self._task_scope(task_id) if task_id else (rec.get("workspace_id") or 1, rec.get("project_id"))
+            user = rec.get("username") or (self._task_creator(task_id) if task_id else "")
+            self._conn.execute(
+                "INSERT INTO token_usage (workspace_id, project_id, task_id, kind, model, step, tokens_in, tokens_out,"
+                " at, username, cost) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (ws, pj, task_id, str(rec.get("kind") or "other")[:20], str(rec.get("model") or "")[:80],
+                 str(rec.get("step") or "")[:40], int(rec.get("tokens_in") or 0), int(rec.get("tokens_out") or 0),
+                 _now(), str(user or "")[:64], rec.get("cost")))
+            self._conn.commit()
+        return ws
+
+    def recompute_token_costs(self, price_for, only_missing: bool = False) -> int:
+        """按当前单价表重算流水的估算费用。管理员改了单价后可选全量重算; only_missing 只补没有费用的行
+        (老数据、回填行、当时未定价而现在定价了的模型)。price_for(model) -> {"input","output"} | None。返回更新的行数。"""
+        n = 0
+        extra = " AND cost IS NULL" if only_missing else ""
+        with self._lock:
+            models = [r["model"] for r in self._conn.execute(
+                "SELECT DISTINCT model FROM token_usage WHERE 1 = 1" + extra).fetchall()]
+            for m in models:
+                p = price_for(m)
+                if p is None:
+                    if only_missing:
+                        continue
+                    cur = self._conn.execute("UPDATE token_usage SET cost = NULL WHERE model = ?", (m,))
+                else:
+                    cur = self._conn.execute(
+                        "UPDATE token_usage SET cost = (tokens_in * ? + tokens_out * ?) / 1000000.0 WHERE model = ?"
+                        + extra, (float(p["input"]), float(p["output"]), m))
+                n += cur.rowcount
+            self._conn.commit()
+        return n
+
+    def _llm_where(self, workspace_id: int, since: str = "", until: str = "", project_id=None, username=None):
+        sql, args = " WHERE u.workspace_id = ?", [workspace_id]  # type: tuple[str, list]
+        if since:
+            sql += " AND u.at >= ?"
+            args.append(since)
+        if until:
+            sql += " AND u.at < ?"
+            args.append(until)
+        if project_id is not None:
+            sql += " AND COALESCE(u.project_id, 0) = ?"
+            args.append(int(project_id))
+        if username is not None:
+            sql += " AND u.username = ?"
+            args.append(username)
+        return sql, args
+
+    _LLM_AGG = (" COUNT(*) AS calls, COALESCE(SUM(u.tokens_in), 0) AS tin, COALESCE(SUM(u.tokens_out), 0) AS tout,"
+                " COALESCE(SUM(u.cost), 0) AS cost,"
+                " SUM(CASE WHEN u.cost IS NULL AND (u.tokens_in + u.tokens_out) > 0 THEN 1 ELSE 0 END) AS unpriced,"
+                " COUNT(DISTINCT u.task_id) AS tasks")
+
+    @staticmethod
+    def _llm_row(r) -> dict:
+        return {"calls": r["calls"] or 0, "tokens_in": r["tin"] or 0, "tokens_out": r["tout"] or 0,
+                "tokens": (r["tin"] or 0) + (r["tout"] or 0), "cost": round(r["cost"] or 0, 6),
+                "unpriced": r["unpriced"] or 0, "tasks": r["tasks"] or 0}
+
+    def llm_usage_totals(self, workspace_id: int, since: str = "", until: str = "", project_id=None,
+                         username=None) -> dict:
+        where, args = self._llm_where(workspace_id, since, until, project_id, username)
+        with self._lock:
+            r = self._conn.execute("SELECT" + self._LLM_AGG + " FROM token_usage u" + where, args).fetchone()
+        return self._llm_row(r)
+
+    def llm_usage_group(self, workspace_id: int, group: str, since: str = "", until: str = "", project_id=None,
+                        username=None, limit: int = 0) -> list:
+        """按 day / model / kind / project / user / task 分组汇总, 按费用、token 降序(day 按日期升序)。
+        返回 [{key, label, calls, tokens_in, tokens_out, tokens, cost, unpriced, tasks}]。"""
+        key = {"day": "substr(datetime(u.at, 'localtime'), 1, 10)", "model": "u.model", "kind": "u.kind",
+               "project": "COALESCE(u.project_id, 0)", "user": "u.username", "task": "COALESCE(u.task_id, 0)"}[group]
+        where, args = self._llm_where(workspace_id, since, until, project_id, username)
+        order = "k ASC" if group == "day" else "cost DESC, tin + tout DESC"
+        sql = f"SELECT {key} AS k," + self._LLM_AGG + " FROM token_usage u" + where + f" GROUP BY k ORDER BY {order}"
+        if limit:
+            sql += f" LIMIT {int(limit)}"
+        with self._lock:
+            rows = self._conn.execute(sql, args).fetchall()
+            names = {}
+            if group == "project":
+                names = {r["id"]: r["name"] for r in self._conn.execute(
+                    "SELECT id, name FROM projects WHERE workspace_id = ?", (workspace_id,)).fetchall()}
+            elif group == "user":
+                names = {r["username"]: (r["display_name"] or r["username"]) for r in self._conn.execute(
+                    "SELECT username, display_name FROM users").fetchall()}
+            elif group == "task":
+                ids = [r["k"] for r in rows if r["k"]]
+                if ids:
+                    names = {r["id"]: r["domain"] for r in self._conn.execute(
+                        f"SELECT id, domain FROM clone_tasks WHERE id IN ({','.join('?' * len(ids))})", ids).fetchall()}
+        out = []
+        for r in rows:
+            d = self._llm_row(r)
+            k = r["k"]
+            if group == "project":
+                label = names.get(k) or ("未归属项目" if not k else "已删除的项目")
+            elif group == "user":
+                label = names.get(k, k) if k else "系统 / 未登录"
+            elif group == "task":
+                label = (names.get(k) or "已删除的任务") if k else "非任务调用"
+            else:
+                label = k or ("未知模型" if group == "model" else "")
+            d.update({"key": k, "label": label})
+            out.append(d)
+        return out
+
     def task_token_usage(self, task_id: int) -> list:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT kind, model, step, tokens_in, tokens_out, at FROM token_usage WHERE task_id = ? ORDER BY id",
+                "SELECT kind, model, step, tokens_in, tokens_out, at, username, cost FROM token_usage"
+                " WHERE task_id = ? ORDER BY id",
                 (task_id,)).fetchall()
         return [dict(r) for r in rows]
 

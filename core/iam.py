@@ -79,6 +79,9 @@ ACTIONS: dict[str, tuple[str, str, bool]] = {
     "ai.batch_repair": ("批量视觉修复", "ai", False),
     "ai.playground": ("AI 实验室", "ai", False),
     "ai.test": ("模型连通测试", "system", False),
+    "llm.budget": ("模型消耗预算提醒", "ai", True),
+    "llm.budget_update": ("修改月度模型预算", "ai", True),
+    "llm.pricing_update": ("修改模型单价表", "system", True),
     "archive.export": ("打包存档", "data", True),
     "archive.import": ("导入存档", "data", False),
     "audit.export": ("导出审计日志", "data", True),
@@ -105,7 +108,7 @@ ACTIONS: dict[str, tuple[str, str, bool]] = {
 _PREFIX_CATEGORY = {
     "login": "auth", "logout": "auth", "user": "member", "member": "member", "invite": "member",
     "workspace": "workspace", "project": "task", "batch": "task", "task": "task", "mock": "task",
-    "generate": "ai", "ai": "ai", "archive": "data", "audit": "data", "settings": "system",
+    "generate": "ai", "ai": "ai", "llm": "ai", "archive": "data", "audit": "data", "settings": "system",
     "storage": "system", "scheduler": "system", "pool": "system", "cache": "system",
     "schedule": "schedule", "links": "links", "docker": "deploy", "remote": "deploy",
 }

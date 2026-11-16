@@ -1093,3 +1093,89 @@ button.mt-row.au-row:focus-visible{outline:none;box-shadow:inset var(--ui-focus)
 .mock-del{opacity:0;transition:opacity .15s}
 .mock-row:hover .mock-del,.mock-row:focus-within .mock-del{opacity:1}
 @media (hover:none){.mock-del{opacity:1}}
+
+/* ===== 2026-11-16 模型消耗 =====
+   沿用 .pg / .pg-kpis / .mt-panel / .mt-row / .iam-drawer 骨架; 只补走势图、占比条、提醒条与单价表 */
+.iam-c-llm{min-width:0}
+.mt-row.iam-row{grid-template-columns:20px minmax(0,1.6fr) 112px 120px minmax(0,1fr) 96px 112px 136px}
+.llm-bad{color:var(--ui-bad)!important}
+.llm-alert{display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;padding:12px 16px;border-radius:12px;font-size:13px;color:var(--fg-2);border:1px solid rgb(var(--warn-500) / .35);background:rgb(var(--warn-500) / .08)}
+.llm-alert > svg,.llm-alert > i{color:var(--ui-warn);flex:none}
+.llm-alert.over{border-color:rgb(var(--bad-500) / .4);background:rgb(var(--bad-500) / .08)}
+.llm-alert.over > svg,.llm-alert.over > i{color:var(--ui-bad)}
+.llm-alert b{font-weight:600;color:var(--fg)}
+.llm-alert .dash-link{margin-left:auto}
+.llm-note{display:flex;align-items:center;flex-wrap:wrap;gap:6px 8px;margin-top:-8px;font-size:13px;color:var(--fg-3)}
+.llm-note > svg,.llm-note > i{flex:none}
+.llm-note > span{flex:0 1 auto;min-width:0}
+.iam-d-body .llm-share{padding:0}
+.llm-budget-bar{position:relative;overflow:visible;margin-top:10px}
+.llm-budget-bar span.warn{background:var(--ui-warn)}
+.llm-budget-bar span.over{background:var(--ui-bad)}
+.llm-budget-bar i{position:absolute;top:-3px;width:1px;height:10px;background:var(--fg-3)}
+/* 走势: 单序列柱图, 柱顶 4px 圆角落在基线上, 柱间 2px 留缝; 悬停出提示 */
+.llm-trend{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;padding:4px 20px 18px}
+.llm-yax{position:relative;height:180px;font-size:12px;line-height:1;color:var(--fg-3);text-align:right}
+.llm-yax span{position:absolute;right:0;transform:translateY(-50%);white-space:nowrap}
+.llm-yax span.llm-yax-w{position:static;display:block;visibility:hidden;transform:none}
+.llm-plot{position:relative;min-width:0}
+.llm-grid{position:absolute;inset:0 0 auto 0;height:180px;display:flex;flex-direction:column;justify-content:space-between;pointer-events:none}
+.llm-grid i{display:block;height:1px;background:var(--line)}
+.llm-cols{position:relative;height:180px;display:flex;align-items:flex-end;gap:2px}
+.llm-col{flex:1 1 0;min-width:0;height:100%;display:flex;align-items:flex-end;padding:0;border-radius:4px 4px 0 0;cursor:default}
+.llm-col span{display:block;width:100%;border-radius:4px 4px 0 0;background:var(--fg-3);opacity:.7;transition:opacity .12s,background .12s}
+.llm-col.on span,.llm-col:focus-visible span{opacity:1;background:var(--fg)}
+.llm-col:focus-visible{outline:none;box-shadow:var(--ui-focus)}
+.llm-xax{display:flex;justify-content:space-between;margin-top:8px;font-size:12px;color:var(--fg-3)}
+.llm-tip{position:absolute;top:-6px;z-index:2;display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:8px;font-size:12px;color:var(--fg-2);background:var(--raised);border:1px solid var(--line-strong);box-shadow:var(--shadow-pop);white-space:nowrap;pointer-events:none}
+.llm-tip b{font-weight:600;color:var(--fg)}
+.llm-cols2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.llm-share{list-style:none;margin:0;padding:0 20px 18px;display:flex;flex-direction:column;gap:14px}
+.llm-share-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;font-size:13px;color:var(--fg)}
+.llm-share-name{min-width:0}
+.llm-share-row b{font-weight:600;flex:none}
+.llm-share .mt-bar{margin-top:6px}
+.llm-share-meta{margin-top:6px;font-size:12px;color:var(--fg-3)}
+.llm-empty{font-size:13px;color:var(--fg-3)}
+.mt-row.llm-row{grid-template-columns:minmax(0,1.6fr) 96px 88px 56px;gap:14px;width:100%;text-align:left;font-size:13px;color:var(--fg-2)}
+.mt-row.llm-row > :not(:first-child){text-align:right}
+button.mt-row.llm-row{cursor:pointer}
+button.mt-row.llm-row:hover .llm-row-name{color:var(--fg);text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--line-strong)}
+button.mt-row.llm-row:focus-visible{outline:none;box-shadow:inset var(--ui-focus)}
+.llm-row-name{color:var(--fg)}
+.llm-tid{margin-right:8px;color:var(--fg-3)}
+.llm-chip{display:inline-flex;align-items:center;gap:4px;cursor:pointer}
+.llm-chip:hover{color:var(--fg)}
+.llm-mini{width:100%;height:48px;flex:none}
+.llm-mini rect{fill:var(--fg-3);opacity:.7}
+.llm-d-models{display:block;margin-top:2px;white-space:normal}
+/* 单价表 */
+.llm-price-grid{display:flex;align-items:center;gap:10px}
+.llm-price-grid label{margin-top:0}
+.llm-cur{max-width:80px!important}
+.llm-price-head,.llm-price-row{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr) 28px;gap:8px;align-items:center}
+.llm-price-head{margin-top:6px;font-size:12px;color:var(--fg-3)}
+.llm-price-row .mt-input{max-width:none;height:32px}
+.llm-recompute{white-space:normal;align-items:flex-start;line-height:1.5;margin-top:4px}
+.llm-recompute input{margin-top:3px}
+@media (max-width:1100px){
+  .mt-row.iam-row{grid-template-columns:20px minmax(0,1.6fr) 112px 120px minmax(0,1fr) 112px 136px}
+  .mt-row.iam-row .iam-c-act{display:none}
+}
+@media (max-width:900px){
+  .llm-cols2{grid-template-columns:minmax(0,1fr)}
+  .mt-row.iam-row{grid-template-columns:20px minmax(0,1fr) 108px 112px 136px}
+  .mt-row.iam-row .iam-c-llm{display:none}
+}
+@media (max-width:600px){
+  .llm-trend{padding:4px 16px 16px}
+  .llm-yax,.llm-grid,.llm-cols{height:140px}
+  .llm-share{padding:0 16px 16px}
+  .mt-row.llm-row{grid-template-columns:minmax(0,1fr) 84px 72px}
+  .mt-row.llm-row > :nth-child(4){display:none}
+  .llm-alert .dash-link{margin-left:0}
+  .llm-note{flex-wrap:nowrap;align-items:flex-start}
+  .llm-note > span{flex:1}
+  .llm-note > svg,.llm-note > i{margin-top:2px}
+  .llm-price-head,.llm-price-row{grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(0,1fr) 28px;gap:6px}
+}

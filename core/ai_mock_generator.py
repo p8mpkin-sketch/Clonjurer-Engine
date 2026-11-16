@@ -20,6 +20,7 @@ from urllib.parse import urlsplit
 import requests
 
 import config
+from core import llm_usage
 
 FORM_RE = re.compile(r"<form\b[^>]*>", re.I)
 ACTION_RE = re.compile(r"""action\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))""", re.I)
@@ -119,7 +120,10 @@ def _llm_body(ai_cfg: dict, form: dict, page_title_hint: str) -> str:
         timeout=config.AI_REQUEST_TIMEOUT,
     )
     resp.raise_for_status()
-    text = (resp.json().get("choices") or [{}])[0].get("message", {}).get("content", "")
+    payload = resp.json()
+    llm_usage.record(ai_cfg, payload.get("usage") if isinstance(payload, dict) else None,
+                     step_name="表单 Mock 润色", kind="ai_mock")
+    text = (payload.get("choices") or [{}])[0].get("message", {}).get("content", "")
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", (text or "").strip()).strip()
     json.loads(text)  # 校验; 非法即抛异常走回退
     return text
