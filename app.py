@@ -2237,6 +2237,12 @@ def auth_login():
             # 验证码不对不校验密码(不给撞库当密码对错的判定器), 也不累计账号失败, 只计来源 IP
             _ip_failures.add(_client_ip())
             given = bool(str(data.get("captcha") or "").strip())
+            why = "验证码不正确" if given else "未填验证码"
+            if user is not None:   # 留痕(记为登录失败, 计入审计的失败登录数); 不累计账号失败
+                _audit_account(user, "login.failed", f"登录失败: {username}({why})")
+            else:
+                db.log_audit(username[:64] or "?", "login.failed", f"登录失败: {username[:64] or '(空)'}({why})",
+                             _client_ip(), workspace_id=1)
             return jsonify({"error": "验证码不正确, 请重新输入" if given else "请输入验证码",
                             "captcha_required": True}), 400
     lock = iam.locked_until(user) if user else ""
@@ -2641,7 +2647,7 @@ def v4_users_export():
                            lambda r: _ROLE_TEXT.get(r, r or ""))
     _audit("audit.export", f"导出成员名单 CSV({len(members)} 人)")
     stamp = time.strftime("%Y%m%d_%H%M%S")
-    return Response(body, mimetype="text/csv; charset=utf-8",
+    return Response(body, content_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="members_{stamp}.csv"'})
 
 
@@ -3187,7 +3193,7 @@ def v4_audit_export_ws():
         rows += more
     _audit("audit.export", f"导出审计日志 {len(rows)} 条(共命中 {total} 条)")
     stamp = time.strftime("%Y%m%d_%H%M%S")
-    return Response(iam.audit_csv(rows), mimetype="text/csv; charset=utf-8",
+    return Response(iam.audit_csv(rows), content_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="audit_{stamp}.csv"'})
 
 
@@ -3540,7 +3546,7 @@ def v4_audit_export():
     _audit("audit.export", f"平台管理员导出全平台审计日志 {len(entries)} 条")
     stamp = time.strftime("%Y%m%d_%H%M%S")
     return Response(iam.audit_csv(entries),
-                    mimetype="text/csv; charset=utf-8",
+                    content_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition":
                              f'attachment; filename="audit_all_{stamp}.csv"'})
 
@@ -4292,7 +4298,7 @@ def v4_link_task_export(task_row_id):
     fname = f"SL-{task['seq']:03d}_{time.strftime('%Y%m%d_%H%M%S')}.{fmt}"
     if fmt == "txt":
         lines = [l["short_url"] for l in links if l["ok"]]
-        return Response("\n".join(lines) + ("\n" if lines else ""), mimetype="text/plain; charset=utf-8",
+        return Response("\n".join(lines) + ("\n" if lines else ""), content_type="text/plain; charset=utf-8",
                         headers={"Content-Disposition": f'attachment; filename="{fname}"'})
     buf = io.StringIO()
     writer = csv.writer(buf)
@@ -4308,7 +4314,7 @@ def v4_link_task_export(task_row_id):
         writer.writerow([_csv_cell(v) for v in (
             i, l["service"], l["short_url"], l["local_url"], l["target_url"], l.get("clicks") or 0,
             "成功" if l["ok"] else "失败", remark, l.get("created_at", ""))])
-    return Response("\ufeff" + buf.getvalue(), mimetype="text/csv; charset=utf-8",
+    return Response("\ufeff" + buf.getvalue(), content_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 
 
@@ -4371,11 +4377,11 @@ def short_link_redirect(code):
     elif link_shortener.valid_code(code):
         link = db.get_short_link_by_code(code)
     if link is None or not link.get("short_url"):
-        return Response("短链不存在", status=404, mimetype="text/plain; charset=utf-8")
+        return Response("短链不存在", status=404, content_type="text/plain; charset=utf-8")
     try:
         target = link_shortener.validate_target(link.get("target_url"))
     except ValueError:
-        return Response("短链目标地址无效", status=410, mimetype="text/plain; charset=utf-8")
+        return Response("短链目标地址无效", status=410, content_type="text/plain; charset=utf-8")
     db.bump_short_link_click(link["id"])
     resp = redirect(target, code=302)
     resp.headers["Cache-Control"] = "no-store"  # 每次点击都要回到这里计数
