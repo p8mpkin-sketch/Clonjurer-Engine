@@ -145,7 +145,7 @@ def _resolved_forbidden(host: str) -> str:
         infos = []
     for info in infos:
         try:
-            ip = ipaddress.ip_address(info[4][0].split("%", 1)[0])
+            ip = ipaddress.ip_address(str(info[4][0]).split("%", 1)[0])
         except ValueError:
             continue
         why = _ip_forbidden(ip)
