@@ -36,7 +36,7 @@ def validate_webhook(url: Any) -> str:
         raise ValueError("通知地址格式不对") from None
     if parts.scheme not in ("http", "https") or not host:
         raise ValueError("通知地址必须以 http:// 或 https:// 开头")
-    why = websec.forbidden_target(host)
+    why = websec.forbidden_target(host, resolve=True)
     if why:
         raise ValueError(f"通知地址不可用: {why}")
     return url
@@ -131,7 +131,8 @@ def send(webhook_url: str, payload: dict) -> tuple[bool, str]:
     if not url:
         return False, "未配置通知地址"
     try:
-        resp = requests.post(url, json=payload, timeout=TIMEOUT, allow_redirects=False,
+        with websec.guard_session(requests.Session()) as sess:
+            resp = sess.post(url, json=payload, timeout=TIMEOUT, allow_redirects=False,
                              headers={"User-Agent": "Clonjurer-Schedule/1.0"})
     except requests.Timeout:
         return False, f"超时({TIMEOUT}s)"

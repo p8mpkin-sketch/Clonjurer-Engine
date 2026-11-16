@@ -88,11 +88,11 @@ class PayloadTests(unittest.TestCase):
 
     def test_send_handles_errors(self):
         import requests
-        with mock.patch.object(sn.requests, "post", side_effect=requests.ConnectionError()):
+        with mock.patch.object(sn.requests.Session, "post", side_effect=requests.ConnectionError()):
             self.assertEqual(sn.send("https://a.example/h", {}), (False, "网络错误: ConnectionError"))
-        with mock.patch.object(sn.requests, "post", return_value=mock.Mock(status_code=500)):
+        with mock.patch.object(sn.requests.Session, "post", return_value=mock.Mock(status_code=500)):
             self.assertEqual(sn.send("https://a.example/h", {}), (False, "HTTP 500"))
-        with mock.patch.object(sn.requests, "post", return_value=mock.Mock(status_code=200)) as post:
+        with mock.patch.object(sn.requests.Session, "post", return_value=mock.Mock(status_code=200)) as post:
             self.assertEqual(sn.send("https://a.example/h", {"a": 1}), (True, "HTTP 200"))
         self.assertFalse(post.call_args.kwargs["allow_redirects"])
         self.assertEqual(sn.send("http://169.254.169.254/", {})[0], False)
@@ -114,7 +114,7 @@ SCRIPT = textwrap.dedent(r'''
     def fake_post(url, json=None, **kw):
         posts.append([url, json])
         return mock.Mock(status_code=200)
-    mock.patch.object(A.schedule_notify.requests, "post", side_effect=fake_post).start()
+    mock.patch.object(A.schedule_notify.requests.Session, "post", side_effect=fake_post).start()
     out = {}
     c = A.app.test_client()
     HOOK = "https://oapi.dingtalk.com/robot/send?access_token=SECRET123456"

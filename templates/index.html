@@ -929,7 +929,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <div class="pg-kpis lk-kpis">
         <div class="pg-kpi"><div class="pg-kpi-label">短链任务</div><div class="pg-kpi-num">[[ links.kpis.tasks ]]</div></div>
         <div class="pg-kpi"><div class="pg-kpi-label">短链</div><div class="pg-kpi-num">[[ links.kpis.links ]]</div><div class="pg-kpi-sub">只算生成成功的</div></div>
-        <div class="pg-kpi"><div class="pg-kpi-label">总点击</div><div class="pg-kpi-num">[[ links.kpis.clicks ]]</div><div class="pg-kpi-sub">经 /s/编号 跳转累计</div></div>
+        <div class="pg-kpi"><div class="pg-kpi-label">总点击</div><div class="pg-kpi-num">[[ links.kpis.clicks ]]</div><div class="pg-kpi-sub">经本站短链跳转累计</div></div>
       </div>
 
       <section class="mt-panel">
@@ -5623,7 +5623,7 @@ const __vueApp = createApp({
       this.openLinkTask(d);
     },
     bumpLocalClick(l) {
-      // 计数在服务端 /s/<id> 跳转时完成; 稍后刷新详情把新点击数带回来
+      // 计数在服务端 /s/<短码> 跳转时完成; 稍后刷新详情把新点击数带回来
       const d = this.links.detail;
       setTimeout(() => { if (this.links.detail && this.links.detail.id === d.id) this.openLinkTask(d); }, 800);
     },

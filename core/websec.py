@@ -115,8 +115,53 @@ _METADATA_HOSTS = {"metadata", "metadata.google.internal", "metadata.goog", "ins
                    "instance-data.ec2.internal", "metadata.azure.internal"}
 
 
-def forbidden_target(host: str) -> str:
+def _ip_forbidden(ip) -> str:
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    if ip.is_link_local or ip.is_unspecified or ip.is_multicast or ip.is_reserved \
+            or str(ip) in ("fd00:ec2::254",):
+        return "不允许访问链路本地/元数据等特殊地址"
+    return ""
+
+
+_RESOLVE_TTL = 300
+_resolve_cache: dict = {}
+_resolve_lock = threading.Lock()
+
+
+def _resolved_forbidden(host: str) -> str:
+    """主机名解析出的地址里有元数据/链路本地地址就拒绝(防「域名指向 169.254.169.254」绕过)。
+    解析失败放行(连不上自然失败); 结果缓存 5 分钟。"""
+    import socket
+    now = time.monotonic()
+    with _resolve_lock:
+        hit = _resolve_cache.get(host)
+        if hit and now - hit[0] < _RESOLVE_TTL:
+            return hit[1]
+    why = ""
+    try:
+        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except (OSError, UnicodeError):
+        infos = []
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0].split("%", 1)[0])
+        except ValueError:
+            continue
+        why = _ip_forbidden(ip)
+        if why:
+            why = "域名解析到" + why.replace("不允许访问", "")
+            break
+    with _resolve_lock:
+        if len(_resolve_cache) > 2048:
+            _resolve_cache.clear()
+        _resolve_cache[host] = (now, why)
+    return why
+
+
+def forbidden_target(host: str, resolve: bool = False) -> str:
     """克隆/外呼目标的底线拦截: 云厂商元数据地址、链路本地、未指定与组播地址。
+    resolve=True 时主机名也做一次 DNS 解析, 解析结果落在上述地址同样拒绝。
     返回拒绝原因, 空串表示放行。内网地址(10.x / 192.168.x 等)照常允许: 克隆内网站点是正常用法。"""
     import socket
     h = split_host(host).rstrip(".")
@@ -135,13 +180,36 @@ def forbidden_target(host: str) -> str:
             except OSError:
                 ip = None
     if ip is None:
-        return ""
-    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
-        ip = ip.ipv4_mapped
-    if ip.is_link_local or ip.is_unspecified or ip.is_multicast or ip.is_reserved \
-            or str(ip) in ("fd00:ec2::254",):
-        return "不允许访问链路本地/元数据等特殊地址"
-    return ""
+        return _resolved_forbidden(h) if resolve else ""
+    return _ip_forbidden(ip)
+
+
+def guarded_adapter():
+    """requests 适配器: 每次真正发请求前(含跟随重定向的每一跳)按 forbidden_target(resolve=True) 拦截,
+    防止页面资源或重定向把抓取器带到云元数据地址。"""
+    import requests
+    from requests.adapters import HTTPAdapter
+
+    class GuardedAdapter(HTTPAdapter):
+        def send(self, request, *args, **kwargs):  # type: ignore[override]
+            try:
+                host = urlsplit(request.url or "").hostname or ""
+            except ValueError:
+                host = ""
+            why = forbidden_target(host, resolve=True) if host else ""
+            if why:
+                raise requests.ConnectionError(f"已拦截: {why}")
+            return super().send(request, *args, **kwargs)
+
+    return GuardedAdapter()
+
+
+def guard_session(sess):
+    """给 requests.Session 的 http/https 都挂上 guarded_adapter。"""
+    adapter = guarded_adapter()
+    sess.mount("http://", adapter)
+    sess.mount("https://", adapter)
+    return sess
 
 
 class FailureCounter:

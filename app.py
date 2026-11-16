@@ -512,7 +512,7 @@ def _normalize_urls(raw_urls):
             rejected.append({"url": url, "reason": "非法 URL"})
             continue
         try:
-            why = websec.forbidden_target(urlsplit(url).hostname or "")
+            why = websec.forbidden_target(urlsplit(url).hostname or "", resolve=True)
         except ValueError:
             why = "非法 URL"
         if why:
@@ -634,9 +634,10 @@ def _proxy_fallback(upstream: str, subpath: str):
     headers["Referer"] = upstream.rstrip("/") + "/"
     headers.setdefault("User-Agent", config.DEFAULT_USER_AGENT)
     try:
-        upstream_resp = upstream_http.request(
-            request.method, url, headers=headers,
-            data=request.get_data(), timeout=15, allow_redirects=True)
+        with websec.guard_session(upstream_http.Session()) as sess:   # 每一跳都拦元数据/链路本地地址
+            upstream_resp = sess.request(
+                request.method, url, headers=headers,
+                data=request.get_data(), timeout=15, allow_redirects=True)
     except Exception as exc:
         return Response(f"Upstream proxy failed: {exc}", status=502,
                         content_type="text/plain; charset=utf-8")
@@ -4018,8 +4019,7 @@ def stream_logs():
     return Response(
         bus.stream(task_id, accept=_accept),
         mimetype="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
-                 "Connection": "keep-alive"},
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},   # Connection 是逐跳头, WSGI 应用不能设
     )
 
 
@@ -4940,19 +4940,41 @@ def _boot():
 
 _boot()
 
+def _use_waitress() -> bool:
+    """平台默认用 waitress(生产级 WSGI 服务器); CLONER_SERVER=werkzeug 或未安装 waitress 时用 Flask 自带服务器。"""
+    if config.SERVER_KIND == "werkzeug":
+        return False
+    try:
+        import waitress  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def _waitress_opts() -> dict:
+    # send_bytes=1: 日志流(SSE)每条事件立即发出, 不攒满 18KB 再发; ident 空: 不在响应头暴露服务器软件
+    return {"threads": config.SERVER_THREADS, "send_bytes": 1, "ident": "", "channel_timeout": 300,
+            "connection_limit": max(100, config.SERVER_THREADS * 8)}
+
+
 def _start_preview_server() -> None:
     """克隆预览独立端口(同一个应用, 另一个监听口): 克隆站脚本与平台不同源, 碰不到平台会话与接口。"""
     if config.PREVIEW_PORT <= 0 or config.PREVIEW_PORT == config.PORT:
         return
-    from werkzeug.serving import make_server
     try:
-        srv = make_server(config.HOST, config.PREVIEW_PORT, app, threaded=True)
+        if _use_waitress():
+            from waitress.server import create_server
+            wsrv = create_server(app, host=config.HOST, port=config.PREVIEW_PORT, **_waitress_opts())
+            run = wsrv.run
+        else:
+            from werkzeug.serving import make_server
+            run = make_server(config.HOST, config.PREVIEW_PORT, app, threaded=True).serve_forever
     except OSError as e:
         print(f"[security] 预览端口 {config.PREVIEW_PORT} 无法监听({e}), 预览回到与平台同源的旧模式;"
               " 可用 CLONER_PREVIEW_PORT 换一个端口", flush=True)
         return
     _PREVIEW["on"] = True
-    threading.Thread(target=srv.serve_forever, daemon=True, name="preview-origin").start()
+    threading.Thread(target=run, daemon=True, name="preview-origin").start()
     print(f" * 克隆预览独立端口: http://{config.HOST}:{config.PREVIEW_PORT}", flush=True)
 
 
@@ -4965,4 +4987,9 @@ def _announce_setup_token() -> None:
 if __name__ == "__main__":
     _start_preview_server()
     _announce_setup_token()
-    app.run(host=config.HOST, port=config.PORT, threaded=True, use_reloader=False)
+    if _use_waitress():
+        from waitress import serve
+        print(f" * 平台服务(waitress, {config.SERVER_THREADS} 线程): http://{config.HOST}:{config.PORT}", flush=True)
+        serve(app, host=config.HOST, port=config.PORT, **_waitress_opts())
+    else:
+        app.run(host=config.HOST, port=config.PORT, threaded=True, use_reloader=False)
