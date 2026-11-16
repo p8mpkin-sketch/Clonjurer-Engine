@@ -67,7 +67,7 @@ from flask import (Flask, Response, abort, jsonify, redirect, render_template, r
 
 import config
 from core import archive, flask_generator, iam, live, security
-from core import ai_mock_generator, llm_usage
+from core import ai_mock_generator, captcha, llm_usage, websec
 from core.clone.api_match import pick_entry
 from core.browser_pool import SyncBrowserPool
 from core.logger import LogBus
@@ -77,7 +77,14 @@ from models import ALL_WORKSPACES, Database, domain_of
 app = Flask(__name__)
 app.config["TEMPLATES_AUTO_RELOAD"] = True  # 模板改动即时生效
 app.secret_key = security.session_secret()
-app.permanent_session_lifetime = timedelta(hours=12)
+app.permanent_session_lifetime = timedelta(hours=max(1, config.SESSION_HOURS))
+# 会话 Cookie: 脚本读不到(HttpOnly), 跨站请求不带(SameSite=Lax), 经 HTTPS 访问时只走 HTTPS
+app.config.update(
+    SESSION_COOKIE_NAME="clonjurer_session",
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=config.COOKIE_SECURE,
+)
 db = Database(config.DB_PATH)
 db.audit_max_rows = config.AUDIT_MAX_ROWS
 bus = LogBus(config.LOG_RING_SIZE)
@@ -113,6 +120,7 @@ def _current_user():
 
 
 def _login_session(user: dict, ws=None):
+    session.clear()  # 登录前的会话内容一律作废, 不沿用
     session["uid"] = user["id"]
     session["sv"] = int(user.get("session_ver") or 0)
     if ws is None:
@@ -132,6 +140,28 @@ def _audit_account(user: dict, action: str, detail: str = ""):
         db.log_audit(name, action, detail, _client_ip(), workspace_id=wid)
 
 
+_WEAK_PASSWORDS = {"12345678", "123456789", "1234567890", "password", "password1", "password123", "qwerty123",
+                   "11111111", "88888888", "00000000", "abc12345", "abcd1234", "admin123", "admin1234",
+                   "1qaz2wsx", "qwertyui", "iloveyou", "a1234567", "aa123456", "woaini1314", "p@ssw0rd"}
+
+
+def _password_problem(password: str, username: str = "") -> str:
+    """新密码规则: 8~128 位, 至少包含字母、数字、符号中的两类, 不能是用户名或常见弱口令。
+    只管新设的密码, 已有账号的旧密码照常能登录。"""
+    if len(password) < 8:
+        return "密码至少 8 位"
+    if len(password) > 128:
+        return "密码最长 128 位"
+    kinds = sum([any(c.isalpha() for c in password), any(c.isdigit() for c in password),
+                 any(not c.isalnum() for c in password)])
+    if kinds < 2:
+        return "密码需要包含字母、数字、符号中的至少两类"
+    low = password.lower()
+    if low in _WEAK_PASSWORDS or username and low == username.lower():
+        return "这个密码太常见或与用户名相同, 请换一个"
+    return ""
+
+
 def _public_user(user: dict):
     if not user:
         return None
@@ -141,9 +171,11 @@ def _public_user(user: dict):
 
 
 def _client_ip() -> str:
-    forwarded = request.headers.get("X-Forwarded-For", "")
-    first = forwarded.split(",")[0].strip() if forwarded else ""
-    return first or (request.remote_addr or "local")
+    """来源 IP: 直连对端是本机/受信代理时才采信 X-Forwarded-For, 否则用 TCP 对端地址(防伪造)。"""
+    if "client_ip" not in g:
+        g.client_ip = websec.client_ip(request.remote_addr or "", request.headers.get("X-Forwarded-For", ""),
+                                       _TRUSTED_PROXIES)
+    return g.client_ip
 
 
 def _audit(action: str, detail: str = "", username: str = None, workspace_id=None):
@@ -202,17 +234,160 @@ def _can_see_ws(workspace_id) -> bool:
     if workspace_id is None:
         return False
     if not _auth_required():
-        return True
+        return not _open_mode_remote()
     user = _current_user()
     return user is not None and db.get_membership(int(workspace_id), user["id"]) is not None
 
 
+# ---------------------------------------------------------------------------
+# Web 安全闸门: Host 白名单 / 同源校验 / 预览独立源 / 开放模式只限本机 / 安全响应头
+# ---------------------------------------------------------------------------
+_ALLOWED_HOSTS = websec.parse_list(config.ALLOWED_HOSTS)
+_TRUSTED_ORIGINS = websec.origin_netlocs(config.TRUSTED_ORIGINS + "," + os.environ.get("CLONER_PUBLIC_URL", ""))
+_TRUSTED_PROXIES = {x.strip() for x in config.TRUSTED_PROXIES.split(",") if x.strip()}
+_SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
+# 预览独立源: 由 __main__ 起第二个监听口; 测试/被 import 时不起, 行为同旧版(同源预览)
+_PREVIEW = {"on": False}
+# 开放模式下从其他机器初始化管理员要用的一次性口令(启动时打印在终端)
+_SETUP_TOKEN = secrets.token_urlsafe(9)
+
+
+def _preview_isolated() -> bool:
+    return _PREVIEW["on"] and config.PREVIEW_PORT > 0
+
+
+def _on_preview_side() -> bool:
+    return _preview_isolated() and str(request.environ.get("SERVER_PORT", "")) == str(config.PREVIEW_PORT)
+
+
+def _preview_base() -> str:
+    """平台页面里 iframe / 新窗口打开预览用的源; 未隔离时为空串(同源相对路径)。"""
+    if not _preview_isolated():
+        return ""
+    if config.PREVIEW_PUBLIC_URL:
+        return config.PREVIEW_PUBLIC_URL
+    host = websec.split_host(request.host)
+    host = f"[{host}]" if ":" in host else host
+    return f"{request.scheme}://{host}:{config.PREVIEW_PORT}"
+
+
+def _is_local_request() -> bool:
+    import ipaddress as _ip
+    try:
+        return _ip.ip_address(_client_ip()).is_loopback
+    except ValueError:
+        return _client_ip() in ("local", "localhost")
+
+
+def _open_mode_remote() -> bool:
+    """开放模式(还没有账号)下来自其他机器的请求: 只能看登录页, 凭终端里的初始化口令建管理员。"""
+    return config.OPEN_MODE_LOCAL_ONLY and not _auth_required() and not _is_local_request()
+
+
+@app.before_request
+def _host_gate():
+    """防 DNS 重绑定: 监听回环地址时只认本机主机名(及 CLONER_ALLOWED_HOSTS)。"""
+    if not websec.host_allowed(request.host, config.HOST, _ALLOWED_HOSTS):
+        return Response("Host not allowed", status=421, mimetype="text/plain")
+    return None
+
+
+@app.before_request
+def _preview_origin_gate():
+    """预览独立源: 预览端口只提供 /preview/* 与克隆页逃逸到根路径的资源, 不提供平台页面与接口;
+    平台端口上的 /preview/* 跳到预览端口(老链接、分享链接照常能打开)。"""
+    if not _preview_isolated():
+        return None
+    if _on_preview_side():
+        if request.path.startswith("/preview/"):
+            return None
+        resp = _referer_fallback(allow_root=True)
+        if resp is not None:
+            return resp
+        return Response("Not Found", status=404, mimetype="text/plain")
+    if request.path.startswith("/preview/") and request.method in _SAFE_METHODS:
+        url = _preview_base() + request.full_path.rstrip("?")
+        return redirect(url, code=302)
+    if request.path.startswith("/preview/"):
+        abort(404)
+    return None
+
+
+@app.before_request
+def _csrf_gate():
+    """改动类请求必须同源: 浏览器跨站(含预览端口上的克隆页)发起的 POST/PUT/PATCH/DELETE 一律拒绝。"""
+    if request.method in _SAFE_METHODS or _on_preview_side():
+        return None
+    if request.path.startswith("/preview/") and not _preview_isolated():
+        return None  # 旧的同源预览: 克隆页表单/接口打到自己的 Mock, 不碰平台数据
+    if websec.same_origin_ok(request.headers.get("Origin", ""), request.headers.get("Referer", ""),
+                             request.host, _TRUSTED_ORIGINS):
+        return None
+    return jsonify({"error": "请求来源校验失败(跨站请求已拦截)。如经反向代理访问, 请配置 CLONER_TRUSTED_ORIGINS"}), 403
+
+
+_CSP_PLATFORM = "; ".join([
+    "frame-ancestors 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+])
+
+
+@app.after_request
+def _security_headers(resp):
+    h = resp.headers
+    h.setdefault("X-Content-Type-Options", "nosniff")
+    if _on_preview_side() or request.path.startswith("/preview/"):
+        # 预览页是任意第三方页面的克隆件: 不缓存到共享代理, 不把平台地址带给外站
+        h.setdefault("Referrer-Policy", "no-referrer-when-downgrade")
+        if _on_preview_side() and resp.mimetype == "text/html" and resp.status_code == 200:
+            _inject_preview_bridge(resp)
+        return resp
+    h.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    h.setdefault("X-Frame-Options", "SAMEORIGIN")
+    h.setdefault("Cross-Origin-Opener-Policy", "same-origin-allow-popups")
+    if resp.mimetype == "text/html":
+        h.setdefault("Content-Security-Policy", _CSP_PLATFORM)
+    if request.path.startswith("/api/"):
+        h.setdefault("Cache-Control", "no-store")
+    return resp
+
+
+# 预览桥: 平台页面通过 postMessage 给预览 iframe 实时注入热补丁 CSS(预览与平台不同源, 不能直接改 DOM)
+_PREVIEW_BRIDGE = (b'<script data-clonjurer="preview-bridge">(function(){addEventListener("message",function(e){'
+                   b'var d=e.data;if(e.source!==parent||!d||d.type!=="clonjurer:hotpatch")return;'
+                   b'var s=document.getElementById("live-hotpatch");if(!s){s=document.createElement("style");'
+                   b's.id="live-hotpatch";(document.head||document.documentElement).appendChild(s);}'
+                   b's.textContent=String(d.css||"");try{e.source.postMessage({type:"clonjurer:hotpatch-ok"},"*")}catch(_){}'
+                   b'});})();</script>')
+
+
+def _inject_preview_bridge(resp):
+    try:
+        resp.direct_passthrough = False
+        body = resp.get_data()
+    except Exception:
+        return
+    low = body[:65536].lower()
+    idx = low.find(b"<head")
+    if idx >= 0:
+        idx = low.find(b">", idx) + 1
+    else:
+        idx = 0
+    resp.set_data(body[:idx] + _PREVIEW_BRIDGE + body[idx:])
+
+
 @app.before_request
 def _rbac_gate():
-    """开放模式全放行。有用户后: /api/* 需登录; 平台级运维接口需平台管理员;
+    """开放模式全放行(只限本机, 见 _open_mode_remote)。有用户后: /api/* 需登录; 平台级运维接口需平台管理员;
     成员/审计/邀请/工作区设置需该区管理员; 写操作需该区操作员及以上。
     页面与 /preview 不在此拦截(预览按任务归属另行校验)。"""
     if not _auth_required():
+        if _open_mode_remote() and request.path.startswith("/api/") \
+                and not request.path.startswith("/api/auth/"):
+            return jsonify({"error": "平台还没有初始化管理员, 只能在本机使用; 请用终端里打印的初始化口令创建管理员",
+                            "auth": "required", "setup": "token"}), 401
         return None
     path = request.path
     if not path.startswith("/api/") or path.startswith("/api/auth/"):
@@ -334,6 +509,13 @@ def _normalize_urls(raw_urls):
         if not domain or "." not in domain or " " in url:
             rejected.append({"url": url, "reason": "非法 URL"})
             continue
+        try:
+            why = websec.forbidden_target(urlsplit(url).hostname or "")
+        except ValueError:
+            why = "非法 URL"
+        if why:
+            rejected.append({"url": url, "reason": why})
+            continue
         if any(u.lower() == url.lower() for u, _d in accepted):
             continue
         accepted.append((url, domain))
@@ -397,9 +579,17 @@ def _preview_share_ok(task_id: int) -> bool:
     return _share_token_ok(task_id, token)
 
 
+def _inside(base: Path, target: Path) -> bool:
+    """target 解析后是否仍在 base 目录内。按路径分段比较: 字符串前缀会把 workspaces/12 当成 workspaces/1 的子路径。"""
+    try:
+        return Path(target).resolve().is_relative_to(Path(base).resolve())
+    except (OSError, ValueError):
+        return False
+
+
 def _workspace_of(task: dict) -> Path:
     ws = Path(task["workspace_path"]) if task.get("workspace_path") else Path()
-    if not str(ws).startswith(str(config.WORKSPACE_ROOT)):
+    if not _inside(config.WORKSPACE_ROOT, ws) or ws.resolve() == config.WORKSPACE_ROOT.resolve():
         ws = config.WORKSPACE_ROOT / str(task["id"])
     return ws
 
@@ -425,16 +615,21 @@ def _read_mock_entries(ws: Path) -> list:
         return []
 
 
+_PROXY_FORWARD_HEADERS = {"accept", "accept-language", "content-type", "user-agent", "if-none-match",
+                          "if-modified-since", "range", "cache-control", "pragma"}
+
+
 def _proxy_fallback(upstream: str, subpath: str):
     url = upstream.rstrip("/") + "/" + subpath.lstrip("/")
     if request.query_string:
         url += "?" + request.query_string.decode("latin-1")
+    # 只转发内容协商类请求头: 浏览器带来的 Cookie / Authorization 是平台自己的会话与凭据, 绝不能发给原站
     headers = {
         k: v for k, v in request.headers.items()
-        if k.lower() not in ("host", "connection", "accept-encoding",
-                             "content-length", "transfer-encoding")
+        if k.lower() in _PROXY_FORWARD_HEADERS or (k.lower().startswith("x-") and not k.lower().startswith(
+            ("x-forwarded", "x-real-ip", "x-csrf", "x-xsrf")))
     }
-    headers.setdefault("Referer", upstream.rstrip("/") + "/")
+    headers["Referer"] = upstream.rstrip("/") + "/"
     headers.setdefault("User-Agent", config.DEFAULT_USER_AGENT)
     try:
         upstream_resp = upstream_http.request(
@@ -511,7 +706,7 @@ def _serve_from_task(task: dict, path: str):
     rel = (path or "").strip("/")
     if rel:
         target = (ws / rel).resolve()
-        if str(target).startswith(str(ws.resolve())) and target.is_file():
+        if _inside(ws, target) and target.is_file():
             resp = send_from_directory(ws, rel)
             resp.headers["X-Clone-Referer"] = "workspace"
             return resp
@@ -569,14 +764,10 @@ def favicon():
 def index_page():
     # Referer 兜底: 克隆页 JS 整页导航逃逸到平台根时(其 Referer 必含
     # /preview/<id>), 回落服务该任务的克隆首页, 避免在预览 iframe 里渲染出平台 UI。
-    referer = request.headers.get("Referer", "")
-    match = PREVIEW_REFERER_RE.search(referer)
-    if match:
-        task = _visible_task(int(match.group(1)))
-        if task is not None:
-            resp = _serve_from_task(task, "/")
-            if resp is not None:
-                return resp
+    if not _preview_isolated():   # 预览独立源时, 这类请求在预览端口上处理, 平台端口不再回落克隆页
+        resp = _referer_fallback(allow_root=True)
+        if resp is not None:
+            return resp
     return render_template("index.html")
 
 
@@ -613,7 +804,11 @@ def create_batch():
 
 @app.get("/api/batches")
 def list_batches():
-    return jsonify({"batches": db.list_batches(50, workspace_id=_cur_ws())})
+    batches = db.list_batches(50, workspace_id=_cur_ws())
+    for b in batches:  # 批次配置里的目标站 Cookie / Bearer / AI Key 不回给前端(只读成员也能看批次列表)
+        if b.get("config_json"):
+            b["config_json"] = json.dumps(_redact_config(_parse_json(b["config_json"])), ensure_ascii=False)
+    return jsonify({"batches": batches})
 
 
 @app.get("/api/tasks")
@@ -666,7 +861,7 @@ def _display_title(task: dict, ws: Path) -> str:
     title = ""
     for rel in dict.fromkeys(pages):
         f = (ws / rel)
-        if not str(f.resolve()).startswith(str(ws.resolve())) or not f.is_file():
+        if not _inside(ws, f) or not f.is_file():
             continue
         try:
             with open(f, "rb") as fh:
@@ -1096,7 +1291,7 @@ def task_file(task_id):
     ws = _workspace_of(task)
     rel = request.args.get("path", "").strip().lstrip("/")
     target = (ws / rel).resolve()
-    if not str(target).startswith(str(ws.resolve())):
+    if not _inside(ws, target):
         return jsonify({"error": "路径越界"}), 400
     if not target.is_file():
         return jsonify({"error": "文件不存在"}), 404
@@ -1940,26 +2135,83 @@ def auth_state():
     if pub is not None:
         pub["platform_admin"] = _is_platform_admin(user)
         pub["role"] = _ws_ctx()[1] or "viewer"  # 界面权限按当前工作区角色
-    return jsonify({"required": _auth_required(),
+    remote_setup = _open_mode_remote()
+    return jsonify({"required": _auth_required() or remote_setup,
                     "open_mode": not _auth_required(),
+                    "setup_token_required": remote_setup,
+                    "captcha_required": _captcha_needed(None),
+                    "session_hours": max(1, config.SESSION_HOURS),
+                    "lock_policy": {"window_min": config.LOGIN_FAIL_WINDOW_MIN, "max": config.LOGIN_FAIL_MAX,
+                                    "lock_min": config.LOGIN_LOCK_MIN},
+                    "preview_base": _preview_base(),
                     "user": pub,
                     "workspace": _workspace_payload(user)})
 
 
+# ---- 登录防护: 本地图形验证码 + 来源 IP 失败计数 ----
+_ip_failures = websec.FailureCounter(max(1, config.LOGIN_FAIL_WINDOW_MIN) * 60)
+_user_failures = websec.FailureCounter(max(1, config.LOGIN_FAIL_WINDOW_MIN) * 60)  # 按输入的用户名(小写)
+# 用户不存在时也做一次同等代价的散列校验, 响应耗时不暴露账号是否存在
+_DUMMY_HASH = security.hash_password(secrets.token_hex(16))
+
+
+def _captcha_needed(username) -> bool:
+    """auto: 这个用户名或这台设备最近输错够次数才要验证码; 正常登录不打扰。"""
+    mode = config.CAPTCHA_MODE
+    if mode == "off":
+        return False
+    if mode == "always":
+        return True
+    if config.CAPTCHA_IP_AFTER > 0 and _ip_failures.count(_client_ip()) >= config.CAPTCHA_IP_AFTER:
+        return True
+    if username and config.CAPTCHA_AFTER > 0 \
+            and _user_failures.count(str(username).lower()) >= config.CAPTCHA_AFTER:
+        return True
+    return False
+
+
+def _ip_blocked():
+    if config.LOGIN_IP_MAX > 0 and _ip_failures.count(_client_ip()) >= config.LOGIN_IP_MAX:
+        wait = _ip_failures.retry_after(_client_ip())
+        resp = jsonify({"error": f"这台设备尝试登录失败次数过多, 请 {max(1, wait // 60)} 分钟后再试",
+                        "retry_after": wait})
+        resp.headers["Retry-After"] = str(wait)
+        return resp, 429
+    return None
+
+
+@app.get("/api/auth/captcha")
+def auth_captcha():
+    """新的图形验证码(一次性, 5 分钟有效)。图片以 data URI 返回, 答案只存在服务端内存。"""
+    resp = jsonify(captcha.new_challenge())
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @app.post("/api/auth/bootstrap")
 def auth_bootstrap():
-    """开放模式 -> 初始化首个管理员(同时完成登录)。"""
+    """开放模式 -> 初始化首个管理员(同时完成登录)。其他机器上初始化须带终端里打印的一次性口令。"""
     if _auth_required():
         return jsonify({"error": "系统已初始化, 请直接登录"}), 409
     data = request.get_json(silent=True) or {}
+    if _open_mode_remote():
+        blocked = _ip_blocked()
+        if blocked:
+            return blocked
+        import hmac as _hmac
+        if not _hmac.compare_digest(str(data.get("setup_token") or "").strip(), _SETUP_TOKEN):
+            _ip_failures.add(_client_ip())
+            return jsonify({"error": "初始化口令不对。口令在启动平台的终端里, 也可以在本机打开平台直接初始化",
+                            "setup": "token"}), 403
     username = str(data.get("username") or "").strip()
     password = str(data.get("password") or "")
     if not _USERNAME_RE.match(username):
         return jsonify({"error": "用户名需 2~32 位字母/数字/._-"}), 400
-    if len(password) < 8:
-        return jsonify({"error": "密码至少 8 位"}), 400
+    err = _password_problem(password, username)
+    if err:
+        return jsonify({"error": err}), 400
     uid = db.create_user(username, security.hash_password(password),
-                         "admin", str(data.get("display_name") or "").strip())
+                         "admin", str(data.get("display_name") or "").strip()[:60])
     db.add_member(1, uid, "owner")  # 首个管理员 = 平台管理员 + 默认工作区所有者
     _login_session(db.get_user(uid), ws=1)
     db.touch_login(uid, _client_ip())
@@ -1972,16 +2224,28 @@ def auth_login():
     if not _auth_required():
         return jsonify({"error": "系统处于开放模式, 请先初始化管理员账号"}), 400
     data = request.get_json(silent=True) or {}
-    username = str(data.get("username") or "").strip()
-    password = str(data.get("password") or "")
+    username = str(data.get("username") or "").strip()[:64]
+    password = str(data.get("password") or "")[:1024]
+    blocked = _ip_blocked()
+    if blocked:
+        return blocked
     user = db.get_user_by_username(username)
+    if _captcha_needed(username):
+        if not captcha.verify(str(data.get("captcha_id") or ""), str(data.get("captcha") or "")):
+            # 验证码不对不校验密码(不给撞库当密码对错的判定器), 也不累计账号失败, 只计来源 IP
+            _ip_failures.add(_client_ip())
+            given = bool(str(data.get("captcha") or "").strip())
+            return jsonify({"error": "验证码不正确, 请重新输入" if given else "请输入验证码",
+                            "captcha_required": True}), 400
     lock = iam.locked_until(user) if user else ""
     if lock:
         # 锁定期内不校验密码(也不再累计), 统一提示; 不泄露密码是否正确
         _audit_account(user, "login.failed", f"登录失败: {username}(账号锁定中)")
         return jsonify({"error": f"连续输错密码次数过多, 账号已临时锁定, {_lock_left(lock)}后自动解锁;"
                                  " 也可以联系管理员提前解锁", "locked_until": lock}), 423
-    if user is None or not security.verify_password(password, user["password_hash"]):
+    pw_ok = security.verify_password(password, user["password_hash"] if user else _DUMMY_HASH)
+    if user is None or not pw_ok:
+        _ip_failures.add(_client_ip())
         if user is None:
             db.log_audit(username[:64] or "?", "login.failed", f"登录失败: {username[:64] or '(空)'}(账号不存在)",
                          _client_ip(), workspace_id=1)
@@ -1992,11 +2256,13 @@ def auth_login():
                 _audit_account(user, "login.locked",
                                f"{config.LOGIN_FAIL_WINDOW_MIN} 分钟内连续输错 {config.LOGIN_FAIL_MAX} 次,"
                                f" 锁定 {config.LOGIN_LOCK_MIN} 分钟")
+        _user_failures.add(username.lower())  # 不管账号是否存在都计, 验证码出现与否不暴露账号存在性
         time.sleep(0.4)  # 暴力破解节流
-        return jsonify({"error": "用户名或密码错误"}), 401
+        return jsonify({"error": "用户名或密码错误", "captcha_required": _captcha_needed(username)}), 401
     if not user["is_active"]:
         _audit_account(user, "login.blocked", "已停用账号尝试登录")
         return jsonify({"error": "账号已被停用, 请联系管理员"}), 403
+    _user_failures.clear(username.lower())
     _login_session(user)
     db.touch_login(user["id"], _client_ip())
     _audit_account(user, "login", "登录成功")
@@ -2441,14 +2707,17 @@ def _member_change(wid: int, my_role: str, target: dict, m: dict, op: str, value
             return None
         db.update_user(target["id"], is_active=1)
         db.reset_login_failures(target["id"])
+        _user_failures.clear(target["username"].lower())
         return "user.enable", f"启用账号 {name}"
     if op == "password":
         if not (platform or is_self):
             raise _MemberError("重置他人密码需要平台管理员", 403)
-        if len(str(value or "")) < 8:
-            raise _MemberError("密码至少 8 位", 400)
+        err = _password_problem(str(value or ""), target["username"])
+        if err:
+            raise _MemberError(err, 400)
         db.update_user(target["id"], password_hash=security.hash_password(str(value)))
         db.reset_login_failures(target["id"])
+        _user_failures.clear(target["username"].lower())
         sv = db.bump_session_ver(target["id"])
         if is_self:
             session["sv"] = sv  # 自己改密: 其他设备下线, 当前会话保留
@@ -2466,6 +2735,7 @@ def _member_change(wid: int, my_role: str, target: dict, m: dict, op: str, value
         if not iam.locked_until(target) and not target.get("failed_logins"):
             return None
         db.reset_login_failures(target["id"])
+        _user_failures.clear(target["username"].lower())
         return "user.unlock", f"解除 {name} 的登录锁定"
     if op == "logout":
         if not platform:
@@ -2570,9 +2840,10 @@ def v4_user_create():
             return jsonify({"error": "用户名已被占用; 已有账号请用邀请链接加入"}), 409
         db.add_member(wid, existing["id"], role, (_current_user() or {}).get("id"))
         _audit("member.add", f"加入成员 {username}({role})")
-        return jsonify({"user": existing}), 201
-    if len(password) < 8:
-        return jsonify({"error": "密码至少 8 位"}), 400
+        return jsonify({"user": _public_user(existing)}), 201
+    err = _password_problem(password, username)
+    if err:
+        return jsonify({"error": err}), 400
     uid = db.create_user(username, security.hash_password(password), "user",
                          str(data.get("display_name") or "").strip()[:60])
     db.add_member(wid, uid, role, (_current_user() or {}).get("id"))
@@ -2755,8 +3026,9 @@ def auth_invite_accept(token):
         password = str(data.get("password") or "")
         if not _USERNAME_RE.match(username):
             return jsonify({"error": "用户名需 2~32 位字母/数字/._-"}), 400
-        if len(password) < 8:
-            return jsonify({"error": "密码至少 8 位"}), 400
+        err = _password_problem(password, username)
+        if err:
+            return jsonify({"error": err}), 400
         if db.get_user_by_username(username):
             return jsonify({"error": "用户名已存在; 已有账号请先登录再打开邀请链接"}), 409
         if not db.use_invite(inv["id"]):
@@ -2856,7 +3128,8 @@ def task_share(task_id):
     hours = (request.get_json(silent=True) or {}).get("hours") or 72
     token = _share_token(task_id, int(hours))
     _audit("task.share", f"任务 #{task_id} 生成 {hours} 小时预览分享链接")
-    return jsonify({"url": f"{request.host_url.rstrip('/')}/preview/{task_id}/?share={token}"})
+    base = _preview_base() or request.host_url.rstrip('/')
+    return jsonify({"url": f"{base}/preview/{task_id}/?share={token}"})
 
 
 # ---------------------------------------------------------------------------
@@ -3437,6 +3710,19 @@ def v4_live():
 
 # ---------------------------------------------------------------------------
 # 定时克隆: 按时间把一组网址自动重新克隆(批次入队), 用来盯竞品/客户站点的变化
+_SECRET_CONFIG_KEYS = ("cookie", "bearer", "ai_api_key")
+
+
+def _redact_config(cfg: dict) -> dict:
+    """接口回显用: 凭据类字段只说明「已填写」, 不回明文。任务执行读的是库里的原值, 不受影响。"""
+    out = dict(cfg or {})
+    for k in _SECRET_CONFIG_KEYS:
+        if out.get(k):
+            out[k] = ""
+            out[k + "_set"] = True
+    return out
+
+
 # ---------------------------------------------------------------------------
 from core import schedules as sched_rules  # noqa: E402
 
@@ -3448,7 +3734,7 @@ def _schedule_view(sc: dict, briefs: dict) -> dict:
             for h in hist[-8:]][::-1]
     return {
         "id": sc["id"], "name": sc["name"], "urls": urls, "project_id": sc.get("project_id"),
-        "config": json.loads(sc.get("config_json") or "{}"),
+        "config": _redact_config(json.loads(sc.get("config_json") or "{}")),
         "freq": sc["freq"], "hour": sc["hour"], "minute": sc["minute"], "weekday": sc["weekday"],
         "rule": sched_rules.describe(sc["freq"], sc["hour"], sc["minute"], sc["weekday"]),
         "enabled": bool(sc["enabled"]), "next_run_at": sc["next_run_at"] if sc["enabled"] else "",
@@ -3747,7 +4033,7 @@ def _short_task_out(task: dict, with_links: bool = False) -> dict:
 
 def _short_task_or_404(task_row_id: int) -> dict:
     task = db.get_short_task(task_row_id)
-    if task is None:
+    if task is None or int(task.get("workspace_id") or 1) != _cur_ws():
         abort(404)
     return task
 
@@ -3779,8 +4065,8 @@ def _start_link_generation(task_row_id: int) -> bool:
 @app.get("/api/v4/link-tasks")
 def v4_link_tasks():
     q = (request.args.get("q") or "").strip()[:100] or None
-    tasks = [_short_task_out(t) for t in db.list_short_tasks(q=q)]
-    return jsonify({"tasks": tasks, "kpis": db.link_kpis()})
+    tasks = [_short_task_out(t) for t in db.list_short_tasks(q=q, workspace_id=_cur_ws())]
+    return jsonify({"tasks": tasks, "kpis": db.link_kpis(workspace_id=_cur_ws())})
 
 
 @app.post("/api/v4/link-tasks")
@@ -3805,7 +4091,7 @@ def v4_link_task_create():
         if _visible_task(clone_id) is None:
             return jsonify({"error": f"克隆任务 #{clone_id} 不存在"}), 400
     note = str(body.get("note") or "").strip()[:300]
-    tid = db.create_short_task(name, target, service, clone_id, note)
+    tid = db.create_short_task(name, target, service, clone_id, note, workspace_id=_cur_ws())
     _audit("links.task_create", f"新建短链任务 #{tid} {name} -> {target} ({service})")
     if body.get("generate"):
         _start_link_generation(tid)
@@ -3924,7 +4210,7 @@ def v4_link_providers():
 def v4_links():
     q = (request.args.get("q") or "").strip()[:100] or None
     standalone = request.args.get("standalone") in ("1", "true")
-    links = [_short_link_out(l) for l in db.list_short_links(q=q, standalone=standalone)]
+    links = [_short_link_out(l) for l in db.list_short_links(q=q, standalone=standalone, workspace_id=_cur_ws())]
     return jsonify({"links": links})
 
 
@@ -3938,7 +4224,7 @@ def v4_link_create():
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     label = str(body.get("label") or "").strip()[:120]
-    res = link_shortener.shorten(db, target, service, label=label)
+    res = link_shortener.shorten(db, target, service, label=label, workspace_id=_cur_ws())
     link = _short_link_out(db.get_short_link(res["link_id"]))
     _audit("links.create", f"单独短链 #{res['link_id']} {target} -> {res['short_url'] or '失败'}")
     if not res["ok"]:
@@ -3950,7 +4236,7 @@ def v4_link_create():
 @app.delete("/api/v4/links/<int:link_id>")
 def v4_link_delete(link_id):
     link = db.get_short_link(link_id)
-    if link is None:
+    if link is None or int(link.get("workspace_id") or 1) != _cur_ws():
         return jsonify({"error": "短链不存在"}), 404
     db.delete_short_link(link_id)
     if link.get("link_task_id"):
@@ -4250,7 +4536,7 @@ def preview(task_id, subpath=""):
     if normalized in routes:
         return _pv_cookie(send_from_directory(ws, routes[normalized]), task_id)
     target = (ws / subpath).resolve()
-    if str(target).startswith(str(ws.resolve())) and target.is_file():
+    if _inside(ws, target) and target.is_file():
         return send_from_directory(ws, subpath)
     # 沙盒内 Mock API(SPA 伪装后 XHR 以 /preview/<id>/ 为基准发请求)
     mock_resp = _serve_from_task(task, subpath)
@@ -4278,27 +4564,40 @@ def _pv_cookie(resp, task_id):
     return resp
 
 
+def _referer_fallback(allow_root: bool = False):
+    """按 Referer(/preview/<id>)或最近打开的预览任务 cookie 找到任务, 从其工作空间回应根路径请求。
+    allow_root: 根路径 "/" 也回落(克隆页 JS 整页导航逃逸到根)。找不到返回 None。"""
+    if request.path.startswith("/preview/"):
+        return None
+    referer = request.headers.get("Referer", "")
+    match = PREVIEW_REFERER_RE.search(referer)
+    task_ref = match.group(1) if match else None
+    if request.path == "/" and not allow_root:
+        return None
+    if task_ref is None and request.method == "GET" and referer and request.path != "/" \
+            and urlsplit(referer).netloc == request.host \
+            and (_on_preview_side() or not request.path.startswith("/api/")):
+        # 同源、Referer 是克隆页里的子资源(样式表)而非平台页: 退到最近打开的预览任务
+        cookie_id = request.cookies.get("clone_pv", "")
+        if cookie_id.isdigit() and not urlsplit(referer).path.rstrip("/") in ("", "/index.html"):
+            task_ref = cookie_id
+    if not task_ref:
+        return None
+    task = _visible_task(int(task_ref))
+    if task is None:
+        return None
+    return _serve_from_task(task, request.path)
+
+
 @app.errorhandler(404)
 def not_found(_error):
     # Referer 智能沙盒路由兜底: 预览 iframe 内逃逸到根路径的静态资源 / Mock API
     # 请求(其 Referer 必含 /preview/<id>, 与平台自身 API 的根 Referer 天然可区分)
     # 自动转发至对应工作空间。
-    referer = request.headers.get("Referer", "")
-    match = PREVIEW_REFERER_RE.search(referer)
-    task_ref = match.group(1) if match else None
-    if task_ref is None and request.method == "GET" and referer \
-            and urlsplit(referer).netloc == request.host \
-            and not request.path.startswith(("/api/", "/preview/")):
-        # 同源、Referer 是克隆页里的子资源(样式表)而非平台页: 退到最近打开的预览任务
-        cookie_id = request.cookies.get("clone_pv", "")
-        if cookie_id.isdigit() and not urlsplit(referer).path.rstrip("/") in ("", "/index.html"):
-            task_ref = cookie_id
-    if task_ref and not request.path.startswith("/preview/"):
-        task = _visible_task(int(task_ref))
-        if task is not None:
-            resp = _serve_from_task(task, request.path)
-            if resp is not None:
-                return resp
+    if not _preview_isolated():
+        resp = _referer_fallback()
+        if resp is not None:
+            return resp
     if request.path.startswith("/api/") or request.path.startswith("/preview/"):
         return jsonify({"error": "not found"}), 404
     return render_template("index.html"), 404
@@ -4514,5 +4813,29 @@ def _boot():
 
 _boot()
 
+def _start_preview_server() -> None:
+    """克隆预览独立端口(同一个应用, 另一个监听口): 克隆站脚本与平台不同源, 碰不到平台会话与接口。"""
+    if config.PREVIEW_PORT <= 0 or config.PREVIEW_PORT == config.PORT:
+        return
+    from werkzeug.serving import make_server
+    try:
+        srv = make_server(config.HOST, config.PREVIEW_PORT, app, threaded=True)
+    except OSError as e:
+        print(f"[security] 预览端口 {config.PREVIEW_PORT} 无法监听({e}), 预览回到与平台同源的旧模式;"
+              " 可用 CLONER_PREVIEW_PORT 换一个端口", flush=True)
+        return
+    _PREVIEW["on"] = True
+    threading.Thread(target=srv.serve_forever, daemon=True, name="preview-origin").start()
+    print(f" * 克隆预览独立端口: http://{config.HOST}:{config.PREVIEW_PORT}", flush=True)
+
+
+def _announce_setup_token() -> None:
+    if not _auth_required() and config.OPEN_MODE_LOCAL_ONLY and not websec.is_loopback_bind(config.HOST):
+        print(f" * 平台还没有管理员。本机打开可直接初始化; 从其他机器初始化需要这个一次性口令: {_SETUP_TOKEN}",
+              flush=True)
+
+
 if __name__ == "__main__":
+    _start_preview_server()
+    _announce_setup_token()
     app.run(host=config.HOST, port=config.PORT, threaded=True, use_reloader=False)

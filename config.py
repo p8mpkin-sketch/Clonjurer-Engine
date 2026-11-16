@@ -267,6 +267,32 @@ AUDIT_MAX_ROWS = int(os.environ.get("CLONER_AUDIT_MAX_ROWS", "200000"))
 LOGIN_FAIL_WINDOW_MIN = int(os.environ.get("CLONER_LOGIN_FAIL_WINDOW_MIN", "15"))
 LOGIN_FAIL_MAX = int(os.environ.get("CLONER_LOGIN_FAIL_MAX", "5"))
 LOGIN_LOCK_MIN = int(os.environ.get("CLONER_LOGIN_LOCK_MIN", "15"))
+# 登录验证码(本地生成, 离线可用): auto = 同一账号连续输错 CAPTCHA_AFTER 次或同一 IP 输错
+# CAPTCHA_IP_AFTER 次后才要求; always = 每次登录都要; off = 关闭
+CAPTCHA_MODE = os.environ.get("CLONER_CAPTCHA", "auto").strip().lower()
+CAPTCHA_AFTER = int(os.environ.get("CLONER_CAPTCHA_AFTER", "2"))
+CAPTCHA_IP_AFTER = int(os.environ.get("CLONER_CAPTCHA_IP_AFTER", "5"))
+# 同一来源 IP 在登录失败窗口内失败达此次数即暂停该 IP 的登录尝试(撞库/喷洒防护; 0 = 不限)
+LOGIN_IP_MAX = int(os.environ.get("CLONER_LOGIN_IP_MAX", "30"))
+
+# ---- Web 安全 ----
+# 克隆预览独立端口: 克隆站的脚本跑在与平台不同的源上, 拿不到平台会话、调不了平台接口。
+# 0 = 关闭(回到与平台同源的旧行为, 不推荐)
+PREVIEW_PORT = int(os.environ.get("CLONER_PREVIEW_PORT", str(PORT + 1)))
+# 预览对外地址(反向代理/容器端口映射时显式配置, 如 https://preview.example.com);
+# 留空按访问平台用的主机名 + PREVIEW_PORT 推断
+PREVIEW_PUBLIC_URL = os.environ.get("CLONER_PREVIEW_URL", "").strip().rstrip("/")
+# 开放模式(还没有任何账号时免登录)只允许本机访问: 监听在对外地址时, 非本机请求须先初始化管理员
+OPEN_MODE_LOCAL_ONLY = os.environ.get("CLONER_OPEN_MODE_LOCAL_ONLY", "1") != "0"
+# 额外允许的 Host 头(逗号分隔主机名): 监听回环地址时防 DNS 重绑定; 对外监听时设置后即只认这些
+ALLOWED_HOSTS = os.environ.get("CLONER_ALLOWED_HOSTS", "")
+# 额外信任的页面来源(逗号分隔, 如 https://cloner.example.com): 反向代理改写了 Host 时用
+TRUSTED_ORIGINS = os.environ.get("CLONER_TRUSTED_ORIGINS", "")
+# 采信 X-Forwarded-For 的上游代理地址(逗号分隔); 回环地址默认可信
+TRUSTED_PROXIES = os.environ.get("CLONER_TRUSTED_PROXIES", "")
+# 会话 Cookie 只走 HTTPS(全程经 HTTPS 反向代理访问时设为 1)
+COOKIE_SECURE = os.environ.get("CLONER_COOKIE_SECURE", "") == "1"
+SESSION_HOURS = int(os.environ.get("CLONER_SESSION_HOURS", "12"))
 
 # @font-face 下载计划: 只下浏览器会请求的字体(src 首个受支持格式 + 页面有对应字符的 unicode-range 切片)
 FONT_PLAN = os.environ.get("CLONER_FONT_PLAN", "1") != "0"
