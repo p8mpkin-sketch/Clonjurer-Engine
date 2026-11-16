@@ -2848,7 +2848,7 @@ def v4_user_create():
                          str(data.get("display_name") or "").strip()[:60])
     db.add_member(wid, uid, role, (_current_user() or {}).get("id"))
     _audit("user.create", f"创建成员 {username}({role})")
-    return jsonify({"user": db.get_user(uid)}), 201
+    return jsonify({"user": _public_user(db.get_user(uid))}), 201
 
 
 @app.patch("/api/v4/users/<int:user_id>")
