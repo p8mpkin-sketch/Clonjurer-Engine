@@ -15,9 +15,9 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 <!-- 顶级字体体系: Inter / Plus Jakarta Sans / JetBrains Mono / Noto Sans SC -->
 <link href="/vendor/fonts/fonts.css" rel="stylesheet">
 <!-- UI 改版 P0 规范层: 字号/对比度/焦点/语义色(只换样式) -->
-<link href="/vendor/css/ui-tokens.css?v=29" rel="stylesheet">
+<link href="/vendor/css/ui-tokens.css?v=30" rel="stylesheet">
 
-<script src="/vendor/js/lucide.subset.js?v=8"></script>
+<script src="/vendor/js/lucide.subset.js?v=9"></script>
 <script>
 /* Lucide 非破坏性 shim: 官方 createIcons 会把 <i data-lucide> 整节点替换为 <svg>,
    Vue 记录的 vnode 锚点随之失效, 任务列表轮询触发 patch 时报
@@ -314,6 +314,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <button v-if="isAdmin()" type="button" @click="goModule('users')"><i data-lucide="users" class="w-4 h-4"></i>用户管理</button>
           <button v-if="isAdmin()" type="button" @click="goModule('admin'); adminTab='workspace'; loadUsage();"><i data-lucide="gauge" class="w-4 h-4"></i>套餐与用量</button>
           <button v-if="isAdmin()" type="button" @click="goModule('audit')"><i data-lucide="scroll-text" class="w-4 h-4"></i>日志审计</button>
+          <button v-if="isAdmin()" type="button" @click="goModule('llmcost')"><i data-lucide="coins" class="w-4 h-4"></i>模型消耗</button>
           <div v-if="!isAdmin()" class="ws-menu-note">你是[[ roleText(auth.user.role) ]]。成员和权限由管理员管理。</div>
         </template>
         <button v-else type="button" @click="auth.required = true"><i data-lucide="user-plus" class="w-4 h-4"></i>启用团队登录，邀请成员</button>
@@ -1314,7 +1315,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 
           <div v-if="iamUsers.length" class="mt-row iam-row mt-row-head">
             <span class="iam-ck"><input type="checkbox" :checked="iamAllSelected" :indeterminate.prop="iam.sel.length > 0 && !iamAllSelected" @change="iamToggleAll($event.target.checked)" aria-label="全选"></span>
-            <span>成员</span><span>角色</span><span>状态</span><span class="iam-c-login">最近登录</span><span class="iam-c-act">近 30 天操作</span><span></span>
+            <span>成员</span><span>角色</span><span>状态</span><span class="iam-c-login">最近登录</span><span class="iam-c-act">近 30 天操作</span><span class="iam-c-llm">近 30 天模型消耗</span><span></span>
           </div>
           <div v-for="u in iamUsers" :key="u.id" class="mt-row iam-row" :class="iam.sel.includes(u.id) ? 'sel' : ''">
             <span class="iam-ck"><input type="checkbox" :checked="iam.sel.includes(u.id)" :disabled="isMe(u)" @change="iamToggle(u.id)" :aria-label="'选择 ' + u.username"></span>
@@ -1341,6 +1342,10 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             </div>
             <div class="iam-c-act text-[13px] text-slate-300 tnums">
               <button v-if="u.actions_30d" type="button" class="dash-link" @click="auditForUser(u.username)" :title="'看 ' + u.username + ' 的操作记录'">[[ u.actions_30d ]] 次</button>
+              <span v-else class="text-slate-500">—</span>
+            </div>
+            <div class="iam-c-llm text-[13px] text-slate-300 tnums" :title="iam.llm[u.username] ? fmtTokens(iam.llm[u.username].tokens) + ' token · ' + iam.llm[u.username].calls + ' 次调用' : '近 30 天没有模型调用'">
+              <template v-if="iam.llm[u.username]">[[ llmMoney(iam.llm[u.username].cost) ]]<div class="iam-sub">[[ fmtTokens(iam.llm[u.username].tokens) ]] token</div></template>
               <span v-else class="text-slate-500">—</span>
             </div>
             <div class="iam-acts">
@@ -1468,6 +1473,246 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
     </div>
   </div>
 
+  <!-- ======================= 模型消耗(工作区管理员) ======================= -->
+  <div v-show="view==='llmcost' && isAdmin()" class="flex-1 min-h-0 overflow-y-auto custom-scroll">
+    <div class="pg">
+      <div class="pg-head">
+        <div>
+          <h2 class="pg-title">模型消耗</h2>
+          <div class="pg-meta">「[[ workspace.name ]]」调用大模型的 token 与估算费用<span class="iam-desc"> · 费用按单价表估算，以供应商账单为准</span></div>
+        </div>
+        <div class="flex items-center gap-2 flex-wrap">
+          <div class="ui-seg" role="group" aria-label="时间范围">
+            <button v-for="d in [7, 30, 90]" :key="d" type="button" :aria-pressed="llm.days===d ? 'true' : 'false'" @click="loadLlm(d)">[[ d ]] 天</button>
+          </div>
+          <button type="button" class="mt-btn" @click="openLlmBudget()"><i data-lucide="wallet" class="w-4 h-4"></i>月度预算</button>
+          <button type="button" class="mt-btn" @click="openLlmPricing()"><i data-lucide="tags" class="w-4 h-4"></i>单价表</button>
+        </div>
+      </div>
+
+      <!-- 预算提醒 -->
+      <div v-if="llm.d && ['warn','over'].includes(llm.d.budget.level)" class="llm-alert" :class="llm.d.budget.level" role="status">
+        <i data-lucide="triangle-alert" class="w-4 h-4"></i>
+        <span>[[ llm.d.budget.level === 'over' ? '本月估算费用已超出预算' : '本月估算费用已达预算的 ' + Math.round(llm.d.budget.pct) + '%' ]]：<b class="tnums">[[ llmMoney(llm.d.budget.spent) ]]</b> / [[ llmMoney(llm.d.budget.monthly) ]]。只做提醒，不会拦截调用。</span>
+        <button type="button" class="dash-link" @click="openLlmBudget()">调整预算</button>
+      </div>
+
+      <template v-if="llm.d">
+        <!-- 概览 -->
+        <div class="pg-kpis iam-kpis">
+          <div class="pg-kpi"><div class="pg-kpi-label">近 [[ llm.d.days ]] 天估算费用</div>
+            <div class="pg-kpi-num tnums">[[ llmMoney(llm.d.totals.cost, true) ]]</div>
+            <div class="pg-kpi-sub">[[ llmDelta(llm.d.totals.cost, llm.d.previous.cost) ]]</div></div>
+          <div class="pg-kpi"><div class="pg-kpi-label">Token 总量</div>
+            <div class="pg-kpi-num tnums">[[ fmtTokens(llm.d.totals.tokens) ]]</div>
+            <div class="pg-kpi-sub tnums">输入 [[ fmtTokens(llm.d.totals.tokens_in) ]] · 输出 [[ fmtTokens(llm.d.totals.tokens_out) ]]</div></div>
+          <div class="pg-kpi"><div class="pg-kpi-label">调用次数</div>
+            <div class="pg-kpi-num tnums">[[ llm.d.totals.calls.toLocaleString() ]]</div>
+            <div class="pg-kpi-sub tnums">涉及 [[ llm.d.totals.tasks ]] 个任务 · 累计 [[ llmMoney(llm.d.all_time.cost) ]]</div></div>
+          <div class="pg-kpi"><div class="pg-kpi-label">本月预算（[[ llm.d.budget.month ]]）</div>
+            <template v-if="llm.d.budget.monthly">
+              <div class="pg-kpi-num tnums" :class="llm.d.budget.level === 'over' ? 'llm-bad' : llm.d.budget.level === 'warn' ? 'iam-warn' : ''">[[ Math.round(llm.d.budget.pct) ]]<small>%</small></div>
+              <div class="mt-bar llm-budget-bar"><span :style="{ width: Math.min(100, llm.d.budget.pct) + '%' }" :class="llm.d.budget.level"></span><i :style="{ left: llm.d.budget.alert_pct + '%' }" :title="'提醒线 ' + llm.d.budget.alert_pct + '%'"></i></div>
+              <div class="pg-kpi-sub tnums">[[ llmMoney(llm.d.budget.spent) ]] / [[ llmMoney(llm.d.budget.monthly) ]]</div>
+            </template>
+            <template v-else>
+              <div class="pg-kpi-num tnums">[[ llmMoney(llm.d.budget.spent, true) ]]</div>
+              <div class="pg-kpi-sub"><button type="button" class="dash-link" @click="openLlmBudget()">设置月度预算</button></div>
+            </template>
+          </div>
+        </div>
+
+        <p v-if="llm.d.unpriced_models.length" class="llm-note"><i data-lucide="info" class="w-4 h-4"></i>
+          <span>[[ llm.d.unpriced_models.join('、') ]] 还没有单价，这部分调用只统计 token，不计入费用。</span>
+          <button type="button" class="dash-link" @click="openLlmPricing(llm.d.unpriced_models)">补上单价</button></p>
+
+        <!-- 走势 -->
+        <section class="mt-panel">
+          <div class="mt-head">
+            <div><h3>每日走势</h3><p>[[ llm.metric === 'cost' ? '估算费用' : 'Token 用量' ]] · 本机日期</p></div>
+            <div class="ui-seg" role="group" aria-label="走势指标">
+              <button type="button" :aria-pressed="llm.metric==='cost' ? 'true' : 'false'" @click="llm.metric='cost'">费用</button>
+              <button type="button" :aria-pressed="llm.metric==='tokens' ? 'true' : 'false'" @click="llm.metric='tokens'">Token</button>
+            </div>
+          </div>
+          <div class="llm-trend" @mouseleave="llm.hover = null">
+            <div class="llm-yax tnums" aria-hidden="true"><span style="top:0">[[ llmAxis(llmTrend.max) ]]</span><span style="top:50%">[[ llmAxis(llmTrend.max / 2) ]]</span><span style="top:100%">0</span><span class="llm-yax-w">[[ llmAxis(llmTrend.max) ]]</span></div>
+            <div class="llm-plot">
+              <div class="llm-grid" aria-hidden="true"><i></i><i></i><i></i></div>
+              <div class="llm-cols" role="img" :aria-label="'近 ' + llm.d.days + ' 天每日' + (llm.metric === 'cost' ? '估算费用' : 'token 用量')">
+                <button v-for="(b, i) in llmTrend.bars" :key="b.date" type="button" class="llm-col" :class="llm.hover === i ? 'on' : ''"
+                  @mouseenter="llm.hover = i" @focus="llm.hover = i" @blur="llm.hover = null"
+                  :aria-label="b.date + '：' + llmMoney(b.cost) + '，' + b.tokens.toLocaleString() + ' token，' + b.calls + ' 次调用'">
+                  <span :style="{ height: b.h + '%' }"></span>
+                </button>
+              </div>
+              <div v-if="llm.hover != null && llmTrend.bars[llm.hover]" class="llm-tip tnums" :style="llmTipPos">
+                <b>[[ llmTrend.bars[llm.hover].date ]]</b>
+                <span>费用 [[ llmMoney(llmTrend.bars[llm.hover].cost) ]]</span>
+                <span>[[ llmTrend.bars[llm.hover].tokens.toLocaleString() ]] token · [[ llmTrend.bars[llm.hover].calls ]] 次</span>
+              </div>
+              <div class="llm-xax tnums" aria-hidden="true"><span>[[ llmTrend.bars[0].date.slice(5) ]]</span><span>[[ llmTrend.bars[Math.floor(llmTrend.bars.length / 2)].date.slice(5) ]]</span><span>今天</span></div>
+            </div>
+          </div>
+        </section>
+
+        <div class="iam-cols llm-cols2">
+          <!-- 按模型 -->
+          <section class="mt-panel">
+            <div class="mt-head"><div><h3>按模型</h3><p>占近 [[ llm.d.days ]] 天[[ llmShareBase === 'cost' ? '费用' : ' token' ]]的比例</p></div></div>
+            <ol class="llm-share">
+              <li v-for="r in llm.d.by_model" :key="r.key">
+                <div class="llm-share-row"><span class="llm-share-name truncate" :title="r.label">[[ r.label ]]</span><b class="tnums">[[ llmPct(r) ]]</b></div>
+                <div class="mt-bar"><span :style="{ width: llmPctW(r) }"></span></div>
+                <div class="llm-share-meta tnums">[[ r.price ? llmMoney(r.cost) : '未定价' ]] · [[ fmtTokens(r.tokens) ]] token · [[ r.calls ]] 次<template v-if="r.price"> · 单价 [[ llmMoney(r.price.input, false, true) ]] / [[ llmMoney(r.price.output, false, true) ]]</template></div>
+              </li>
+              <li v-if="!llm.d.by_model.length" class="llm-empty">近 [[ llm.d.days ]] 天没有模型调用</li>
+            </ol>
+          </section>
+          <!-- 按功能 -->
+          <section class="mt-panel">
+            <div class="mt-head"><div><h3>按功能</h3><p>哪类操作在花钱</p></div></div>
+            <ol class="llm-share">
+              <li v-for="r in llm.d.by_kind" :key="r.key">
+                <div class="llm-share-row"><span class="llm-share-name">[[ r.label ]]</span><b class="tnums">[[ llmPct(r) ]]</b></div>
+                <div class="mt-bar"><span :style="{ width: llmPctW(r) }"></span></div>
+                <div class="llm-share-meta tnums">[[ llmMoney(r.cost) ]] · [[ fmtTokens(r.tokens) ]] token · [[ r.calls ]] 次</div>
+              </li>
+              <li v-if="!llm.d.by_kind.length" class="llm-empty">暂无</li>
+            </ol>
+          </section>
+        </div>
+
+        <div class="iam-cols llm-cols2">
+          <!-- 按项目 -->
+          <section class="mt-panel">
+            <div class="mt-head"><div><h3>按项目</h3><p>任务移到别的项目时，消耗跟着任务走</p></div></div>
+            <div v-if="llm.d.by_project.length" class="mt-row llm-row mt-row-head"><span>项目</span><span>费用</span><span>Token</span><span>任务</span></div>
+            <component :is="llmProject(r) ? 'button' : 'div'" v-for="r in llm.d.by_project" :key="r.key" type="button" class="mt-row llm-row" @click="llmProject(r) && enterProject(llmProject(r))">
+              <span class="truncate llm-row-name">[[ r.label ]]</span>
+              <span class="tnums">[[ llmMoney(r.cost) ]]</span>
+              <span class="tnums">[[ fmtTokens(r.tokens) ]]</span>
+              <span class="tnums">[[ r.tasks ]]</span>
+            </component>
+            <div v-if="!llm.d.by_project.length" class="pg-empty">暂无</div>
+          </section>
+          <!-- 按成员 -->
+          <section class="mt-panel">
+            <div class="mt-head"><div><h3>按成员</h3><p>任务记在提交人名下，手动修复和模型测试记在操作人名下</p></div></div>
+            <div v-if="llm.d.by_user.length" class="mt-row llm-row mt-row-head"><span>成员</span><span>费用</span><span>Token</span><span>调用</span></div>
+            <div v-for="r in llm.d.by_user" :key="r.key" class="mt-row llm-row">
+              <span class="truncate llm-row-name">[[ r.key ? (r.label !== r.key ? r.label + ' @' + r.key : '@' + r.key) : (llm.d.open_mode ? '本机（开放模式）' : r.label) ]]</span>
+              <span class="tnums">[[ llmMoney(r.cost) ]]</span>
+              <span class="tnums">[[ fmtTokens(r.tokens) ]]</span>
+              <span class="tnums">[[ r.calls ]]</span>
+            </div>
+            <div v-if="!llm.d.by_user.length" class="pg-empty">暂无</div>
+          </section>
+        </div>
+
+        <!-- 消耗最多的任务 -->
+        <section class="mt-panel">
+          <div class="mt-head"><div><h3>消耗最多的任务</h3><p>近 [[ llm.d.days ]] 天，按估算费用排序；失败的任务也计入</p></div></div>
+          <div v-if="llm.d.top_tasks.length" class="mt-row llm-row llm-row-task mt-row-head"><span>任务</span><span>费用</span><span>Token</span><span>调用</span></div>
+          <button v-for="r in llm.d.top_tasks" :key="r.key" type="button" class="mt-row llm-row llm-row-task" @click="openTaskById(r.key)" :title="'打开任务 #' + r.key">
+            <span class="truncate llm-row-name"><span class="llm-tid tnums">#[[ r.key ]]</span>[[ r.label ]]</span>
+            <span class="tnums">[[ llmMoney(r.cost) ]]</span>
+            <span class="tnums">[[ fmtTokens(r.tokens) ]]</span>
+            <span class="tnums">[[ r.calls ]]</span>
+          </button>
+          <div v-if="!llm.d.top_tasks.length" class="pg-empty">暂无</div>
+        </section>
+      </template>
+      <div v-else class="pg-empty">[[ llm.error || '加载中…' ]]</div>
+    </div>
+  </div>
+
+  <!-- 单价表 -->
+  <div v-if="llm.priceEdit" class="fixed inset-0 z-[80] flex items-center justify-center bg-black/50" @click.self="llm.priceEdit = null">
+    <form class="mt-modal wide" role="dialog" aria-modal="true" aria-labelledby="llm-p-title" @submit.prevent="saveLlmPricing()">
+      <h3 id="llm-p-title">模型单价表</h3>
+      <p>按模型名前缀匹配（不区分大小写，取最长匹配）。单位：每百万 token。内置的是参考价，以供应商账单为准。<template v-if="!llm.priceEdit.canEdit">只有平台管理员可以修改。</template></p>
+      <div class="llm-price-grid">
+        <label for="llm-cur">货币符号</label>
+        <input id="llm-cur" v-model="llm.priceEdit.currency" maxlength="4" class="mt-input llm-cur" :disabled="!llm.priceEdit.canEdit">
+      </div>
+      <div class="llm-price-head"><span>模型名前缀</span><span>输入单价</span><span>输出单价</span><span></span></div>
+      <div v-for="(row, i) in llm.priceEdit.prices" :key="i" class="llm-price-row">
+        <input v-model="row.match" class="mt-input" placeholder="如 deepseek" :aria-label="'第 ' + (i + 1) + ' 行模型名前缀'" :disabled="!llm.priceEdit.canEdit">
+        <input v-model.number="row.input" type="number" min="0" step="0.01" class="mt-input tnums" :aria-label="'第 ' + (i + 1) + ' 行输入单价'" :disabled="!llm.priceEdit.canEdit">
+        <input v-model.number="row.output" type="number" min="0" step="0.01" class="mt-input tnums" :aria-label="'第 ' + (i + 1) + ' 行输出单价'" :disabled="!llm.priceEdit.canEdit">
+        <button v-if="llm.priceEdit.canEdit" type="button" class="mt-icon danger" title="删除这一行" aria-label="删除这一行" @click="llm.priceEdit.prices.splice(i, 1)"><i data-lucide="x" class="w-4 h-4"></i></button>
+      </div>
+      <button v-if="llm.priceEdit.canEdit" type="button" class="dash-link" style="align-self:flex-start" @click="llm.priceEdit.prices.push({ match: '', input: 0, output: 0 })">＋ 添加一行</button>
+      <label v-if="llm.priceEdit.canEdit" class="iam-check llm-recompute"><input type="checkbox" v-model="llm.priceEdit.recompute">按新单价重算全部历史费用（不勾选时，已有的估算保持不变，只给未定价的旧调用补上费用）</label>
+      <div v-if="llm.priceEdit.error" class="ui-hint lk-err" role="alert">[[ llm.priceEdit.error ]]</div>
+      <div class="flex justify-end gap-2 mt-2">
+        <button type="button" class="mt-btn" @click="llm.priceEdit = null">[[ llm.priceEdit.canEdit ? '取消' : '关闭' ]]</button>
+        <button v-if="llm.priceEdit.canEdit" type="submit" class="mt-btn primary" :disabled="llm.priceEdit.busy">保存</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- 月度预算 -->
+  <div v-if="llm.budgetEdit" class="fixed inset-0 z-[80] flex items-center justify-center bg-black/50" @click.self="llm.budgetEdit = null">
+    <form class="mt-modal" role="dialog" aria-modal="true" aria-labelledby="llm-b-title" @submit.prevent="saveLlmBudget()">
+      <h3 id="llm-b-title">月度预算</h3>
+      <p>本工作区每月 1 日起的估算费用到提醒线、超出预算时各提醒一次（日志与日志审计里都能看到）。只做提醒，不会拦截调用。</p>
+      <label for="llm-b-amt">每月预算（[[ llmCur ]]）<span class="rd-hint">填 0 表示不设</span></label>
+      <input id="llm-b-amt" v-model.number="llm.budgetEdit.monthly" type="number" min="0" step="1" class="mt-input tnums">
+      <label for="llm-b-pct">提醒线（%）</label>
+      <input id="llm-b-pct" v-model.number="llm.budgetEdit.alert_pct" type="number" min="10" max="100" step="5" class="mt-input tnums">
+      <div v-if="llm.budgetEdit.error" class="ui-hint lk-err" role="alert">[[ llm.budgetEdit.error ]]</div>
+      <div class="flex justify-end gap-2 mt-2">
+        <button type="button" class="mt-btn" @click="llm.budgetEdit = null">取消</button>
+        <button type="submit" class="mt-btn primary" :disabled="llm.budgetEdit.busy">保存</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- 项目消耗(右侧抽屉) -->
+  <div v-if="llm.proj" class="fixed inset-0 z-[70] bg-black/50" @click.self="llm.proj = null">
+    <aside class="iam-drawer" role="dialog" aria-modal="true" aria-labelledby="llm-pj-title">
+      <div class="iam-d-head">
+        <div class="min-w-0 flex-1">
+          <h3 id="llm-pj-title" class="truncate">「[[ llm.proj.name ]]」的模型消耗</h3>
+          <div class="iam-sub">近 [[ llm.proj.d ? llm.proj.d.days : 30 ]] 天 · 费用按单价表估算</div>
+        </div>
+        <button type="button" class="mt-icon" title="关闭" aria-label="关闭" @click="llm.proj = null"><i data-lucide="x" class="w-4 h-4"></i></button>
+      </div>
+      <div class="iam-d-body custom-scroll">
+        <template v-if="llm.proj.d">
+          <div class="ui-seg" style="align-self:flex-start" role="group" aria-label="时间范围">
+            <button v-for="d in [7, 30, 90]" :key="d" type="button" :aria-pressed="llm.proj.d.days===d ? 'true' : 'false'" @click="loadProjLlm(llm.proj.id, d)">[[ d ]] 天</button>
+          </div>
+          <dl class="iam-kv">
+            <div><dt>估算费用</dt><dd class="tnums">[[ llmMoney(llm.proj.d.totals.cost) ]] <span class="iam-sub">· [[ llmDelta(llm.proj.d.totals.cost, llm.proj.d.previous.cost) ]]</span></dd></div>
+            <div><dt>Token</dt><dd class="tnums">[[ fmtTokens(llm.proj.d.totals.tokens) ]]（输入 [[ fmtTokens(llm.proj.d.totals.tokens_in) ]] · 输出 [[ fmtTokens(llm.proj.d.totals.tokens_out) ]]）</dd></div>
+            <div><dt>调用</dt><dd class="tnums">[[ llm.proj.d.totals.calls ]] 次 · [[ llm.proj.d.totals.tasks ]] 个任务</dd></div>
+          </dl>
+          <svg class="llm-mini" viewBox="0 0 100 32" preserveAspectRatio="none" role="img" :aria-label="'每日' + (llmProjSeries.base === 'cost' ? '费用' : 'token')"><rect v-for="b in llmProjSeries.bars" :key="b.x" :x="b.x" :y="b.y" :width="b.w" :height="b.h" rx="0.6"><title>[[ b.title ]]</title></rect></svg>
+          <h4 class="iam-d-h">按模型</h4>
+          <ol class="llm-share">
+            <li v-for="r in llm.proj.d.by_model" :key="r.key">
+              <div class="llm-share-row"><span class="llm-share-name truncate">[[ r.label ]]</span><b class="tnums">[[ r.unpriced && !r.cost ? '未定价' : llmMoney(r.cost) ]]</b></div>
+              <div class="llm-share-meta tnums">[[ fmtTokens(r.tokens) ]] token · [[ r.calls ]] 次<template v-if="r.unpriced && r.cost"> · 含未定价调用</template></div>
+            </li>
+            <li v-if="!llm.proj.d.by_model.length" class="llm-empty">这段时间没有模型调用</li>
+          </ol>
+          <h4 v-if="llm.proj.d.by_kind.length" class="iam-d-h">按功能</h4>
+          <ol class="iam-tl">
+            <li v-for="r in llm.proj.d.by_kind" :key="r.key"><span class="iam-tl-detail">[[ r.label ]]</span><span class="iam-tl-meta tnums">[[ llmMoney(r.cost) ]] · [[ fmtTokens(r.tokens) ]]</span></li>
+          </ol>
+          <h4 v-if="llm.proj.d.top_tasks.length" class="iam-d-h">消耗最多的任务</h4>
+          <ol class="iam-tl">
+            <li v-for="r in llm.proj.d.top_tasks" :key="r.key"><button type="button" class="iam-tl-detail text-left dash-link" @click="llm.proj = null; openTaskById(r.key)">#[[ r.key ]] [[ r.label ]]</button><span class="iam-tl-meta tnums">[[ llmMoney(r.cost) ]]</span></li>
+          </ol>
+        </template>
+        <div v-else class="pg-empty">加载中…</div>
+      </div>
+    </aside>
+  </div>
+
   <!-- 成员详情(右侧抽屉) -->
   <div v-if="iam.detail" class="fixed inset-0 z-[70] bg-black/50" @click.self="iam.detail = null">
     <aside class="iam-drawer" role="dialog" aria-modal="true" aria-labelledby="iam-d-title">
@@ -1486,6 +1731,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <div><dt>最近登录</dt><dd class="tnums">[[ iam.detail.user.last_login_at ? localTime(iam.detail.user.last_login_at) : '从未登录' ]]<template v-if="iam.detail.user.last_login_ip"> · [[ iam.detail.user.last_login_ip ]]</template></dd></div>
           <div><dt>近 30 天操作</dt><dd class="tnums">[[ iam.detail.user.actions_30d ]] 次<template v-if="iam.detail.user.failed_logins"> · 当前连续输错密码 [[ iam.detail.user.failed_logins ]] 次</template></dd></div>
           <div><dt>所在工作区</dt><dd class="tnums">[[ iam.detail.user.workspace_count ]] 个</dd></div>
+          <div><dt>近 30 天模型消耗</dt><dd class="tnums"><template v-if="iam.detailLlm && iam.detailLlm.totals.calls">[[ llmMoney(iam.detailLlm.totals.cost) ]] · [[ fmtTokens(iam.detailLlm.totals.tokens) ]] token · [[ iam.detailLlm.totals.calls ]] 次
+            <span v-if="iam.detailLlm.by_model.length" class="iam-sub llm-d-models">[[ iam.detailLlm.by_model.slice(0, 3).map(r => r.label + ' ' + llmMoney(r.cost)).join('，') ]]</span></template><template v-else>—</template></dd></div>
         </dl>
         <div v-if="canManageMember(iam.detail.user)" class="iam-d-acts">
           <button type="button" class="mt-btn" @click="openIamEdit(iam.detail.user)"><i data-lucide="pencil" class="w-4 h-4"></i>编辑</button>
@@ -1649,9 +1896,10 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <!-- 工作区: 名称 / 套餐与用量 / 离开 -->
       <div v-show="adminTab==='workspace'" class="space-y-6">
         <section class="mt-panel p-5 max-w-[640px]">
-          <!-- 模型用量: 界面生成与 AI 视觉修复消耗的 token, 近 30 天 -->
+          <!-- 模型用量: 近 30 天概要, 明细在「模型消耗」 -->
         <div class="dash-sec-head">
           <h2 class="text-base font-semibold text-slate-100">模型用量<span class="tok-sub">近 30 天 · [[ fmtTokens(tokenUsage.tokens_in + tokenUsage.tokens_out) ]] token</span></h2>
+          <button type="button" class="dash-link" @click="goModule('llmcost')">查看模型消耗</button>
         </div>
         <div class="tok-seg" role="tablist" aria-label="用量分组">
           <button v-for="g in [['day','按天'],['project','按项目'],['model','按模型']]" :key="g[0]" type="button" role="tab"
@@ -1664,7 +1912,6 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <div class="tok-meta tnums">[[ r.tasks ]] 个任务 · 输入 [[ fmtTokens(r.tokens_in) ]] · 输出 [[ fmtTokens(r.tokens_out) ]]<template v-if="r.ai_repair"> · 修复 [[ fmtTokens(r.ai_repair) ]]</template></div>
           </li>
         </ol>
-        <div v-else class="dash-feed-empty">[[ tokenUsage.loaded ? '近 30 天还没有模型调用。' : '加载中…' ]]</div>
         </section>
         <section class="mt-panel">
           <div class="mt-head"><div><h3>工作区名称</h3><p>成员在侧栏和邀请页看到的名字</p></div></div>
@@ -2060,6 +2307,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <span class="px-2 py-1 rounded-md bg-slate-950/60 border border-white/[0.06] text-[10px] text-slate-400">成功 <b class="text-emerald-300 tnums">[[ currentProject.ok_cnt ]]</b></span>
           <span v-if="currentProject.fail_cnt" class="px-2 py-1 rounded-md bg-slate-950/60 border border-white/[0.06] text-[10px] text-slate-400">失败 <b class="text-rose-400 tnums">[[ currentProject.fail_cnt ]]</b></span>
           <span class="px-2 py-1 rounded-md bg-slate-950/60 border border-white/[0.06] text-[10px] text-slate-400">平均还原度 <b :class="avgClass(currentProject.avg_score)" class="tnums">[[ currentProject.avg_score != null ? currentProject.avg_score.toFixed(1) : '—' ]]</b></span>
+          <button v-if="projLlm.id === currentProject.id && projLlm.totals" type="button" class="llm-chip px-2 py-1 rounded-md bg-slate-950/60 border border-white/[0.06] text-[10px] text-slate-400" @click="openProjLlm(currentProject)" title="看这个项目的模型消耗明细">近 30 天模型消耗 <b class="text-slate-200 tnums">[[ projLlm.totals.calls ? llmMoney(projLlm.totals.cost) : '—' ]]</b><i data-lucide="chevron-right" class="w-3 h-3"></i></button>
         </div>
         <div class="flex-1"></div>
         <button @click="switchView('dashboard')" class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-white/[0.08] text-[10.5px] text-slate-400 hover:text-slate-100 transition-all">
@@ -2090,6 +2338,12 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <span class="text-[12px] text-slate-500">交互可用</span>
           <span class="serif-num text-[22px] leading-none" :class="(selectedTask.stats.interaction_check.failed || []).length ? 'text-amber-400' : 'text-slate-100'">[[ selectedTask.stats.interaction_check.ok ]]<span class="text-[13px] text-slate-500">/[[ selectedTask.stats.interaction_check.checked ]]</span></span>
           <span v-if="selectedTask.stats.interaction_penalty" class="text-[11px] text-amber-400 pl-0.5">扣[[ selectedTask.stats.interaction_penalty ]]</span>
+        </div>
+        <div v-if="taskTokens.id === selectedTask.id && taskTokens.calls" class="flex items-baseline gap-1 pl-3 ml-1 border-l border-white/[0.08]"
+          :title="'本任务调用大模型 ' + taskTokens.calls + ' 次 · ' + taskTokens.total.toLocaleString() + ' token' + (taskTokens.unpriced ? ' · 含未定价调用' : '') + '\n' + taskTokens.rows.map(r => (r.step || r.kind_label) + ' · ' + r.model + '：' + llmMoney(r.cost, false, false, taskTokens.currency)).join('\n')">
+          <span class="text-[12px] text-slate-500">模型消耗</span>
+          <span class="serif-num text-[22px] leading-none text-slate-100">[[ llmMoney(taskTokens.cost, false, false, taskTokens.currency) ]]</span>
+          <span class="text-[12px] text-slate-500 tnums pl-0.5">[[ fmtTokens(taskTokens.total) ]] token</span>
         </div>
         <div class="flex-1"></div>
         <!-- 操作按主次: 主按钮下载, 次按钮部署, 其余进「更多」; 失败/运行中不显示交付操作(失败只在下方给一个「重试」) -->
@@ -2207,10 +2461,10 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         <p v-if="fitDetail(selectedTask).review_mode !== 'vision'" class="fit-note warn">[[ fitDetail(selectedTask).review_mode === 'text' ? '当前模型未通过看图自检，本次验收只依据页面源码和浏览器体检数据，外观类条目可信度较低。' : '本次未经模型验收，分数只依据浏览器体检数据。' ]]</p>
         <p v-for="(d, i) in (fitGen(selectedTask) ? fitGen(selectedTask).remaining_defects || [] : [])" :key="'d' + i" class="fit-note warn">仍存在：[[ d ]]</p>
         <div v-if="taskTokens.id === selectedTask.id && taskTokens.rows.length" class="fit-tokens">
-          <div class="fit-tokens-head">Token 用量<span class="tnums">输入 [[ fmtTokens(taskTokens.tokens_in) ]] · 输出 [[ fmtTokens(taskTokens.tokens_out) ]] · 合计 [[ fmtTokens(taskTokens.total) ]]</span></div>
+          <div class="fit-tokens-head">模型消耗<span class="tnums">[[ taskTokens.calls ]] 次调用 · 输入 [[ fmtTokens(taskTokens.tokens_in) ]] · 输出 [[ fmtTokens(taskTokens.tokens_out) ]] · 估算 [[ llmMoney(taskTokens.cost, false, false, taskTokens.currency) ]]<template v-if="taskTokens.unpriced">（含未定价调用）</template></span></div>
           <table class="tnums">
-            <thead><tr><th>步骤</th><th>模型</th><th>输入</th><th>输出</th></tr></thead>
-            <tbody><tr v-for="(r, i) in taskTokens.rows" :key="i"><td>[[ r.step || r.kind ]]</td><td>[[ r.model ]]</td><td>[[ r.tokens_in.toLocaleString() ]]</td><td>[[ r.tokens_out.toLocaleString() ]]</td></tr></tbody>
+            <thead><tr><th>步骤</th><th>模型</th><th>调用</th><th>输入</th><th>输出</th><th>费用</th></tr></thead>
+            <tbody><tr v-for="(r, i) in taskTokens.rows" :key="i"><td>[[ r.step || r.kind_label || r.kind ]]</td><td>[[ r.model ]]</td><td>[[ r.calls ]]</td><td>[[ r.tokens_in.toLocaleString() ]]</td><td>[[ r.tokens_out.toLocaleString() ]]</td><td>[[ r.unpriced && !r.cost ? '未定价' : llmMoney(r.cost, false, false, taskTokens.currency) ]]</td></tr></tbody>
           </table>
         </div>
           </div>
@@ -3610,6 +3864,7 @@ const __vueApp = createApp({
         { title: '团队', adminOnly: true, items: [
           { id: 'users', label: '用户管理', icon: 'users', desc: '成员、角色、登录状态与账号安全' },
           { id: 'audit', label: '日志审计', icon: 'scroll-text', desc: '谁在什么时候做了什么，可筛选和导出' },
+          { id: 'llmcost', label: '模型消耗', icon: 'coins', desc: '大模型 token 与估算费用：总量、走势、按模型、按项目和成员' },
         ]},
       ],
       schedulerBatches: [],
@@ -3701,7 +3956,9 @@ const __vueApp = createApp({
                catalog: { categories: [], actions: [] }, usernames: [], entry: null, context: [],
                f: { q: '', category: '', action: '', username: '', ip: '', result: '', sensitive: false, range: '7d' },
                stats: { days: 7, total: 0, by_day: [], by_category: [], top_users: [], active_users: 0, ip_count: 0, failed_24h: 0, sensitive: 0 } },
-      iam: { loaded: false, q: '', role: '', status: '', sel: [], detail: null, edit: null,
+      llm: { days: 30, d: null, error: '', metric: 'cost', hover: null, priceEdit: null, budgetEdit: null, proj: null, currency: '¥' },
+      projLlm: { id: null, totals: null },
+      iam: { loaded: false, q: '', role: '', status: '', sel: [], detail: null, edit: null, llm: {}, detailLlm: null,
              summary: { total: 0, active: 0, locked: 0, disabled: 0, managers: 0, never_logged_in: 0 },
              me: { role: '', platform_admin: false },
              policy: { lock_after: 5, lock_window_min: 15, lock_minutes: 15, session_hours: 12, audit_retention_days: 90 } },
@@ -3848,6 +4105,30 @@ const __vueApp = createApp({
       }
       return null;
     },
+    llmCur() { return (this.llm.d && this.llm.d.currency) || this.llm.currency || '¥'; },
+    // 占比按费用算; 一段时间里全是未定价调用(费用为 0)时退回按 token
+    llmShareBase() { return this.llm.d && this.llm.d.totals.cost > 0 ? 'cost' : 'tokens'; },
+    llmTrend() {
+      const s = (this.llm.d && this.llm.d.series) || [];
+      const key = this.llm.metric === 'cost' ? 'cost' : 'tokens';
+      const raw = Math.max(0, ...s.map(b => b[key]));
+      const max = this.llmNiceMax(raw);
+      return { max, bars: s.map(b => Object.assign({}, b, { h: raw ? Math.max(b[key] ? 1.5 : 0, b[key] / max * 100) : 0 })) };
+    },
+    llmTipPos() {
+      const n = this.llmTrend.bars.length, i = this.llm.hover;
+      const x = n ? (i + 0.5) / n * 100 : 0;
+      return x > 70 ? { right: (100 - x) + '%', transform: 'translateX(12px)' } : { left: x + '%', transform: 'translateX(-12px)' };
+    },
+    llmProjSeries() {
+      const d = this.llm.proj && this.llm.proj.d;
+      const s = (d && d.series) || [];
+      const base = d && d.totals.cost > 0 ? 'cost' : 'tokens';
+      const max = Math.max(0, ...s.map(b => b[base])) || 1;
+      const w = 100 / Math.max(1, s.length);
+      return { base, bars: s.map((b, i) => { const h = b[base] ? Math.max(1, b[base] / max * 30) : 0;
+        return { x: i * w + w * 0.15, w: w * 0.7, h, y: 32 - h, title: b.date + '：' + this.llmMoney(b.cost) + ' · ' + b.tokens.toLocaleString() + ' token' }; }) };
+    },
     iamUsers() {
       const q = this.iam.q.trim().toLowerCase();
       return this.users.filter(u => (!this.iam.role || u.role === this.iam.role)
@@ -3916,6 +4197,7 @@ const __vueApp = createApp({
         admin: ['团队与设置', '工作区、用量与平台设置'],
         users: ['用户管理', '成员、角色、登录状态与账号安全'],
         audit: ['日志审计', '登录与操作记录，可筛选和导出'],
+        llmcost: ['模型消耗', '大模型 token 与估算费用'],
       };
       const t = m[this.view] || ['Clonjurer', ''];
       return { title: t[0], sub: t[1] };
@@ -4206,7 +4488,7 @@ const __vueApp = createApp({
     searchQ() { this.pg.page = 1; },
     statusFilter() { this.pg.page = 1; },
     currentBatchId() { this.pg.page = 1; },
-    currentProjectId() { this.pg.page = 1; },
+    currentProjectId(v) { this.pg.page = 1; if (v) this.loadProjLlm(Number(v)); },
     groupByDomain() { this.pg.page = 1; },
     aiPoolSearch() { this.aiPoolPage = 1; },
     aiPoolSort() { this.aiPoolPage = 1; },
@@ -4566,6 +4848,7 @@ const __vueApp = createApp({
         const ids = new Set(this.users.map(u => u.id));
         this.iam.sel = this.iam.sel.filter(id => ids.has(id));
       } catch (e) { return; } finally { this.iam.loaded = true; this.iconRefresh(); }
+      this.loadUsersLlm();
       if (!this.usage.plan) this.loadUsage();
     },
     isMe(u) { return !!(this.auth.user && u && u.id === this.auth.user.id); },
@@ -4606,7 +4889,10 @@ const __vueApp = createApp({
       const { ok, data } = await this.apiJson('/api/v4/users/' + u.id);
       if (!ok) { this.toast('❌ ' + (data.error || '读取失败')); return; }
       this.iam.detail = data;
+      this.iam.detailLlm = null;
       this.iconRefresh();
+      const r = await this.apiJson('/api/v4/users/llm-usage?days=30&username=' + encodeURIComponent(u.username));
+      if (r.ok && this.iam.detail && this.iam.detail.user.username === u.username) this.iam.detailLlm = r.data;
     },
     openIamEdit(u) {
       this.iam.edit = { id: u.id, username: u.username, role: u.role, role0: u.role,
@@ -5917,7 +6203,7 @@ const __vueApp = createApp({
       this.fitDrawer = false;
       if (window.innerWidth < 640) this.previewWidth = 'mobile';     // 手机上默认按手机宽度预览, 不把桌面页挤成一条
       this.taskTokens = { id: null, rows: [], tokens_in: 0, tokens_out: 0, total: 0 };
-      if (this.isGenTask(task) || (task.stats && task.stats.generate)) this.loadTaskTokens(task.id);
+      this.loadTaskTokens(task.id);      // 克隆任务也可能有视觉修复 / Mock 润色的模型消耗
       this.previewTaskId = task.id;
       this.activeTab = 'sandbox';
       this.view = 'task';
@@ -6025,6 +6311,7 @@ const __vueApp = createApp({
       if (id === 'remote') this.loadRemote();
       if (id === 'users') { this.iam.sel = []; this.loadUsers(); }
       if (id === 'audit') { this.loadAudit(1); this.loadAuditStats(); }
+      if (id === 'llmcost') this.loadLlm();
       if (id === 'browserpool' || id === 'scheduler') { this.loadLive(); this.refreshTelemetry().then(() => { if (id === 'scheduler') this.schedulerBatches = this.batches; }); }
       if (id === 'scheduler') this.loadSchedules();
       if (id === 'ai') { this.loadAiJobs(); if (!this.previewTaskId && this.aiList.length) this.aiPick(this.aiList[0]); }
@@ -6417,6 +6704,97 @@ const __vueApp = createApp({
       if (el && sc) sc.scrollTo({ top: Math.max(0, el.offsetTop - 40), behavior: 'smooth' });
     },
     fmtTokens(n) { n = Number(n || 0); return n >= 1e8 ? (n / 1e8).toFixed(2) + ' 亿' : n >= 1e4 ? (n / 1e4).toFixed(1) + ' 万' : n.toLocaleString(); },
+    // ---- 模型消耗 ----
+    llmMoney(v, big, unit, cur) {
+      v = Number(v || 0); cur = cur || this.llmCur;
+      if (unit) return cur + (v >= 100 ? v.toFixed(0) : v.toFixed(2).replace(/\.?0+$/, ''));
+      if (v > 0 && v < 0.01) return '<' + cur + '0.01';
+      return cur + (big && v >= 1000 ? Math.round(v).toLocaleString() : v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+    },
+    llmNiceMax(v) {
+      if (!v) return 1;
+      const p = Math.pow(10, Math.floor(Math.log10(v))), m = v / p;
+      return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p;
+    },
+    llmAxis(v) { return this.llm.metric === 'cost' ? this.llmCur + (v >= 10 ? Math.round(v).toLocaleString() : +v.toFixed(2)) : this.fmtTokens(Math.round(v)).replace(' ', ''); },
+    llmDelta(cur, prev) {
+      if (!prev && !cur) return '与上一周期持平（都没有调用）';
+      if (!prev) return '上一周期没有费用';
+      const d = (cur - prev) / prev * 100;
+      return (Math.abs(d) < 0.5 ? '与上一周期持平' : '比上一周期' + (d > 0 ? '多 ' : '少 ') + Math.abs(d).toFixed(0) + '%') + '（' + this.llmMoney(prev) + '）';
+    },
+    llmPct(r) {
+      const base = this.llmShareBase, tot = this.llm.d ? this.llm.d.totals[base] : 0;
+      if (!tot) return '0%';
+      const v = r[base] / tot * 100;
+      return (v > 0 && v < 1 ? '<1' : Math.round(v)) + '%';
+    },
+    llmPctW(r) {
+      const base = this.llmShareBase, tot = this.llm.d ? this.llm.d.totals[base] : 0;
+      return (tot ? Math.min(100, r[base] / tot * 100) : 0).toFixed(2) + '%';
+    },
+    llmProject(r) { return r.key ? (this.projects || []).find(p => p.id === r.key) : null; },
+    async loadLlm(days) {
+      if (days) this.llm.days = days;
+      this.llm.hover = null;
+      const { ok, data } = await this.apiJson('/api/v4/workspace/llm-usage?days=' + this.llm.days);
+      if (!ok) { this.llm.error = data.error || '读取失败'; return; }
+      this.llm.d = data; this.llm.error = ''; this.llm.currency = data.currency;
+      if (!this.projects || !this.projects.length) this.loadProjects();
+      this.iconRefresh();
+    },
+    async openLlmPricing(focus) {
+      const { ok, data } = await this.apiJson('/api/v4/llm-pricing');
+      if (!ok) { this.toast('❌ ' + (data.error || '读取失败')); return; }
+      const prices = (data.prices || []).map(p => Object.assign({}, p));
+      for (const m of (focus || [])) if (!prices.some(p => m.toLowerCase().startsWith(p.match))) prices.push({ match: m.toLowerCase(), input: 0, output: 0 });
+      this.llm.priceEdit = { currency: data.currency, prices, canEdit: !!data.can_edit, recompute: false, busy: false, error: '' };
+      this.iconRefresh();
+    },
+    async saveLlmPricing() {
+      const e = this.llm.priceEdit; e.busy = true; e.error = '';
+      const { ok, data } = await this.apiJson('/api/v4/admin/llm-pricing', { method: 'PUT',
+        body: JSON.stringify({ currency: e.currency, prices: e.prices, recompute: e.recompute }) });
+      e.busy = false;
+      if (!ok) { e.error = data.error || '保存失败'; return; }
+      this.llm.priceEdit = null;
+      this.toast('单价表已保存' + (e.recompute ? '，历史费用已按新单价重算' : ''));
+      this.loadLlm();
+    },
+    async openLlmBudget() {
+      const { ok, data } = await this.apiJson('/api/v4/workspace/llm-budget');
+      if (!ok) { this.toast('❌ ' + (data.error || '读取失败')); return; }
+      this.llm.currency = data.currency;
+      this.llm.budgetEdit = { monthly: data.monthly, alert_pct: data.alert_pct, busy: false, error: '' };
+    },
+    async saveLlmBudget() {
+      const e = this.llm.budgetEdit; e.busy = true; e.error = '';
+      const { ok, data } = await this.apiJson('/api/v4/workspace/llm-budget', { method: 'PUT',
+        body: JSON.stringify({ monthly: e.monthly || 0, alert_pct: e.alert_pct || 80 }) });
+      e.busy = false;
+      if (!ok) { e.error = data.error || '保存失败'; return; }
+      this.llm.budgetEdit = null;
+      this.toast(data.monthly ? '月度预算已保存' : '已取消月度预算');
+      if (this.view === 'llmcost') this.loadLlm();
+    },
+    async loadProjLlm(id, days) {
+      const { ok, data } = await this.apiJson('/api/projects/' + id + '/llm-usage?days=' + (days || 30));
+      if (!ok) return null;
+      this.llm.currency = data.currency;
+      if (!days || days === 30) this.projLlm = { id, totals: data.totals };
+      if (this.llm.proj && this.llm.proj.id === id) this.llm.proj = Object.assign({}, this.llm.proj, { d: data });
+      this.iconRefresh();
+      return data;
+    },
+    openProjLlm(p) {
+      this.llm.proj = { id: p.id, name: p.name, d: null };
+      this.loadProjLlm(p.id);
+      this.iconRefresh();
+    },
+    async loadUsersLlm() {
+      const { ok, data } = await this.apiJson('/api/v4/users/llm-usage?days=30');
+      if (ok) { this.iam.llm = data.users || {}; this.llm.currency = data.currency; }
+    },
     async loadTaskTokens(id) {
       try {
         const r = await fetch('/api/tasks/' + id + '/tokens');

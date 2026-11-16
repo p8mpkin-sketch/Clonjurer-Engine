@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 
 import config
-from core import live
+from core import live, llm_usage
 from core.browser_pool import SyncBrowserPool
 from core.cloner_engine import ClonerEngine
 from core.uir import generate as uir_generate
@@ -141,12 +141,16 @@ class Scheduler:
         self.bus.publish(task["id"], "SCHED",
                          f"Worker-{index} 接手任务 #{task['id']} ({task['domain']})")
         try:
-            if uir_generate.is_generate_task(task):
-                # 通用 UI 重建引擎(L1 生成任务): 按 target_url 前缀分流, 不进克隆管线
-                uir_generate.run_generation_task(task, self.db, self.bus, self.pool)
-            else:
-                engine = ClonerEngine(task["id"], self.db, self.bus, self.pool)
-                engine.run()
+            is_gen = uir_generate.is_generate_task(task)
+            # 本线程里的模型调用都记到这个任务、这个任务的提交人名下(token 流水)
+            with llm_usage.scope(task_id=task["id"], kind="generate" if is_gen else "clone",
+                                 username=task.get("created_by")):
+                if is_gen:
+                    # 通用 UI 重建引擎(L1 生成任务): 按 target_url 前缀分流, 不进克隆管线
+                    uir_generate.run_generation_task(task, self.db, self.bus, self.pool)
+                else:
+                    engine = ClonerEngine(task["id"], self.db, self.bus, self.pool)
+                    engine.run()
             self._package_if_requested(task)
             self._record_usage(task["id"])
         except Exception as exc:

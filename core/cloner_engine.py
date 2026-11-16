@@ -61,7 +61,7 @@ except ImportError:  # pragma: no cover
 import config
 from core import ai_mock_generator, ai_vision_repair, flask_generator, smart_downloader
 from core import pattern_detector, strategy_packs
-from core import live
+from core import live, llm_usage
 from core import pixel_calibrator
 
 from core.clone import interaction_check
@@ -800,7 +800,8 @@ class ClonerEngine(CaptureMixin, DownloadMixin, LocalizeMixin, ScoringMixin):
         model = (self.cfg.get("ai_model") or "").strip() or config.AI_MODEL
         if not api_key:
             return None
-        return {"base_url": base_url.rstrip("/"), "api_key": api_key, "model": model}
+        # 贴上当前任务的计量归属: 之后不论在哪个线程发请求, token 都记在本任务名下
+        return llm_usage.tag({"base_url": base_url.rstrip("/"), "api_key": api_key, "model": model})
 
     # ------------------------------------------------------------------
     def _execute(self, origin: str, domain: str):

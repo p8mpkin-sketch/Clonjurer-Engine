@@ -67,7 +67,7 @@ from flask import (Flask, Response, abort, jsonify, redirect, render_template, r
 
 import config
 from core import archive, flask_generator, iam, live, security
-from core import ai_mock_generator
+from core import ai_mock_generator, llm_usage
 from core.clone.api_match import pick_entry
 from core.browser_pool import SyncBrowserPool
 from core.logger import LogBus
@@ -181,6 +181,13 @@ def _ws_ctx():
                 session["ws"] = spaces[0]["id"]
     g.ws_ctx = ctx
     return ctx
+
+
+def _me_name() -> str:
+    """当前登录成员的用户名(开放模式为空): 模型消耗记在谁名下。"""
+    if not _auth_required():
+        return ""
+    return (_current_user() or {}).get("username") or ""
 
 
 def _cur_ws() -> int:
@@ -1098,10 +1105,29 @@ def task_file(task_id):
 def task_tokens(task_id):
     """本任务的大模型 token 流水(界面生成各步 / AI 视觉修复各轮)与合计。"""
     _task_or_404(task_id)
-    rows = db.task_token_usage(task_id)
+    raw = db.task_token_usage(task_id)
+    # 流水是每次请求一行(一次生成几十行): 详情页按「功能 · 步骤 · 模型」合并, 保持首次出现的顺序
+    merged: dict = {}
+    for r in raw:
+        k = (r["kind"], r["step"], r["model"])
+        m = merged.setdefault(k, {"kind": r["kind"], "kind_label": llm_usage.KINDS.get(r["kind"], r["kind"]),
+                                  "step": r["step"], "model": r["model"], "calls": 0, "tokens_in": 0,
+                                  "tokens_out": 0, "cost": 0.0, "unpriced": False})
+        m["calls"] += 1
+        m["tokens_in"] += r["tokens_in"]
+        m["tokens_out"] += r["tokens_out"]
+        if r.get("cost") is None:
+            m["unpriced"] = m["unpriced"] or bool(r["tokens_in"] or r["tokens_out"])
+        else:
+            m["cost"] += r["cost"]
+    rows = list(merged.values())
+    for m in rows:
+        m["cost"] = round(m["cost"], 6)
     tin = sum(r["tokens_in"] for r in rows)
     tout = sum(r["tokens_out"] for r in rows)
     return jsonify({"rows": rows, "tokens_in": tin, "tokens_out": tout, "total": tin + tout,
+                    "calls": sum(r["calls"] for r in rows), "cost": round(sum(r["cost"] for r in rows), 6),
+                    "unpriced": any(r["unpriced"] for r in rows), "currency": llm_usage.currency(),
                     "models": sorted({r["model"] for r in rows if r["model"]})})
 
 
@@ -1119,6 +1145,227 @@ def usage_tokens():
     rows = db.token_usage_summary(_cur_ws(), group, since)
     return jsonify({"group": group, "days": days, "rows": rows,
                     "tokens_in": sum(r["tokens_in"] for r in rows), "tokens_out": sum(r["tokens_out"] for r in rows)})
+
+
+# ---------------------------------------------------------------------------
+# 模型消耗: 总览(工作区管理员) / 项目消耗(成员可看) / 成员用量 / 月度预算 / 单价表(平台管理员)
+# ---------------------------------------------------------------------------
+LLM_PERIODS = (7, 30, 90)
+
+
+def _utc_str(dt) -> str:
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _llm_days() -> int:
+    try:
+        days = int(request.args.get("days", 30))
+    except ValueError:
+        days = 30
+    return days if days in LLM_PERIODS else 30
+
+
+def _llm_series(wid: int, days: int, since: str, **flt) -> list:
+    """近 N 天逐日序列(本机日期, 没有调用的日子补 0), 走势图用。"""
+    got = {r["key"]: r for r in db.llm_usage_group(wid, "day", since, **flt)}
+    today = datetime.now().date()
+    out = []
+    for i in range(days - 1, -1, -1):
+        d = (today - timedelta(days=i)).isoformat()
+        r = got.get(d) or {}
+        out.append({"date": d, "tokens": r.get("tokens", 0), "tokens_in": r.get("tokens_in", 0),
+                    "tokens_out": r.get("tokens_out", 0), "cost": r.get("cost", 0), "calls": r.get("calls", 0)})
+    return out
+
+
+def _with_kind_labels(rows: list) -> list:
+    for r in rows:
+        r["label"] = llm_usage.KINDS.get(r["key"], r["key"] or "其他")
+    return rows
+
+
+def _with_price(rows: list) -> list:
+    for r in rows:
+        p = llm_usage.price_for(r["key"])
+        r["price"] = {"input": p["input"], "output": p["output"], "match": p["match"]} if p else None
+    return rows
+
+
+def _budget_cfg(wid: int) -> dict:
+    cfg = _parse_json(db.get_setting(f"llm_budget:{wid}", "") or "{}")
+    try:
+        monthly = max(0.0, float(cfg.get("monthly") or 0))
+    except (TypeError, ValueError):
+        monthly = 0.0
+    try:
+        pct = max(10, min(100, int(cfg.get("alert_pct") or 80)))
+    except (TypeError, ValueError):
+        pct = 80
+    return {"monthly": monthly, "alert_pct": pct}
+
+
+def _budget_status(wid: int) -> dict:
+    """本月(每月 1 日起, UTC)估算费用 vs 月度预算。level: none(未设) / ok / warn(过提醒线) / over(超预算)。"""
+    b = _budget_cfg(wid)
+    spent = db.llm_usage_totals(wid, _month_start())
+    used = spent["cost"]
+    level, pct = "none", None
+    if b["monthly"] > 0:
+        pct = round(used / b["monthly"] * 100, 1)
+        level = "over" if pct >= 100 else "warn" if pct >= b["alert_pct"] else "ok"
+    return {"monthly": b["monthly"], "alert_pct": b["alert_pct"], "spent": round(used, 4),
+            "tokens": spent["tokens"], "pct": pct, "level": level, "month": _month_start()[:7],
+            "unpriced": spent["unpriced"]}
+
+
+_budget_lock = threading.Lock()
+
+
+def _budget_check(wid: int):
+    """每记一笔就看一眼本月预算: 首次越过提醒线 / 超出预算时各提醒一次(事件流 + 审计), 同月不重复。"""
+    if not db.get_setting(f"llm_budget:{wid}", ""):
+        return
+    st = _budget_status(wid)
+    if st["level"] not in ("warn", "over"):
+        return
+    with _budget_lock:
+        mark = f"{st['month']}:{st['level']}"
+        key = f"llm_budget_note:{wid}"
+        sent = db.get_setting(key, "")
+        if sent == mark or (st["level"] == "warn" and sent == f"{st['month']}:over"):
+            return
+        db.set_setting(key, mark)
+    cur = llm_usage.currency()
+    msg = (f"本月模型消耗已超出预算: {cur}{st['spent']:.2f} / {cur}{st['monthly']:.2f}" if st["level"] == "over"
+           else f"本月模型消耗已达预算的 {st['pct']:.0f}%: {cur}{st['spent']:.2f} / {cur}{st['monthly']:.2f}")
+    with suppress(Exception):
+        bus.publish(None, "BUDGET", msg, "WARN")
+    with suppress(Exception):
+        db.log_audit("system", "llm.budget", msg, "local", workspace_id=wid)
+
+
+def _llm_sink(rec: dict):
+    """core/llm_usage.SINK: 落库 + 预算提醒。"""
+    wid = db.add_llm_call(rec)
+    if rec.get("cost"):
+        with suppress(Exception):
+            _budget_check(wid or 1)
+
+
+def _pricing_payload() -> dict:
+    return {"currency": llm_usage.currency(), "prices": llm_usage.prices(), "unit": "每百万 token",
+            "can_edit": (not _auth_required()) or _is_platform_admin(_current_user())}
+
+
+@app.get("/api/v4/workspace/llm-usage")
+def v4_llm_usage():
+    """模型消耗总览: ?days=7|30|90。总量与上一周期对比、逐日走势、按模型 / 功能 / 项目 / 成员 / 任务。"""
+    wid, days = _cur_ws(), _llm_days()
+    now = datetime.now(timezone.utc)
+    since, prev = _utc_str(now - timedelta(days=days)), _utc_str(now - timedelta(days=days * 2))
+    by_model = _with_price(db.llm_usage_group(wid, "model", since))
+    return jsonify({
+        "days": days, "currency": llm_usage.currency(),
+        "totals": db.llm_usage_totals(wid, since),
+        "previous": db.llm_usage_totals(wid, prev, since),
+        "all_time": db.llm_usage_totals(wid),
+        "series": _llm_series(wid, days, since),
+        "by_model": by_model,
+        "by_kind": _with_kind_labels(db.llm_usage_group(wid, "kind", since)),
+        "by_project": db.llm_usage_group(wid, "project", since),
+        "by_user": db.llm_usage_group(wid, "user", since),
+        "top_tasks": [r for r in db.llm_usage_group(wid, "task", since, limit=11) if r["key"]][:10],
+        "unpriced_models": [r["key"] for r in by_model if r["price"] is None and r["tokens"]],
+        "budget": _budget_status(wid),
+        "pricing": _pricing_payload(),
+        "open_mode": not _auth_required(),
+    })
+
+
+@app.get("/api/v4/workspace/llm-budget")
+def v4_llm_budget_get():
+    return jsonify(dict(_budget_status(_cur_ws()), currency=llm_usage.currency()))
+
+
+@app.put("/api/v4/workspace/llm-budget")
+def v4_llm_budget_put():
+    """月度预算: {monthly: 金额(0 = 不设), alert_pct: 提醒线百分比 10~100}。"""
+    wid = _cur_ws()
+    data = request.get_json(silent=True) or {}
+    try:
+        monthly = float(data.get("monthly") or 0)
+        pct = int(data.get("alert_pct") or 80)
+    except (TypeError, ValueError):
+        return jsonify({"error": "预算金额与提醒线须为数字"}), 400
+    if monthly < 0 or monthly > 1e9:
+        return jsonify({"error": "预算金额超出范围"}), 400
+    if not 10 <= pct <= 100:
+        return jsonify({"error": "提醒线须在 10% ~ 100% 之间"}), 400
+    db.set_setting(f"llm_budget:{wid}", json.dumps({"monthly": round(monthly, 2), "alert_pct": pct}))
+    db.set_setting(f"llm_budget_note:{wid}", "")      # 改了预算重新判断是否需要提醒
+    cur = llm_usage.currency()
+    _audit("llm.budget_update", f"月度模型预算: {cur}{monthly:.2f}, 提醒线 {pct}%" if monthly else "取消月度模型预算")
+    return jsonify(dict(_budget_status(wid), currency=cur))
+
+
+@app.get("/api/v4/users/llm-usage")
+def v4_users_llm_usage():
+    """用户管理页: 各成员近 N 天的模型用量(按用户名); ?username= 给出单人按模型 / 功能的明细。"""
+    wid, days = _cur_ws(), _llm_days()
+    since = _utc_str(datetime.now(timezone.utc) - timedelta(days=days))
+    name = request.args.get("username")
+    if name is not None:
+        return jsonify({"days": days, "currency": llm_usage.currency(), "username": name,
+                        "totals": db.llm_usage_totals(wid, since, username=name),
+                        "by_model": db.llm_usage_group(wid, "model", since, username=name),
+                        "by_kind": _with_kind_labels(db.llm_usage_group(wid, "kind", since, username=name)),
+                        "series": _llm_series(wid, days, since, username=name)})
+    rows = db.llm_usage_group(wid, "user", since)
+    return jsonify({"days": days, "currency": llm_usage.currency(),
+                    "users": {r["key"]: {k: r[k] for k in ("calls", "tokens", "cost", "unpriced")} for r in rows}})
+
+
+@app.get("/api/projects/<int:project_id>/llm-usage")
+def project_llm_usage(project_id):
+    """项目页: 这个项目近 N 天的模型消耗(成员可看)。"""
+    proj = db.get_project(project_id)
+    wid = _cur_ws()
+    if proj is None or proj.get("workspace_id") != wid:
+        return jsonify({"error": "项目不存在"}), 404
+    days = _llm_days()
+    now = datetime.now(timezone.utc)
+    since, prev = _utc_str(now - timedelta(days=days)), _utc_str(now - timedelta(days=days * 2))
+    return jsonify({"days": days, "currency": llm_usage.currency(), "project_id": project_id,
+                    "totals": db.llm_usage_totals(wid, since, project_id=project_id),
+                    "previous": db.llm_usage_totals(wid, prev, since, project_id=project_id),
+                    "series": _llm_series(wid, days, since, project_id=project_id),
+                    "by_model": db.llm_usage_group(wid, "model", since, project_id=project_id),
+                    "by_kind": _with_kind_labels(db.llm_usage_group(wid, "kind", since, project_id=project_id)),
+                    "top_tasks": [r for r in db.llm_usage_group(wid, "task", since, project_id=project_id, limit=6)
+                                  if r["key"]][:5]})
+
+
+@app.get("/api/v4/llm-pricing")
+def v4_llm_pricing_get():
+    return jsonify(_pricing_payload())
+
+
+@app.put("/api/v4/admin/llm-pricing")
+def v4_llm_pricing_put():
+    """单价表(平台级): {currency, prices: [{match, input, output}], recompute: bool}。
+    未定价的旧调用总会按新表补算; recompute=true 时已有费用的历史流水也按新单价重算, 否则保留当时的估算。"""
+    data = request.get_json(silent=True) or {}
+    try:
+        prices = llm_usage.normalize_prices(data.get("prices"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    cur = (str(data.get("currency") or "").strip() or llm_usage.currency())[:4]
+    llm_usage.set_prices(prices, cur)
+    db.set_setting("llm_pricing", json.dumps({"currency": cur, "prices": prices}, ensure_ascii=False))
+    # 未定价的旧调用总会按新表补上费用; recompute=true 再把已有费用也按新单价重算
+    n = db.recompute_token_costs(llm_usage.price_for, only_missing=not data.get("recompute"))
+    _audit("llm.pricing_update", f"模型单价表: {len(prices)} 条, 货币 {cur}" + (f", 重算历史 {n} 行" if n and data.get("recompute") else ""))
+    return jsonify(dict(_pricing_payload(), recomputed=n))
 
 
 @app.get("/api/tasks/<int:task_id>/diff_regions")
@@ -1247,6 +1494,7 @@ def trigger_ai_repair(task_id):
     }
     if not ai_cfg["api_key"]:
         return jsonify({"error": "未配置大模型 API Key(环境变量 CLONER_AI_KEY 或请求体 api_key)"}), 400
+    ai_cfg = llm_usage.tag(ai_cfg, task_id=task_id, kind="ai_repair", username=_me_name())
 
     def _run():
         from core import ai_vision_repair, cloner_engine
@@ -1356,6 +1604,7 @@ def v4_ai_batch_repair():
     }
     if not ai_cfg["api_key"]:
         return jsonify({"error": "未配置模型 API Key(系统设置 → AI 供应商配置)"}), 400
+    ai_cfg = llm_usage.tag(ai_cfg, kind="ai_repair", username=_me_name())
 
     queue = []
     for raw in ids[:50]:
@@ -1599,6 +1848,7 @@ def v4_ai_playground_repair():
     if not key:
         return jsonify({"error": "未配置大模型 API Key(系统设置 → AI 供应商)"}), 400
     prompt = str(data.get("prompt") or "").strip()[:2000]
+    initiator = _me_name()
     with _ai_jobs_lock:   # 查重与登记须原子: 双击不会起两个修复线程改同一份工程
         job = _ai_jobs.get(task_id)
         if job and job.get("state") == "running":
@@ -1630,8 +1880,9 @@ def v4_ai_playground_repair():
                     detail = json.loads(detail_file.read_text(encoding="utf-8"))
             engine = cloner_engine.ClonerEngine(task_id, db, bus, pool)
             engine.bind_target(task["target_url"])
-            ai_cfg = {"base_url": config.AI_API_BASE_URL, "api_key": key,
-                      "model": config.AI_MODEL, "user_prompt": prompt}
+            ai_cfg = llm_usage.tag({"base_url": config.AI_API_BASE_URL, "api_key": key,
+                                    "model": config.AI_MODEL, "user_prompt": prompt},
+                                   task_id=task_id, kind="ai_repair", username=initiator)
             with pool.context(viewport={"width": 1920, "height": 1080}) as ctx:
                 report = ai_vision_repair.run_vision_repair(
                     ws, ai_cfg, detail,
@@ -2836,6 +3087,15 @@ def v4_ai_models():
         return jsonify({"error": f"连接失败: {type(exc).__name__}"}), 200
 
 
+def _record_test_call(model: str, resp, step: str):
+    """三段式测试的两次对话请求也按 token 计费, 记在发起测试的成员名下。"""
+    usage = None
+    with suppress(ValueError, TypeError, AttributeError):
+        usage = resp.json().get("usage")
+    llm_usage.record({"model": model}, usage, step_name=step, kind="ai_test",
+                     username=_me_name(), workspace_id=_ws_ctx()[0] or 1)
+
+
 @app.post("/api/v4/ai/test")
 def v4_ai_test():
     """三段式能力测试: ① 连通(/models) ② 鉴权(1-token chat) ③ 多模态(图像输入)。
@@ -2892,6 +3152,7 @@ def v4_ai_test():
                 detail = str(chat.json().get("error", {}).get("message", ""))[:120]
             return _err(f"对话接口异常(HTTP {chat.status_code}){(': ' + detail) if detail else ''}")
         result["chat_ok"] = True
+        _record_test_call(model, chat, "连通测试")
     except upstream_http.RequestException as exc:
         return _err(f"对话接口请求失败: {type(exc).__name__}")
 
@@ -2906,6 +3167,7 @@ def v4_ai_test():
                           "url": "data:image/png;base64," + _VISION_PROBE_PNG}},
                   ]}]})
         if vision.status_code < 400:
+            _record_test_call(model, vision, "看图测试")
             result["vision_ok"] = True
             result["ok"] = True
             result["message"] = (f"连通 {result['latency_ms']}ms · 模型 {model} · "
@@ -4214,21 +4476,16 @@ def _backfill_generate_meta():
                 db.replace_token_usage(r["id"], "generate", token_rows(rep))
 
 
-def _record_repair_tokens(ws, model, step, usage):
-    """AI 视觉修复每轮的 token 记账(ai_vision_repair.USAGE_SINK); 工作区目录名即任务号。"""
-    name = Path(ws).name
-    if name.isdigit():
-        db.add_token_usage(int(name), "ai_repair", model, step, (usage or {}).get("prompt_tokens") or 0,
-                           (usage or {}).get("completion_tokens") or 0)
-
-
 def _boot():
     db.ensure_default_project()
     _apply_saved_settings()
-    from core import ai_vision_repair
-    ai_vision_repair.USAGE_SINK = _record_repair_tokens
+    # 模型消耗: 单价表 → 记账出口; 老流水(无费用列时写入的)按单价表补算一次
+    llm_usage.load_saved(db.get_setting("llm_pricing", ""))
+    llm_usage.SINK = _llm_sink
     with suppress(Exception):
         _backfill_generate_meta()
+    with suppress(Exception):
+        db.recompute_token_costs(llm_usage.price_for, only_missing=True)
     scheduler.start()
     threading.Thread(target=_audit_retention_worker, daemon=True,
                      name="audit-retention").start()

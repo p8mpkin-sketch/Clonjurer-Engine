@@ -16,6 +16,7 @@ import requests
 from PIL import Image
 
 import config
+from core import llm_usage
 
 
 _NO_THINK_UNSUPPORTED = set()   # 不认 thinking 字段的上游(base_url)
@@ -67,6 +68,7 @@ def resolve_ai_cfg(task_cfg: dict = None, role: str = ""):
     if not api_key:
         return None
     cfg = {"base_url": base_url.rstrip("/"), "api_key": api_key, "model": model}
+    cfg = llm_usage.tag(cfg) if llm_usage.current() else cfg
     if role == "judge":
         import os
         pick = lambda k: (os.environ.get(k) or filed.get(k) or "").strip()  # noqa: E731
@@ -74,6 +76,7 @@ def resolve_ai_cfg(task_cfg: dict = None, role: str = ""):
             cfg = {"base_url": (pick("CLONER_AI_JUDGE_BASE_URL") or cfg["base_url"]).rstrip("/"),
                    "api_key": pick("CLONER_AI_JUDGE_KEY") or cfg["api_key"],
                    "model": pick("CLONER_AI_JUDGE_MODEL")}
+            cfg = llm_usage.tag(cfg) if llm_usage.current() else cfg
     return cfg
 
 
@@ -228,7 +231,7 @@ def _transport(ai_cfg: dict, system: str, content: list, temperature: float, tim
         last = None
         for attempt in range(3):
             try:
-                return _call_once(budget)
+                payload = _call_once(budget)
             except (requests.exceptions.SSLError, requests.exceptions.ConnectionError,
                     requests.exceptions.Timeout, requests.exceptions.ChunkedEncodingError) as exc:
                 last = exc
@@ -236,6 +239,10 @@ def _transport(ai_cfg: dict, system: str, content: list, temperature: float, tim
                     if _left() < 2 * (attempt + 1) + 5:
                         break
                     time.sleep(2 * (attempt + 1))
+                continue
+            # 每次成功返回的请求都按 token 计费(含升档重试): 在这里记账, 不靠调用方回传 usage
+            llm_usage.record(ai_cfg, (payload or {}).get("usage"))
+            return payload
         raise RuntimeError(f"上游网络错误(已重试 3 次): {type(last).__name__}: {str(last)[:160]}")
 
     def _call_once(budget: int):
