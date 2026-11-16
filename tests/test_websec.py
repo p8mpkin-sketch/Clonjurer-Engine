@@ -67,6 +67,12 @@ class WebsecPureTest(unittest.TestCase):
             self.assertEqual(websec.forbidden_target("evil.example"), "")          # 默认不解析
             self.assertIn("域名解析到", websec.forbidden_target("evil.example", resolve=True))
             self.assertEqual(websec.forbidden_target("good.example", resolve=True), "")
+        # localhost 在多数 Linux 上先解析出 ::1(Python 里 ::1 也算 is_reserved), 本机地址必须放行
+        loop6 = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("::1", 0, 0, 0)),
+                 (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0))]
+        with mock.patch("socket.getaddrinfo", return_value=loop6):
+            self.assertEqual(websec.forbidden_target("localhost", resolve=True), "")
+        self.assertEqual(websec.forbidden_target("::1"), "")
         with mock.patch("socket.getaddrinfo", side_effect=OSError("nxdomain")):
             self.assertEqual(websec.forbidden_target("nx.example", resolve=True), "")
         websec._resolve_cache.clear()
@@ -143,6 +149,8 @@ SCRIPT = textwrap.dedent(r'''
     config.WORKSPACE_ROOT = tmp / "ws"; config.WORKSPACE_ROOT.mkdir()
     config.EXPORTS_DIR = tmp / "ex"; config.EXPORTS_DIR.mkdir()
     config.LOGIN_IP_MAX = 8
+    from core.scheduler import Scheduler as _Sched
+    _Sched.start = lambda self: None   # 导入 app 时 _boot() 就会起调度线程, 事后改实例来不及
     import app as A
     from core import captcha
     A.scheduler.start = lambda *a, **k: None

@@ -118,6 +118,8 @@ _METADATA_HOSTS = {"metadata", "metadata.google.internal", "metadata.goog", "ins
 def _ip_forbidden(ip) -> str:
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
         ip = ip.ipv4_mapped
+    if ip.is_loopback:   # ::1 在 Python 里同时算 is_reserved(::/8), 本机地址照常放行
+        return ""
     if ip.is_link_local or ip.is_unspecified or ip.is_multicast or ip.is_reserved \
             or str(ip) in ("fd00:ec2::254",):
         return "不允许访问链路本地/元数据等特殊地址"

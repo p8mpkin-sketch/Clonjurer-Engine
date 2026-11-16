@@ -21,6 +21,8 @@ SCRIPT = textwrap.dedent(r'''
     config.WORKSPACE_ROOT = tmp / "ws"; config.WORKSPACE_ROOT.mkdir()
     config.EXPORTS_DIR = tmp / "ex"; config.EXPORTS_DIR.mkdir()
     config.NEW_WORKSPACE_PLAN = "free"   # 模拟对外 SaaS: 新区默认免费版
+    from core.scheduler import Scheduler as _Sched
+    _Sched.start = lambda self: None   # 导入 app 时 _boot() 就会起调度线程, 事后改实例来不及
     import app as A
     A.scheduler.start = lambda *a, **k: None          # 不真跑克隆
     out = {}

@@ -25,6 +25,8 @@ SCRIPT = textwrap.dedent(r'''
     config.DB_PATH = tmp / "t.db"
     config.WORKSPACE_ROOT = tmp / "ws"; config.WORKSPACE_ROOT.mkdir()
     config.EXPORTS_DIR = tmp / "ex"; config.EXPORTS_DIR.mkdir()
+    from core.scheduler import Scheduler as _Sched
+    _Sched.start = lambda self: None   # 导入 app 时 _boot() 就会起调度线程, 事后改实例来不及
     import app as A
     from core import remote_deploy as rd
     from tests._fake_ssh import FakeWorld
