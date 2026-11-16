@@ -66,7 +66,7 @@ from flask import (Flask, Response, abort, jsonify, redirect, render_template, r
                    g, send_file, send_from_directory, session)
 
 import config
-from core import archive, flask_generator, live, security
+from core import archive, flask_generator, iam, live, security
 from core import ai_mock_generator
 from core.clone.api_match import pick_entry
 from core.browser_pool import SyncBrowserPool
@@ -79,6 +79,7 @@ app.config["TEMPLATES_AUTO_RELOAD"] = True  # 模板改动即时生效
 app.secret_key = security.session_secret()
 app.permanent_session_lifetime = timedelta(hours=12)
 db = Database(config.DB_PATH)
+db.audit_max_rows = config.AUDIT_MAX_ROWS
 bus = LogBus(config.LOG_RING_SIZE)
 pool = SyncBrowserPool.instance(config.MAX_CONCURRENT_CONTEXTS)
 scheduler = Scheduler(db, bus, pool)
@@ -103,10 +104,32 @@ def _current_user():
     if not uid:
         return None
     user = db.get_user(uid)
-    if user is None or not user.get("is_active"):
+    # 会话版本: 强制下线 / 重置密码 / 停用会把 users.session_ver 加一, 旧会话随即失效
+    if user is None or not user.get("is_active") \
+            or int(session.get("sv") or 0) != int(user.get("session_ver") or 0):
         session.clear()
         return None
     return user
+
+
+def _login_session(user: dict, ws=None):
+    session["uid"] = user["id"]
+    session["sv"] = int(user.get("session_ver") or 0)
+    if ws is None:
+        session.pop("ws", None)
+    else:
+        session["ws"] = ws
+    session.permanent = True
+    g.pop("ws_ctx", None)
+
+
+def _audit_account(user: dict, action: str, detail: str = ""):
+    """账号级事件(登录/退出/锁定)写进该账号所在的每个工作区, 各区管理员都能看到、互不串区;
+    不存在的用户名(撞库)记在默认工作区。"""
+    spaces = [s["id"] for s in db.user_workspaces(user["id"])] if user and user.get("id") else []
+    name = (user or {}).get("username") or "?"
+    for wid in spaces or [1]:
+        db.log_audit(name, action, detail, _client_ip(), workspace_id=wid)
 
 
 def _public_user(user: dict):
@@ -1679,10 +1702,8 @@ def auth_bootstrap():
     uid = db.create_user(username, security.hash_password(password),
                          "admin", str(data.get("display_name") or "").strip())
     db.add_member(1, uid, "owner")  # 首个管理员 = 平台管理员 + 默认工作区所有者
-    session["uid"] = uid
-    session["ws"] = 1
-    session.permanent = True
-    db.touch_login(uid)
+    _login_session(db.get_user(uid), ws=1)
+    db.touch_login(uid, _client_ip())
     _audit("user.bootstrap", f"初始化管理员 {username}", username=username)
     return jsonify({"user": _public_user(db.get_user(uid))}), 201
 
@@ -1695,27 +1716,47 @@ def auth_login():
     username = str(data.get("username") or "").strip()
     password = str(data.get("password") or "")
     user = db.get_user_by_username(username)
+    lock = iam.locked_until(user) if user else ""
+    if lock:
+        # 锁定期内不校验密码(也不再累计), 统一提示; 不泄露密码是否正确
+        _audit_account(user, "login.failed", f"登录失败: {username}(账号锁定中)")
+        return jsonify({"error": f"连续输错密码次数过多, 账号已临时锁定, {_lock_left(lock)}后自动解锁;"
+                                 " 也可以联系管理员提前解锁", "locked_until": lock}), 423
     if user is None or not security.verify_password(password, user["password_hash"]):
-        _audit("login.failed", f"登录失败: {username or '(空)'}", username=username or "?")
+        if user is None:
+            db.log_audit(username[:64] or "?", "login.failed", f"登录失败: {username[:64] or '(空)'}(账号不存在)",
+                         _client_ip(), workspace_id=1)
+        else:
+            _audit_account(user, "login.failed", f"登录失败: {username}(密码错误)")
+            if iam.register_login_failure(db, user, config.LOGIN_FAIL_WINDOW_MIN,
+                                          config.LOGIN_FAIL_MAX, config.LOGIN_LOCK_MIN):
+                _audit_account(user, "login.locked",
+                               f"{config.LOGIN_FAIL_WINDOW_MIN} 分钟内连续输错 {config.LOGIN_FAIL_MAX} 次,"
+                               f" 锁定 {config.LOGIN_LOCK_MIN} 分钟")
         time.sleep(0.4)  # 暴力破解节流
         return jsonify({"error": "用户名或密码错误"}), 401
     if not user["is_active"]:
-        _audit("login.blocked", "已停用账号尝试登录", username=username)
+        _audit_account(user, "login.blocked", "已停用账号尝试登录")
         return jsonify({"error": "账号已被停用, 请联系管理员"}), 403
-    session["uid"] = user["id"]
-    session.pop("ws", None)
-    session.permanent = True
-    db.touch_login(user["id"])
-    g.pop("ws_ctx", None)
-    _audit("login", "登录成功", username=username, workspace_id=_ws_ctx()[0] or 1)
+    _login_session(user)
+    db.touch_login(user["id"], _client_ip())
+    _audit_account(user, "login", "登录成功")
     return jsonify({"user": _public_user(user)})
+
+
+def _lock_left(lock: str) -> str:
+    try:
+        left = datetime.strptime(lock, "%Y-%m-%d %H:%M:%S") - datetime.utcnow()
+    except ValueError:
+        return "稍"
+    return f"约 {max(1, int(left.total_seconds() // 60) + 1)} 分钟"
 
 
 @app.post("/api/auth/logout")
 def auth_logout():
     user = _current_user()
     if user:
-        _audit("logout", "退出登录", username=user["username"])
+        _audit_account(user, "logout", "退出登录")
     session.clear()
     return jsonify({"ok": True})
 
@@ -2024,17 +2065,226 @@ def v4_archive_import():
 # ---------------------------------------------------------------------------
 # 用户管理(admin)
 # ---------------------------------------------------------------------------
-def _member_out(m: dict) -> dict:
+_ROLE_TEXT = {"owner": "所有者", "admin": "管理员", "operator": "成员", "viewer": "只读"}
+
+
+def _member_out(m: dict, counts: dict = None) -> dict:
     return {"id": m["id"], "username": m["username"], "display_name": m["display_name"],
             "role": m["role"], "is_active": m["is_active"], "last_login_at": m["last_login_at"],
+            "last_login_ip": m.get("last_login_ip") or "",
+            "status": iam.status_of(m), "locked_until": iam.locked_until(m),
+            "platform_admin": m.get("account_role") == "admin",
+            "actions_30d": (counts or {}).get(m["username"], 0),
             "created_at": m["joined_at"] or m["created_at"]}
+
+
+def _members_with_stats(wid: int) -> list:
+    since = (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
+    counts = db.audit_counts_by_user(wid, since)
+    return [_member_out(m, counts) for m in db.list_members(wid)]
 
 
 @app.get("/api/v4/users")
 def v4_users():
-    """当前工作区的成员(角色为本区角色)。"""
-    return jsonify({"users": [_member_out(m) for m in db.list_members(_cur_ws())],
-                    "invites": db.list_invites(_cur_ws())})
+    """当前工作区的成员(角色为本区角色) + 待接受邀请 + 概览计数。"""
+    wid = _cur_ws()
+    users = _members_with_stats(wid)
+    _, my_role = _ws_ctx()
+    summary = {"total": len(users),
+               "active": sum(1 for u in users if u["status"] == "active"),
+               "disabled": sum(1 for u in users if u["status"] == "disabled"),
+               "locked": sum(1 for u in users if u["status"] == "locked"),
+               "managers": sum(1 for u in users if u["role"] in ("owner", "admin")),
+               "never_logged_in": sum(1 for u in users if not u["last_login_at"])}
+    return jsonify({"users": users, "invites": db.list_invites(wid), "summary": summary,
+                    "me": {"role": my_role, "platform_admin": _is_platform_admin(_current_user())
+                           or not _auth_required()},
+                    "policy": {"lock_after": config.LOGIN_FAIL_MAX,
+                               "lock_window_min": config.LOGIN_FAIL_WINDOW_MIN,
+                               "lock_minutes": config.LOGIN_LOCK_MIN,
+                               "session_hours": int(app.permanent_session_lifetime.total_seconds() // 3600),
+                               "audit_retention_days": config.AUDIT_RETENTION_DAYS}})
+
+
+@app.get("/api/v4/users/export")
+def v4_users_export():
+    wid = _cur_ws()
+    members = _members_with_stats(wid)
+    body = iam.members_csv([{**m, "joined_at": m["created_at"]} for m in members],
+                           lambda r: _ROLE_TEXT.get(r, r or ""))
+    _audit("audit.export", f"导出成员名单 CSV({len(members)} 人)")
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    return Response(body, mimetype="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="members_{stamp}.csv"'})
+
+
+@app.get("/api/v4/users/<int:user_id>")
+def v4_user_detail(user_id):
+    """成员详情: 资料、本区角色、本区内最近操作与登录记录(不跨区)。"""
+    wid = _cur_ws()
+    target = db.get_user(user_id)
+    m = db.get_membership(wid, user_id) if target else None
+    if m is None:
+        return jsonify({"error": "用户不存在"}), 404
+    row = next((x for x in db.list_members(wid) if x["id"] == user_id), None) or {}
+    counts = db.audit_counts_by_user(
+        wid, (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S"))
+    inviter = db.get_user(m["invited_by"]) if m.get("invited_by") else None
+    auth_actions = ["login", "login.failed", "login.blocked", "login.locked", "logout"]
+    others = [a for a in db.audit_actions(wid) if a not in auth_actions]
+    return jsonify({
+        "user": {**_member_out(row, counts),
+                 "failed_logins": row.get("failed_logins") or 0,
+                 "invited_by": (inviter or {}).get("username") or "",
+                 "workspace_count": len(db.user_workspaces(user_id))},
+        "logins": [iam.decorate(e) for e in
+                   db.user_audit(target["username"], workspace_id=wid, actions=auth_actions, limit=15)],
+        "activity": [iam.decorate(e) for e in
+                     db.user_audit(target["username"], workspace_id=wid,
+                                   actions=others or ["__none__"], limit=20)],
+    })
+
+
+def _member_change(wid: int, my_role: str, target: dict, m: dict, op: str, value=None):
+    """对一位成员执行一项变更 -> (审计动作, 说明) 或抛 _MemberError(提示, 状态码)。
+    单条 PATCH 与批量操作共用, 规则一致: 所有者只能由所有者改动; 不能降级/移除最后一个管理者;
+    账号级动作(停用/启用/重置他人密码/强制下线)需要平台管理员。"""
+    me = _current_user()
+    platform = _is_platform_admin(me) or not _auth_required()
+    is_self = bool(me) and me["id"] == target["id"]
+    name = target["username"]
+    if op == "role":
+        if value not in WS_ROLE_RANK:
+            raise _MemberError("非法角色", 400)
+        if value == m["role"]:
+            return None
+        if "owner" in (value, m["role"]) and my_role != "owner":
+            raise _MemberError("只有所有者可以转让或变更所有者", 403)
+        if m["role"] in ("owner", "admin") and value not in ("owner", "admin") \
+                and db.count_managers(wid) <= 1:
+            raise _MemberError("不能降级最后一个管理员", 409)
+        db.set_member_role(wid, target["id"], value)
+        return "member.role", f"{name}: {_ROLE_TEXT.get(m['role'])} → {_ROLE_TEXT.get(value)}"
+    if op in ("disable", "enable"):
+        if not platform:
+            raise _MemberError("停用账号需要平台管理员; 可改为把成员移出本工作区", 403)
+        if op == "disable":
+            if is_self:
+                raise _MemberError("不能停用自己的账号", 409)
+            if m["role"] in ("owner", "admin") and db.count_managers(wid) <= 1:
+                raise _MemberError("不能停用最后一个管理员", 409)
+            if not target["is_active"]:
+                return None
+            db.update_user(target["id"], is_active=0)
+            db.bump_session_ver(target["id"])
+            return "user.disable", f"停用账号 {name}(已登录的会话同时失效)"
+        if target["is_active"]:
+            return None
+        db.update_user(target["id"], is_active=1)
+        db.reset_login_failures(target["id"])
+        return "user.enable", f"启用账号 {name}"
+    if op == "password":
+        if not (platform or is_self):
+            raise _MemberError("重置他人密码需要平台管理员", 403)
+        if len(str(value or "")) < 8:
+            raise _MemberError("密码至少 8 位", 400)
+        db.update_user(target["id"], password_hash=security.hash_password(str(value)))
+        db.reset_login_failures(target["id"])
+        sv = db.bump_session_ver(target["id"])
+        if is_self:
+            session["sv"] = sv  # 自己改密: 其他设备下线, 当前会话保留
+        return "user.password", (f"{name} 修改了自己的密码" if is_self
+                                 else f"重置 {name} 的密码(已登录的会话同时失效)")
+    if op == "display_name":
+        if not (platform or is_self):
+            raise _MemberError("只能修改自己的显示名", 403)
+        new = str(value or "").strip()[:60] or name
+        if new == target.get("display_name"):
+            return None
+        db.update_user(target["id"], display_name=new)
+        return "user.update", f"{name} 显示名改为「{new}」"
+    if op == "unlock":
+        if not iam.locked_until(target) and not target.get("failed_logins"):
+            return None
+        db.reset_login_failures(target["id"])
+        return "user.unlock", f"解除 {name} 的登录锁定"
+    if op == "logout":
+        if not platform:
+            raise _MemberError("强制下线需要平台管理员; 可改为把成员移出本工作区", 403)
+        if is_self:
+            raise _MemberError("不能强制自己下线, 请直接退出登录", 409)
+        db.bump_session_ver(target["id"])
+        return "user.force_logout", f"强制 {name} 在所有设备下线"
+    if op == "remove":
+        if is_self:
+            raise _MemberError("不能移除自己; 请改用离开工作区", 409)
+        if m["role"] == "owner" and my_role != "owner":
+            raise _MemberError("只有所有者可以移除所有者", 403)
+        if m["role"] in ("owner", "admin") and db.count_managers(wid) <= 1:
+            raise _MemberError("不能移除最后一个管理员", 409)
+        db.remove_member(wid, target["id"])
+        return "member.remove", f"移出成员 {name}({_ROLE_TEXT.get(m['role'])})"
+    raise _MemberError("不支持的操作", 400)
+
+
+class _MemberError(Exception):
+    def __init__(self, msg: str, status: int):
+        super().__init__(msg)
+        self.status = status
+
+
+@app.post("/api/v4/users/<int:user_id>/<op>")
+def v4_user_action(user_id, op):
+    """单个成员的动作: unlock 解锁 / logout 强制下线 / disable 停用 / enable 启用。"""
+    if op not in ("unlock", "logout", "disable", "enable"):
+        return jsonify({"error": "不支持的操作"}), 404
+    wid, my_role = _ws_ctx()
+    target = db.get_user(user_id)
+    m = db.get_membership(wid, user_id) if target else None
+    if m is None:
+        return jsonify({"error": "用户不存在"}), 404
+    try:
+        res = _member_change(wid, my_role, target, m, op)
+    except _MemberError as e:
+        return jsonify({"error": str(e)}), e.status
+    if res:
+        _audit(*res)
+    return jsonify({"ok": True, "changed": bool(res)})
+
+
+@app.post("/api/v4/users/bulk")
+def v4_users_bulk():
+    """批量: {ids: [...], op: role|remove|disable|enable|unlock|logout, role?}。
+    逐个按单条规则执行, 返回每个人的结果; 整批只记一条汇总审计 + 每人一条明细。"""
+    data = request.get_json(silent=True) or {}
+    op = data.get("op")
+    if op not in ("role", "remove", "disable", "enable", "unlock", "logout"):
+        return jsonify({"error": "不支持的批量操作"}), 400
+    ids = [int(i) for i in (data.get("ids") or []) if str(i).isdigit()][:200]
+    if not ids:
+        return jsonify({"error": "请先勾选成员"}), 400
+    wid, my_role = _ws_ctx()
+    results, done = [], 0
+    for uid in dict.fromkeys(ids):
+        target = db.get_user(uid)
+        m = db.get_membership(wid, uid) if target else None
+        if m is None:
+            results.append({"id": uid, "ok": False, "error": "用户不存在"})
+            continue
+        try:
+            res = _member_change(wid, my_role, target, m, op, data.get("role"))
+        except _MemberError as e:
+            results.append({"id": uid, "username": target["username"], "ok": False, "error": str(e)})
+            continue
+        if res:
+            _audit(*res)
+            done += 1
+        results.append({"id": uid, "username": target["username"], "ok": True, "changed": bool(res)})
+    label = {"role": f"改为{_ROLE_TEXT.get(data.get('role'), '?')}", "remove": "移出",
+             "disable": "停用", "enable": "启用", "unlock": "解锁", "logout": "强制下线"}[op]
+    failed = sum(1 for r in results if not r["ok"])
+    _audit("member.bulk", f"批量{label} {len(results)} 人: 生效 {done}, 失败 {failed}")
+    return jsonify({"ok": failed == 0, "done": done, "failed": failed, "results": results})
 
 
 @app.post("/api/v4/users")
@@ -2078,41 +2328,30 @@ def v4_user_update(user_id):
     m = db.get_membership(wid, user_id) if target else None
     if m is None:
         return jsonify({"error": "用户不存在"}), 404
-    me = _current_user()
-    platform = _is_platform_admin(me)
     data = request.get_json(silent=True) or {}
-    fields, changed = {}, []
+    # 逐项执行(角色 → 启停 → 显示名 → 密码), 每项单独记审计; 某项被拒时前面已生效的保留并如实返回
+    steps = []
     if "role" in data:
-        role = data.get("role")
-        if role not in WS_ROLE_RANK:
-            return jsonify({"error": "非法角色"}), 400
-        if "owner" in (role, m["role"]) and my_role != "owner":
-            return jsonify({"error": "只有所有者可以转让或变更所有者"}), 403
-        if m["role"] in ("owner", "admin") and role not in ("owner", "admin") \
-                and db.count_managers(wid) <= 1:
-            return jsonify({"error": "不能降级最后一个管理员"}), 409
-        db.set_member_role(wid, user_id, role)
-        changed.append("role")
+        steps.append(("role", data.get("role")))
     if "is_active" in data:  # 账号停用是全局动作: 本区内语义为"移出本区"由 DELETE 承担
-        if not platform:
-            return jsonify({"error": "停用账号需要平台管理员; 可改为把成员移出本工作区"}), 403
-        active = 1 if data.get("is_active") in (True, 1, "1") else 0
-        if active == 0 and me and me["id"] == user_id:
-            return jsonify({"error": "不能停用自己的账号"}), 409
-        fields["is_active"] = active
-    if "display_name" in data and (platform or (me and me["id"] == user_id)):
-        fields["display_name"] = str(data.get("display_name") or "").strip()[:60]
+        steps.append(("enable" if data.get("is_active") in (True, 1, "1") else "disable", None))
+    if "display_name" in data:
+        steps.append(("display_name", data.get("display_name")))
     if data.get("password"):
-        if not (platform or (me and me["id"] == user_id)):
-            return jsonify({"error": "重置他人密码需要平台管理员"}), 403
-        password = str(data.get("password"))
-        if len(password) < 8:
-            return jsonify({"error": "密码至少 8 位"}), 400
-        fields["password_hash"] = security.hash_password(password)
-    db.update_user(user_id, **fields)
-    _audit("user.update", f"更新成员 {target['username']}: {', '.join(changed + list(fields))}")
-    m = db.get_membership(wid, user_id) or {}
-    return jsonify({"user": {**(db.get_user(user_id) or {}), "role": m.get("role")}})
+        steps.append(("password", data.get("password")))
+    applied = []
+    for op, value in steps:
+        try:
+            res = _member_change(wid, my_role, db.get_user(user_id), m, op, value)
+        except _MemberError as e:
+            return jsonify({"error": str(e), "applied": applied}), e.status
+        if res:
+            _audit(*res)
+            applied.append(op)
+        m = db.get_membership(wid, user_id) or m
+    u = _member_out({**(db.get_user(user_id) or {}), "role": m.get("role"),
+                     "joined_at": m.get("joined_at"), "account_role": target.get("role")})
+    return jsonify({"user": u, "applied": applied})
 
 
 @app.delete("/api/v4/users/<int:user_id>")
@@ -2123,15 +2362,10 @@ def v4_user_delete(user_id):
     m = db.get_membership(wid, user_id) if target else None
     if m is None:
         return jsonify({"error": "用户不存在"}), 404
-    me = _current_user()
-    if me and me["id"] == user_id:
-        return jsonify({"error": "不能移除自己; 请改用离开工作区"}), 409
-    if m["role"] == "owner" and my_role != "owner":
-        return jsonify({"error": "只有所有者可以移除所有者"}), 403
-    if m["role"] in ("owner", "admin") and db.count_managers(wid) <= 1:
-        return jsonify({"error": "不能移除最后一个管理员"}), 409
-    db.remove_member(wid, user_id)
-    _audit("member.remove", f"移出成员 {target['username']}")
+    try:
+        _audit(*_member_change(wid, my_role, target, m, "remove"))
+    except _MemberError as e:
+        return jsonify({"error": str(e)}), e.status
     return jsonify({"ok": True})
 
 
@@ -2271,8 +2505,8 @@ def auth_invite_accept(token):
         uid = db.create_user(username, security.hash_password(password), "user",
                              str(data.get("display_name") or "").strip()[:60])
         user = db.get_user(uid)
-        session["uid"] = uid
-        session.permanent = True
+        _login_session(user)
+        db.touch_login(uid, _client_ip())
     elif db.get_membership(inv["workspace_id"], user["id"]):
         session["ws"] = inv["workspace_id"]
         return jsonify({"ok": True, "already": True})
@@ -2371,14 +2605,56 @@ def task_share(task_id):
 # ---------------------------------------------------------------------------
 @app.get("/api/v4/audit")
 def v4_audit():
-    limit = request.args.get("limit", 80, type=int)
-    action = request.args.get("action", "").strip()
-    keyword = request.args.get("q", "").strip()
+    """本区审计日志: 多条件筛选 + 分页。参数见 core.iam.parse_filters, 另有 page / size。
+    兼容旧参数 limit(只取第一页)。"""
     wid = _cur_ws()
-    actions = [row["action"] for row in db.list_audit(limit=500, workspace_id=wid)]
-    return jsonify({"entries": db.list_audit(limit=limit, action=action, q=keyword,
-                                             workspace_id=wid),
-                    "actions": sorted(set(actions))})
+    known = db.audit_actions(wid)
+    filters = iam.parse_filters(request.args, known)
+    size = max(10, min(200, request.args.get("size", request.args.get("limit", 50, type=int), type=int)))
+    page = max(1, request.args.get("page", 1, type=int))
+    rows, total = db.query_audit(wid, limit=size, offset=(page - 1) * size, **filters)
+    return jsonify({"entries": [iam.decorate(r) for r in rows],
+                    "total": total, "page": page, "size": size,
+                    "pages": max(1, -(-total // size)),
+                    "actions": known,
+                    "catalog": iam.catalog(known),
+                    "usernames": db.audit_usernames(wid),
+                    "retention_days": config.AUDIT_RETENTION_DAYS})
+
+
+@app.get("/api/v4/audit/stats")
+def v4_audit_stats():
+    return jsonify(iam.stats(db, _cur_ws(), request.args.get("days", 7, type=int)))
+
+
+@app.get("/api/v4/audit/<int:entry_id>")
+def v4_audit_entry(entry_id):
+    """单条记录详情 + 同一成员前后的 5 条操作(还原上下文)。"""
+    wid = _cur_ws()
+    e = db.get_audit(wid, entry_id)
+    if e is None:
+        return jsonify({"error": "记录不存在"}), 404
+    around = db.user_audit(e["username"], workspace_id=wid, limit=200)
+    idx = next((i for i, x in enumerate(around) if x["id"] == entry_id), 0)
+    ctx = around[max(0, idx - 5): idx + 6]
+    return jsonify({"entry": iam.decorate(e), "context": [iam.decorate(x) for x in ctx]})
+
+
+@app.get("/api/v4/audit/export")
+def v4_audit_export_ws():
+    """按当前筛选导出本区审计 CSV(最多 20000 条), 导出本身也记一条审计。"""
+    wid = _cur_ws()
+    filters = iam.parse_filters(request.args, db.audit_actions(wid))
+    rows, total = db.query_audit(wid, limit=5000, **filters)
+    while len(rows) < min(total, 20000):
+        more, _ = db.query_audit(wid, limit=5000, offset=len(rows), **filters)
+        if not more:
+            break
+        rows += more
+    _audit("audit.export", f"导出审计日志 {len(rows)} 条(共命中 {total} 条)")
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    return Response(iam.audit_csv(rows), mimetype="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="audit_{stamp}.csv"'})
 
 
 # ---------------------------------------------------------------------------
@@ -2715,18 +2991,13 @@ def v4_prune_exports():
 @app.get("/api/v4/admin/audit/export")
 def v4_audit_export():
     """审计日志导出 CSV(BOM 防 Excel 乱码)。"""
-    entries = db.list_audit(limit=5000)
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow(["时间", "用户", "动作", "详情", "IP"])
-    for e in entries:
-        writer.writerow([e.get("created_at", ""), e.get("username", ""),
-                         e.get("action", ""), e.get("detail", ""), e.get("ip", "")])
+    entries, _ = db.query_audit(None, limit=5000)
+    _audit("audit.export", f"平台管理员导出全平台审计日志 {len(entries)} 条")
     stamp = time.strftime("%Y%m%d_%H%M%S")
-    return Response("\ufeff" + buf.getvalue(),
+    return Response(iam.audit_csv(entries),
                     mimetype="text/csv; charset=utf-8",
                     headers={"Content-Disposition":
-                             f'attachment; filename="audit_{stamp}.csv"'})
+                             f'attachment; filename="audit_all_{stamp}.csv"'})
 
 
 # ---------------------------------------------------------------------------

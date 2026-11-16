@@ -953,6 +953,136 @@ html body ::placeholder,html body .placeholder\:text-slate-600::placeholder{colo
 .cfg-wrap{padding-bottom:88px}
 @media (max-width:640px){html body .cfg-bar{bottom:calc(70px + env(safe-area-inset-bottom))}.cfg-wrap{padding-bottom:140px}}
 
+/* ===== 2026-11-16 用户管理 / 日志审计 =====
+   沿用 .pg / .mt-panel / .mt-row / .dp-state / .pg-kpis 骨架; 只补本模块的列宽、批量条、抽屉与时间线 */
+.iam-desc{color:var(--fg-3)}
+.iam-empty-text{max-width:520px;line-height:1.7}
+.iam-stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border:1px solid var(--line);border-radius:14px;background:var(--surface);overflow:hidden}
+.iam-stats button{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:16px 20px;text-align:left;border-left:1px solid var(--line);transition:background .15s}
+.iam-stats button:first-child{border-left:0}
+.iam-stats button:hover{background:rgba(127,120,110,.05)}
+.iam-stats button[aria-pressed="true"]{background:rgba(127,120,110,.09);box-shadow:inset 0 -2px 0 var(--fg-2)}
+.iam-stats span{font-size:13px;color:var(--fg-3)}
+.iam-stats b{font-size:24px;line-height:1;font-weight:600;color:var(--fg)}
+.iam-warn{color:var(--ui-warn)!important}
+.iam-bar{display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;padding:14px 20px}
+.iam-bar .mt-select{flex:none;max-width:200px}
+.iam-count{margin-left:auto;font-size:13px;color:var(--fg-3)}
+.iam-check{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--fg-2);white-space:nowrap;cursor:pointer}
+.iam-chip{gap:4px;height:28px;padding:0 10px;cursor:pointer}
+.iam-bulk{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:10px 20px;border-top:1px solid var(--line);background:var(--accent-soft)}
+.iam-bulk b{font-size:13px;font-weight:600;color:var(--fg);margin-right:4px}
+.iam-bulk .mt-btn,.iam-bulk .mt-select{height:30px}
+.iam-bulk-x{margin-left:auto}
+.mt-row.iam-row{grid-template-columns:20px minmax(0,1.6fr) 112px 120px minmax(0,1fr) 96px 136px;gap:14px}
+.mt-row.iam-row.sel{background:var(--accent-soft)}
+.iam-ck{display:flex;align-items:center}
+.iam-ck input{width:15px;height:15px;cursor:pointer;accent-color:var(--ink)}
+.iam-ck input:disabled{cursor:not-allowed;opacity:.35}
+.iam-who{display:flex;align-items:center;gap:12px;min-width:0;text-align:left}
+.iam-who > span:last-child{display:flex;flex-direction:column;gap:2px}
+.iam-who:hover .iam-name{text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--line-strong)}
+.iam-name{font-size:14px;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.iam-you{font-size:12px;color:var(--fg-3)}
+.iam-sub{font-size:12px;color:var(--fg-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.iam-tag{display:inline-flex;align-items:center;height:18px;margin-left:6px;padding:0 6px;border-radius:5px;font-size:12px;line-height:1;color:var(--fg-2);border:1px solid var(--line-strong);vertical-align:1px}
+.iam-tag.bad{color:var(--ui-bad);border-color:rgb(var(--bad-500) / .45)}
+.iam-role{width:100%;height:32px}
+.iam-role-text{font-size:13px;color:var(--fg-2)}
+.dp-state.iam-off{color:var(--fg-3)}.dp-state.iam-off .dot{background:transparent;border:1.5px solid var(--fg-3)}
+.iam-acts{display:flex;align-items:center;justify-content:flex-end;gap:2px}
+.iam-cols{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:24px;align-items:start}
+.iam-policy{list-style:none;margin:0;padding:0 20px 18px;display:flex;flex-direction:column}
+.iam-policy li{display:flex;justify-content:space-between;gap:16px;padding:10px 0;border-top:1px solid var(--line);font-size:13px}
+.iam-policy li:first-child{border-top:0}
+.iam-policy span{color:var(--fg-3);flex:none}
+.iam-policy b{font-weight:500;color:var(--fg-2);text-align:right}
+
+/* 审计表 */
+.mt-row.au-row{grid-template-columns:136px minmax(0,.8fr) minmax(0,1.1fr) minmax(0,2fr) 120px;gap:14px;width:100%;text-align:left;font-size:13px}
+button.mt-row.au-row{cursor:pointer}
+button.mt-row.au-row:focus-visible{outline:none;box-shadow:inset var(--ui-focus)}
+.au-time{color:var(--fg-3);white-space:nowrap}
+.au-user{color:var(--fg-2)}
+.au-act{display:flex;align-items:center;gap:8px}
+.au-badge{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:6px;font-size:12px;color:var(--fg-2);background:rgba(127,120,110,.1);white-space:nowrap;flex:none}
+.au-badge.warn{color:var(--ui-warn);background:rgb(var(--warn-500) / .12)}
+.au-badge.bad{color:var(--ui-bad);background:rgb(var(--bad-500) / .12)}
+.au-cat{font-size:12px;color:var(--fg-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.au-detail{color:var(--fg-2)}
+.au-ip{color:var(--fg-3)}
+.au-full{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6}
+.iam-pager{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px;padding:12px 20px;border-top:1px solid var(--line);font-size:13px;color:var(--fg-3)}
+.iam-pager > span{margin-right:auto}
+.iam-pager .mt-btn,.iam-pager .mt-select{height:30px}
+.iam-kpis .pg-kpi{padding-right:22px}
+.iam-bars{position:absolute;right:22px;bottom:20px;width:96px;height:28px}
+.iam-bars rect{fill:var(--fg-3);opacity:.55}
+.iam-top{margin-top:8px;display:flex;flex-direction:column;gap:4px}
+.iam-top button{display:flex;justify-content:space-between;gap:10px;font-size:13px;color:var(--fg-2);min-width:0}
+.iam-top button:hover span{text-decoration:underline;text-underline-offset:3px}
+.iam-top b{font-weight:500;color:var(--fg-3)}
+
+/* 成员详情抽屉 + 时间线 */
+.iam-drawer{position:absolute;top:0;right:0;bottom:0;width:440px;max-width:100vw;display:flex;flex-direction:column;background:var(--surface);border-left:1px solid var(--line-strong);box-shadow:var(--shadow-pop)}
+.iam-d-head{display:flex;align-items:center;gap:12px;padding:20px 20px 16px;border-bottom:1px solid var(--line)}
+.iam-d-head h3{font-size:18px;font-weight:600;color:var(--fg)}
+.iam-d-body{flex:1;min-height:0;overflow-y:auto;padding:16px 20px 28px;display:flex;flex-direction:column;gap:12px}
+.iam-kv{display:flex;flex-direction:column;margin:0}
+.iam-kv > div{display:grid;grid-template-columns:104px minmax(0,1fr);gap:12px;padding:8px 0;border-top:1px solid var(--line);font-size:13px}
+.iam-kv > div:first-child{border-top:0}
+.iam-kv dt{color:var(--fg-3)}
+.iam-kv dd{color:var(--fg-2);min-width:0;overflow-wrap:anywhere}
+.iam-d-acts{display:flex;flex-wrap:wrap;gap:8px}
+.iam-d-h{display:flex;align-items:center;justify-content:space-between;margin-top:8px;font-size:14px;font-weight:600;color:var(--fg)}
+.iam-tl{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.iam-tl li{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:13px;min-width:0}
+.iam-tl li:first-child{border-top:0}
+.iam-tl li.cur{background:var(--accent-soft);margin:0 -10px;padding-left:10px;padding-right:10px;border-radius:8px}
+.iam-tl-detail{flex:1;min-width:0;color:var(--fg-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.iam-tl-meta{margin-left:auto;flex:none;font-size:12px;color:var(--fg-3)}
+.iam-tl-empty{color:var(--fg-3)}
+
+@media (max-width:1100px){
+  .mt-row.iam-row{grid-template-columns:20px minmax(0,1.6fr) 112px 120px minmax(0,1fr) 136px}
+  .mt-row.iam-row .iam-c-act{display:none}
+  .mt-row.au-row{grid-template-columns:128px minmax(0,.8fr) minmax(0,1.2fr) minmax(0,1.6fr)}
+  .mt-row.au-row .au-c-ip{display:none}
+}
+@media (max-width:900px){
+  .iam-stats button{padding:14px 16px}
+  .iam-cols{grid-template-columns:minmax(0,1fr)}
+  .mt-row.iam-row{grid-template-columns:20px minmax(0,1fr) 108px 112px 136px}
+  .mt-row.iam-row .iam-c-login{display:none}
+  .mt-row.au-row{grid-template-columns:120px minmax(0,1fr) minmax(0,1.3fr)}
+  .mt-row.au-row .au-c-detail{display:none}
+}
+@media (max-width:600px){
+  .pg-meta .iam-desc{display:none}
+  .iam-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .iam-stats button{padding:12px 16px}
+  .iam-stats button:nth-child(odd){border-left:0}
+  .iam-stats button:nth-child(n+3){border-top:1px solid var(--line)}
+  .iam-bar,.iam-bulk,.iam-pager{padding-left:16px;padding-right:16px}
+  .iam-bar .mt-select{flex:1 1 40%;max-width:none}
+  .iam-count{margin-left:0}
+  .iam-bulk-x{margin-left:0}
+  .mt-row.iam-row.mt-row-head,.mt-row.au-row.mt-row-head{display:none}
+  .mt-row.iam-row{grid-template-columns:20px minmax(0,1fr) auto;row-gap:8px}
+  .mt-row.iam-row > :nth-child(3){grid-column:2;grid-row:2}
+  .mt-row.iam-row > :nth-child(4){grid-column:3;grid-row:2;justify-self:end}
+  .mt-row.iam-row > .iam-acts{grid-column:3;grid-row:1}
+  .mt-row.iam-row .iam-role{width:140px}
+  .mt-row.au-row{grid-template-columns:minmax(0,1fr) auto;row-gap:4px}
+  .mt-row.au-row > .au-time{grid-column:2;grid-row:1;font-size:12px}
+  .mt-row.au-row > .au-user{grid-column:1;grid-row:2;font-size:12px;color:var(--fg-3)}
+  .mt-row.au-row > .au-act{grid-column:1;grid-row:1}
+  .iam-kpis .pg-kpi-num{font-size:32px}
+  .iam-bars{display:none}
+  .iam-drawer{width:100vw;border-left:0}
+  .iam-kv > div{grid-template-columns:88px minmax(0,1fr)}
+}
+@media (max-width:600px){.iam-stats button:last-child:nth-child(odd){grid-column:span 2}}
 /* 删除 / 编辑: 选择条与菜单里的危险操作、视觉修复列表的选择条 */
 .sel-bar button.danger,.head-menu > button.danger{color:rgb(var(--bad-400))}
 .sel-bar button.danger:hover,.head-menu > button.danger:hover{background:rgb(var(--bad-500) / .08);color:rgb(var(--bad-400))}

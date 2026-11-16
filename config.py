@@ -261,6 +261,12 @@ PLATFORM_PUBLIC_URL = os.environ.get("CLONER_PUBLIC_URL", f"http://127.0.0.1:{PO
 
 # 审计日志保留天数(超过自动清理; 0 = 永久保留)
 AUDIT_RETENTION_DAYS = int(os.environ.get("CLONER_AUDIT_RETENTION_DAYS", "90"))
+# 审计日志总行数硬上限(兜底防撑爆磁盘; 按天保留是主策略。多工作区共用, 别设太小)
+AUDIT_MAX_ROWS = int(os.environ.get("CLONER_AUDIT_MAX_ROWS", "200000"))
+# 登录防暴力破解: 同一账号 N 分钟内连续失败 M 次即锁定 L 分钟(管理员可提前解锁)
+LOGIN_FAIL_WINDOW_MIN = int(os.environ.get("CLONER_LOGIN_FAIL_WINDOW_MIN", "15"))
+LOGIN_FAIL_MAX = int(os.environ.get("CLONER_LOGIN_FAIL_MAX", "5"))
+LOGIN_LOCK_MIN = int(os.environ.get("CLONER_LOGIN_LOCK_MIN", "15"))
 
 # @font-face 下载计划: 只下浏览器会请求的字体(src 首个受支持格式 + 页面有对应字符的 unicode-range 切片)
 FONT_PLAN = os.environ.get("CLONER_FONT_PLAN", "1") != "0"
