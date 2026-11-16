@@ -1,0 +1,66 @@
+name: platform-tests
+
+# 全量测试: 装齐 requirements(flask / paramiko / cryptography …)与 Playwright Chromium,
+# 让平台接口(用户管理、审计、远程发布、短链、多工作区 …)与浏览器端到端用例真正跑起来。
+# engine-gate 是精简环境的快速闸门(逐值等价 + 基准), 这些用例在那里会被跳过; 本工作流补上。
+# 跳过数设上限: 新增用例若因环境缺失被静默跳过, 这里会红, 不再出现"测试全绿但没跑"。
+on:
+  pull_request:
+    paths:
+      - "core/**"
+      - "tests/**"
+      - "templates/**"
+      - "static_vendor/**"
+      - "app.py"
+      - "models.py"
+      - "config.py"
+      - "requirements.txt"
+      - ".github/workflows/platform-tests.yml"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: platform-tests-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONUTF8: "1"
+      MAX_SKIPPED: "3"   # 允许的跳过: Android SDK/JDK 构建类用例(runner 环境不保证)等
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 安装平台依赖与 Chromium
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt "mypy==2.3.1" types-requests
+          python -m playwright install --with-deps chromium
+          sudo apt-get install -y fonts-noto-cjk >/dev/null
+      - name: 全量单测(含平台接口与浏览器用例)
+        run: |
+          set -o pipefail
+          python -m unittest discover -s tests -t . -v 2>&1 | tee unittest.log
+      - name: 跳过数上限
+        if: always()
+        run: |
+          grep -E " \.\.\. skipped " unittest.log | sed -E "s/^(.*) \.\.\. skipped (.*)$/\2  <- \1/" | sort | uniq -c || true
+          n=$(grep -cE " \.\.\. skipped " unittest.log || true)
+          echo "skipped=$n (上限 $MAX_SKIPPED)"
+          if [ "$n" -gt "$MAX_SKIPPED" ]; then
+            echo "::error::跳过了 $n 项测试, 超过上限 $MAX_SKIPPED: 检查是否缺依赖或新用例被静默跳过"
+            exit 1
+          fi
+      - name: 上传测试日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-unittest-log
+          path: unittest.log
+          if-no-files-found: ignore
