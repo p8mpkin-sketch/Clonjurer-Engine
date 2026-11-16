@@ -97,6 +97,7 @@ ACTIONS: dict[str, tuple[str, str, bool]] = {
     "schedule.update": ("修改定时任务", "schedule", False),
     "schedule.delete": ("删除定时任务", "schedule", False),
     "schedule.run": ("手动运行定时任务", "schedule", False),
+    "schedule.notify_test": ("测试定时任务通知", "schedule", False),
     "links.task_create": ("新建短链任务", "links", False),
     "links.generate": ("生成短链", "links", False),
     "links.task_delete": ("删除短链任务", "links", False),

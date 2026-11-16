@@ -42,6 +42,7 @@ REST API:
   GET  /api/v4/remote/deploys/<id>/status        远端服务存活探测
   POST /api/v4/remote/test-connection            保存前连通性测试(只验证登录)
 """
+import calendar
 import io
 import csv
 import io
@@ -59,6 +60,7 @@ import zipfile
 from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Optional
 from urllib.parse import urlsplit
 
 import requests as upstream_http
@@ -3725,12 +3727,25 @@ def _redact_config(cfg: dict) -> dict:
 
 # ---------------------------------------------------------------------------
 from core import schedules as sched_rules  # noqa: E402
+from core import schedule_notify  # noqa: E402
+
+
+def _mask_webhook(url: str) -> str:
+    """通知地址常带 access_token 之类的密钥: 接口只回主机名 + 末 4 位。"""
+    if not url:
+        return ""
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return "已设置"
+    return f"{parts.scheme}://{parts.hostname or ''}/…{url[-4:]}"
 
 
 def _schedule_view(sc: dict, briefs: dict) -> dict:
     hist = json.loads(sc.get("history_json") or "[]")
     urls = json.loads(sc.get("urls_json") or "[]")
-    runs = [{"batch_id": h["batch_id"], "at": h["at"], **(briefs.get(h["batch_id"]) or {})}
+    runs = [{"batch_id": h["batch_id"], "at": h["at"], **(briefs.get(h["batch_id"]) or {}),
+             **{k: h[k] for k in ("changed", "failed_sites", "notified", "notify_msg") if k in h}}
             for h in hist[-8:]][::-1]
     return {
         "id": sc["id"], "name": sc["name"], "urls": urls, "project_id": sc.get("project_id"),
@@ -3740,6 +3755,8 @@ def _schedule_view(sc: dict, briefs: dict) -> dict:
         "enabled": bool(sc["enabled"]), "next_run_at": sc["next_run_at"] if sc["enabled"] else "",
         "last_run_at": sc["last_run_at"], "runs_total": sc["runs"], "runs": runs,
         "created_by": sc.get("created_by") or "", "created_at": sc["created_at"],
+        "notify": sc.get("notify") or "change", "webhook_set": bool(sc.get("webhook_url")),
+        "webhook_masked": _mask_webhook(sc.get("webhook_url") or ""),
     }
 
 
@@ -3772,9 +3789,62 @@ def _fire_schedule(sc: dict, actor: str) -> dict:
     return {"batch_id": batch_id, "accepted": len(accepted)}
 
 
+def _batch_summary(batch_id: int, wid: int):
+    tasks = []
+    for t in db.list_tasks(batch_id=batch_id, workspace_id=wid, limit=200):
+        try:
+            stats = json.loads(t.get("stats_json") or "{}")
+        except (TypeError, ValueError):
+            stats = {}
+        tasks.append({**t, "stats": stats})
+    return schedule_notify.summarize(tasks)
+
+
+def _check_schedule_notifications(now: Optional[float] = None) -> int:
+    """定时批次跑完后: 记下变化/失败数, 发一条事件, 配了通知地址的按规则推 webhook。返回本轮处理的批次数。
+    每个批次只处理一次(history 里标 notified); 只看最近 8 次运行。"""
+    handled = 0
+    now = now if now is not None else time.time()
+    for sc in db.list_schedules():
+        hist = json.loads(sc.get("history_json") or "[]")
+        dirty = False
+        for h in hist[-8:]:
+            if "notified" in h:
+                continue
+            summary = _batch_summary(h["batch_id"], sc["workspace_id"])
+            if summary is None:
+                try:   # 一直跑不完(如服务重启丢了队列)的批次 6 小时后不再等
+                    started: float = calendar.timegm(time.strptime(h["at"], "%Y-%m-%d %H:%M:%S"))
+                except (TypeError, ValueError):
+                    started = now
+                if now - started > 6 * 3600:
+                    h.update(notified=False, notify_msg="批次长时间未完成, 未通知")
+                    dirty = True
+                continue
+            h.update(changed=summary["changed"], failed_sites=summary["failed"])
+            mode = sc.get("notify") or "change"
+            url = sc.get("webhook_url") or ""
+            verdict = schedule_notify.summary_text(sc["name"], summary).splitlines()[0]
+            bus.publish(None, "SCHED", verdict, "WARN" if summary["failed"] else "INFO",
+                        workspace_id=sc["workspace_id"])
+            if url and schedule_notify.should_notify(mode, summary):
+                link = f"{config.PUBLIC_URL}/" if config.PUBLIC_URL else ""
+                ok, msg = schedule_notify.send(url, schedule_notify.build_payload(url, sc, h["batch_id"], summary, link))
+                h.update(notified=ok, notify_msg=msg)
+            else:
+                h.update(notified=False, notify_msg="" if url else "未配置通知地址")
+            dirty = True
+            handled += 1
+        if dirty:
+            db.update_schedule(sc["id"], history_json=json.dumps(hist[-30:]))
+    return handled
+
+
 def _schedule_ticker():
     while True:
         time.sleep(20)
+        with suppress(Exception):   # 通知出错不影响触发
+            _check_schedule_notifications()
         try:
             due = db.due_schedules(time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()))
         except Exception:  # noqa: BLE001 — 后台线程不得退出
@@ -3818,6 +3888,17 @@ def _schedule_body(data: dict, partial: bool = False) -> tuple:
             out[k] = v
     if "enabled" in data:
         out["enabled"] = 1 if data.get("enabled") else 0
+    if "notify" in data:
+        if data.get("notify") not in schedule_notify.NOTIFY_MODES:
+            return None, "通知方式只能是 有变化时 / 每次 / 不通知"
+        out["notify"] = data["notify"]
+    if data.get("webhook_clear"):
+        out["webhook_url"] = ""
+    elif data.get("webhook_url"):   # 留空 = 不改(编辑时接口只回掩码)
+        try:
+            out["webhook_url"] = schedule_notify.validate_webhook(data.get("webhook_url"))
+        except ValueError as exc:
+            return None, str(exc)
     if "config" in data or not partial:
         out["config_json"] = json.dumps(_sanitize_config(data.get("config") or {}), ensure_ascii=False)
     if "project_id" in data:
@@ -3889,6 +3970,23 @@ def v4_schedule_run(schedule_id):
         return jsonify(res), 429 if "额度" in res["error"] else 400
     _audit("schedule.run", f"定时任务 #{schedule_id} 手动运行 → 批次 #{res['batch_id']}")
     return jsonify(res), 201
+
+
+@app.post("/api/v4/schedules/<int:schedule_id>/test-notify")
+def v4_schedule_test_notify(schedule_id):
+    """往已保存的通知地址发一条示例消息, 用来确认机器人/接收端配置对不对。"""
+    sc = _schedule_or_404(schedule_id)
+    url = sc.get("webhook_url") or ""
+    if not url:
+        return jsonify({"error": "还没有填写通知地址"}), 400
+    urls = json.loads(sc.get("urls_json") or "[]")[:3] or ["https://example.com/"]
+    sample = {"total": len(urls), "changed": 1, "failed": 0,
+              "sites": [{"task_id": 0, "url": u, "status": "completed", "score": None, "changed": i == 0,
+                         "verdict": "测试消息: 与上次相比有 1 处变化, 约占 3.2% 面积" if i == 0 else "",
+                         "area_pct": 3.2 if i == 0 else 0, "first_run": False} for i, u in enumerate(urls)]}
+    ok, msg = schedule_notify.send(url, schedule_notify.build_payload(url, sc, 0, sample))
+    _audit("schedule.notify_test", f"定时任务 #{schedule_id} 测试通知: {'成功' if ok else '失败'} {msg}")
+    return jsonify({"ok": ok, "message": msg}), 200 if ok else 502
 
 
 @app.get("/api/stream_logs")

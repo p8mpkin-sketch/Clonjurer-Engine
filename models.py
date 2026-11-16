@@ -206,7 +206,9 @@ CREATE TABLE IF NOT EXISTS schedules (
     history_json  TEXT    NOT NULL DEFAULT '[]',
     runs          INTEGER NOT NULL DEFAULT 0,
     created_by    TEXT    NOT NULL DEFAULT '',
-    created_at    TEXT    NOT NULL
+    created_at    TEXT    NOT NULL,
+    webhook_url   TEXT    NOT NULL DEFAULT '',      -- 跑完后的变化通知地址(空 = 不推送)
+    notify        TEXT    NOT NULL DEFAULT 'change' -- change 有变化或失败才推 / always 每次 / off
 );
 
 CREATE TABLE IF NOT EXISTS usage_events (
@@ -377,6 +379,11 @@ class Database:
                                    (code, r["id"]))
         if sl_cols:
             self._conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_short_links_code ON short_links(code)")
+        # 定时任务变化通知
+        sc_cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(schedules)").fetchall()}
+        if sc_cols and "webhook_url" not in sc_cols:
+            self._conn.execute("ALTER TABLE schedules ADD COLUMN webhook_url TEXT NOT NULL DEFAULT ''")
+            self._conn.execute("ALTER TABLE schedules ADD COLUMN notify TEXT NOT NULL DEFAULT 'change'")
         # 任务自定义名称(为空时界面显示克隆页标题 / 域名)
         ct_cols = {r["name"] for r in
                    self._conn.execute("PRAGMA table_info(clone_tasks)").fetchall()}
@@ -1100,7 +1107,8 @@ class Database:
     # 定时任务
     # ------------------------------------------------------------------
     _SCHEDULE_COLS = ("project_id", "name", "urls_json", "config_json", "freq", "hour", "minute",
-                      "weekday", "enabled", "next_run_at", "last_run_at", "history_json", "runs")
+                      "weekday", "enabled", "next_run_at", "last_run_at", "history_json", "runs",
+                      "webhook_url", "notify")
 
     def create_schedule(self, workspace_id: int, created_by: str = "", **fields) -> int:
         cols = {k: v for k, v in fields.items() if k in self._SCHEDULE_COLS}
