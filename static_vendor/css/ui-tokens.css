@@ -933,3 +933,14 @@ html body ::placeholder,html body .placeholder\:text-slate-600::placeholder{colo
 /* 平台设置的悬浮保存条: 给内容留出底部空间, 手机上抬到底部导航之上 */
 .cfg-wrap{padding-bottom:88px}
 @media (max-width:640px){html body .cfg-bar{bottom:calc(70px + env(safe-area-inset-bottom))}.cfg-wrap{padding-bottom:140px}}
+
+/* 删除 / 编辑: 选择条与菜单里的危险操作、视觉修复列表的选择条 */
+.sel-bar button.danger,.head-menu > button.danger{color:rgb(var(--bad-400))}
+.sel-bar button.danger:hover,.head-menu > button.danger:hover{background:rgb(var(--bad-500) / .08);color:rgb(var(--bad-400))}
+.mt-icon.danger:hover,.icon-btn2.danger:hover{color:rgb(var(--bad-400));background:rgb(var(--bad-500) / .08)}
+.head-menu hr{border:0;border-top:1px solid var(--line);margin:4px 2px}
+.ai-sel{padding:0 12px 10px}
+.ai-sel .sel-bar{max-width:100%;overflow-x:auto}
+.mock-del{opacity:0;transition:opacity .15s}
+.mock-row:hover .mock-del,.mock-row:focus-within .mock-del{opacity:1}
+@media (hover:none){.mock-del{opacity:1}}
