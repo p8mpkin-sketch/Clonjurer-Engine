@@ -1,6 +1,7 @@
 """用户管理与日志审计模块: 成员筛选/详情/批量、登录锁定、会话失效、审计筛选/分页/统计/导出、跨区不串。
 
 在独立子进程里导入 app(临时数据库与工作目录), 不污染其他测试与本机实例。"""
+import importlib.util
 import json
 import subprocess
 import sys
@@ -113,6 +114,7 @@ SCRIPT = textwrap.dedent(r'''
 ''')
 
 
+@unittest.skipUnless(importlib.util.find_spec("flask"), "需要 flask(平台依赖)")
 class IamModuleTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
