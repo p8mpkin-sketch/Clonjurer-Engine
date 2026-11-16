@@ -15,7 +15,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 <!-- 顶级字体体系: Inter / Plus Jakarta Sans / JetBrains Mono / Noto Sans SC -->
 <link href="/vendor/fonts/fonts.css" rel="stylesheet">
 <!-- UI 改版 P0 规范层: 字号/对比度/焦点/语义色(只换样式) -->
-<link href="/vendor/css/ui-tokens.css?v=26" rel="stylesheet">
+<link href="/vendor/css/ui-tokens.css?v=27" rel="stylesheet">
 
 <script src="/vendor/js/lucide.subset.js?v=8"></script>
 <script>
@@ -223,7 +223,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
   .lc-meta{margin-left:auto;white-space:nowrap;font-variant-numeric:tabular-nums}
   .lc-spin{width:10px;height:10px;border-radius:50%;border:1.5px solid var(--line-strong,rgba(127,127,127,.35));border-top-color:var(--fg-2);animation:lc-spin .9s linear infinite;flex:none}
   @keyframes lc-spin{to{transform:rotate(360deg)}}
-  .lc-steps{list-style:none;margin:0;padding:8px 12px;max-height:150px;overflow-y:auto;border-bottom:1px solid var(--line);font-size:12.5px;line-height:1.5}
+  .lc-steps{list-style:none;margin:0;padding:8px 12px;max-height:150px;overflow-y:auto;border-bottom:1px solid var(--line);font-size:13px;line-height:1.5}
   .lc-steps li{display:grid;grid-template-columns:16px 76px minmax(0,1fr);gap:6px;padding:2px 0;align-items:start}
   .lc-steps .ic{color:rgb(var(--ok-500,34 197 94));font-size:11px;line-height:19px}
   .lc-steps .ic .lc-spin{margin-top:4px}
@@ -248,8 +248,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
   .lc-empty{padding:10px 14px;color:var(--fg-3);font-size:12px}
   .lc-big{height:430px;margin-top:12px}
   .lc-compact{height:180px;border-radius:0;border:0}
-  .lc-compact .lc-head{padding:7px 10px;font-size:11px}
-  .lc-compact .lc-code{font-size:10.5px;padding:4px 0;overflow:hidden}
+  .lc-compact .lc-head{padding:7px 10px;font-size:12px}
+  .lc-compact .lc-code{font-size:12px;padding:4px 0;overflow:hidden}
   .lc-compact .lc-code .no{width:28px;padding-right:8px}
   .run-panel,.run-log{min-width:0;max-width:100%;overflow:hidden}
   @media (prefers-reduced-motion: reduce){.lc-spin,.lc-bar i,.lc-caret{animation:none}}
@@ -260,8 +260,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
   .shot-drop.on{border-color:#818cf8;background:rgba(99,102,241,.12)}
   .shot-drop.has{border-style:solid}
   .shot-drop img{max-width:100%;max-height:256px;object-fit:contain;display:block}
-  .shot-drop-tip{display:flex;flex-direction:column;align-items:center;gap:4px;color:var(--fg-3);font-size:11px;padding:18px;text-align:center}
-  .shot-drop-tip b{font-size:12.5px;color:var(--fg-2);font-weight:600}
+  .shot-drop-tip{display:flex;flex-direction:column;align-items:center;gap:4px;color:var(--fg-3);font-size:12px;padding:18px;text-align:center}
+  .shot-drop-tip b{font-size:13px;color:var(--fg-2);font-weight:600}
   .shot-drop-x{position:absolute;top:6px;right:6px;width:24px;height:24px;border-radius:50%;background:rgba(0,0,0,.65);color:#fff;font-size:15px;line-height:22px}
 </style>
 <!-- Tailwind 预编译(tools/build_css.sh): 原 451KB 运行时 JS 每次打开都在浏览器里扫描 DOM 生成样式;
@@ -468,7 +468,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             </div>
           </div>
           <div v-if="authMode !== 'login'">
-            <label class="text-[11px] text-slate-400 mb-1 block">显示名称(可选)</label>
+            <label class="text-[11px] text-slate-400 mb-1 block">显示名称（可选）</label>
             <div class="login-field">
               <svg class="lf-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.2V11a2 2 0 0 0-2-2h-4.3l1-1.1a2 2 0 0 0-.1-2.8l-1.5-1.4a2 2 0 0 0-2.8.1L4.5 10.6a2 2 0 0 0-.6 1.4v7.6a2 2 0 0 0 2 2h12.7a2 2 0 0 0 2-2v-2.2"/><circle cx="16.8" cy="15.6" r="2.1"/></svg>
               <input v-model="auth.form.display_name" :placeholder="authMode==='invite' ? '同事看到的名字，例如：林夏' : '例如：平台管理员'" class="login-input">
@@ -614,7 +614,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <div class="px-5 pt-4 pb-5">
               <div class="flex items-center gap-2">
                 <span class="w-2 h-2 rounded-full shrink-0" :style="{ background: p.color }"></span>
-                <span class="text-[15px] font-medium text-slate-100 truncate">[[ p.name ]]</span>
+                <span class="text-base font-medium text-slate-100 truncate">[[ p.name ]]</span>
                 <button v-if="canWrite" @click.stop="projectMenu = (projectMenu===p.id ? null : p.id)" title="项目操作" aria-label="项目操作"
                   class="ml-auto w-7 h-7 flex items-center justify-center rounded-md text-slate-500 hover:text-slate-100 hover:bg-white/[0.06] transition-colors shrink-0">
                   <i data-lucide="more-horizontal" class="w-4 h-4"></i>
@@ -748,7 +748,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         </div>
         <div class="space-y-3">
           <div><label class="text-[11px] text-slate-400 mb-1 block">项目名称 *</label>
-            <input v-model="projectModal.name" placeholder="例如: 客户官网改版" class="w-full bg-slate-950/80 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500/60"></div>
+            <input v-model="projectModal.name" placeholder="例如：客户官网改版" class="w-full bg-slate-950/80 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500/60"></div>
           <div><label class="text-[11px] text-slate-400 mb-1 block">描述</label>
             <textarea v-model="projectModal.description" rows="2" placeholder="项目用途 / 负责人 / 备注" class="w-full bg-slate-950/80 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500/60 resize-none"></textarea></div>
           <div><label class="text-[11px] text-slate-400 mb-1 block">标识色</label>
@@ -1171,9 +1171,9 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <img v-if="!thumbErrs.has(t.id)" :src="thumbUrl(t)" @error="thumbFail(t.id)" alt="" loading="lazy"><span v-else class="pick-ph"></span>
               <span class="flex-1 min-w-0"><b class="block truncate">[[ taskTitle(t) ]]</b><small>#[[ t.id ]] · [[ taskSub(t) ]]</small></span>
               <span v-if="aiJobById[t.id] && aiJobById[t.id].state==='running'" class="ai-run"><i data-lucide="loader" class="w-3.5 h-3.5 animate-spin"></i>[[ fmtDur(aiJobById[t.id].elapsed_s) ]]</span>
-              <span v-else class="score-pill" :class="(t.similarity_score || 0) >= 90 ? 'ok' : (t.similarity_score || 0) >= 80 ? 'mid' : 'low'">[[ t.similarity_score != null ? Number(t.similarity_score).toFixed(1) : '—' ]]</span>
+              <span v-else class="score-pill" :class="t.similarity_score == null ? '' : t.similarity_score >= 90 ? 'ok' : t.similarity_score >= 80 ? 'mid' : 'low'">[[ t.similarity_score != null ? Number(t.similarity_score).toFixed(1) : '—' ]]</span>
             </div>
-            <div v-if="!aiList.length" class="pg-empty">[[ aiAll || !tasks.some(t => t.status === 'completed' && taskKind(t) === 'clone') ? '还没有完成的克隆' : '所有克隆都已达到 95 分, 不需要修复。勾选「显示全部」查看全部任务' ]]</div>
+            <div v-if="!aiList.length" class="pg-empty">[[ aiAll || !tasks.some(t => t.status === 'completed' && taskKind(t) === 'clone') ? '还没有完成的克隆' : '所有克隆都已达到 95 分，不需要修复。勾选「显示全部」查看全部任务' ]]</div>
           </div>
         </section>
 
@@ -1218,11 +1218,11 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
   </div>
 
   <!-- ======================= 管理中心(仅 admin) ======================= -->
-  <div v-show="view==='admin' && auth.user && isAdmin()" class="flex-1 min-h-0 overflow-y-auto custom-scroll">
+  <div v-show="view==='admin' && (auth.user || !auth.required) && isAdmin()" class="flex-1 min-h-0 overflow-y-auto custom-scroll">
     <div class="max-w-[1300px] mx-auto px-6 py-6 space-y-4">
       <div class="flex items-center justify-between flex-wrap gap-4">
         <div class="min-w-0">
-          <h2 class="font-display text-[28px] leading-tight text-slate-100">[[ workspace.name ]]</h2>
+          <h2 class="pg-title">[[ workspace.name ]]</h2>
           <p class="text-[13px] text-slate-500 mt-1.5">成员与权限、套餐用量、操作记录<template v-if="isPlatformAdmin()">，以及平台设置</template></p>
         </div>
         <div class="flex items-center gap-1 p-0.5 rounded-xl border border-white/[0.07] bg-slate-950/60 max-w-full overflow-x-auto">
@@ -1300,7 +1300,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         <section class="mt-panel p-5 max-w-[640px]">
           <!-- 模型用量: 界面生成与 AI 视觉修复消耗的 token, 近 30 天 -->
         <div class="dash-sec-head">
-          <h2 class="text-[15px] font-semibold text-slate-100">模型用量<span class="tok-sub">近 30 天 · [[ fmtTokens(tokenUsage.tokens_in + tokenUsage.tokens_out) ]] token</span></h2>
+          <h2 class="text-base font-semibold text-slate-100">模型用量<span class="tok-sub">近 30 天 · [[ fmtTokens(tokenUsage.tokens_in + tokenUsage.tokens_out) ]] token</span></h2>
         </div>
         <div class="tok-seg" role="tablist" aria-label="用量分组">
           <button v-for="g in [['day','按天'],['project','按项目'],['model','按模型']]" :key="g[0]" type="button" role="tab"
@@ -1343,7 +1343,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <div class="text-xs font-semibold text-slate-300 flex items-center gap-2"><i data-lucide="scroll-text" class="w-4 h-4 text-amber-400"></i>审计日志</div>
           <div class="flex items-center gap-2 flex-wrap max-w-full">
             <input v-model="audit.q" @input="auditThrottled" placeholder="搜索用户 / 详情 / IP…" class="bg-slate-950/80 border border-white/[0.08] rounded-lg px-3 py-1.5 text-[11px] text-slate-300 w-48 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500">
-            <a href="/api/v4/admin/audit/export" title="导出 CSV(最近500条)"
+            <a href="/api/v4/admin/audit/export" title="导出 CSV（最近500条）"
               class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-white/[0.08] text-[10.5px] text-slate-400 hover:text-slate-100 transition-all">
               <i data-lucide="download" class="w-3 h-3"></i>导出 CSV
             </a>
@@ -1377,7 +1377,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 
       <!-- 系统设置 -->
       <div v-show="adminTab==='settings' && isPlatformAdmin()" class="mb-3 flex items-center gap-3 rounded-xl border border-white/[0.07] px-4 py-3 text-[13px] text-slate-400">
-        <i data-lucide="activity" class="w-4 h-4"></i>系统: 浏览器池、克隆工位与资源占用
+        <i data-lucide="activity" class="w-4 h-4"></i>系统：浏览器池、克隆工位与资源占用
         <button type="button" class="mt-btn ml-auto" @click="goModule('browserpool')">打开浏览器池</button>
       </div>
       <div v-show="adminTab==='settings'" class="cfg-wrap flex gap-4 items-start">
@@ -1408,17 +1408,17 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               </div>
               <div v-if="settings.providerNote" class="text-[9.5px] text-slate-500 mt-1">[[ settings.providerNote ]]</div>
             </div>
-            <div><label class="text-[11px] text-slate-400 mb-1 block">Base URL(OpenAI 兼容)</label>
+            <div><label class="text-[11px] text-slate-400 mb-1 block">Base URL（OpenAI 兼容）</label>
               <input v-model="settings.base_url" placeholder="https://api.deepseek.com/v1" class="w-full bg-slate-950/80 border border-white/[0.08] rounded-lg px-3 py-2 text-xs text-slate-200 font-mono placeholder:text-slate-600 focus:outline-none focus:border-indigo-500/60"></div>
-            <div><label class="text-[11px] text-slate-400 mb-1 flex items-center justify-between">API Key <span class="text-slate-600">(留空保持不变)</span>
+            <div><label class="text-[11px] text-slate-400 mb-1 flex items-center justify-between">API Key <span class="text-slate-600">（留空保持不变）</span>
               <button v-if="settings.configured" type="button" @click="toggleRevealKey"
                 class="flex items-center gap-1 text-[9.5px] px-1.5 py-0.5 rounded-md border border-white/[0.08] text-slate-500 hover:text-slate-100 transition-all">
                 <i :data-lucide="settings.revealed ? 'eye-off' : 'eye'" class="w-3 h-3"></i>[[ settings.revealed ? settings.revealedKey : settings.masked ]]
               </button></label>
-              <input v-model="settings.api_key" type="password" :placeholder="settings.configured ? '••••••••(留空保持已配置 Key)' : 'sk-…'" class="w-full bg-slate-950/80 border border-white/[0.08] rounded-lg px-3 py-2 text-xs text-slate-200 font-mono placeholder:text-slate-600 focus:outline-none focus:border-indigo-500/60"></div>
+              <input v-model="settings.api_key" type="password" :placeholder="settings.configured ? '••••••••（留空保持已配置 Key）' : 'sk-…'" class="w-full bg-slate-950/80 border border-white/[0.08] rounded-lg px-3 py-2 text-xs text-slate-200 font-mono placeholder:text-slate-600 focus:outline-none focus:border-indigo-500/60"></div>
             <div>
               <div class="flex items-center justify-between mb-1">
-                <label class="text-[11px] text-slate-400">模型(视觉闭环需多模态)</label>
+                <label class="text-[11px] text-slate-400">模型（视觉闭环需多模态）</label>
                 <button @click="fetchAiModels" :disabled="settings.fetchingModels"
                   class="text-[10px] px-2 py-0.5 rounded-md border border-white/[0.1] text-slate-400 hover:text-slate-100 hover:border-white/[0.18] transition-all disabled:opacity-50">[[ settings.fetchingModels ? '拉取中…' : '⟳ 拉取模型列表' ]]</button>
               </div>
@@ -1445,7 +1445,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               </div>
             </div>
             <div class="flex gap-2 pt-1">
-              <button @click="testAI" :disabled="settings.testing" class="flex-1 py-2 rounded-lg border border-white/[0.08] text-[11px] text-slate-300 hover:text-white hover:border-white/20 transition-all">[[ settings.testing ? '测试中(最长约 1 分钟)…' : '三段式测试(连接/鉴权/多模态)' ]]</button>
+              <button @click="testAI" :disabled="settings.testing" class="flex-1 py-2 rounded-lg border border-white/[0.08] text-[11px] text-slate-300 hover:text-white hover:border-white/20 transition-all">[[ settings.testing ? '测试中（最长约 1 分钟）…' : '三段式测试（连接/鉴权/多模态）' ]]</button>
               <button @click="saveSettings" :disabled="settings.busy" class="flex-1 py-2 rounded-lg ui-primary text-[11px] font-semibold text-white disabled:opacity-50 transition-all">[[ settings.busy ? '保存中…' : '保存设置' ]]</button>
             </div>
           </div>
@@ -1454,11 +1454,11 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <div class="flex items-center gap-2 mb-1"><i data-lucide="shield" class="w-4 h-4 text-emerald-400"></i><div class="text-xs font-semibold text-slate-300">鉴权与会话配置</div>
             <span class="ml-auto text-[9.5px] font-mono text-slate-500">会话有效期 12h · 当前用户 [[ users.length ]] 个</span></div>
           <div class="space-y-2.5 mt-3 text-[11px] text-slate-400 leading-relaxed">
-            <div class="flex gap-2"><i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5"></i><span><b class="text-slate-200">开放模式</b>:平台无任何用户时免登录,适合单机起步;创建首个管理员后自动进入强制鉴权。</span></div>
-            <div class="flex gap-2"><i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5"></i><span><b class="text-slate-200">viewer(观察者)</b>:仅查看任务、日志、预览与导出,不能提交或修改。</span></div>
-            <div class="flex gap-2"><i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5"></i><span><b class="text-slate-200">operator(操作员)</b>:提交批次、重建、Mock/热补丁、触发 AI 修复。</span></div>
-            <div class="flex gap-2"><i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5"></i><span><b class="text-slate-200">admin(管理员)</b>:全部能力 + 用户管理 / 审计日志 / 系统设置。</span></div>
-            <div class="flex gap-2"><i data-lucide="info" class="w-3.5 h-3.5 text-sky-400 shrink-0 mt-0.5"></i><span>密钥体系:密码 PBKDF2-SHA256 散列;API Key Fernet 对称加密(.secret_key 派生);登录会话 12 小时。</span></div>
+            <div class="flex gap-2"><i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5"></i><span><b class="text-slate-200">开放模式</b>：平台无任何用户时免登录，适合单机起步；创建首个管理员后自动进入强制鉴权。</span></div>
+            <div class="flex gap-2"><i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5"></i><span><b class="text-slate-200">viewer（观察者）</b>：仅查看任务、日志、预览与导出，不能提交或修改。</span></div>
+            <div class="flex gap-2"><i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5"></i><span><b class="text-slate-200">operator（操作员）</b>：提交批次、重建、Mock/热补丁、触发 AI 修复。</span></div>
+            <div class="flex gap-2"><i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5"></i><span><b class="text-slate-200">admin（管理员）</b>：全部能力 + 用户管理 / 审计日志 / 系统设置。</span></div>
+            <div class="flex gap-2"><i data-lucide="info" class="w-3.5 h-3.5 text-sky-400 shrink-0 mt-0.5"></i><span>密钥体系：密码 PBKDF2-SHA256 散列；API Key Fernet 对称加密（.secret_key 派生）；登录会话 12 小时。</span></div>
           </div>
           <div class="pt-3 border-t border-white/[0.06] grid grid-cols-3 gap-2 text-center">
             <div class="rounded-lg bg-slate-950/60 py-2"><div class="text-[9.5px] text-slate-500">用户总数</div><div class="text-sm font-bold text-slate-200 tnums">[[ users.length ]]</div></div>
@@ -1478,7 +1478,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <div class="rounded-lg bg-slate-950/60 py-2.5"><div class="text-[9.5px] text-slate-500">命中率</div><div class="text-sm font-bold text-emerald-300 tnums">[[ telemetry.cas.hit_rate ]]%</div></div>
             <div class="rounded-lg bg-slate-950/60 py-2.5"><div class="text-[9.5px] text-slate-500">命中 / 未中</div><div class="text-sm font-bold text-slate-200 tnums">[[ fmtNum(telemetry.cas.hits) ]] / [[ fmtNum(telemetry.cas.misses) ]]</div></div>
           </div>
-          <div class="text-[9.5px] text-slate-600 leading-relaxed">说明: 未捕获资源默认走 <b class="text-slate-400">上游源站反向代理兜底</b>(批次级开关「上游源站反向代理兜底」), 代理响应会写入 CAS 缓存池; 清空缓存池不影响已完成的任务产物。</div>
+          <div class="text-[9.5px] text-slate-600 leading-relaxed">说明：未捕获资源默认走 <b class="text-slate-400">上游源站反向代理兜底</b>（批次级开关「上游源站反向代理兜底」），代理响应会写入 CAS 缓存池；清空缓存池不影响已完成的任务产物。</div>
         </div>
 
         <!-- 并发与限制(只读快照) -->
@@ -1558,7 +1558,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <input v-model="userModal.username" placeholder="2~32 位字母/数字/._-" class="w-full bg-slate-950/80 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500/60"></div>
             <div><label class="text-[11px] text-slate-400 mb-1 block">显示名称</label>
               <input v-model="userModal.display_name" class="w-full bg-slate-950/80 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500/60"></div>
-            <div><label class="text-[11px] text-slate-400 mb-1 block">初始密码 *(≥8 位)</label>
+            <div><label class="text-[11px] text-slate-400 mb-1 block">初始密码 *（≥8 位）</label>
               <input v-model="userModal.password" type="text" class="w-full bg-slate-950/80 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-slate-200 font-mono placeholder:text-slate-600 focus:outline-none focus:border-indigo-500/60"></div>
             <div><label class="text-[11px] text-slate-400 mb-1 block">角色</label>
               <div class="grid grid-cols-3 gap-2">
@@ -1584,21 +1584,21 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 
       <!-- Hero 任务输入区 -->
       <section class="shrink-0 px-6 pt-8 pb-3">
-        <h1 class="font-display text-[30px] leading-tight text-slate-100">新建克隆</h1>
+        <h1 class="pg-title">新建克隆</h1>
         <p class="text-[13px] text-slate-500 mt-1 mb-5">填好网址和交付形态就能开始，其余设置都有合理的默认值。</p>
         <div class="rounded-xl border border-white/[0.1] bg-slate-900 p-4 space-y-3">
           <label for="clone-urls" class="text-[12px] font-semibold text-slate-300 flex items-center gap-1.5">要克隆的网址
-            <span class="text-[11px] text-slate-500 font-normal">· 粘贴一个或多个, 一行一个, 一次最多 50 个</span>
+            <span class="text-[11px] text-slate-500 font-normal">· 粘贴一个或多个，一行一个，一次最多 50 个</span>
           </label>
           <textarea id="clone-urls" v-model="urlsText" :rows="Math.min(8, Math.max(2, urlCount + 1))" spellcheck="false"
             @keydown.meta.enter.prevent="submit()" @keydown.ctrl.enter.prevent="submit()"
             placeholder="https://example.com&#10;粘贴多行时自动按批量处理"
             class="w-full rounded-xl bg-slate-950/80 border border-white/[0.10] px-3 py-2.5 text-[13px] font-mono text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-400/70 resize-y custom-scroll"></textarea>
-          <div v-if="urlCount" class="text-[11px] text-slate-500 -mt-1">识别到 <b class="text-slate-300 tnums">[[ urlCount ]]</b> 个网址[[ urlCount > 1 ? ', 将作为一个批次克隆' : '' ]] · ⌘/Ctrl + 回车 开始</div>
+          <div v-if="urlCount" class="text-[11px] text-slate-500 -mt-1">识别到 <b class="text-slate-300 tnums">[[ urlCount ]]</b> 个网址[[ urlCount > 1 ? '，将作为一个批次克隆' : '' ]] · ⌘/Ctrl + 回车 开始</div>
           <!-- 交付形态: 同一个克隆任务, 产出网站工程 / 桌面应用 / Android 应用 -->
           <div class="space-y-1.5">
             <div class="text-[10px] text-slate-500 tracking-[0.16em] font-semibold flex items-center gap-1.5">交付形态
-              <span class="tracking-normal font-normal text-slate-600">· 任务完成后自动构建, 在任务卡片下载</span></div>
+              <span class="tracking-normal font-normal text-slate-600">· 任务完成后自动构建，在任务卡片下载</span></div>
             <div class="grid grid-cols-3 gap-2">
               <button v-for="d in deliveries" :key="d.id" @click="form.package=d.id" :title="d.hint"
                 :class="form.package===d.id ? 'border-slate-400 bg-slate-500/10 text-slate-50' : 'border-white/[0.06] bg-slate-950/50 text-slate-400 hover:border-white/[0.12] hover:text-slate-300'"
@@ -1656,7 +1656,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                   class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-2 py-1.5 text-xs font-mono text-slate-200 focus:outline-none focus:border-indigo-500/60">
                 <span class="text-[10px] text-slate-500 shrink-0">秒</span>
               </div>
-              <div class="text-[9px] text-slate-600 leading-snug">单页加载上限 5-120 秒, 超时按已就绪内容继续固化</div>
+              <div class="text-[9px] text-slate-600 leading-snug">单页加载上限 5-120 秒，超时按已就绪内容继续固化</div>
             </div>
             <div class="rounded-xl border border-white/[0.06] bg-slate-950/50 p-2.5 space-y-1.5">
               <div class="text-[10.5px] font-medium text-slate-300">设备视口</div>
@@ -1693,15 +1693,15 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <!-- 仿真交互自定义: 登录提示文案与跳转(留空用默认) -->
             <div v-show="form.interactionSim" class="pl-1 space-y-1.5 fade-in border-l-2 border-indigo-500/30 ml-1 py-1">
               <div>
-                <label class="text-[10px] text-slate-400 mb-1 block">登录点击提示文案 <span class="text-slate-600">(留空 = 默认"系统繁忙,请稍后重试")</span></label>
+                <label class="text-[10px] text-slate-400 mb-1 block">登录点击提示文案 <span class="text-slate-600">（留空 = 默认"系统繁忙，请稍后重试"）</span></label>
                 <input v-model="form.simLoginMessage" spellcheck="false" maxlength="120"
-                  placeholder="例如: 演示环境,登录功能已关闭"
+                  placeholder="例如：演示环境，登录功能已关闭"
                   class="w-full rounded-lg bg-slate-950/70 border border-white/[0.07] px-2.5 py-1.5 text-[11px] text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500/60">
               </div>
               <div>
-                <label class="text-[10px] text-slate-400 mb-1 block">登录后跳转网址 <span class="text-slate-600">(留空 = 不跳转; 支持 http(s):// 或站内 /path)</span></label>
+                <label class="text-[10px] text-slate-400 mb-1 block">登录后跳转网址 <span class="text-slate-600">(留空 = 不跳转；支持 http(s):// 或站内 /path)</span></label>
                 <input v-model="form.simLoginRedirect" spellcheck="false" maxlength="500"
-                  placeholder="例如: https://example.com/welcome 或 /success.html"
+                  placeholder="例如：https://example.com/welcome 或 /success.html"
                   class="w-full rounded-lg bg-slate-950/70 border border-white/[0.07] px-2.5 py-1.5 text-[11px] font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500/60">
               </div>
             </div>
@@ -1716,7 +1716,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                   :class="authTab===at.id ? 'bg-slate-700 text-slate-50 shadow-inner' : 'text-slate-400 hover:text-slate-200'"
                   class="flex-1 text-[10px] px-2 py-1.5 rounded-lg transition-all">[[ at.label ]]</button>
               </div>
-              <textarea v-if="authTab==='cookie'" v-model="form.cookie" rows="3" spellcheck="false" placeholder="Cookie 字符串或 JSON,如 sessionid=xxx; token=yyy"
+              <textarea v-if="authTab==='cookie'" v-model="form.cookie" rows="3" spellcheck="false" placeholder="Cookie 字符串或 JSON，如 sessionid=xxx; token=yyy"
                 class="w-full rounded-lg bg-slate-950/70 border border-white/[0.07] p-2 text-[11px] font-mono text-slate-200 placeholder-slate-600 resize-y custom-scroll"></textarea>
               <input v-else-if="authTab==='bearer'" v-model="form.bearer" spellcheck="false" placeholder="Bearer Token (JWT / API Key)"
                 class="w-full rounded-lg bg-slate-950/70 border border-white/[0.07] p-2 text-[11px] font-mono text-slate-200 placeholder-slate-600">
@@ -1731,7 +1731,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                   <div class="text-[11px] text-slate-300 flex items-center gap-1.5">
                     <i data-lucide="sparkles" class="w-3.5 h-3.5 text-fuchsia-400"></i>启用大模型视觉闭环修复
                   </div>
-                  <div class="text-[9.5px] text-slate-500">诚实评分低于 85 分时, 由多模态大模型对比双图生成 CSS/HTML 补丁并自动迭代复评</div>
+                  <div class="text-[9.5px] text-slate-500">诚实评分低于 85 分时，由多模态大模型对比双图生成 CSS/HTML 补丁并自动迭代复评</div>
                 </div>
                 <button type="button" @click="form.aiRepair=!form.aiRepair"
                   :class="form.aiRepair ? 'bg-indigo-600' : 'bg-slate-700/80'"
@@ -1742,7 +1742,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               </div>
               <div v-show="form.aiRepair" class="space-y-1.5 fade-in">
                 <input v-model="form.aiKey" type="password" spellcheck="false" autocomplete="off"
-                  :placeholder="aiKeyConfigured ? 'API Key 已由环境变量提供, 此处可覆盖' : '大模型 API Key(如 DeepSeek, 留空则用环境变量 CLONER_AI_KEY)'"
+                  :placeholder="aiKeyConfigured ? 'API Key 已由环境变量提供，此处可覆盖' : '大模型 API Key（如 DeepSeek，留空则用环境变量 CLONER_AI_KEY）'"
                   class="w-full rounded-lg bg-slate-950/70 border border-white/[0.07] p-2 text-[11px] font-mono text-slate-200 placeholder-slate-600">
                 <div class="grid grid-cols-2 gap-1.5">
                   <input v-model="form.aiModel" spellcheck="false" :placeholder="aiDefaults.model || '模型名'"
@@ -1750,10 +1750,10 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                   <input v-model="form.aiBaseUrl" spellcheck="false" :placeholder="aiDefaults.base_url || 'API Base URL'"
                     class="rounded-lg bg-slate-950/70 border border-white/[0.07] p-2 text-[10px] font-mono text-slate-200 placeholder-slate-600">
                 </div>
-                <div class="text-[9px] text-slate-600 leading-relaxed">OpenAI 兼容 /chat/completions 接口; 视觉闭环要求多模态模型。未配置 Key 时该功能自动跳过, 不影响确定性克隆管线。</div>
+                <div class="text-[9px] text-slate-600 leading-relaxed">OpenAI 兼容 /chat/completions 接口；视觉闭环要求多模态模型。未配置 Key 时该功能自动跳过，不影响确定性克隆管线。</div>
                 <div v-if="isAdmin()" class="flex items-center justify-between pt-1.5 border-t border-white/[0.05]">
                   <span class="text-[9.5px]" :class="aiKeyConfigured ? 'text-emerald-400/80' : 'text-slate-500'">
-                    [[ aiKeyConfigured ? '平台已配置: ' + (aiDefaults.model || '默认模型') : '平台未配置模型(此处填 Key 仅本次批次生效)' ]]
+                    [[ aiKeyConfigured ? '平台已配置: ' + (aiDefaults.model || '默认模型') : '平台未配置模型（此处填 Key 仅本次批次生效）' ]]
                   </span>
                   <button @click="adminTab='settings'; switchView('admin')"
                     class="flex items-center gap-1 px-2 py-1 rounded-md border border-fuchsia-500/30 bg-fuchsia-500/10 text-[9.5px] text-fuchsia-300 hover:bg-fuchsia-500/20 transition-all">
@@ -1783,12 +1783,12 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <div class="pt-[86px] max-w-[440px] space-y-4">
         <h2 class="text-[13px] font-medium text-slate-400">克隆完成后你会得到</h2>
         <ol class="gain-list">
-          <li><b>一个能离线打开的克隆网站</b><span>页面、样式、图片、字体都下载到本地, 原站下线也能看。</span></li>
-          <li><b>还原度评分和对比</b><span>与原站逐像素比对打分, 可并排、卷帘、看差异图找出不一样的地方。</span></li>
-          <li><b>可下载的网站工程</b><span>一个源码包(ZIP), 解压即可运行; 选了桌面/Android 应用时同时给安装包。</span></li>
-          <li><b>一键部署</b><span>在本机启动这个网站, 得到一个可以直接打开的访问地址。</span></li>
+          <li><b>一个能离线打开的克隆网站</b><span>页面、样式、图片、字体都下载到本地，原站下线也能看。</span></li>
+          <li><b>还原度评分和对比</b><span>与原站逐像素比对打分，可并排、卷帘、看差异图找出不一样的地方。</span></li>
+          <li><b>可下载的网站工程</b><span>一个源码包(ZIP)，解压即可运行；选了桌面/Android 应用时同时给安装包。</span></li>
+          <li><b>一键部署</b><span>在本机启动这个网站，得到一个可以直接打开的访问地址。</span></li>
         </ol>
-        <p class="text-[12px] text-slate-500 leading-relaxed">普通单页通常 30 秒到 2 分钟完成; 页面越大、图片越多越久。需要登录的页面, 在「高级克隆配置」里填 Cookie。</p>
+        <p class="text-[12px] text-slate-500 leading-relaxed">普通单页通常 30 秒到 2 分钟完成；页面越大、图片越多越久。需要登录的页面，在「高级克隆配置」里填 Cookie。</p>
       </div>
     </aside>
 
@@ -1857,7 +1857,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             class="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 opacity-80">
             <i data-lucide="loader" class="w-4 h-4 animate-spin"></i>部署中 · [[ dockerInfo.step || '启动' ]]
           </button>
-          <button v-else @click="dockerAction('start')" :disabled="docker.busy" title="在本机启动这个网站, 得到一个可访问的地址"
+          <button v-else @click="dockerAction('start')" :disabled="docker.busy" title="在本机启动这个网站，得到一个可访问的地址"
             class="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-200 hover:border-white/[0.2] disabled:opacity-60 transition-all">
             <i data-lucide="rocket" class="w-4 h-4"></i>[[ docker.busy ? '提交中…' : '部署' ]]
           </button>
@@ -1908,7 +1908,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <div v-if="view==='task' && selectedTask && fitDetail(selectedTask)" class="fit-panel">
         <button type="button" class="fit-bar" @click="fitDrawer = true" title="查看完整验收清单">
           <span class="fit-title">验收清单</span>
-          <span class="fit-count tnums" title="满足 = 完全做到; 部分 = 做到了但有瑕疵或现有证据确认不了">[[ fitDetail(selectedTask).items.filter(i => i.verdict === 'yes').length ]] 满足<template v-if="fitDetail(selectedTask).items.filter(i => i.verdict === 'partial').length"> · [[ fitDetail(selectedTask).items.filter(i => i.verdict === 'partial').length ]] 部分</template><i>/</i>[[ fitDetail(selectedTask).items.length ]] 条</span>
+          <span class="fit-count tnums" title="满足 = 完全做到；部分 = 做到了但有瑕疵或现有证据确认不了">[[ fitDetail(selectedTask).items.filter(i => i.verdict === 'yes').length ]] 满足<template v-if="fitDetail(selectedTask).items.filter(i => i.verdict === 'partial').length"> · [[ fitDetail(selectedTask).items.filter(i => i.verdict === 'partial').length ]] 部分</template><i>/</i>[[ fitDetail(selectedTask).items.length ]] 条</span>
           <span class="fit-stats tnums">
             <span v-if="fitDetail(selectedTask).fidelity && fitDetail(selectedTask).fidelity.score != null">原图相似度 <b>[[ Math.round(fitDetail(selectedTask).fidelity.score) ]]</b></span>
             <span>运行健康 <b>[[ Math.round(fitDetail(selectedTask).health * 100) ]]%</b></span>
@@ -1973,7 +1973,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         <div v-show="activeTab==='matrix'" class="space-y-3">
           <div v-if="view==='tasks'" class="flex items-end justify-between gap-4 flex-wrap pt-4 pb-3 px-1">
             <div>
-              <h1 class="font-display text-[22px] sm:text-[30px] leading-tight text-slate-100">[[ currentProject ? currentProject.name : '全部任务' ]]</h1>
+              <h1 class="pg-title">[[ currentProject ? currentProject.name : '全部任务' ]]</h1>
               <div v-if="currentBatchId !== '' && currentBatchId !== null" class="mt-1 text-[13px] text-slate-500 tnums">本批 [[ filteredTasks.length ]] 个
                 <button type="button" class="dash-link ml-1" @click="currentBatchId = ''">查看全部 [[ tasks.length ]] 个</button></div>
               <div v-else class="mt-1 text-[13px] text-slate-500 tnums">[[ filteredTasks.length ]] 个任务<template v-if="listAvg"> · [[ listAvg.n ]] 个克隆的平均还原度 <span class="serif-num text-[17px] text-slate-200">[[ listAvg.v ]]</span></template></div>
@@ -2064,7 +2064,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                   <!-- 已完成: 还原度大数字即状态; 其他状态才显示状态徽标 -->
                   <span v-if="task.status==='completed' && task.similarity_score != null" class="tnums leading-none text-right" :title="scoreLabel(task) + ' ' + task.similarity_score + ' 分'"
                     >
-                    <span class="text-[15px] font-semibold tnums" :class="scoreTone(task.similarity_score)">[[ Number(task.similarity_score).toFixed(1) ]]</span><span class="text-[12px] text-slate-500 ml-0.5">分</span>
+                    <span class="text-base font-semibold tnums" :class="scoreTone(task.similarity_score)">[[ Number(task.similarity_score).toFixed(1) ]]</span><span class="text-[12px] text-slate-500 ml-0.5">分</span>
                   </span>
                   <span v-else class="inline-flex items-center gap-1 text-[9px] font-medium px-2 py-0.5 rounded-full border"
                     :class="task.status==='completed' ? 'bg-emerald-500/10 text-emerald-300/90 border-emerald-500/25' : statusBadge(task.status)">
@@ -2094,7 +2094,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                 </div>
                 <div v-else class="h-[180px] flex flex-col items-center justify-center gap-1.5">
                   <i data-lucide="inbox" class="w-5 h-5 text-slate-700"></i>
-                  <span class="text-[12px] text-slate-500 text-center px-4">[[ task.status==='failed' ? humanError(task).title : (task.status==='pending' ? '排队中' : '没有截图, 点「预览」查看页面') ]]</span>
+                  <span class="text-[12px] text-slate-500 text-center px-4">[[ task.status==='failed' ? humanError(task).title : (task.status==='pending' ? '排队中' : '没有截图，点「预览」查看页面') ]]</span>
                 </div>
                 <div v-if="task.status==='completed'" class="absolute bottom-2 right-2 px-2 py-0.5 rounded-md bg-black/70 text-[12px] text-white opacity-0 group-hover:opacity-100 transition-opacity">查看详情</div>
               </div>
@@ -2116,7 +2116,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                   <i data-lucide="download" class="w-2.5 h-2.5"></i>[[ ({android: 'APK', darwin: 'macOS', win32: 'Windows', linux: 'Linux'})[a.platform] || a.label ]]
                   <span class="text-slate-500">[[ (a.bytes / 1048576).toFixed(0) ]]MB</span></a>
                 <span v-if="genBuildGap(task)" :title="genBuildGap(task)"
-                  class="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300 font-sans">构建失败(悬停看原因)</span>
+                  class="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300 font-sans">构建失败（悬停看原因）</span>
               </div>
 
               <!-- 失败: 一句人话原因 + 只保留「重试」 -->
@@ -2168,15 +2168,15 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <button @click="previewWidth='tablet'" :aria-pressed="previewWidth==='tablet'">平板 768</button>
               <button @click="previewWidth='mobile'" :aria-pressed="previewWidth==='mobile'">手机 390</button>
             </div>
-            <span v-if="previewScale < 0.995 && ['single','compare','overlay'].includes(previewMode)" class="text-[12px] text-slate-500 tnums whitespace-nowrap" title="页面按真实宽度排版, 容器不够宽时整体等比缩小显示">按 [[ Math.round(previewScale * 100) ]]% 显示</span>
+            <span v-if="previewScale < 0.995 && ['single','compare','overlay'].includes(previewMode)" class="text-[12px] text-slate-500 tnums whitespace-nowrap" title="页面按真实宽度排版，容器不够宽时整体等比缩小显示">按 [[ Math.round(previewScale * 100) ]]% 显示</span>
             <div v-if="previewMode==='compare' && previewTask && taskKind(previewTask) === 'clone'" class="fade-in">
               <div class="ui-seg" role="group">
-              <button @click="origView='shot'" :aria-pressed="origView==='shot'" title="克隆时拍下的原站整页截图, 评分就是拿它比的">原站截图</button>
-              <button @click="origView='live'" :aria-pressed="origView==='live'" title="直接加载原站; 很多网站禁止被嵌入, 会显示空白">原站实时</button>
+              <button @click="origView='shot'" :aria-pressed="origView==='shot'" title="克隆时拍下的原站整页截图，评分就是拿它比的">原站截图</button>
+              <button @click="origView='live'" :aria-pressed="origView==='live'" title="直接加载原站；很多网站禁止被嵌入，会显示空白">原站实时</button>
             </div>
             </div>
             <div class="flex-1"></div>
-            <button v-if="previewTask" @click="openHotpatch" class="hidden sm:flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white transition-all" title="直接改克隆站的 CSS, 即时生效"><i data-lucide="paintbrush" class="w-4 h-4"></i><span class="ui-btn-label">改样式</span></button>
+            <button v-if="previewTask" @click="openHotpatch" class="hidden sm:flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white transition-all" title="直接改克隆站的 CSS，即时生效"><i data-lucide="paintbrush" class="w-4 h-4"></i><span class="ui-btn-label">改样式</span></button>
             <button v-if="previewTask" @click="openNewWindow('/preview/' + previewTask.id + '/')" class="hidden sm:flex items-center gap-1.5 h-8 px-3 rounded-lg border border-white/[0.10] text-[13px] text-slate-300 hover:text-white transition-all"><i data-lucide="external-link" class="w-4 h-4"></i><span class="ui-btn-label">新窗口</span></button>
           </div>
 
@@ -2373,7 +2373,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         <div v-show="activeTab==='deploy'" class="h-full flex flex-col gap-3">
           <div v-if="!selectedTask" class="flex-1 flex flex-col items-center justify-center gap-3 text-slate-600">
             <i data-lucide="container" class="w-10 h-10 opacity-40"></i>
-            <div class="text-xs">先在任务矩阵选择任务, 再查看部署蓝图</div>
+            <div class="text-xs">先在任务矩阵选择任务，再查看部署蓝图</div>
           </div>
           <template v-else>
             <div class="flex items-center gap-2 text-[11px] text-slate-400">
@@ -2416,7 +2416,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                 </button>
               </div>
               <div v-if="docker.error" class="px-3 py-2 text-[10px] text-rose-300 bg-rose-500/5 border-b border-rose-500/20">[[ docker.error ]]</div>
-              <pre v-if="docker.showLogs" class="log-term max-h-40 overflow-auto custom-scroll rounded-lg p-3 text-[10px] font-mono leading-5">[[ docker.logs || '(暂无日志)' ]]</pre>
+              <pre v-if="docker.showLogs" class="log-term max-h-40 overflow-auto custom-scroll rounded-lg p-3 text-[10px] font-mono leading-5">[[ docker.logs || '（暂无日志）' ]]</pre>
               <div class="px-3 py-2 text-[9.5px] text-slate-500">极速启动：不构建镜像，直接把工程挂载进通用运行环境，约 1 秒可访问。默认只允许本机访问，24 小时后自动销毁，可在「部署」页延长或销毁。</div>
             </div>
 
@@ -2477,7 +2477,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <option v-for="t in tasks" :key="t.id" :value="t.id">#[[ t.id ]] [[ t.domain ]]</option>
         </select>
         <div class="flex-1"></div>
-        <button @click="logAutoScroll=!logAutoScroll" :class="logAutoScroll ? 'text-emerald-300' : 'text-slate-500'" class="term-btn flex items-center gap-1 hover:bg-white/5" :title="logAutoScroll ? '自动滚动: 开(点击解锁)' : '自动滚动: 关(点击锁定)'">
+        <button @click="logAutoScroll=!logAutoScroll" :class="logAutoScroll ? 'text-emerald-300' : 'text-slate-500'" class="term-btn flex items-center gap-1 hover:bg-white/5" :title="logAutoScroll ? '自动滚动：开（点击解锁）' : '自动滚动：关（点击锁定）'">
           <i :data-lucide="logAutoScroll ? 'arrow-down-to-line' : 'unlock'" class="w-3 h-3"></i>自动滚动
         </button>
         <button @click="clearLogs" class="term-btn text-slate-500 hover:text-rose-300 hover:bg-white/5">清空日志</button>
@@ -2507,7 +2507,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       </div>
     </div>
     <div v-if="consoleState > 0" ref="consoleBody" class="flex-1 overflow-y-auto custom-scroll px-3 py-2 font-mono text-[10.5px] leading-5">
-      <div v-if="!filteredLogs.length" class="text-slate-600 text-[11px] font-sans py-2">等待构建日志流入(支持级别筛选: 全部 / 仅错误 / 仅 API / 仅构建)</div>
+      <div v-if="!filteredLogs.length" class="text-slate-600 text-[11px] font-sans py-2">等待构建日志流入（支持级别筛选：全部 / 仅错误 / 仅 API / 仅构建）</div>
       <div v-for="l in filteredLogs" :key="l.seq" class="whitespace-pre-wrap break-all">
         <span class="text-slate-600 tnums">[[ l.time ]]</span>
         <span class="mx-1.5 px-1.5 py-px rounded text-[9px] font-bold tracking-wide align-middle" :class="stagePill(l.stage)">[[ l.stage ]]</span>
@@ -2604,7 +2604,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <div class="max-w-[1400px] mx-auto px-6 py-6 space-y-4">
         <div class="flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <h2 class="font-display text-[28px] leading-tight text-slate-100">界面生成</h2>
+            <h2 class="pg-title">界面生成</h2>
             <p class="text-[13px] text-slate-500 mt-1.5">写一段需求或上传截图，生成可运行的网页；按需求逐条验收，不达标自动修复。</p>
           </div>
           <div class="flex items-center gap-2 text-[11px] text-slate-400">
@@ -2623,12 +2623,12 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                 class="flex-1 px-3 py-1.5 rounded-md border text-[11px] transition-all">界面截图</button>
             </div>
             <div v-show="gen.kind==='description'" class="space-y-1.5">
-              <label class="text-[10px] text-slate-500">想要什么样的网页(一句话也可以; 动效、小游戏、工具、信息页都行, 写得越具体越贴合)</label>
-              <textarea v-model="gen.description" rows="6" maxlength="4000" placeholder="例如: 做一个番茄钟, 25 分钟专注 5 分钟休息, 可以开始、暂停、重置, 配色安静一些"
+              <label class="text-[10px] text-slate-500">想要什么样的网页（一句话也可以；动效、小游戏、工具、信息页都行，写得越具体越贴合）</label>
+              <textarea v-model="gen.description" rows="6" maxlength="4000" placeholder="例如：做一个番茄钟，25 分钟专注 5 分钟休息，可以开始、暂停、重置，配色安静一些"
                 class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500 resize-none"></textarea>
             </div>
             <div v-show="gen.kind==='screenshot'" class="space-y-2">
-              <label class="text-[10px] text-slate-500">界面截图(PNG/JPG/WebP, ≤12MB; 浏览器整窗截图会自动去掉地址栏等外框, Retina 截图自动按倍率换算)</label>
+              <label class="text-[10px] text-slate-500">界面截图（PNG/JPG/WebP, ≤12MB；浏览器整窗截图会自动去掉地址栏等外框，Retina 截图自动按倍率换算）</label>
               <div class="shot-drop" :class="{ on: gen.drag, has: gen.preview }" tabindex="0"
                 @click="$refs.genFile.click()" @keydown.enter.prevent="$refs.genFile.click()"
                 @dragover.prevent="gen.drag = true" @dragleave.prevent="gen.drag = false" @drop.prevent="onGenDrop">
@@ -2639,15 +2639,15 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               </div>
               <div v-if="gen.fileInfo" class="text-[10px] text-slate-500 tnums">[[ gen.fileInfo ]]</div>
               <input ref="genFile" type="file" accept="image/*" @change="handleGenFile" class="hidden">
-              <label class="text-[10px] text-slate-500 block pt-1">补充要求(可选: 想在截图基础上改什么、加什么; 不填就按截图还原)</label>
-              <textarea v-model="gen.hint" rows="3" maxlength="2000" placeholder="例如: 配色换成深色; 右侧加一个购物车按钮; 商品卡片做成 3 列"
+              <label class="text-[10px] text-slate-500 block pt-1">补充要求（可选：想在截图基础上改什么、加什么；不填就按截图还原）</label>
+              <textarea v-model="gen.hint" rows="3" maxlength="2000" placeholder="例如：配色换成深色；右侧加一个购物车按钮；商品卡片做成 3 列"
                 class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500 resize-none"></textarea>
             </div>
             <div class="grid grid-cols-2 gap-3">
               <!-- 交付形态: 与「新建克隆」同一组选项 -->
               <div class="space-y-1.5 col-span-2">
                 <div class="text-[10px] text-slate-500 tracking-[0.16em] font-semibold flex items-center gap-1.5">交付形态
-                  <span class="tracking-normal font-normal text-slate-600">· 任务完成后自动构建, 在任务卡片下载</span></div>
+                  <span class="tracking-normal font-normal text-slate-600">· 任务完成后自动构建，在任务卡片下载</span></div>
                 <div class="grid grid-cols-3 gap-2">
                   <button v-for="d in deliveries" :key="d.id" @click="gen.package=d.id" :title="d.hint"
                     :disabled="gen.target==='flutter' && d.id==='desktop'"
@@ -2669,8 +2669,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                   <option value="desktop">大屏桌面 1920</option><option value="laptop">笔记本 1440</option><option value="mobile">手机 390</option></select></div>
               <div class="space-y-1"><label class="text-[10px] text-slate-500">界面代码</label>
                 <select v-model="gen.target" @change="gen.package = (gen.target==='flutter' && gen.package==='desktop') ? '' : gen.package" class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-2 py-1.5 text-xs text-slate-200">
-                  <option value="html_css">HTML / CSS(可预览评分)</option><option value="flutter">Flutter 原生控件(D3 最小版)</option></select></div>
-              <div class="space-y-1"><label class="text-[10px] text-slate-500">目标分(≥即停)</label>
+                  <option value="html_css">HTML / CSS（可预览评分）</option><option value="flutter">Flutter 原生控件（D3 最小版）</option></select></div>
+              <div class="space-y-1"><label class="text-[10px] text-slate-500">目标分（≥即停）</label>
                 <input v-model.number="gen.targetScore" type="number" min="1" max="100" class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-2 py-1.5 text-xs text-slate-200"></div>
               <div class="space-y-1"><label class="text-[10px] text-slate-500">最多轮数 / 时间预算(s)</label>
                 <div class="flex gap-2"><input v-model.number="gen.maxRounds" type="number" min="1" max="12" class="w-1/2 rounded-lg bg-slate-950/80 border border-white/[0.08] px-2 py-1.5 text-xs text-slate-200">
@@ -2687,18 +2687,18 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <div class="text-[13px] font-semibold text-slate-200">不知道怎么写? 点一个试试</div>
               <span class="gen-help" tabindex="0" aria-label="评分说明">?
                 <span class="gen-help-pop">[[ gen.kind === 'screenshot'
-                  ? '还原度 = 40% 与原图的相似度 + 30% 清单达成 + 15% 电脑/平板/手机三端正常 + 15% 设计。模型先读截图, 再写响应式页面, 在真实浏览器里三端体检, 对照原图验收, 不达标自动修一到两轮。'
-                  : '需求符合度 = 35% 清单达成(只算能确认的条目) + 25% 运行正常 + 40% 设计。模型先把一句话扩写成任务书和验收清单, 写页面, 在真实浏览器里体检, 看图逐条验收, 不达标自动修一到两轮。' ]]</span></span>
+                  ? '还原度 = 40% 与原图的相似度 + 30% 清单达成 + 15% 电脑/平板/手机三端正常 + 15% 设计。模型先读截图，再写响应式页面，在真实浏览器里三端体检，对照原图验收，不达标自动修一到两轮。'
+                  : '需求符合度 = 35% 清单达成（只算能确认的条目） + 25% 运行正常 + 40% 设计。模型先把一句话扩写成任务书和验收清单，写页面，在真实浏览器里体检，看图逐条验收，不达标自动修一到两轮。' ]]</span></span>
             </div>
             <template v-if="gen.kind !== 'screenshot'">
               <button v-for="ex in genExamples" :key="ex" type="button" class="gen-example" @click="gen.description = ex">[[ ex ]]</button>
             </template>
             <template v-else>
-              <p class="text-[12.5px] text-slate-400 leading-relaxed">截一张网页或 App 的图, 在左边按 ⌘V 粘贴。浏览器整窗截图会自动去掉地址栏; 可以在「补充要求」里写想改的地方, 比如:</p>
+              <p class="text-[12.5px] text-slate-400 leading-relaxed">截一张网页或 App 的图，在左边按 ⌘V 粘贴。浏览器整窗截图会自动去掉地址栏；可以在「补充要求」里写想改的地方，比如：</p>
               <button v-for="ex in genShotHints" :key="ex" type="button" class="gen-example" @click="gen.hint = ex">[[ ex ]]</button>
             </template>
             <div v-if="!genReady && !form.aiKey" class="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-[12.5px] text-amber-200 flex items-center gap-2">
-              还没有配置大模型, 生成需要它。
+              还没有配置大模型，生成需要它。
               <button v-if="isPlatformAdmin()" type="button" class="ml-auto mt-btn" @click="switchView('admin'); adminTab='settings'; loadSettings()">去配置</button>
             </div>
           </div>
@@ -2709,7 +2709,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <div class="max-w-[1400px] mx-auto px-6 py-6 space-y-4">
         <div class="flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <h2 class="font-display text-[28px] leading-tight text-slate-100">Mock 数据</h2>
+            <h2 class="pg-title">Mock 数据</h2>
             <p class="text-[13px] text-slate-500 mt-1.5">描述业务场景，生成接口响应，并注入到克隆站。</p>
           </div>
           <div class="flex items-center gap-2">
@@ -2731,8 +2731,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <i data-lucide="braces" class="w-4 h-4 text-emerald-400"></i>字段规则配置
             </div>
             <div class="space-y-1.5">
-              <label class="text-[10px] text-slate-500">业务场景描述(关键词决定字段: 商品 / 订单 / 用户 / 文章)</label>
-              <textarea v-model="mockGen.scene" rows="2" maxlength="200" placeholder="例如: 电商商品列表接口, 返回在售商品的名称价格与库存"
+              <label class="text-[10px] text-slate-500">业务场景描述（关键词决定字段：商品 / 订单 / 用户 / 文章）</label>
+              <textarea v-model="mockGen.scene" rows="2" maxlength="200" placeholder="例如：电商商品列表接口，返回在售商品的名称价格与库存"
                 class="w-full rounded-lg bg-slate-950/80 border border-white/[0.08] px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500/50 resize-none"></textarea>
             </div>
             <div class="space-y-1.5">
@@ -2840,8 +2840,8 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         </div>
         <div class="flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <h2 class="font-display text-[28px] leading-tight text-slate-100">表单捕获追踪</h2>
-            <p class="text-[13px] text-slate-500 mt-1.5">Form Tracker · 各任务埋点配置总览 + 最近上报实时流(细粒度配置在任务详情「表单埋点推送」)</p>
+            <h2 class="pg-title">表单捕获追踪</h2>
+            <p class="text-[13px] text-slate-500 mt-1.5">Form Tracker · 各任务埋点配置总览 + 最近上报实时流（细粒度配置在任务详情「表单埋点推送」）</p>
           </div>
           <button @click="loadTrackerOverview(); iconRefresh()" class="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-white/[0.08] text-[11px] text-slate-400 hover:text-slate-100 transition-all">
             <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>刷新
@@ -2880,7 +2880,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                   </button>
                 </td>
                 <td class="px-3 py-2 text-slate-400">[[ it.has_token ? '已配置' : '未配置' ]]</td>
-                <td class="px-3 py-2 text-slate-400">[[ it.enabled ? (it.mask ? '开启' : '明文(审计)') : '—' ]]</td>
+                <td class="px-3 py-2 text-slate-400">[[ it.enabled ? (it.mask ? '开启' : '明文（审计）') : '—' ]]</td>
                 <td class="px-3 py-2"><span class="font-mono text-slate-500">[[ it.slots.length ? it.slots.join(' / ') : '全部槽位' ]]</span></td>
                 <td class="px-3 py-2 text-right whitespace-nowrap">
                   <button @click="viewTrackerCaptures(it)" title="查看捕获记录" class="p-1.5 rounded-md text-slate-400 hover:text-slate-100 transition-all"><i data-lucide="search-code" class="w-3.5 h-3.5"></i></button>
@@ -2925,7 +2925,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
                 <td class="px-4 py-2 font-mono text-slate-500 tnums shrink-0">[[ r.time ]]</td>
                 <td class="px-3 py-2"><span class="px-1.5 py-0.5 rounded border border-indigo-500/30 text-indigo-300 text-[9.5px]">[[ r.title ]]·[[ r.event ]]</span></td>
                 <td class="px-3 py-2 text-slate-400">[[ r.task_id == null ? '—' : '#' + r.task_id ]]</td>
-                <td class="px-3 py-2 font-mono text-slate-400 truncate max-w-[340px]">[[ (r.fields || []).join(' / ') || '(无字段)' ]]</td>
+                <td class="px-3 py-2 font-mono text-slate-400 truncate max-w-[340px]">[[ (r.fields || []).join(' / ') || '（无字段）' ]]</td>
                 <td class="px-3 py-2 text-right"><i data-lucide="chevron-down" class="w-3.5 h-3.5 text-slate-600 inline transition-transform" :class="trackerExpanded === i ? 'rotate-180' : ''"></i></td>
               </tr>
               <tr v-if="!trackerFiltered.length"><td colspan="5" class="px-4 py-8 text-center text-slate-600">[[ trackerOverview.recent.length ? '无匹配记录' : '暂无上报记录' ]]</td></tr>
@@ -3118,7 +3118,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
     </div>
     <div class="grid grid-cols-2 gap-3 flex-1 min-h-0">
       <div class="rounded-xl border border-white/10 overflow-hidden flex flex-col min-h-0">
-        <div class="px-3 py-1.5 text-[10px] font-mono text-sky-300 bg-slate-950/60">original_preview.png(原站 Playwright 渲染)</div>
+        <div class="px-3 py-1.5 text-[10px] font-mono text-sky-300 bg-slate-950/60">original_preview.png（原站 Playwright 渲染）</div>
         <div class="flex-1 overflow-auto custom-scroll bg-white/5"><img :src="compareData.original" class="w-full" alt="原站快照"></div>
       </div>
       <div class="rounded-xl border border-indigo-500/30 overflow-hidden flex flex-col min-h-0">
@@ -3127,7 +3127,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <button @click="compareData.rightMode='cloned'" :class="compareData.rightMode==='cloned' ? 'ui-chip-on' : 'text-slate-400 hover:text-slate-200'" class="text-[9px] px-2 py-1 transition-all">克隆图</button>
             <button @click="compareData.rightMode='diff'" :class="compareData.rightMode==='diff' ? 'bg-rose-600 text-white' : 'text-slate-400 hover:text-slate-200'" class="text-[9px] px-2 py-1 transition-all">差异热力图</button>
           </div>
-          <span class="ml-auto truncate" :class="compareData.rightMode==='diff' ? 'text-rose-300' : 'text-indigo-300'">[[ compareData.rightMode==='diff' ? 'diff_preview.png(红色 = 像素差异)' : 'cloned_preview.png(本地克隆渲染)' ]]</span>
+          <span class="ml-auto truncate" :class="compareData.rightMode==='diff' ? 'text-rose-300' : 'text-indigo-300'">[[ compareData.rightMode==='diff' ? 'diff_preview.png（红色 = 像素差异）' : 'cloned_preview.png（本地克隆渲染）' ]]</span>
         </div>
         <div class="flex-1 overflow-auto custom-scroll bg-white/5"><img :src="compareRightUrl" class="w-full" :alt="compareData.rightMode==='diff' ? '像素差异热力图' : '克隆站快照'"></div>
       </div>
@@ -3145,11 +3145,11 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
     </div>
     <div v-if="aiReport.loading" class="text-xs text-slate-400 py-6 text-center">报告加载中…</div>
     <div v-else-if="!aiReport.data" class="space-y-3">
-      <div class="text-xs text-slate-400 leading-relaxed">该任务尚未产生 AI 修复报告。可在下方手动触发视觉闭环(需已配置大模型 API Key, 否则将提示跳过)。</div>
+      <div class="text-xs text-slate-400 leading-relaxed">该任务尚未产生 AI 修复报告。可在下方手动触发视觉闭环（需已配置大模型 API Key，否则将提示跳过）。</div>
       <button @click="triggerAiRepair" :disabled="aiReport.busy"
         class="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl font-display font-bold text-xs text-white ui-primary disabled:opacity-60 transition-all">
         <i :data-lucide="aiReport.busy ? 'loader-2' : 'wand-sparkles'" :class="aiReport.busy ? 'animate-spin' : ''" class="w-3.5 h-3.5"></i>
-        [[ aiReport.busy ? '修复执行中, 请稍后刷新查看' : '手动触发 AI 视觉闭环修复' ]]
+        [[ aiReport.busy ? '修复执行中，请稍后刷新查看' : '手动触发 AI 视觉闭环修复' ]]
       </button>
     </div>
     <div v-else class="flex-1 min-h-0 overflow-y-auto custom-scroll space-y-2.5 text-[11px]">
@@ -3167,7 +3167,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <span v-if="r.rolled_back" class="px-1.5 py-0.5 rounded bg-amber-400/15 text-amber-300 border border-amber-400/30">已回滚·改坏</span>
           <span v-else-if="r.error" class="text-rose-300">调用失败</span>
         </div>
-        <div class="text-slate-300 leading-relaxed">[[ r.diagnosis || r.error || '(无诊断)' ]]</div>
+        <div class="text-slate-300 leading-relaxed">[[ r.diagnosis || r.error || '（无诊断）' ]]</div>
         <div v-if="r.notes" class="text-slate-500 leading-relaxed">备注: [[ r.notes ]]</div>
       </div>
     </div>
@@ -3182,7 +3182,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <span class="font-display font-bold text-sm text-slate-200">表单埋点实时推送 · 任务 #[[ selectedTaskId ]]</span>
       <button @click="tracker.open=false" class="ml-auto text-slate-500 hover:text-slate-200 p-1"><i data-lucide="x" class="w-4 h-4"></i></button>
     </div>
-    <p class="text-[10px] text-slate-500 leading-relaxed mb-3">启用后, 该任务导出的 Flask 工程会自动注入表单埋点引擎(13 类槽位智能识别, 含 Shadow DOM/表格布局/拼音词库)。访客提交表单时按下方勾选的字段实时推送到钉钉。修改字段无需重新克隆。</p>
+    <p class="text-[10px] text-slate-500 leading-relaxed mb-3">启用后，该任务导出的 Flask 工程会自动注入表单埋点引擎（13 类槽位智能识别，含 Shadow DOM/表格布局/拼音词库）。访客提交表单时按下方勾选的字段实时推送到钉钉。修改字段无需重新克隆。</p>
 
     <div class="flex items-center justify-between py-2 border-y border-white/[0.06]">
       <div>
@@ -3204,19 +3204,19 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       </div>
       <div class="grid grid-cols-2 gap-2">
         <div>
-          <label class="text-[11px] text-slate-400 mb-1 block">加签 secret <span class="text-slate-600">(可选, 留空保持)</span></label>
+          <label class="text-[11px] text-slate-400 mb-1 block">加签 secret <span class="text-slate-600">（可选，留空保持）</span></label>
           <input v-model="tracker.form.secret" type="password" spellcheck="false" autocomplete="off" placeholder="SEC 开头"
             class="w-full rounded-lg bg-slate-950/70 border border-white/[0.07] px-2.5 py-2 text-[11px] font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500/60">
         </div>
         <div>
-          <label class="text-[11px] text-slate-400 mb-1 block">自定义关键词 <span class="text-slate-600">(自动追加)</span></label>
-          <input v-model="tracker.form.keyword" spellcheck="false" maxlength="60" placeholder="例如: 埋点"
+          <label class="text-[11px] text-slate-400 mb-1 block">自定义关键词 <span class="text-slate-600">（自动追加）</span></label>
+          <input v-model="tracker.form.keyword" spellcheck="false" maxlength="60" placeholder="例如：埋点"
             class="w-full rounded-lg bg-slate-950/70 border border-white/[0.07] px-2.5 py-2 text-[11px] text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500/60">
         </div>
       </div>
       <div>
         <div class="flex items-center justify-between mb-1">
-          <label class="text-[11px] text-slate-400">推送字段(勾选要推送的槽位; 全不勾 = 全部推送)</label>
+          <label class="text-[11px] text-slate-400">推送字段（勾选要推送的槽位；全不勾 = 全部推送）</label>
           <button @click="tracker.form.slots = tracker.form.slots.length ? [] : [...trackerSlots]" class="text-[10px] text-indigo-300 hover:text-slate-100">[[ tracker.form.slots.length ? '清空' : '全选' ]]</button>
         </div>
         <div class="flex flex-wrap gap-1.5">
@@ -3226,7 +3226,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         </div>
       </div>
       <label class="flex items-center gap-2 text-[11px] text-slate-400 pt-1">
-        <input type="checkbox" v-model="tracker.form.mask" class="accent-emerald-500">推送消息中密码/验证码/令牌打码(本地日志仍为明文)
+        <input type="checkbox" v-model="tracker.form.mask" class="accent-emerald-500">推送消息中密码/验证码/令牌打码（本地日志仍为明文）
       </label>
       <div v-if="tracker.testMsg" class="px-3 py-2 rounded-lg border text-[11px]"
         :class="tracker.testOk ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-rose-500/30 bg-rose-500/10 text-rose-300'">[[ tracker.testMsg ]]</div>
@@ -3236,7 +3236,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <button @click="testTracker" :disabled="tracker.testing" class="flex-1 py-2 rounded-xl border border-white/[0.08] text-[11px] text-slate-300 hover:text-white disabled:opacity-50 transition-all">[[ tracker.testing ? '推送中…' : '测试推送' ]]</button>
       <button @click="saveTracker" :disabled="tracker.saving" class="flex-1 py-2 rounded-xl ui-primary text-[11px] font-semibold text-white disabled:opacity-50 transition-all">[[ tracker.saving ? '保存中…' : '保存配置' ]]</button>
     </div>
-    <div class="text-[9px] text-slate-600 leading-relaxed mt-2">注意: 启用后需在任务详情点「下载 Flask 工程」重新导出(自动注入埋点脚本); 引擎上报到平台 /api/tracker/report, 由平台统一推送。仅用于授权测试环境。</div>
+    <div class="text-[9px] text-slate-600 leading-relaxed mt-2">注意：启用后需在任务详情点「下载 Flask 工程」重新导出（自动注入埋点脚本）；引擎上报到平台 /api/tracker/report，由平台统一推送。仅用于授权测试环境。</div>
   </div>
 </div>
 
@@ -3264,7 +3264,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         <button @click="viewRepairReport(r.task_id)" class="px-2 py-1 rounded-md border border-white/[0.08] text-[10px] text-slate-400 hover:text-slate-100 shrink-0 transition-all">详情</button>
       </div>
       <div v-if="!repairHistory.items.length" class="py-12 text-center text-slate-600 text-xs">
-        暂无修复记录 — 配置模型 API Key 后, 评分低于阈值的任务会自动进入视觉闭环修复
+        暂无修复记录 — 配置模型 API Key 后，评分低于阈值的任务会自动进入视觉闭环修复
       </div>
     </div>
   </div>
@@ -3286,7 +3286,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       placeholder="/* 输入自定义 CSS, 例如: .popup-overlay { display: none !important; } */"
       class="flex-1 min-h-[220px] resize-none rounded-xl bg-slate-950/70 border border-white/[0.07] p-3 text-[11px] font-mono text-amber-100/90 custom-scroll"></textarea>
     <div class="flex items-center gap-2">
-      <span class="text-[9.5px] text-slate-500 leading-tight flex-1 font-sans">「应用预览」仅实时注入当前沙盒 iframe;「保存并重建」会写入任务页面并重新打包 Flask 工程 ZIP。</span>
+      <span class="text-[9.5px] text-slate-500 leading-tight flex-1 font-sans">「应用预览」仅实时注入当前沙盒 iframe；「保存并重建」会写入任务页面并重新打包 Flask 工程 ZIP。</span>
       <button @click="liveApplyHotpatch"
         class="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] border border-sky-500/40 bg-sky-500/10 text-sky-300 hover:bg-sky-500/20 transition-all"><i data-lucide="zap" class="w-3.5 h-3.5"></i>应用预览</button>
       <button @click="saveHotpatch" :disabled="hotpatch.saving"
@@ -3332,10 +3332,10 @@ const __vueApp = createApp({
       taskTokens: { id: null, rows: [], tokens_in: 0, tokens_out: 0, total: 0 },
       tokenUsage: { group: 'day', rows: [], tokens_in: 0, tokens_out: 0, loaded: false },
       genAdv: (() => { try { return localStorage.getItem('cloner-gen-adv') === '1'; } catch (e) { return false; } })(),
-      genExamples: ['做一个番茄钟, 25 分钟专注 5 分钟休息, 可以开始、暂停、重置, 配色安静一些',
-        '一家独立咖啡店的官网首页: 品牌故事、招牌饮品、门店地址和营业时间',
-        '个人记账本: 能添加收入和支出, 按分类统计本月花费, 数据保存在本地'],
-      genShotHints: ['配色保持不变, 右上角加一个购物车按钮', '整体换成深色主题', '商品卡片改成 3 列, 手机上 1 列'],
+      genExamples: ['做一个番茄钟，25 分钟专注 5 分钟休息，可以开始、暂停、重置，配色安静一些',
+        '一家独立咖啡店的官网首页：品牌故事、招牌饮品、门店地址和营业时间',
+        '个人记账本：能添加收入和支出，按分类统计本月花费，数据保存在本地'],
+      genShotHints: ['配色保持不变，右上角加一个购物车按钮', '整体换成深色主题', '商品卡片改成 3 列，手机上 1 列'],
       highlightTaskId: null, filtSheet: false, taskSort: 'recent', fitDrawer: false, headMore: false, runMenu: false, previewCode: { id: null, text: '', loading: false },
       opsKpis: { tracker_total: 0, links_total: 0, clicks_total: 0,
                  scheduler_running: 0, scheduler_pending: 0, scheduler_paused: false },
@@ -3457,9 +3457,9 @@ const __vueApp = createApp({
         { id: 'inspector', label: '资源与接口', icon: 'search-code' },
       ],
       deliveries: [
-        { id: '', label: '网站工程', sub: '可下载的网站源码包, 可一键部署', icon: 'globe', hint: '默认: 导出可独立运行的网站工程' },
-        { id: 'desktop', label: '桌面应用', sub: 'macOS .app + Windows .exe', icon: 'monitor', hint: '系统 WebView 应用壳(macOS WKWebView / Windows WebView2), 体积≈站点 + 约 2.5MB; 未签名' },
-        { id: 'apk', label: 'Android 应用', sub: 'APK(debug 证书签名)', icon: 'smartphone', hint: '原生 Android WebView 应用壳, 体积≈站点 + 约 20KB; 构建数秒' },
+        { id: '', label: '网站工程', sub: '可下载的网站源码包，可一键部署', icon: 'globe', hint: '默认：导出可独立运行的网站工程' },
+        { id: 'desktop', label: '桌面应用', sub: 'macOS .app + Windows .exe', icon: 'monitor', hint: '系统 WebView 应用壳(macOS WKWebView / Windows WebView2)，体积≈站点 + 约 2.5MB；未签名' },
+        { id: 'apk', label: 'Android 应用', sub: 'APK（debug 证书签名）', icon: 'smartphone', hint: '原生 Android WebView 应用壳，体积≈站点 + 约 20KB；构建数秒' },
       ],
       viewports: [
         { id: 'desktop', label: '大屏桌面', size: '1920×1080' },
@@ -3571,7 +3571,7 @@ const __vueApp = createApp({
     },
     activeTitle() {
       const m = {
-        dashboard: ['首页', '粘贴网址开始克隆, 查看进行中的任务与项目'],
+        dashboard: ['首页', '粘贴网址开始克隆，查看进行中的任务与项目'],
         create: ['新建克隆', '一次克隆一个或多个网址，可调引擎选项'],
         tasks: ['任务', '所有克隆与生成任务'],
         task: ['任务详情', '预览、对比、下载与部署'],
@@ -3661,7 +3661,7 @@ const __vueApp = createApp({
         else hit = m === min && h === hr && dow === Number(this.cron.dow);
         if (hit) fires.push(cur.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', weekday: 'short' }));
       }
-      return fires.length ? fires : ['(计算中)'];
+      return fires.length ? fires : ['（计算中）'];
     },
     lastBatchResult() {
       return (this.schedulerBatches || []).find(b => b.status === 'completed' && (b.ok_cnt || 0) + (b.fail_cnt || 0) > 0) || null;
@@ -3677,7 +3677,7 @@ const __vueApp = createApp({
     remoteLogText() {
       if (!this.remote.log) return '';
       if (this.remote.logKind === 'runtime') return this.remote.runtimeLogs || '加载中…';
-      return this.remote.log.deploy_log || '(还没有部署日志)';
+      return this.remote.log.deploy_log || '（还没有部署日志）';
     },
     filteredDocker() {
       if (this.dockerFilter === 'all') return this.docker.list;
@@ -3818,8 +3818,8 @@ const __vueApp = createApp({
     diffVerdict() {
       const d = this.diffInfo;
       if (!d.regions.length && d.area_pct < 1) return '与' + this.diffRef + '几乎一致';
-      if (!d.regions.length) return '整体有细微差别, 约 ' + d.area_pct + '% 面积';
-      return '差别集中在 ' + d.regions.length + ' 处, 约占 ' + d.area_pct + '% 面积';
+      if (!d.regions.length) return '整体有细微差别，约 ' + d.area_pct + '% 面积';
+      return '差别集中在 ' + d.regions.length + ' 处，约占 ' + d.area_pct + '% 面积';
     },
     previewNominal() { return this.previewWidth === 'full' ? 1440 : (this.previewWidth === 'tablet' ? 768 : 390); },
     previewWidthStyle() { return this.previewWidth === 'full' ? '100%' : (this.previewWidth === 'tablet' ? '768px' : '390px'); },
@@ -3857,7 +3857,7 @@ const __vueApp = createApp({
       const id = this.selectedTaskId || 0;
       const zip = (this.structureInfo && this.structureInfo.zip_name) || (id + '.zip');
       return [
-        { title: 'Docker 部署', icon: 'container', body: '# 解压 ' + zip + ' 后进入 clone_site_' + id + ' 目录\ndocker build -t clone_site_' + id + ' .\ndocker run -d -p 8000:8000 --name clone_site_' + id + ' clone_site_' + id + '\n# 或使用编排: docker compose up --build -d\n# 访问 http://127.0.0.1:8000/__healthz 验证' },
+        { title: 'Docker 部署', icon: 'container', body: '# 解压 ' + zip + ' 后进入 clone_site_' + id + ' 目录\ndocker build -t clone_site_' + id + ' .\ndocker run -d -p 8000:8000 --name clone_site_' + id + ' clone_site_' + id + '\n# 或使用编排：docker compose up --build -d\n# 访问 http://127.0.0.1:8000/__healthz 验证' },
         { title: 'Linux / macOS 一键启动', icon: 'terminal', body: 'unzip ' + zip + '\ncd clone_site_' + id + '\nchmod +x run.sh\n./run.sh\n# 访问 http://127.0.0.1:5000' },
         { title: 'Windows 一键启动', icon: 'app-window', body: 'rem 解压 ' + zip + ' 后进入 clone_site_' + id + ' 目录\ncd clone_site_' + id + '\nrun.bat\nrem 访问 http://127.0.0.1:5000' },
       ];
@@ -4228,7 +4228,7 @@ const __vueApp = createApp({
     cfgLimitName(k) {
       return { max_concurrent_contexts: '浏览器并发上限', max_pages_limit: '单批次页面上限',
                render_repair_rounds: '渲染修复轮数', download_workers: '下载并发线程',
-               ai_repair_max_rounds: 'AI 修复轮数上限', audit_retention_days: '审计保留(天)',
+               ai_repair_max_rounds: 'AI 修复轮数上限', audit_retention_days: '审计保留（天）',
                pageload_timeout_ms: '页面加载超时(ms)', network_idle_timeout_ms: 'networkidle 等待(ms)',
                session_hours: '会话有效期(h)' }[k] || k;
     },
@@ -4262,7 +4262,7 @@ const __vueApp = createApp({
         this.settings.max_rounds = data.ai.max_rounds;
         this.settings.configured = !!data.ai.key_configured;
         this.settings.masked = data.ai.key_masked || '';
-        this.toast('已重置为内置默认(立即生效)');
+        this.toast('已重置为内置默认（立即生效）');
       } catch (e) { this.toast('网络错误: ' + e); }
       finally { this.settings.resetBusy = false; }
     },
@@ -4316,10 +4316,10 @@ const __vueApp = createApp({
         if (data.models && data.models.length) {
           s.modelOptions = data.models;
           s.modelsOk = true;
-          s.modelsMsg = '已拉取 ' + data.models.length + ' 个模型, 输入框可下拉选择';
+          s.modelsMsg = '已拉取 ' + data.models.length + ' 个模型，输入框可下拉选择';
         } else {
           s.modelsOk = false;
-          s.modelsMsg = data.error || '上游未返回模型列表(可手输模型名)';
+          s.modelsMsg = data.error || '上游未返回模型列表（可手输模型名）';
         }
       } catch (e) { s.modelsOk = false; s.modelsMsg = '网络错误: ' + e; }
       finally { s.fetchingModels = false; }
@@ -4466,7 +4466,7 @@ const __vueApp = createApp({
     },
     async pruneExports() {
       if (this.pruning) return;
-      if (!confirm('删除可再生的导出包?\n只删工作空间仍在的已完成任务的 ZIP, 下载时会自动重建; 克隆工作空间不动。')) return;
+      if (!confirm('删除可再生的导出包?\n只删工作空间仍在的已完成任务的 ZIP，下载时会自动重建；克隆工作空间不动。')) return;
       this.pruning = true;
       try {
         const r = await fetch('/api/v4/admin/storage/prune_exports', { method: 'POST' });
@@ -4868,9 +4868,9 @@ const __vueApp = createApp({
       try {
         const r = await fetch('/api/v4/remote/deploys/' + id + '/logs?kind=runtime&tail=300');
         const data = await r.json();
-        this.remote.runtimeLogs = data.error ? ('读取失败: ' + data.error) : (data.logs || '(还没有运行日志)');
+        this.remote.runtimeLogs = data.error ? ('读取失败: ' + data.error) : (data.logs || '（还没有运行日志）');
         this.$nextTick(() => { const el = this.$refs.remoteLogBody; if (el) el.scrollTop = el.scrollHeight; });
-      } catch (e) { this.remote.runtimeLogs = '(读取失败)'; }
+      } catch (e) { this.remote.runtimeLogs = '（读取失败）'; }
     },
     openRemoteDelete(d) {
       this.remote.del = d; this.remote.delPurge = false; this.remote.delErr = ''; this.remote.delCanForce = false;
@@ -4965,7 +4965,7 @@ const __vueApp = createApp({
       try {
         const r = await fetch('/api/v4/docker/' + this.dockerDetail.task_id + '/logs?tail=200');
         const data = await r.json();
-        this.docker.logs = data.logs || '(空)';
+        this.docker.logs = data.logs || '（空）';
         this.$nextTick(() => { const el = this.$refs.dockerLogBody; if (el) el.scrollTop = el.scrollHeight; });
       } catch (e) { this.docker.logs = '日志加载失败'; }
       finally { this.docker.logLoading = false; }
@@ -5020,7 +5020,7 @@ const __vueApp = createApp({
         const r = await fetch('/api/tasks/' + this.selectedTaskId + '/docker/logs');
         const data = await r.json();
         this.docker.logs = data.logs || '';
-      } catch (e) { this.docker.logs = '(读取失败)'; }
+      } catch (e) { this.docker.logs = '（读取失败）'; }
     },
 
     /* ---------- 鉴权 / RBAC / 项目 / 管理中心 ---------- */
@@ -5166,7 +5166,7 @@ const __vueApp = createApp({
         this.auth.user = data.user; this.auth.required = true; this.auth.openMode = false;
         this.auth.form.password = '';
         await this.loadAuth();
-        this.toast('管理员已创建, 平台进入强制鉴权模式');
+        this.toast('管理员已创建，平台进入强制鉴权模式');
       } catch (e) { this.auth.error = '网络错误: ' + e; }
       finally { this.auth.busy = false; }
     },
@@ -5321,7 +5321,7 @@ const __vueApp = createApp({
       this.auth.user = null;
       this.auth.required = true;
       this.stopPolling();
-      this.toast('⚠️ 登录会话已过期, 请重新登录');
+      this.toast('⚠️ 登录会话已过期，请重新登录');
     },
     async loadAuth() {
       try {
@@ -5383,7 +5383,7 @@ const __vueApp = createApp({
         }
         await new Promise(r => setTimeout(r, 500));
       }
-      this.toast('没找到这个任务, 可能已被删除');
+      this.toast('没找到这个任务，可能已被删除');
       return false;
     },
     openTaskDetail(task) {
@@ -5409,7 +5409,7 @@ const __vueApp = createApp({
         });
         const data = await r.json();
         if (!r.ok) { this.toast(data.error || '启动失败'); this.aiReport.busy = false; return; }
-        this.toast('AI 视觉修复已启动, 报告生成后可点击「查看报告」');
+        this.toast('AI 视觉修复已启动，报告生成后可点击「查看报告」');
         const poll = setInterval(async () => {
           try {
             const rr = await fetch('/api/tasks/' + this.previewTaskId + '/ai_report');
@@ -5439,7 +5439,7 @@ const __vueApp = createApp({
     async startBatchRepair() {
       const ids = [...this.aiBatchIds];
       if (!ids.length) return;
-      if (!confirm('批量修复 ' + ids.length + ' 个任务?\n将串行执行视觉闭环(每任务约 1-3 分钟, 取决于模型)。')) return;
+      if (!confirm('批量修复 ' + ids.length + ' 个任务?\n将串行执行视觉闭环（每任务约 1-3 分钟，取决于模型）。')) return;
       this.aiBatchBusy = true;
       try {
         const r = await fetch('/api/v4/ai/batch_repair', { method: 'POST',
@@ -5447,7 +5447,7 @@ const __vueApp = createApp({
           body: JSON.stringify({ task_ids: ids }) });
         const data = await r.json();
         if (!r.ok) { this.toast('❌ ' + (data.error || '队列创建失败')); return; }
-        this.toast('已开始修复 ' + data.queued + ' 个任务, 完成后分数自动更新');
+        this.toast('已开始修复 ' + data.queued + ' 个任务，完成后分数自动更新');
         this.aiBatchIds = new Set();
         this.aiBatchMode = false;
         await this.refreshTasks();
@@ -5518,7 +5518,7 @@ const __vueApp = createApp({
           if (this._uiVer == null) { this._uiVer = d.version; return; }
           if (d.version && d.version !== this._uiVer) {
             this._uiVer = d.version;
-            this.toast('📦 平台已更新, 请刷新页面 (Ctrl+Shift+R)');
+            this.toast('📦 平台已更新，请刷新页面 (Ctrl+Shift+R)');
           }
         } catch (e) {}
       };
@@ -5559,7 +5559,7 @@ const __vueApp = createApp({
         const r = await fetch('/api/scheduler/' + action, { method: 'POST' });
         if (!r.ok) { this.toast('❌ 操作失败'); return; }
         this.opsKpis.scheduler_paused = !this.opsKpis.scheduler_paused;
-        this.toast(this.opsKpis.scheduler_paused ? '⏸ 调度器已暂停, 队列任务暂不领取' : '▶ 调度器已恢复');
+        this.toast(this.opsKpis.scheduler_paused ? '⏸ 调度器已暂停，队列任务暂不领取' : '▶ 调度器已恢复');
       } catch (e) { this.toast('网络错误: ' + e); }
     },
     trackerPayloadJson(r) {
@@ -5608,7 +5608,7 @@ const __vueApp = createApp({
       if (!it.has_token) {
         this.selectedTaskId = it.task_id;
         this.openTaskById(it.task_id);
-        this.toast('⚠ 该任务尚未配置钉钉 Token, 已打开配置弹窗');
+        this.toast('⚠ 该任务尚未配置钉钉 Token，已打开配置弹窗');
         this.$nextTick(() => { const b = [...document.querySelectorAll('button')].find(e => e.offsetParent && e.textContent.includes('表单埋点推送')); if (b) b.click(); });
         return;
       }
@@ -5623,13 +5623,13 @@ const __vueApp = createApp({
     viewTrackerCaptures(it) {
       this.trackerRowSearch = '#' + it.task_id;
       this.trackerExpanded = -1;
-      this.toast('已过滤任务 #' + it.task_id + ' 的捕获记录, 点击行查看 Payload');
+      this.toast('已过滤任务 #' + it.task_id + ' 的捕获记录，点击行查看 Payload');
     },
     async quickTrackerTest(taskId) {
       try {
         const r = await fetch(`/api/v4/tasks/${taskId}/tracker/test`, { method: 'POST' });
         const d = await r.json();
-        this.toast(d.ok ? '✅ 测试消息已推送, 请查看钉钉群' : '❌ ' + (d.error || '测试失败'));
+        this.toast(d.ok ? '✅ 测试消息已推送，请查看钉钉群' : '❌ ' + (d.error || '测试失败'));
       } catch (e) { this.toast('网络错误: ' + e); }
     },
     async resetTracker(it) {
@@ -5683,7 +5683,7 @@ const __vueApp = createApp({
     },
     goTrackerConfig(taskId) {
       this.openTaskById(taskId);
-      this.toast('已打开任务详情, 点击工具栏「表单埋点推送」配置');
+      this.toast('已打开任务详情，点击工具栏「表单埋点推送」配置');
     },
     async generateMock() {
       this.mockGen.busy = true;
@@ -5741,7 +5741,7 @@ const __vueApp = createApp({
     },
     async poolRestart() {
       if (this.poolRestarting) return;
-      if (!confirm('清理并重启浏览器实例池?\n所有空闲 Chromium 实例将被销毁, 各工作线程在下次任务前自动重建。')) return;
+      if (!confirm('清理并重启浏览器实例池?\n所有空闲 Chromium 实例将被销毁，各工作线程在下次任务前自动重建。')) return;
       this.poolRestarting = true;
       try {
         const r = await fetch('/api/pool/restart', { method: 'POST' });
@@ -5796,14 +5796,14 @@ const __vueApp = createApp({
       const raw = String((t && t.error_msg) || '');
       const clone = this.taskKind(t) === 'clone';
       const rules = [
-        [/ERR_NAME_NOT_RESOLVED|getaddrinfo|Name or service not known|nodename nor servname/i, '目标网站打不开: 域名解析失败', '检查网址是否拼写正确, 或本机网络是否正常, 然后重试'],
-        [/ERR_CONNECTION_(REFUSED|RESET|CLOSED)|ECONNREFUSED|Connection refused/i, '目标网站拒绝了连接', '确认网站当前可以访问(可能需要内网/VPN), 然后重试'],
-        [/ERR_CERT|SSL|certificate/i, '目标网站的证书有问题', '确认网址是 https 且证书有效; 内部站点可改用 http 地址重试'],
-        [/\b(401|403)\b|Forbidden|Unauthorized|验证码|captcha/i, '目标网站拒绝访问(需要登录或有防护)', '先在浏览器里确认能直接打开; 需要登录的页面目前无法直接克隆'],
+        [/ERR_NAME_NOT_RESOLVED|getaddrinfo|Name or service not known|nodename nor servname/i, '目标网站打不开：域名解析失败', '检查网址是否拼写正确，或本机网络是否正常，然后重试'],
+        [/ERR_CONNECTION_(REFUSED|RESET|CLOSED)|ECONNREFUSED|Connection refused/i, '目标网站拒绝了连接', '确认网站当前可以访问（可能需要内网/VPN），然后重试'],
+        [/ERR_CERT|SSL|certificate/i, '目标网站的证书有问题', '确认网址是 https 且证书有效；内部站点可改用 http 地址重试'],
+        [/\b(401|403)\b|Forbidden|Unauthorized|验证码|captcha/i, '目标网站拒绝访问（需要登录或有防护）', '先在浏览器里确认能直接打开；需要登录的页面目前无法直接克隆'],
         [/\b404\b|Not Found/i, '目标网址不存在(404)', '检查网址是否正确'],
         [/Key|api_key|大模型|模型配置|AI 供应商/i, '没有可用的大模型', '到「设置 → AI 供应商」配置模型 Key 后重试'],
         [/Deadline|墙钟|超出.*预算|time budget/i, '超出了时间预算还没完成', '在提交时把时间预算调大一些后重试'],
-        [/Timeout|timed out|超时/i, clone ? '目标网站响应太慢, 加载超时' : '模型响应超时', clone ? '稍后重试; 网站很重时可在新建时选择更长的等待' : '稍后重试'],
+        [/Timeout|timed out|超时/i, clone ? '目标网站响应太慢，加载超时' : '模型响应超时', clone ? '稍后重试；网站很重时可在新建时选择更长的等待' : '稍后重试'],
         [/截图输入缺失|截图.*(不可解析|过小)/, '截图文件有问题', '重新粘贴或上传一张清晰的截图'],
         [/CodegenError|没有产出可用的网页|不是 HTML|不完整/, '模型没有写出可用的页面', '把需求写得更具体一些后重试'],
         [/Chromium 启动失败|Playwright|Executable doesn't exist/i, '浏览器服务没能启动', '稍后重试; 反复出现时请管理员在「设置 → 浏览器池」重启'],
@@ -5811,7 +5811,7 @@ const __vueApp = createApp({
         [/No space left|磁盘/i, '磁盘空间不足', '清理磁盘后重试'],
       ];
       for (const [re, title, advice] of rules) if (re.test(raw)) return { title, advice, raw };
-      return { title: clone ? '这次克隆没能完成' : '这次生成没能完成', advice: '点「重试」再来一次; 仍然失败时把技术详情发给管理员', raw };
+      return { title: clone ? '这次克隆没能完成' : '这次生成没能完成', advice: '点「重试」再来一次；仍然失败时把技术详情发给管理员', raw };
     },
     taskKind(t) {
       const u = String((t && t.target_url) || '');
@@ -5900,9 +5900,9 @@ const __vueApp = createApp({
     interactionTip(t) {
       const ic = t && t.stats && t.stats.interaction_check;
       if (!ic) return '';
-      const parts = ['克隆完成后自动点一遍导航、按钮与表单, 与原站对比有无反应'];
+      const parts = ['克隆完成后自动点一遍导航、按钮与表单，与原站对比有无反应'];
       const sb = t.stats && t.stats.score_before_interaction;
-      if (sb != null && t.stats.interaction_penalty) parts.push('扣分前还原度 ' + Number(sb).toFixed(1) + ', 交互不可用扣 ' + t.stats.interaction_penalty);
+      if (sb != null && t.stats.interaction_penalty) parts.push('扣分前还原度 ' + Number(sb).toFixed(1) + '，交互不可用扣 ' + t.stats.interaction_penalty);
       const failed = (ic.failed || []);
       if (failed.length) parts.push('点不动: ' + failed.slice(0, 6).map(x => x.text || x.selector).join('、') + (failed.length > 6 ? ' 等' : ''));
       else parts.push('检查的控件都有反应');
@@ -6079,7 +6079,7 @@ const __vueApp = createApp({
     async batchRebuild() {
       const ids = [...this.selectedIds];
       if (!ids.length) return;
-      if (!confirm('批量重建 ' + ids.length + ' 个任务?\n工作区将清空并重新克隆, 运行中的任务会被跳过。')) return;
+      if (!confirm('批量重建 ' + ids.length + ' 个任务?\n工作区将清空并重新克隆，运行中的任务会被跳过。')) return;
       this.batchBusy = true;
       try {
         const r = await fetch('/api/tasks/batch/rebuild', { method: 'POST',
@@ -6198,7 +6198,7 @@ const __vueApp = createApp({
         if (!r.ok) { this.toast(data.error || '保存失败'); return false; }
         this.trackerEnabled = !!f.enabled;
         if (silent !== true) {
-          this.toast('表单推送已保存' + (f.enabled ? ', 重新下载工程后生效' : ''));
+          this.toast('表单推送已保存' + (f.enabled ? '，重新下载工程后生效' : ''));
           this.loadSettings && null;
         }
         return true;
@@ -6245,7 +6245,7 @@ const __vueApp = createApp({
         });
         const data = await r.json();
         if (!r.ok) { this.toast(data.error || '触发失败'); return; }
-        this.toast('AI 视觉修复已在后台执行, 片刻后刷新报告查看结果');
+        this.toast('AI 视觉修复已在后台执行，片刻后刷新报告查看结果');
       } catch (e) { this.toast('网络错误: ' + e); }
       finally { this.aiReport.busy = false; }
     },
@@ -6397,7 +6397,7 @@ const __vueApp = createApp({
     },
     async copyText(text) {
       try { await navigator.clipboard.writeText(text); this.toast('已复制到剪贴板'); }
-      catch (e) { this.toast('复制失败, 请手动选择'); }
+      catch (e) { this.toast('复制失败，请手动选择'); }
     },
 
     /* ---------- SSE 控制台 ---------- */
@@ -6446,7 +6446,7 @@ const __vueApp = createApp({
     clearLogs() { this.logs = []; },
     exportLogs() {
       const text = this.filteredLogs.map(l => l.time + ' [' + l.stage + '] ' + (l.task_id ? '#' + l.task_id + ' ' : '') + l.message).join('\n');
-      const blob = new Blob([text || '(空日志)'], { type: 'text/plain;charset=utf-8' });
+      const blob = new Blob([text || '（空日志）'], { type: 'text/plain;charset=utf-8' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = 'clone-console-' + Date.now() + '.log';
@@ -6540,10 +6540,10 @@ __vueApp.component('live-code', {
     nowText() {
       const st = this.stage || '';
       if (this.writing) return (this.label || st) + ' · 正在写入 index.html';
-      if (/读取/.test(st)) return '读截图: 布局、配色、文字与图片素材, 拟定验收清单';
-      if (/理解/.test(st)) return '读需求, 拟定任务书与验收清单';
-      if (/编写|修复/.test(st)) return this.code ? '写完, 等待体检' : '等待模型开始输出代码';
-      if (/体检/.test(st)) return '在真实浏览器里运行: 桌面 / 平板 / 手机, 报错、动效、交互、重叠';
+      if (/读取/.test(st)) return '读截图：布局、配色、文字与图片素材，拟定验收清单';
+      if (/理解/.test(st)) return '读需求，拟定任务书与验收清单';
+      if (/编写|修复/.test(st)) return this.code ? '写完，等待体检' : '等待模型开始输出代码';
+      if (/体检/.test(st)) return '在真实浏览器里运行：桌面 / 平板 / 手机，报错、动效、交互、重叠';
       if (/验收/.test(st)) return '看图模型逐条核对验收清单';
       return st || '准备中';
     },
@@ -6558,7 +6558,7 @@ __vueApp.component('live-code', {
       <li class="now"><span class="ic"><span class="lc-spin"></span></span><span class="k">进行中</span><span class="v">[[ nowText ]]</span></li>
     </ol>
     <div v-if="!compact" class="lc-bar"><i></i></div>
-    <pre ref="code" class="lc-code" @scroll="onScroll"><div v-if="html" v-html="html"></div><div v-else class="lc-empty">[[ code ? '' : '模型开始写代码后, 这里实时显示写入的内容' ]]</div></pre>
+    <pre ref="code" class="lc-code" @scroll="onScroll"><div v-if="html" v-html="html"></div><div v-else class="lc-empty">[[ code ? '' : '模型开始写代码后，这里实时显示写入的内容' ]]</div></pre>
     <button v-if="!compact && !follow" type="button" class="lc-follow" @click="resume">跟随最新 ↓</button>
   </div>`,
   mounted() {

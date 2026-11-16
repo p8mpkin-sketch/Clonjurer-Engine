@@ -18,7 +18,7 @@
   --warn-50:255 248 235;--warn-100:254 236 199;--warn-200:253 216 141;--warn-300:246 194 89;--warn-400:235 169 53;--warn-500:209 140 28;--warn-600:173 111 18;--warn-700:138 85 18;--warn-800:111 68 20;--warn-900:92 57 20;--warn-950:51 30 7;
   --bad-50:253 242 244;--bad-100:251 226 231;--bad-200:246 196 207;--bad-300:238 154 174;--bad-400:227 110 138;--bad-500:210 77 109;--bad-600:183 58 88;--bad-700:150 47 72;--bad-800:122 41 62;--bad-900:101 37 55;--bad-950:57 16 28;
   --bg:#121110; --surface:#1b1a18; --raised:#22211e; --line:rgba(255,255,255,.08); --line-strong:rgba(255,255,255,.14);
-  --fg:#eeece8; --fg-2:#c3bfb8; --fg-3:#8f8b83;
+  --fg:#eeece8; --fg-2:#c3bfb8; --fg-3:#96928a;
   --ink:#eeece8; --ink-hover:#ffffff; --on-ink:#121110; --brand:#e0785a;
   --accent:#e47e5d; --accent-soft:rgba(216,101,63,.16);
   --ui-brand:#c4532f; --ui-ok:#45bd85; --ui-warn:#eba935; --ui-bad:#e36e8a; --ui-info:#e47e5d;
@@ -91,7 +91,7 @@ html body :is(button,a,input,select,textarea,[tabindex]):focus-visible{outline:n
 html body textarea:focus,html body input:focus,html body select:focus{outline:none;border-color:rgb(var(--a-500));box-shadow:0 0 0 3px var(--accent-soft)}
 html body button:disabled,html body button[disabled]{cursor:not-allowed}
 html body input[type="checkbox"],html body input[type="radio"]{accent-color:rgb(var(--a-600))}
-html body ::placeholder{color:rgb(var(--n-600));opacity:1}
+html body ::placeholder{color:var(--fg-4);opacity:1}
 @media (pointer:coarse){html body button,html body a.rounded-lg{min-height:36px}}
 
 /* ---------- 6. 动效偏好 ---------- */
@@ -296,7 +296,7 @@ html body .proj-sort select option{background:var(--surface);color:var(--fg)}
 .dash-feed-sub{font-size:12px;color:var(--fg-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dash-feed-score{font-family:var(--ui-font);font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums;font-size:15px;line-height:1;color:var(--fg);white-space:nowrap;flex:none}
 .dash-feed-tag{font-size:12px;color:var(--fg-3)}
-.dash-feed-tag.is-bad{color:rgb(var(--bad-500))}
+.dash-feed-tag.is-bad{color:var(--ui-bad)}
 .dash-feed-empty{padding:16px 0;font-size:13px;color:var(--fg-3)}
 @media (max-width:1180px){
   .dash-body{grid-template-columns:minmax(0,1fr);gap:48px}
@@ -497,7 +497,7 @@ html body .proj-sort select option{background:var(--surface);color:var(--fg)}
 .ai-row small{font-size:12px;color:var(--fg-3)}
 .ai-run{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--fg-2);font-variant-numeric:tabular-nums}
 .score-pill{min-width:44px;text-align:center;padding:2px 6px;border-radius:6px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--fg-2);background:rgba(127,120,110,.1)}
-.score-pill.ok{color:rgb(var(--ok-600))}.score-pill.low{color:rgb(var(--bad-600));background:rgb(var(--bad-500) / .1)}.score-pill.mid{color:rgb(var(--warn-600))}
+.score-pill.ok{color:var(--ui-ok)}.score-pill.low{color:var(--ui-bad);background:rgb(var(--bad-500) / .1)}.score-pill.mid{color:var(--ui-warn)}
 .ai-shots{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 20px 16px}
 .ai-shots figure{position:relative;margin:0;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--bg)}
 .ai-shots figcaption{position:absolute;top:8px;left:8px;z-index:1;padding:2px 8px;border-radius:6px;font-size:12px;color:var(--fg-2);background:var(--surface);border:1px solid var(--line)}
@@ -548,12 +548,12 @@ html body .proj-sort select option{background:var(--surface);color:var(--fg)}
 .run-step.active{color:var(--fg)}
 .run-step.active .bar i{position:relative;overflow:hidden}
 .run-step.active .bar i::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.5),transparent);transform:translateX(-100%);animation:bar-sheen 1.6s ease-in-out infinite}
-.run-step.bad{color:rgb(var(--bad-500))}.run-step.bad .bar i{width:100%;background:rgb(var(--bad-500))}
+.run-step.bad{color:var(--ui-bad)}.run-step.bad .bar i{width:100%;background:rgb(var(--bad-500))}
 .run-step .sec{font-variant-numeric:tabular-nums}
 .run-log{margin-top:12px;display:flex;flex-direction:column;gap:3px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--fg-3)}
 .run-log > div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .run-log span{margin-right:10px;opacity:.7}
-.run-log .err{color:rgb(var(--bad-500))}
+.run-log .err{color:var(--ui-bad)}
 
 @media (max-width:900px){
   .pg{padding:24px 16px 48px}
@@ -770,13 +770,13 @@ html body label.tracking-\[0\.16em\],html body div.tracking-\[0\.16em\]{letter-s
 .tok-bar i{display:block;height:100%;border-radius:2px;background:rgb(var(--brand-500,99 102 241))}
 .tok-meta{font-size:11.5px;color:var(--fg-3)}
 .fit-note{margin:0;padding:0 20px 10px 34px;font-size:12.5px;line-height:1.6;color:var(--fg-3)}
-.fit-note.warn{color:rgb(var(--warn-600))}
+.fit-note.warn{color:var(--ui-warn)}
 .fit-list{list-style:none;margin:0;padding:0 20px 12px 34px;display:flex;flex-direction:column}
 .fit-list li{display:grid;grid-template-columns:58px minmax(0,1fr);column-gap:12px;padding:8px 0;border-top:1px solid var(--line)}
 .fit-mark{grid-row:1 / span 2;align-self:start;font-size:12px;font-weight:600;line-height:20px;color:var(--fg-3)}
-.fit-list li.yes .fit-mark{color:rgb(var(--ok-500))}
-.fit-list li.partial .fit-mark{color:rgb(var(--warn-500))}
-.fit-list li.no .fit-mark{color:rgb(var(--bad-500))}
+.fit-list li.yes .fit-mark{color:var(--ui-ok)}
+.fit-list li.partial .fit-mark{color:var(--ui-warn)}
+.fit-list li.no .fit-mark{color:var(--ui-bad)}
 .fit-text{color:var(--fg);line-height:20px}
 .fit-text em{font-style:normal;font-size:11px;color:var(--fg-3);border:1px solid var(--line);border-radius:4px;padding:0 5px;margin-left:8px;white-space:nowrap}
 .fit-why{font-size:12px;line-height:1.55;color:var(--fg-3)}
@@ -837,7 +837,7 @@ html body label.tracking-\[0\.16em\],html body div.tracking-\[0\.16em\]{letter-s
   nav.sidebar{display:none!important}
   .m-tabbar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:45;height:58px;padding:0 4px env(safe-area-inset-bottom);
     background:var(--surface);border-top:1px solid var(--line)}
-  .m-tabbar button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:10.5px;color:var(--fg-3)}
+  .m-tabbar button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:12px;color:var(--fg-3)}
   .m-tabbar button.on{color:var(--fg)}
   #app main, #app .flex-1.min-h-0.overflow-y-auto{padding-bottom:64px}
   .task-head{gap:8px!important}
@@ -906,3 +906,30 @@ html body label.tracking-\[0\.16em\],html body div.tracking-\[0\.16em\]{letter-s
 .insp-scope .text-\[8\.5px\],.insp-scope .text-\[9px\],.insp-scope .text-\[9\.5px\]{font-size:11px}
 .insp-scope .text-\[10px\]{font-size:11.5px}
 .insp-scope .text-cyan-400,.insp-scope .text-indigo-400,.insp-scope .text-indigo-400\/80{color:var(--a)}
+
+/* ===== 2026-11-16 全站排版与对比度一轮 =====
+   1) 文字灰阶: 色阶 n-500/n-600 同时用于底色与描边, 不直接改色阶; 只把「文字」工具类指到达标的文字令牌。
+      深色 n-500 在浮层(raised)上 4.32、n-600 3.04~3.56; 浅色 n-600 3.98~4.46 -> 统一 >= 4.6
+   2) 字号回到阶梯 12/13/14/16/20/24/32(+36 页标题): 去掉 10/11/11.5/12.5/15px 的散值
+   3) 页标题统一 .pg-title(36px 衬线, 常规字重), 手机端 28px */
+:root{--fg-4:#8d8981}
+[data-theme="light"]{--fg-4:#706c66}
+html body .text-slate-500{color:var(--fg-3)}
+html body .text-slate-600{color:var(--fg-4)}
+html body .text-rose-500{color:var(--ui-bad)}
+html body .text-amber-500{color:var(--ui-warn)}
+html body ::placeholder,html body .placeholder\:text-slate-600::placeholder{color:var(--fg-4);opacity:1}
+.insp-scope .text-\[8\.5px\],.insp-scope .text-\[9px\],.insp-scope .text-\[9\.5px\],.insp-scope .text-\[10px\]{font-size:12px}
+.insp-scope .text-cyan-400,.insp-scope .text-indigo-400,.insp-scope .text-indigo-400\/80{color:var(--accent)}
+.tok-meta,.head-menu small,.run-tech pre{font-size:12px}
+.fit-note,.fit-drawer-head span,.gain-list span,.gen-example,.dep-link{font-size:13px}
+.fit-text em{font-size:12px}
+.run-panel-head b,.fit-drawer-head b,.filt-sheet-head b{font-size:16px}
+.dash-omni-prefix{font-size:16px}
+.dash-feed-score{font-size:16px}
+.diff-box span{font-size:12px}
+@media (max-width:900px){.run-step .nm{font-size:12px}}
+@media (max-width:600px){.pg-title{font-size:28px}}
+/* 平台设置的悬浮保存条: 给内容留出底部空间, 手机上抬到底部导航之上 */
+.cfg-wrap{padding-bottom:88px}
+@media (max-width:640px){html body .cfg-bar{bottom:calc(70px + env(safe-area-inset-bottom))}.cfg-wrap{padding-bottom:140px}}
