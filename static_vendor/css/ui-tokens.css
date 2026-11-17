@@ -1187,3 +1187,9 @@ button.mt-row.llm-row:focus-visible{outline:none;box-shadow:inset var(--ui-focus
   .mt-row.iam-row{grid-template-columns:20px minmax(0,1fr) auto}
   .mt-row.iam-row .iam-c-login,.mt-row.iam-row .iam-c-act,.mt-row.iam-row .iam-c-llm{display:none}
 }
+
+/* 提示条必须盖在所有弹窗遮罩(z 70/80)之上: 之前 z 60 被遮罩压住, 弹窗里点「复制」「保存」等看起来没反应 */
+.ui-toast.ui-toast{z-index:100}
+/* 条件不满足但仍可点击的按钮(点了说明原因), 视觉上弱化 */
+.mt-btn.is-soft-off{opacity:.55}
+.mt-btn.is-soft-off:hover{opacity:.7}
