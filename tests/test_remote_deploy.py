@@ -6,6 +6,7 @@ paramiko 整体替换为 tests/_fake_ssh.py 的假实现(不开 socket、不连�
 import tempfile
 import time
 import unittest
+import re
 import zipfile
 from pathlib import Path
 from unittest import mock
@@ -53,6 +54,16 @@ class CommandTemplateTests(unittest.TestCase):
             for other in ("rd_70", "rd_17", "rd_8"):
                 self.assertNotIn(other, cmd, name)
 
+    def test_deps_script_adapts_to_fresh_servers(self):
+        cmd = rd.build_commands(7, 8080)["deps"]
+        # 整段放在 sh -c '...' 里: 脚本自身不能含单引号, 否则会截断命令
+        self.assertNotIn("'", rd._DEPS_SCRIPT)
+        self.assertTrue(cmd.startswith("cd ~/clonjurer_deploy/rd_7 && sh -c '"))
+        self.assertTrue(cmd.endswith("'"))
+        for needle in ("python3 -m venv venv", "-venv", "apt-get", "dnf", "yum", "apk", "sudo -n",
+                       "--without-pip", "get-pip.py", "mirrors.aliyun.com", "app/requirements.txt"):
+            self.assertIn(needle, cmd, needle)
+
     def test_port_must_be_validated_integer(self):
         self.assertEqual(rd.validate_port("8080"), 8080)
         self.assertEqual(rd.validate_port(" 22 "), 22)
@@ -80,7 +91,11 @@ class CommandTemplateTests(unittest.TestCase):
         dep = h.create(name="名称$(reboot)`id`", note="; rm -rf ~ #", remote_port=8080)
         h.deploy(dep)
         allowed = set(rd.build_commands(dep, 8080).values()) | {rd.runtime_log_command(dep, 30)}
+        stamp = rd.stamp_command(dep, "0" * 64).replace("0" * 64, "")
         for cmd, _timeout in h.srv.commands:
+            if cmd.replace(cmd[5:69], "") == stamp and re.fullmatch(r"[0-9a-f]{64}", cmd[5:69]):
+                continue   # 摘要是本地算出的十六进制串, 其余部分固定
+
             self.assertIn(cmd, allowed)
             for frag in ("reboot", "`id`", "rm -rf ~ #", "名称", "vps.example.com"):
                 self.assertNotIn(frag, cmd)
@@ -193,7 +208,9 @@ class DeployFlowTests(unittest.TestCase):
             self.assertEqual(sorted(zf.namelist()), ["app/app.py", "app/requirements.txt", "app/templates/index.html"])
         cmds = rd.build_commands(dep, 8080)
         ran = [c for c, _t in self.h.srv.commands]
-        order = [cmds[k] for k in ("mkdir", "extract", "deps", "stop", "start", "local_health")]
+        digest = rd.bundle_digest(local)
+        order = [cmds["mkdir"], cmds["bundle_state"], cmds["extract"], rd.stamp_command(dep, digest),
+                 cmds["deps"], cmds["stop"], cmds["start"], cmds["local_health"]]
         self.assertEqual(ran[:len(order)], order)
         for cmd, timeout in self.h.srv.commands:  # 每条命令都带超时
             self.assertTrue(timeout and timeout > 0, cmd)
@@ -213,6 +230,12 @@ class DeployFlowTests(unittest.TestCase):
         self.assertIn("ensurepip is not available", rec["log"])
         self.assertIn("开始发布", rec["log"])
         self.assertFalse(self.h.dep.is_busy(rec["id"]))
+
+    def test_deps_failure_without_root_explains_permission(self):
+        self.h.srv.fail["pip install"] = (1, "ensurepip is not available\nno root or sudo\n")
+        rec = self.h.deploy(self.h.create())
+        self.assertEqual(rec["status"], "failed")
+        self.assertIn("没有 root 或免密 sudo", rec["log"])
 
     def test_health_failure_appends_runtime_tail(self):
         self.h.srv.healthy = False
@@ -257,6 +280,53 @@ class DeployFlowTests(unittest.TestCase):
             self.h.dep.begin_deploy(dep)
         self.h.dep.run_deploy(dep)
         self.assertFalse(self.h.dep.is_busy(dep))
+
+    def test_start_stop_and_deploy_are_mutually_exclusive(self):
+        dep = self.h.create()
+        self.h.deploy(dep)
+        # 发布进行中: 启动 / 停止被拒
+        self.h.dep.begin_deploy(dep)
+        for op in (self.h.dep.start, self.h.dep.stop):
+            with self.assertRaises(rd.RemoteDeployError):
+                op(dep)
+        self.h.dep.run_deploy(dep)
+        # 启动进行中: 发布被拒, 结束后释放
+        seen = []
+        orig = self.h.dep._session
+
+        def session(dep_id, fn):
+            with self.assertRaises(rd.RemoteDeployError):
+                self.h.dep.begin_deploy(dep_id)
+            seen.append(True)
+            return orig(dep_id, fn)
+        with mock.patch.object(self.h.dep, "_session", session):
+            self.h.dep.start(dep)
+        self.assertEqual(seen, [True])
+        self.assertFalse(self.h.dep.is_busy(dep))
+
+    def test_unchanged_bundle_skips_upload_and_extract(self):
+        dep = self.h.create()
+        self.h.deploy(dep)
+        digest = rd.bundle_digest(self.h.srv.uploads[0][0])
+        cmds = rd.build_commands(dep, 8080)
+        self.h.srv.fail[cmds["bundle_state"]] = (0, f"{digest}\nHAS_APP\n")
+        n_up, n_cmd = len(self.h.srv.uploads), len(self.h.srv.commands)
+        rec = self.h.deploy(dep)
+        self.assertEqual(rec["status"], "running")
+        self.assertEqual(len(self.h.srv.uploads), n_up)            # 没再上传
+        ran = [c for c, _t in self.h.srv.commands[n_cmd:]]
+        self.assertNotIn(cmds["extract"], ran)                     # 也没再解压
+        self.assertIn("跳过上传和解压", rec["log"])
+
+    def test_bundle_digest_ignores_zip_metadata(self):
+        a, b = self.h.tmp / "a.zip", self.h.tmp / "b.zip"
+        with zipfile.ZipFile(a, "w", zipfile.ZIP_STORED) as z:
+            z.writestr(zipfile.ZipInfo("app/x.txt", (2020, 1, 1, 0, 0, 0)), "hi")
+        with zipfile.ZipFile(b, "w", zipfile.ZIP_DEFLATED) as z:
+            z.writestr(zipfile.ZipInfo("app/x.txt", (2026, 5, 5, 0, 0, 0)), "hi")
+        self.assertEqual(rd.bundle_digest(a), rd.bundle_digest(b))
+        with self.assertRaises(rd.RemoteDeployError):
+            rd.stamp_command(1, "abc; reboot")
 
     def test_missing_secret_rejected_before_connect(self):
         dep = self.h.create(password="")

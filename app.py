@@ -2097,6 +2097,14 @@ def v4_ai_playground_repair():
                     page_file=engine._main_page_file(),
                     region_cells=engine._region_cells())
             final = report.get("final_score")
+            rounds = report.get("rounds") or []
+            if rounds and all(r.get("error") for r in rounds):
+                # 大模型一轮都没调通: 不是「修复完成」, 明确标失败并给出原因
+                reason = str(rounds[-1].get("error") or "")[:200]
+                db.update_task(task_id, stage="AI修复失败")
+                job.update(state="failed", ended=time.time(),
+                           log=(job["log"] + [f"大模型调用失败, 页面未改动: {reason}"])[-6:])
+                return
             if final is not None:
                 db.update_task(task_id, similarity_score=final)
             _regenerate_project(db.get_task(task_id), ws)

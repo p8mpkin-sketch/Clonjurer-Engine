@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import base64
+import contextlib
 import io
 import ipaddress
 import posixpath
@@ -41,6 +42,8 @@ CMD_TIMEOUTS = {
     "local_health": 15, "status": 20, "logs": 20, "purge": 120,
 }
 UPLOAD_TIMEOUT = 600
+SFTP_WINDOW = 64 * 1024 * 1024    # SFTP 通道窗口: 高延迟链路的吞吐上限 ≈ 窗口 / 往返时延
+SFTP_MAX_PACKET = 32768
 HEALTH_TIMEOUT_S = 45.0
 LOG_TAIL_MAX = 2000
 
@@ -114,6 +117,54 @@ def remote_dir(dep_id: int) -> str:
     return f"{REMOTE_BASE}/rd_{int(dep_id)}"
 
 
+# 依赖安装脚本(固定文本, 不含任何档案字段): 适配「刚开通的服务器」常见缺环境情况。
+# 1) 没有 python3 -> 有 root / 免密 sudo 时用系统包管理器装; 2) venv 建不出来(Debian/Ubuntu 缺
+# python3.X-venv, ensurepip 不可用) -> 自动装 venv 包; 仍不行 -> --without-pip 建 venv 再用 get-pip.py
+# 补 pip; 3) pip 装依赖失败(多为访问 PyPI 慢/不通) -> 依次换国内镜像重试。
+# 只用双引号, 整段放进 sh -c '...'; 各步都打 [环境] 前缀日志, 失败时输出关键字供 _hint_for 识别。
+_DEPS_SCRIPT = (
+    'SUDO=""; if [ "$(id -u)" != 0 ]; then if sudo -n true 2>/dev/null; then SUDO="sudo -n"; else SUDO=no; fi; fi; '
+    'pkg() { [ "$SUDO" = no ] && return 1; '
+    'if command -v apt-get >/dev/null 2>&1; then '
+    '$SUDO env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=180 install -y -q "$@" >/dev/null 2>&1 || '
+    '{ $SUDO env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=180 update -q >/dev/null 2>&1; '
+    '$SUDO env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=180 install -y -q "$@" >/dev/null 2>&1; }; '
+    'elif command -v dnf >/dev/null 2>&1; then $SUDO dnf install -y -q "$@" >/dev/null 2>&1; '
+    'elif command -v yum >/dev/null 2>&1; then $SUDO yum install -y -q "$@" >/dev/null 2>&1; '
+    'elif command -v apk >/dev/null 2>&1; then $SUDO apk add -q "$@" >/dev/null 2>&1; '
+    'elif command -v zypper >/dev/null 2>&1; then $SUDO zypper -q -n install "$@" >/dev/null 2>&1; '
+    'else return 1; fi; }; '
+    'if ! command -v python3 >/dev/null 2>&1; then echo "[环境] 服务器没有 python3, 尝试自动安装"; '
+    'pkg python3 || { echo "python3: command not found"; [ "$SUDO" = no ] && echo "no root or sudo"; exit 127; }; fi; '
+    'ok() { test -x venv/bin/python && venv/bin/python -m pip --version >/dev/null 2>&1; }; '
+    'if ! ok; then rm -rf venv; python3 -m venv venv >/dev/null 2>&1; fi; '
+    'if ! ok; then rm -rf venv; '
+    'V=$(python3 -c "import sys; print(str(sys.version_info[0]) + chr(46) + str(sys.version_info[1]))"); '
+    'echo "[环境] 服务器缺少 Python 虚拟环境组件, 尝试自动安装 python$V-venv"; '
+    'pkg python$V-venv || pkg python3-venv || pkg python3-virtualenv || pkg py3-virtualenv; '
+    'python3 -m venv venv >/dev/null 2>&1; fi; '
+    'if ! ok; then rm -rf venv; echo "[环境] 改为不带 pip 创建虚拟环境, 再用 get-pip.py 补 pip"; '
+    'python3 -m venv --without-pip venv >/dev/null 2>&1 && for u in https://bootstrap.pypa.io/get-pip.py '
+    'https://mirrors.aliyun.com/pypi/get-pip.py; do '
+    '{ curl -fsSL --max-time 60 "$u" 2>/dev/null || wget -qO- --timeout=60 "$u" 2>/dev/null; } > venv/get-pip.py '
+    '&& venv/bin/python venv/get-pip.py -q >/dev/null 2>&1 && break; done; fi; '
+    'if ! ok; then echo "ensurepip is not available: 无法创建 Python 虚拟环境"; '
+    '[ "$SUDO" = no ] && echo "no root or sudo"; exit 1; fi; '
+    'echo "[环境] 虚拟环境就绪: $(venv/bin/python -V 2>&1)"; '
+    # 依赖清单没变且上次装成功过: 直接跳过(重复发布最省时的一步)
+    'H=$( (sha256sum app/requirements.txt 2>/dev/null || cksum app/requirements.txt) | cut -d" " -f1); '
+    'if [ -n "$H" ] && [ "$(cat venv/.req_hash 2>/dev/null)" = "$H" ]; then echo "[环境] 依赖清单没有变化, 跳过安装"; exit 0; fi; '
+    # 测各软件源的响应时间, 按快慢排序后依次尝试(国内服务器访问 pypi.org 往往很慢)
+    'ALL="https://pypi.org/simple/ https://mirrors.aliyun.com/pypi/simple/ https://pypi.tuna.tsinghua.edu.cn/simple/"; ORDER=""; '
+    'if command -v curl >/dev/null 2>&1; then ORDER=$(for u in $ALL; do '
+    't=$(curl -o /dev/null -s -m 5 -w "%{time_total}" "${u}pip/" 2>/dev/null) && echo "$t $u"; done | sort -n | cut -d" " -f2); fi; '
+    '[ -z "$ORDER" ] && ORDER=$ALL; '
+    'for i in $ORDER; do echo "[环境] 使用软件源 $i"; '
+    'venv/bin/python -m pip install -q --disable-pip-version-check --timeout 30 -i "$i" -r app/requirements.txt '
+    '&& { echo "$H" > venv/.req_hash; exit 0; }; done; exit 1'
+)
+
+
 def service_name(dep_id: int) -> str:
     return f"{SERVICE_PREFIX}{int(dep_id)}"
 
@@ -132,8 +183,7 @@ def build_commands(dep_id: int, port: Any) -> dict:
         "extract": (f"cd {d} && rm -rf app.new && python3 -c "
                     "'import zipfile; zipfile.ZipFile(\"app.zip\").extractall(\"app.new\")'"
                     " && rm -rf app && mv app.new/app app && rm -rf app.new app.zip"),
-        "deps": (f"cd {d} && (test -x venv/bin/python || python3 -m venv venv) && "
-                 "venv/bin/python -m pip install -q --disable-pip-version-check -r app/requirements.txt"),
+        "deps": f"cd {d} && sh -c '{_DEPS_SCRIPT}'",
         "stop": (f"if {alive}; then kill $pid; sleep 1; kill -9 $pid 2>/dev/null; fi; "
                  f"rm -f {pid}; echo stopped"),
         "start": (f"cd {d}/app && {{ CLONJURER_SERVICE={svc} PORT={p} nohup ../venv/bin/python app.py {p}"
@@ -143,7 +193,31 @@ def build_commands(dep_id: int, port: Any) -> dict:
         "status": (f"if [ ! -d {d} ]; then echo absent; elif {alive}; then echo running; "
                    "else echo stopped; fi"),
         "purge": f"rm -rf {d}",
+        # 远端已有的工程包内容摘要 + app/ 是否完整: 内容没变时跳过上传与解压
+        "bundle_state": (f"cat {d}/bundle.sha256 2>/dev/null; echo; "
+                         f"if [ -f {d}/app/app.py ]; then echo HAS_APP; else echo NO_APP; fi"),
     }
+
+
+_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def stamp_command(dep_id: int, digest: str) -> str:
+    """解压成功后记录工程包内容摘要。摘要须是 64 位小写十六进制, 不会把别的东西带进命令行。"""
+    if not _DIGEST_RE.match(str(digest or "")):
+        raise RemoteDeployError("工程包摘要格式异常")
+    return f"echo {digest} > ~/{remote_dir(int(dep_id))}/bundle.sha256"
+
+
+def bundle_digest(bundle: Path) -> str:
+    """工程包内容摘要: 按文件名排序后对「文件名 + 内容」求 SHA-256, 与 ZIP 的时间戳和压缩参数无关。"""
+    h = hashlib.sha256()
+    with zipfile.ZipFile(bundle) as z:
+        for name in sorted(z.namelist()):
+            h.update(name.encode("utf-8") + b"\0")
+            h.update(z.read(name))
+            h.update(b"\0")
+    return h.hexdigest()
 
 
 def runtime_log_command(dep_id: int, lines: Any = 200) -> str:
@@ -354,9 +428,15 @@ def service_url(host: str, port: int) -> str:
 def _hint_for(output: str) -> str:
     low = (output or "").lower()
     if "ensurepip" in low or "no module named venv" in low:
-        return "服务器缺少 python3-venv, 请先在服务器上安装(Debian/Ubuntu: apt install -y python3-venv)"
+        if "no root or sudo" in low:
+            return ("服务器缺少 python3-venv, 当前账号没有 root 或免密 sudo 权限无法自动安装: 请用 root 账号发布,"
+                    " 或先在服务器上执行 apt install -y python3-venv(CentOS/RHEL: yum install -y python3)")
+        return ("服务器缺少 python3-venv 且自动安装失败, 请在服务器上手动安装"
+                "(Debian/Ubuntu: apt install -y python3-venv; CentOS/RHEL: yum install -y python3)")
     if "python3: not found" in low or "python3: command not found" in low:
-        return "服务器上没有 python3, 请先安装 Python 3.9 及以上"
+        if "no root or sudo" in low:
+            return "服务器上没有 python3, 当前账号没有 root 或免密 sudo 权限无法自动安装, 请先安装 Python 3.9 及以上"
+        return "服务器上没有 python3 且自动安装失败, 请先安装 Python 3.9 及以上"
     if "no space left" in low:
         return "服务器磁盘空间不足"
     if "could not find a version" in low or "no matching distribution" in low or \
@@ -467,7 +547,7 @@ class RemoteDeployer:
         validate_port(rec.get("remote_port"), "服务端口")
         with self._lock:
             if dep_id in self._running:
-                raise RemoteDeployError("这个档案正在发布中")
+                raise RemoteDeployError("这个档案有操作正在进行(发布 / 启动 / 停止), 请等它结束")
             self._running.add(dep_id)
         self.db.update_remote_deploy(dep_id, status="deploying", progress=progress_for("package"),
                                      stage=stage_label("package"), log="", service_url="")
@@ -512,14 +592,20 @@ class RemoteDeployer:
             self._log(dep_id, "SSH 登录成功")
             self._exec(client, dep_id, "mkdir", cmds, secret)
 
-            # 3) 上传 24-42(SFTP)
-            self._step(dep_id, "upload", 0.0, "SFTP 上传工程包")
-            self._upload(client, dep_id, bundle)
-            self._step(dep_id, "upload", 1.0, "上传完成")
-
-            # 4) 解压 46
-            self._step(dep_id, "extract", 0.0, "远端解压到 app/")
-            self._exec(client, dep_id, "extract", cmds, secret)
+            # 3) 上传 24-42(SFTP); 4) 解压 46 —— 服务器上的工程内容和这次完全一样时两步都跳过
+            digest = bundle_digest(bundle)
+            state = run_command(client, cmds["bundle_state"], CMD_TIMEOUTS["status"])[1].split()
+            if digest in state and "HAS_APP" in state:
+                self._step(dep_id, "upload", 1.0, "服务器上的工程与本次内容相同, 跳过上传和解压")
+            else:
+                self._step(dep_id, "upload", 0.0, f"SFTP 上传工程包({size_kb} KB)")
+                t0 = time.monotonic()
+                self._upload(client, dep_id, bundle)
+                secs = max(0.1, time.monotonic() - t0)
+                self._step(dep_id, "upload", 1.0, f"上传完成, 用时 {secs:.0f}s({size_kb / secs:.0f} KB/s)")
+                self._step(dep_id, "extract", 0.0, "远端解压到 app/")
+                self._exec(client, dep_id, "extract", cmds, secret)
+                run_command(client, stamp_command(dep_id, digest), CMD_TIMEOUTS["status"])
 
             # 5) 依赖安装 52-78
             self._step(dep_id, "deps", 0.0, "创建虚拟环境并安装依赖(首次可能需要数分钟)")
@@ -564,8 +650,22 @@ class RemoteDeployer:
             raise RemoteDeployError(f"步骤「{key}」失败(退出码 {rc})" + (f": {hint}" if hint else ""))
         return out
 
+    @staticmethod
+    def _open_sftp(client):
+        """大窗口 SFTP: 默认窗口(2MB)在高延迟链路(如跨境、国内云主机)上把吞吐压得很低,
+        放大到 64MB 后同一条链路上传可快数倍。拿不到底层 transport 时退回默认。"""
+        get_t = getattr(client, "get_transport", None)
+        transport = get_t() if callable(get_t) else None
+        if transport is not None:
+            try:
+                return _paramiko().SFTPClient.from_transport(
+                    transport, window_size=SFTP_WINDOW, max_packet_size=SFTP_MAX_PACKET)
+            except Exception:  # noqa: BLE001 — 退回默认参数
+                pass
+        return client.open_sftp()
+
     def _upload(self, client, dep_id: int, bundle: Path) -> None:
-        sftp = client.open_sftp()
+        sftp = self._open_sftp(client)
         try:
             chan = sftp.get_channel()
             if chan is not None:
@@ -615,6 +715,20 @@ class RemoteDeployer:
         if dep_id in self._running:
             raise RemoteDeployError("这个档案正在发布中, 请等发布结束")
 
+    @contextlib.contextmanager
+    def _exclusive(self, dep_id: int):
+        """启动 / 停止 / 拆除与发布互斥: 同一档案同一时刻只跑一个远端操作。
+        之前只有发布占位, 「启动」正在健康检查时点「发布」, 两边并发写同一份日志和状态。"""
+        with self._lock:
+            if dep_id in self._running:
+                raise RemoteDeployError("这个档案有操作正在进行(发布 / 启动 / 停止), 请等它结束")
+            self._running.add(dep_id)
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._running.discard(dep_id)
+
     def _session(self, dep_id: int, fn: Callable[[Any, dict, dict, str], Any]) -> Any:
         rec = self._rec(dep_id)
         secret = self._secret(rec)
@@ -632,7 +746,6 @@ class RemoteDeployer:
             client.close()
 
     def start(self, dep_id: int) -> dict:
-        self._guard_idle(dep_id)
 
         def go(client, rec, cmds, secret):
             st = run_command(client, cmds["status"], CMD_TIMEOUTS["status"])[1].strip()
@@ -654,28 +767,29 @@ class RemoteDeployer:
                 self.db.update_remote_deploy(dep_id, status="failed", stage="启动失败")
                 self._log(dep_id, "ERROR 启动后健康检查未通过, 请查看运行日志")
             return {"ok": ok, "status": "running" if ok else "failed", "service_url": url if ok else ""}
-        return self._session(dep_id, go)
+        with self._exclusive(dep_id):
+            return self._session(dep_id, go)
 
     def stop(self, dep_id: int) -> dict:
-        self._guard_idle(dep_id)
 
         def go(client, rec, cmds, secret):
             self._exec(client, dep_id, "stop", cmds, secret)
             self.db.update_remote_deploy(dep_id, status="stopped", stage="已停止")
             self._log(dep_id, f"已停止服务 {service_name(dep_id)}")
             return {"ok": True, "status": "stopped"}
-        return self._session(dep_id, go)
+        with self._exclusive(dep_id):
+            return self._session(dep_id, go)
 
     def teardown(self, dep_id: int, purge: bool = False) -> dict:
         """停服务(不存在也算成功), 可选删除远端目录。幂等。"""
-        self._guard_idle(dep_id)
 
         def go(client, rec, cmds, secret):
             self._exec(client, dep_id, "stop", cmds, secret)
             if purge:
                 self._exec(client, dep_id, "purge", cmds, secret)
             return {"ok": True, "purged": bool(purge)}
-        return self._session(dep_id, go)
+        with self._exclusive(dep_id):
+            return self._session(dep_id, go)
 
     def runtime_logs(self, dep_id: int, lines: Any = 200) -> str:
         def go(client, rec, cmds, secret):

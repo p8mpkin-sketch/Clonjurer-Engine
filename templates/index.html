@@ -20,7 +20,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 <!-- 顶级字体体系: Inter / Plus Jakarta Sans / JetBrains Mono / Noto Sans SC -->
 <link href="/vendor/fonts/fonts.css" rel="stylesheet">
 <!-- UI 改版 P0 规范层: 字号/对比度/焦点/语义色(只换样式) -->
-<link href="/vendor/css/ui-tokens.css?v=31" rel="stylesheet">
+<link href="/vendor/css/ui-tokens.css?v=32" rel="stylesheet">
 
 <script src="/vendor/js/lucide.subset.js?v=9"></script>
 <script>
@@ -1228,7 +1228,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
         <div class="flex items-center gap-3">
           <h3 id="rd-log-title" class="flex-1 truncate">[[ remote.log.name ]]</h3>
           <button type="button" class="mt-icon" title="复制日志" aria-label="复制日志" @click="copyText(remoteLogText)"><i data-lucide="copy" class="w-4 h-4"></i></button>
-          <button type="button" class="mt-icon" title="刷新" aria-label="刷新" @click="refreshRemoteLog()"><i data-lucide="refresh-cw" class="w-4 h-4"></i></button>
+          <button type="button" class="mt-icon" title="刷新" aria-label="刷新" @click="refreshRemoteLog().then(() => toast('日志已刷新'))"><i data-lucide="refresh-cw" class="w-4 h-4"></i></button>
           <button type="button" class="mt-icon" title="关闭" aria-label="关闭" @click="closeRemoteLog()"><i data-lucide="x" class="w-4 h-4"></i></button>
         </div>
         <p class="tnums">[[ remote.log.username ]]@[[ remote.log.host ]]:[[ remote.log.ssh_port ]] · [[ remote.log.remote_dir ]] · [[ remoteStatusText(remote.log.status) ]]<template v-if="remote.log.host_fingerprint"> · 指纹 [[ remote.log.host_fingerprint ]]</template></p>
@@ -1278,7 +1278,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           </div>
         </div>
         <div class="flex items-center gap-2">
-          <button v-if="aiSel.size" type="button" class="mt-btn primary" :disabled="!aiKeyConfigured" @click="aiRepairSelected()"><i data-lucide="wand-sparkles" class="w-4 h-4"></i>修复选中的 [[ aiSel.size ]] 个</button>
+          <button v-if="aiSel.size" type="button" class="mt-btn primary" :aria-disabled="!aiKeyConfigured ? 'true' : null" :class="!aiKeyConfigured ? 'is-soft-off' : ''" :title="!aiKeyConfigured ? '还没配置视觉修复用的模型' : ''" @click="aiRepairSelected()"><i data-lucide="wand-sparkles" class="w-4 h-4"></i>修复选中的 [[ aiSel.size ]] 个</button>
         </div>
       </div>
 
@@ -1347,7 +1347,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           </div>
           <form class="ai-ask" @submit.prevent="aiRepair(aiCur.id, aiPrompt)">
             <input v-model="aiPrompt" class="mt-input max-w-none flex-1" placeholder="想重点修哪里？可不填，例如：顶部导航的间距和字号" aria-label="修复说明">
-            <button type="submit" class="mt-btn primary" :disabled="!aiKeyConfigured || !canWrite || (aiJobById[aiCur.id] && aiJobById[aiCur.id].state==='running')"><i data-lucide="wand-sparkles" class="w-4 h-4"></i>开始修复</button>
+            <button type="submit" class="mt-btn primary" :disabled="!canWrite || (aiJobById[aiCur.id] && aiJobById[aiCur.id].state==='running')" :aria-disabled="!aiKeyConfigured ? 'true' : null" :class="!aiKeyConfigured ? 'is-soft-off' : ''" :title="!canWrite ? '当前账号是只读角色，不能发起修复' : (!aiKeyConfigured ? '还没配置视觉修复用的模型' : '')"><i data-lucide="wand-sparkles" class="w-4 h-4"></i>开始修复</button>
           </form>
         </section>
         <section v-else class="mt-panel ai-bench pg-empty lg"><i data-lucide="flask-conical" class="w-6 h-6"></i><div>从左边选一个克隆，看和原站差在哪里</div></section>
@@ -4816,12 +4816,25 @@ const __vueApp = createApp({
     },
     aiPick(t) { this.previewTaskId = t.id; this.aiPrompt = ''; this.loadAiReportData(); this.$nextTick(() => this.iconRefresh()); },
     aiToggle(t) { const s = new Set(this.aiSel); if (s.has(t.id)) s.delete(t.id); else s.add(t.id); this.aiSel = s; this.iconRefresh(); },
+    aiNeedModel() {
+      // 没配模型时按钮不再静默禁用: 点了给出原因, 管理员直接带去设置页
+      if (this.aiKeyConfigured) return false;
+      if (this.isPlatformAdmin()) {
+        this.toast('视觉修复还没配置模型（和界面生成的模型分开配置），已带你到设置页', 'bad');
+        this.switchView('admin'); this.adminTab = 'settings'; this.loadSettings();
+      } else {
+        this.toast('视觉修复还没配置模型，请联系管理员在设置里配置', 'bad');
+      }
+      return true;
+    },
     async aiRepair(id, prompt) {
+      if (this.aiNeedModel()) return false;
       const { ok, data } = await this.apiJson('/api/v4/ai/playground-repair', { method: 'POST', body: JSON.stringify({ task_id: id, prompt: prompt || '' }) });
       if (!ok) { this.toast(data.error || '启动失败'); return false; }
       this.loadAiJobs(); return true;
     },
     async aiRepairSelected() {
+      if (this.aiNeedModel()) return;
       const ids = [...this.aiSel];
       if (!ids.length) return;
       let n = 0;

@@ -22,6 +22,7 @@ import base64
 import json
 import re
 import tempfile
+from typing import Any
 from pathlib import Path
 
 import requests
@@ -100,9 +101,23 @@ def _downscale_copy(image_path: Path, max_edge: int) -> bytes:
 
 
 
+# 已确认不接受图片输入的模型(base_url + model), 进程内记忆; 命中后直接走纯文字线索模式
+_TEXT_ONLY_MODELS: set = set()
+_TEXT_ONLY_NOTE = ("\n\n(当前模型无法查看截图: 请只依据上面的评分、差分区域线索和 HTML 结构摘要"
+                   "推断最可能的样式偏差, 宁可少改, 不要猜测大范围改动。)")
+
+
+def _model_key(ai_cfg: dict) -> str:
+    return f"{str(ai_cfg.get('base_url') or '').rstrip('/')}|{ai_cfg.get('model') or ''}"
+
+
+def _text_only_model(ai_cfg: dict) -> bool:
+    return _model_key(ai_cfg) in _TEXT_ONLY_MODELS
+
+
 def _chat_vision(ai_cfg: dict, original: Path, cloned: Path,
                  html_summary: str, detail: dict, hints: str = "",
-                 diff_image: Path = None, usage_out: list = None) -> dict:
+                 diff_image: Path = None, usage_out: list = None, notice: list = None) -> dict:
     """调用 OpenAI 兼容多模态接口; 返回解析后的补丁 dict。
 
     hints: 像素差分区域线索(region_hints); diff_image: 差异热力图(可选第 3 张图)。"""
@@ -127,20 +142,46 @@ def _chat_vision(ai_cfg: dict, original: Path, cloned: Path,
         "请只针对上面列出的差异区域输出 JSON 补丁。"
     )
 
-    def _call(budget: int):
-        resp = requests.post(
+    text_only = [_text_only_model(ai_cfg)]
+
+    def _post(budget: int):
+        if text_only[0]:
+            content: Any = user_text + _TEXT_ONLY_NOTE
+        else:
+            content = [{"type": "text", "text": user_text}, *images]
+        return requests.post(
             f"{ai_cfg['base_url']}/chat/completions",
             headers={"Authorization": f"Bearer {ai_cfg['api_key']}"},
             json={
                 "model": ai_cfg["model"], "temperature": 0.2, "max_tokens": budget,
                 "messages": [
                     {"role": "system", "content": _SYSTEM_PROMPT},
-                    {"role": "user", "content": [{"type": "text", "text": user_text}, *images]},
+                    {"role": "user", "content": content},
                 ],
             },
             timeout=config.AI_REQUEST_TIMEOUT,
         )
-        resp.raise_for_status()
+
+    def _call(budget: int):
+        resp = _post(budget)
+        if resp.status_code == 400 and not text_only[0]:
+            # 纯文本模型(如 DeepSeek 官方接口)收到图片会直接 400: 降级为只发文字线索再试一次,
+            # 并记住这个模型, 之后的轮次不再白发图片
+            body = resp.text[:300]
+            text_only[0] = True
+            resp2 = _post(budget)
+            if resp2.ok:
+                _TEXT_ONLY_MODELS.add(_model_key(ai_cfg))
+                if notice is not None:
+                    notice.append(f"模型 {ai_cfg.get('model')} 不接受图片输入, 已改用纯文字线索修复"
+                                  f"(效果有限, 建议在设置里换成多模态模型, 如 qwen-vl-max / gpt-4o / glm-4v)")
+                resp = resp2
+            else:
+                raise RuntimeError(
+                    f"大模型接口返回 400: {body!r}; 去掉图片后仍失败(HTTP {resp2.status_code}: "
+                    f"{resp2.text[:160]!r}) — 请在设置里核对模型名与接口地址")
+        if not resp.ok:
+            raise RuntimeError(f"大模型接口返回 HTTP {resp.status_code}: {resp.text[:200]!r}")
         try:
             payload = resp.json()
         except ValueError:
@@ -300,17 +341,21 @@ def run_vision_repair(ws: Path, ai_cfg: dict, detail: dict, log,
         log("AI-VISION", f"第 {round_no}/{config.AI_REPAIR_MAX_ROUNDS} 轮: "
                          f"提交双图、差异热力图与差分线索给大模型分析")
         hints = region_hints(region_cells, detail or {})
-        used = []
+        used, notice = [], []
         try:
             with llm_usage.scope(**_ws_scope(ws), kind="ai_repair"), llm_usage.step(f"视觉修复第 {round_no} 轮"):
                 patch = _chat_vision(ai_cfg, ws / "original_preview.png",
                                      ws / "cloned_preview.png",
                                      _html_summary(ws, page_file), detail or {},
-                                     hints=hints, diff_image=ws / "diff_preview.png", usage_out=used)
+                                     hints=hints, diff_image=ws / "diff_preview.png", usage_out=used,
+                                     notice=notice)
         except Exception as exc:
             log("AI-VISION", f"大模型调用失败: {type(exc).__name__}: {str(exc)[:200]}")
             report["rounds"].append({"round": round_no, "error": str(exc)[:300]})
             break
+        for n in notice:
+            log("AI-VISION", n)
+            report["text_only"] = True
         diagnosis = str(patch.get("diagnosis") or "")[:500]
         log("AI-VISION", f"诊断: {diagnosis or '(未提供)'}")
         snap = _snapshot(ws, page_file)
