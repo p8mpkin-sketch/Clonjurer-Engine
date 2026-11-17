@@ -57,6 +57,49 @@ class WebsecPureTest(unittest.TestCase):
         for h in ["example.com", "10.0.0.8", "192.168.1.20", "127.0.0.1", "8.8.8.8"]:
             self.assertEqual(websec.forbidden_target(h), "", h)
 
+    def test_forbidden_target_resolves_hostnames(self):
+        import socket
+        from unittest import mock
+        websec._resolve_cache.clear()
+        evil = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("169.254.169.254", 0))]
+        fine = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+        with mock.patch("socket.getaddrinfo", side_effect=lambda h, *a, **k: evil if h == "evil.example" else fine):
+            self.assertEqual(websec.forbidden_target("evil.example"), "")          # 默认不解析
+            self.assertIn("域名解析到", websec.forbidden_target("evil.example", resolve=True))
+            self.assertEqual(websec.forbidden_target("good.example", resolve=True), "")
+        # localhost 在多数 Linux 上先解析出 ::1(Python 里 ::1 也算 is_reserved), 本机地址必须放行
+        loop6 = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("::1", 0, 0, 0)),
+                 (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0))]
+        with mock.patch("socket.getaddrinfo", return_value=loop6):
+            self.assertEqual(websec.forbidden_target("localhost", resolve=True), "")
+        self.assertEqual(websec.forbidden_target("::1"), "")
+        with mock.patch("socket.getaddrinfo", side_effect=OSError("nxdomain")):
+            self.assertEqual(websec.forbidden_target("nx.example", resolve=True), "")
+        websec._resolve_cache.clear()
+
+    def test_guarded_session_blocks_metadata_and_redirect_hops(self):
+        import requests
+        sess = websec.guard_session(requests.Session())
+        with self.assertRaises(requests.ConnectionError) as cm:
+            sess.get("http://169.254.169.254/latest/meta-data/", timeout=2)
+        self.assertIn("已拦截", str(cm.exception))
+        # 每一跳都经适配器: 模拟一个 302 到元数据地址的响应
+        from unittest import mock
+        from requests.adapters import HTTPAdapter
+        hop = requests.Response()
+        hop.status_code, hop.headers["Location"], hop.url = 302, "http://169.254.169.254/x", "http://a.example/"
+        class _Raw:   # 没有 _original_response: requests 不从它解析 Cookie
+            def release_conn(self):
+                pass
+
+            def close(self):
+                pass
+        hop.raw = _Raw()
+        hop._content = b""
+        with mock.patch.object(HTTPAdapter, "send", side_effect=lambda req, *a, **k: setattr(hop, "request", req) or hop):
+            with self.assertRaises(requests.ConnectionError):
+                sess.get("http://a.example/", timeout=2)
+
     def test_failure_counter(self):
         c = websec.FailureCounter(60)
         self.assertEqual(c.count("a"), 0)
@@ -106,6 +149,8 @@ SCRIPT = textwrap.dedent(r'''
     config.WORKSPACE_ROOT = tmp / "ws"; config.WORKSPACE_ROOT.mkdir()
     config.EXPORTS_DIR = tmp / "ex"; config.EXPORTS_DIR.mkdir()
     config.LOGIN_IP_MAX = 8
+    from core.scheduler import Scheduler as _Sched
+    _Sched.start = lambda self: None   # 导入 app 时 _boot() 就会起调度线程, 事后改实例来不及
     import app as A
     from core import captcha
     A.scheduler.start = lambda *a, **k: None
@@ -229,9 +274,9 @@ SCRIPT = textwrap.dedent(r'''
     seen = {}
     class _R:
         status_code = 200; content = b"ok"; headers = {"content-type": "text/plain"}
-    def _fake(method, url, headers=None, **kw):
+    def _fake(self, method, url, headers=None, **kw):
         seen.update(headers or {}); return _R()
-    A.upstream_http.request = _fake
+    A.upstream_http.Session.request = _fake   # 兜底代理走带拦截适配器的 Session
     with A.app.test_request_context("/preview/1/x", headers={"Cookie": "clonjurer_session=abc",
                                     "Authorization": "Bearer t", "Accept": "*/*", "X-Requested-With": "XMLHttpRequest"}):
         A._proxy_fallback("https://origin.example", "x")

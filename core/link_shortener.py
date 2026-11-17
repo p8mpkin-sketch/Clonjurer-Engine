@@ -1,6 +1,10 @@
-"""短链服务层: 把站点地址交给公共缩链服务(免注册免 Key)生成短链, 结果经 models 方法落库。
+"""短链服务层: 本站随机短码为主(不依赖外网, 每次点击都计数), 公共缩链服务可选; 结果经 models 方法落库。
 
-适配四家服务, 每家一个生成函数: 成功返回 (短链, extras), 失败抛 ShortenError。
+本站短码: 每条短链都有一个 8 位随机短码(不可枚举), /s/<短码> 302 到目标并计一次点击。
+  service=local 只生成本站短码; 选公共服务时, 公共短链指向本站 /s/<短码>(点击同样计数),
+  平台对外地址是本机/内网(公共服务连不回来)时才退回直接缩目标地址, 并在 extras 里注明。
+
+适配四家公共服务, 每家一个生成函数: 成功返回 (短链, extras), 失败抛 ShortenError。
   - tinyurl : GET  https://tinyurl.com/api-create.php?url=…      纯文本短链
   - clckru  : GET  https://clck.ru/--?url=…                      纯文本短链
   - lnkua   : POST https://lnk.ua/api/v1/link/create (Bearer public) JSON {"result": {"lnk", "key", "qr"}}
@@ -18,6 +22,8 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import secrets
+import string
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -31,6 +37,9 @@ TIMEOUT = 15            # 所有外呼统一超时(秒)
 MAX_URL_LEN = 2048
 PREFLIGHT_TTL = 60      # 可用性预检结果缓存(秒), 免得每次打开页面都去敲四家服务
 USER_AGENT = "Clonjurer-LinkShortener/1.0"
+LOCAL = "local"         # 本站短码
+CODE_LEN = 8            # 62^8 ≈ 2.2e14, 随机生成, 不可枚举
+_CODE_ALPHABET = string.ascii_letters + string.digits
 
 Extras = dict[str, Any]
 
@@ -68,6 +77,38 @@ def validate_target(url: Any) -> str:
     if not host:
         raise InvalidTarget("目标地址缺少主机名")
     return url
+
+
+def new_code() -> str:
+    """本站短码: 8 位大小写字母 + 数字。纯数字的码留给老的 /s/<编号> 链接, 不发。"""
+    while True:
+        code = "".join(secrets.choice(_CODE_ALPHABET) for _ in range(CODE_LEN))
+        if not code.isdigit():
+            return code
+
+
+def valid_code(code: Any) -> bool:
+    return isinstance(code, str) and 4 <= len(code) <= 32 and all(c in _CODE_ALPHABET for c in code)
+
+
+def local_path(code: str) -> str:
+    return f"/s/{code}"
+
+
+def base_is_public(base_url: str) -> bool:
+    """平台对外地址公共缩链服务能不能连回来: 本机名 / 回环 / 内网 / 链路本地 IP 视为不能。"""
+    try:
+        host = (urlsplit(base_url or "").hostname or "").lower().rstrip(".")
+    except ValueError:
+        return False
+    if not host or host == "localhost" or host.endswith(".localhost") or host.endswith(".local") \
+            or "." not in host and ":" not in host:
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return True
+    return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_unspecified)
 
 
 def host_is_ip(url: str) -> bool:
@@ -220,16 +261,17 @@ PROVIDERS: dict[str, Provider] = {
     "lnkua": Provider("lnkua", "lnk.ua", "https://lnk.ua/", True, gen_lnkua),
     "urlasia": Provider("urlasia", "url.asia", "https://url.asia/", False, gen_urlasia),
 }
-ORDER = tuple(PROVIDERS)  # 自动适配 / 失败顺延的顺序
-SERVICE_CHOICES = ("all",) + ORDER
+ORDER = tuple(PROVIDERS)  # 公共服务: 失败顺延的顺序
+SERVICE_CHOICES = (LOCAL, "all") + ORDER   # local = 只要本站短码(默认); all = 本站 + 每家公共服务各一条
 
 
-def normalize_service(value: Any, default: str = "all") -> str:
-    """服务名归一: 接受 key 或展示名(clck.ru / lnk.ua / url.asia); 未知抛 ValueError。"""
+def normalize_service(value: Any, default: str = LOCAL) -> str:
+    """服务名归一: 接受 key 或展示名(clck.ru / lnk.ua / url.asia / 本站); 未知抛 ValueError。"""
     raw = str(value or "").strip().lower()
     if not raw:
         return default
-    alias = {"clck.ru": "clckru", "lnk.ua": "lnkua", "url.asia": "urlasia", "auto": "all"}
+    alias = {"clck.ru": "clckru", "lnk.ua": "lnkua", "url.asia": "urlasia", "auto": "all",
+             "本站": LOCAL, "site": LOCAL}
     raw = alias.get(raw, raw)
     if raw not in SERVICE_CHOICES:
         raise ValueError(f"未知短链服务 {value!r}, 可选: {', '.join(SERVICE_CHOICES)}")
@@ -271,86 +313,121 @@ def _try(service: str, target: str) -> tuple[Optional[str], Extras, str]:
 # ---------------------------------------------------------------------------
 # 生成入口(落库)
 # ---------------------------------------------------------------------------
-def shorten(db: Any, target_url: str, prefer: str = "all", *, label: str = "",
-            task_id: Optional[int] = None, link_task_id: Optional[int] = None,
-            workspace_id: Optional[int] = None) -> dict:
-    """生成一条短链: prefer 指定的服务先试, 失败按 ORDER 顺延; prefer=all 即从第一家开始。
+def _public_source(target: str, code: str, base_url: str) -> tuple[str, bool]:
+    """交给公共服务缩的地址: 平台对外地址可达时缩本站 /s/<短码>(点击计数), 否则直接缩目标。"""
+    if base_url and base_is_public(base_url):
+        return base_url.rstrip("/") + local_path(code), True
+    return target, False
 
-    成功落一行(service = 实际用的服务, extras.requested / fallback / attempts 留痕);
-    全部失败也落一行(short_url 为空, extras.ok=False)。返回 {ok, link_id, service, short_url, attempts}。"""
+
+def _create(db: Any, task_id, target: str, service: str, short: str, label: str, record: Extras,
+            code: str, link_task_id, workspace_id) -> int:
+    return db.create_short_link(task_id, target, service, short, label, record, link_task_id=link_task_id,
+                                workspace_id=workspace_id, code=code)
+
+
+def _shorten_local(db: Any, target: str, *, label: str, task_id, link_task_id, workspace_id) -> dict:
+    code = new_code()
+    record = {"ok": True, "requested": LOCAL, "attempts": [{"service": LOCAL, "ok": True}]}
+    link_id = _create(db, task_id, target, LOCAL, local_path(code), label, record, code,
+                      link_task_id, workspace_id)
+    return {"ok": True, "link_id": link_id, "service": LOCAL, "short_url": local_path(code), "code": code,
+            "requested": LOCAL, "fallback": False, "attempts": record["attempts"]}
+
+
+def shorten(db: Any, target_url: str, prefer: str = LOCAL, *, label: str = "",
+            task_id: Optional[int] = None, link_task_id: Optional[int] = None,
+            workspace_id: Optional[int] = None, base_url: str = "") -> dict:
+    """生成一条短链。prefer=local(默认)只发本站短码, 不外呼; prefer=<公共服务> 先试该家, 失败按 ORDER
+    顺延; prefer=all 从第一家公共服务开始顺延。每行都带本站短码, 公共短链(平台可达时)指向它。
+
+    成功落一行(service = 实际用的服务, extras.requested / fallback / attempts / via_local 留痕);
+    公共服务全部失败也落一行(short_url 为空, extras.ok=False)。返回 {ok, link_id, service, short_url, attempts}。"""
     target = validate_target(target_url)
     prefer = normalize_service(prefer)
-    chain = fallback_chain(target, prefer)
+    if prefer == LOCAL:
+        return _shorten_local(db, target, label=label, task_id=task_id, link_task_id=link_task_id,
+                              workspace_id=workspace_id)
+    code = new_code()
+    source, via_local = _public_source(target, code, base_url)
+    chain = fallback_chain(source, prefer)
     attempts: list[dict] = []
     if prefer != "all" and prefer not in chain:  # 如 IP 目标指定了 url.asia: 记一笔跳过, 顺延其余服务
         attempts.append({"service": prefer, "ok": False, "skipped": True,
                          "error": f"{PROVIDERS[prefer].name} 不接受纯 IP 目标"})
     for service in chain:
-        short, extras, error = _try(service, target)
+        short, extras, error = _try(service, source)
         if short is None:
             attempts.append({"service": service, "ok": False, "error": error})
             continue
         attempts.append({"service": service, "ok": True})
-        record = {**extras, "ok": True, "requested": prefer,
+        record = {**extras, "ok": True, "requested": prefer, "via_local": via_local,
                   "fallback": prefer != "all" and service != prefer, "attempts": attempts}
-        link_id = db.create_short_link(task_id, target, service, short, label, record,
-                                       link_task_id=link_task_id, workspace_id=workspace_id)
-        return {"ok": True, "link_id": link_id, "service": service, "short_url": short,
+        link_id = _create(db, task_id, target, service, short, label, record, code, link_task_id, workspace_id)
+        return {"ok": True, "link_id": link_id, "service": service, "short_url": short, "code": code,
                 "requested": prefer, "fallback": record["fallback"], "attempts": attempts}
     error = "全部服务生成失败" if chain else "没有可用的短链服务"
     record = {"ok": False, "requested": prefer, "error": error, "attempts": attempts}
-    link_id = db.create_short_link(task_id, target, prefer, "", label, record,
-                                   link_task_id=link_task_id, workspace_id=workspace_id)
+    link_id = _create(db, task_id, target, prefer, "", label, record, code, link_task_id, workspace_id)
     return {"ok": False, "link_id": link_id, "service": prefer, "short_url": "",
             "requested": prefer, "error": error, "attempts": attempts}
 
 
 def shorten_multi(db: Any, target_url: str, *, label: str = "", task_id: Optional[int] = None,
-                  link_task_id: Optional[int] = None, skip: Iterable[str] = ()) -> dict:
-    """prefer=all: 依次对每家可用服务各生成一条, 每家成功 / 失败各落一行。
+                  link_task_id: Optional[int] = None, skip: Iterable[str] = (),
+                  workspace_id: Optional[int] = None, base_url: str = "") -> dict:
+    """prefer=all: 先发一条本站短码, 再依次对每家可用公共服务各生成一条; 每家成功 / 失败各落一行。
 
     skip: 不再重复生成的服务(如任务里该服务已有成功短链)。返回 {results, created, failed}。"""
     target = validate_target(target_url)
     skip = set(skip)
-    results: list[dict] = list(skipped_services(target))
+    results: list[dict] = []
+    if LOCAL in skip:
+        results.append({"service": LOCAL, "ok": True, "skipped": True, "error": "已有本站短码, 未重复生成"})
+    else:
+        one = _shorten_local(db, target, label=label, task_id=task_id, link_task_id=link_task_id,
+                             workspace_id=workspace_id)
+        results.append({"service": LOCAL, "ok": True, "short_url": one["short_url"], "link_id": one["link_id"]})
+    results.extend(skipped_services(target))
     for service in usable_services(target):
         if service in skip:
             results.append({"service": service, "ok": True, "skipped": True, "error": "已有成功短链, 未重复生成"})
             continue
-        short, extras, error = _try(service, target)
+        code = new_code()
+        source, via_local = _public_source(target, code, base_url)
+        short, extras, error = _try(service, source)
         if short is None:
             record = {"ok": False, "requested": "all", "error": error}
-            link_id = db.create_short_link(task_id, target, service, "", label, record,
-                                           link_task_id=link_task_id)
+            link_id = _create(db, task_id, target, service, "", label, record, code, link_task_id, workspace_id)
             results.append({"service": service, "ok": False, "error": error, "link_id": link_id})
         else:
-            record = {**extras, "ok": True, "requested": "all"}
-            link_id = db.create_short_link(task_id, target, service, short, label, record,
-                                           link_task_id=link_task_id)
+            record = {**extras, "ok": True, "requested": "all", "via_local": via_local}
+            link_id = _create(db, task_id, target, service, short, label, record, code, link_task_id, workspace_id)
             results.append({"service": service, "ok": True, "short_url": short, "link_id": link_id})
     created = sum(1 for r in results if r["ok"] and not r.get("skipped"))
     failed = sum(1 for r in results if not r["ok"] and not r.get("skipped"))
     return {"results": results, "created": created, "failed": failed}
 
 
-def generate_for_task(db: Any, task_row_id: int) -> dict:
+def generate_for_task(db: Any, task_row_id: int, base_url: str = "") -> dict:
     """按短链任务的偏好服务生成: 先清掉该任务上一轮的失败记录, 再生成, 最后刷新任务状态。
 
-    service=all 时已成功过的服务不重复生成; 指定单一服务时每次生成一条新短链(失败顺延)。"""
+    service=all 时已成功过的服务(含本站短码)不重复生成; 其余每次生成一条新短链(公共服务失败顺延)。"""
     task = db.get_short_task(task_row_id)
     if task is None:
         raise LookupError(f"短链任务 #{task_row_id} 不存在")
     db.delete_failed_links_of_short_task(task_row_id)
     label = task.get("name") or ""
     clone_id = task.get("clone_task_id")
+    wid = task.get("workspace_id")
     try:
-        if (task.get("service") or "all") == "all":
+        if (task.get("service") or LOCAL) == "all":
             done = {l["service"] for l in db.list_links_of_short_task(task_row_id) if l.get("short_url")}
             res = shorten_multi(db, task["target_url"], label=label, task_id=clone_id,
-                                link_task_id=task_row_id, skip=done)
+                                link_task_id=task_row_id, skip=done, workspace_id=wid, base_url=base_url)
         else:
             one = shorten(db, task["target_url"], task["service"], label=label, task_id=clone_id,
-                          link_task_id=task_row_id)
+                          link_task_id=task_row_id, workspace_id=wid, base_url=base_url)
             res = {"results": [one], "created": int(one["ok"]), "failed": int(not one["ok"])}
     except InvalidTarget as exc:
         res = {"results": [], "created": 0, "failed": 0, "error": str(exc)}
@@ -397,5 +474,5 @@ def preflight(force: bool = False) -> list[dict]:
 
 
 def provider_meta() -> list[dict]:
-    """不外呼的服务清单(名称 / 是否收 IP), 给表单下拉用。"""
+    """不外呼的公共服务清单(名称 / 是否收 IP), 给表单下拉用(本站短码不在其中, 总是可用)。"""
     return [{"key": p.key, "name": p.name, "supports_ip": p.supports_ip} for p in PROVIDERS.values()]

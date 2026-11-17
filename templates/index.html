@@ -20,7 +20,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
 <!-- 顶级字体体系: Inter / Plus Jakarta Sans / JetBrains Mono / Noto Sans SC -->
 <link href="/vendor/fonts/fonts.css" rel="stylesheet">
 <!-- UI 改版 P0 规范层: 字号/对比度/焦点/语义色(只换样式) -->
-<link href="/vendor/css/ui-tokens.css?v=30" rel="stylesheet">
+<link href="/vendor/css/ui-tokens.css?v=31" rel="stylesheet">
 
 <script src="/vendor/js/lucide.subset.js?v=9"></script>
 <script>
@@ -918,7 +918,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <div class="pg-head">
         <div>
           <h2 class="pg-title">短链管理</h2>
-          <div class="pg-meta">把站点地址变成便于分享的短链 · 从本站 /s/编号 打开的访问会计入点击</div>
+          <div class="pg-meta">把站点地址变成便于分享的短链 · 默认用本站短码，不依赖外网，每次打开都计入点击</div>
         </div>
         <div class="flex items-center gap-2 flex-wrap">
           <input v-model="links.q" @input="loadLinksSoon()" class="mt-input lk-search" placeholder="搜索名称 / 目标地址 / 备注" aria-label="搜索短链任务">
@@ -929,7 +929,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <div class="pg-kpis lk-kpis">
         <div class="pg-kpi"><div class="pg-kpi-label">短链任务</div><div class="pg-kpi-num">[[ links.kpis.tasks ]]</div></div>
         <div class="pg-kpi"><div class="pg-kpi-label">短链</div><div class="pg-kpi-num">[[ links.kpis.links ]]</div><div class="pg-kpi-sub">只算生成成功的</div></div>
-        <div class="pg-kpi"><div class="pg-kpi-label">总点击</div><div class="pg-kpi-num">[[ links.kpis.clicks ]]</div><div class="pg-kpi-sub">经 /s/编号 跳转累计</div></div>
+        <div class="pg-kpi"><div class="pg-kpi-label">总点击</div><div class="pg-kpi-num">[[ links.kpis.clicks ]]</div><div class="pg-kpi-sub">经本站短链跳转累计</div></div>
       </div>
 
       <section class="mt-panel">
@@ -970,14 +970,15 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
       <form class="mt-modal" role="dialog" aria-modal="true" aria-labelledby="lk-create-title" @submit.prevent="links.editId ? saveLinkEdit() : createLinkTask()">
         <h3 id="lk-create-title">[[ links.editId ? '编辑短链任务' : '新建短链任务' ]]</h3>
         <p v-if="links.editId">改目标地址不会影响已经生成的短链，它们仍指向原地址；重新生成后用新地址。</p>
-        <p v-else>选「全部服务」会依次用每家服务各生成一条；指定一家时，失败会自动换下一家。</p>
+        <p v-else>默认生成本站短码，不依赖外网，每次点击都计数。也可以再用公共缩链服务生成一条，它会指向本站短码，点击同样计数；指定一家失败时自动换下一家。</p>
         <label for="lk-name">名称</label>
         <input id="lk-name" v-model="links.form.name" class="mt-input" maxlength="120" placeholder="例如：活动落地页" required>
         <label for="lk-target">目标地址</label>
         <input id="lk-target" v-model="links.form.target_url" class="mt-input font-mono" spellcheck="false" placeholder="https://example.com/page" required>
         <label for="lk-service">偏好服务</label>
         <select id="lk-service" v-model="links.form.service" class="mt-select">
-          <option value="all">全部服务（每家各生成一条）</option>
+          <option value="local">本站短码（推荐，不依赖外网）</option>
+          <option value="all">本站短码 + 每家公共服务各一条</option>
           <option v-for="pv in links.providers" :key="pv.key" :value="pv.key">[[ pv.name ]][[ pv.supports_ip ? '' : '（不支持 IP 地址）' ]][[ pv.available === false ? ' · 预检不通' : '' ]]</option>
         </select>
         <div v-if="linkTargetIsIp && links.form.service==='urlasia'" class="ui-hint">目标是 IP 地址，url.asia 不收，会自动换下一家。</div>
@@ -1004,7 +1005,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
           <h3 id="lk-detail-title" class="flex-1 truncate">[[ links.detail.name ]]</h3>
           <button type="button" class="mt-icon" title="关闭" aria-label="关闭" @click="closeLinkTask()"><i data-lucide="x" class="w-4 h-4"></i></button>
         </div>
-        <p class="tnums">SL-[[ String(links.detail.seq).padStart(3, '0') ]] · [[ links.detail.service === 'all' ? '全部服务' : linkServiceName(links.detail.service) ]] · [[ linkStatusText(links.detail.status) ]]<template v-if="links.detail.clone_task_id"> · 克隆 #[[ links.detail.clone_task_id ]] [[ links.detail.clone_domain ]]</template><template v-if="links.detail.note"> · [[ links.detail.note ]]</template></p>
+        <p class="tnums">SL-[[ String(links.detail.seq).padStart(3, '0') ]] · [[ linkServiceName(links.detail.service) ]] · [[ linkStatusText(links.detail.status) ]]<template v-if="links.detail.clone_task_id"> · 克隆 #[[ links.detail.clone_task_id ]] [[ links.detail.clone_domain ]]</template><template v-if="links.detail.note"> · [[ links.detail.note ]]</template></p>
         <div class="mt-link"><input :value="links.detail.target_url" readonly aria-label="目标地址" @focus="$event.target.select()">
           <button type="button" class="mt-icon sm" title="复制目标地址" aria-label="复制目标地址" @click="copyText(links.detail.target_url)"><i data-lucide="copy" class="w-3.5 h-3.5"></i></button></div>
         <div class="pg-stats lk-stats">
@@ -1018,7 +1019,7 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <div class="min-w-0 flex-1">
               <template v-if="l.ok">
                 <a :href="l.short_url" target="_blank" rel="noopener" class="dp-link truncate block" :title="l.short_url">[[ l.short_url.replace(/^https?:\/\//, '') ]]</a>
-                <div class="lk-sub truncate">计数入口 [[ l.local_url ]]<template v-if="l.extras && l.extras.fallback"> · 指定的 [[ linkServiceName(l.extras.requested) ]] 失败，已顺延</template></div>
+                <div v-if="l.service !== 'local'" class="lk-sub truncate"><template v-if="l.extras && l.extras.via_local === false">平台地址是本机或内网，这条公共短链直接指向目标，点击不计数；计数请用 [[ l.local_url ]]</template><template v-else>指向本站 [[ l.local_url ]]，点击计数</template><template v-if="l.extras && l.extras.fallback"> · 指定的 [[ linkServiceName(l.extras.requested) ]] 失败，已顺延</template></div>
               </template>
               <div v-else class="lk-sub lk-err truncate" :title="l.extras && l.extras.error">失败：[[ (l.extras && l.extras.error) || '未知原因' ]]</div>
             </div>
@@ -3609,12 +3610,13 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
             <div class="min-w-0">
               <div class="text-[14px] text-slate-100 truncate">[[ sc.name ]]</div>
               <div class="text-[12px] text-slate-500 truncate">[[ sc.urls.length ]] 个网址 · [[ sc.urls.map(u => u.replace(/^https?:\/\//, '').replace(/\/$/, '')).slice(0, 2).join('、') ]][[ sc.urls.length > 2 ? ' 等' : '' ]]</div>
+              <div v-if="sc.runs.length && sc.runs[0].changed != null" class="text-[12px] truncate" :class="sc.runs[0].changed || sc.runs[0].failed_sites ? 'text-amber-400' : 'text-slate-500'">最近一次：[[ sc.runs[0].changed ? sc.runs[0].changed + ' 个站点有变化' : '没有明显变化' ]][[ sc.runs[0].failed_sites ? '，' + sc.runs[0].failed_sites + ' 个失败' : '' ]][[ sc.webhook_set ? (sc.runs[0].notified ? ' · 已通知' : (sc.runs[0].notify_msg && sc.runs[0].notify_msg !== '未配置通知地址' && (sc.runs[0].changed || sc.runs[0].failed_sites || sc.notify === 'always') ? ' · 通知失败：' + sc.runs[0].notify_msg : '')) : '' ]]</div>
             </div>
             <div class="text-[13px] text-slate-300">[[ sc.rule ]]</div>
             <div class="hide-sm text-[13px]" :class="sc.enabled ? 'text-slate-300' : 'text-slate-500'">[[ sc.enabled ? whenText(sc.next_run_at) : '已暂停' ]]</div>
             <div class="hide-sm sc-runs">
               <span v-for="r in sc.runs.slice(0, 6).reverse()" :key="r.batch_id" class="sc-run" :class="runTone(r)"
-                :title="whenText(r.at) + ' · 成功 ' + (r.completed || 0) + ' / 失败 ' + (r.failed || 0) + (r.avg_score != null ? ' · 均分 ' + r.avg_score : '')"></span>
+                :title="whenText(r.at) + ' · 成功 ' + (r.completed || 0) + ' / 失败 ' + (r.failed || 0) + (r.avg_score != null ? ' · 均分 ' + r.avg_score : '') + (r.changed ? ' · ' + r.changed + ' 个有变化' : '')"></span>
               <span v-if="sc.runs.length && sc.runs[0].avg_score != null" class="sc-score" title="最近一次的平均还原度">[[ sc.runs[0].avg_score ]]</span>
               <span v-if="!sc.runs.length" class="text-[12px] text-slate-500">还没运行过</span>
             </div>
@@ -3699,6 +3701,19 @@ document.documentElement.setAttribute('data-theme',eff);}catch(e){document.docum
               <select id="sc-proj" v-model="schedModal.project_id" class="mt-select"><option value="">默认项目</option><option v-for="p in projects" :key="p.id" :value="p.id">[[ p.name ]]</option></select></div>
           </div>
           <div v-if="schedTzNote" class="text-[12px] text-slate-500">[[ schedTzNote ]]</div>
+          <label for="sc-notify">跑完后通知</label>
+          <div class="flex gap-2">
+            <select id="sc-notify" v-model="schedModal.notify" class="mt-select" style="flex:0 0 auto;width:auto">
+              <option value="change">有变化或失败时</option><option value="always">每次都通知</option><option value="off">不通知</option>
+            </select>
+            <input id="sc-webhook" v-model="schedModal.webhook_url" :disabled="schedModal.notify==='off'" class="mt-input font-mono flex-1 min-w-0" spellcheck="false" aria-label="通知地址"
+              :placeholder="schedModal.webhook_masked ? '已设置 ' + schedModal.webhook_masked + '，留空不改' : '机器人 Webhook 地址（飞书 / 钉钉 / 企业微信 / Slack / 自定义）'">
+          </div>
+          <div class="text-[12px] text-slate-500 flex items-center gap-2 flex-wrap">
+            <span>按地址自动适配消息格式；钉钉机器人设了关键词时请包含「定时任务」。</span>
+            <button v-if="schedModal.id && schedModal.webhook_masked && !schedModal.webhook_url" type="button" class="dash-link" :disabled="schedModal.testing" @click="testScheduleNotify()">[[ schedModal.testing ? '发送中…' : '发一条测试消息' ]]</button>
+            <button v-if="schedModal.webhook_masked && !schedModal.webhook_url" type="button" class="dash-link" @click="schedModal.webhook_clear = true; schedModal.webhook_masked = ''">清除地址</button>
+          </div>
           <div v-if="schedModal.error" class="text-[12px] text-rose-400">[[ schedModal.error ]]</div>
           <div class="flex justify-end gap-2 pt-2">
             <button type="button" class="mt-btn" @click="schedModal.open=false">取消</button>
@@ -3995,7 +4010,8 @@ const __vueApp = createApp({
               scheduler: { paused: false }, median_s: 0 },
       liveHist: [],
       schedules: [], schedLoaded: false, schedTz: '',
-      schedModal: { open: false, id: null, name: '', urls: '', freq: 'daily', time: '09:00', minute: 0, weekday: 0, project_id: '', enabled: true, busy: false, error: '' },
+      schedModal: { open: false, id: null, name: '', urls: '', freq: 'daily', time: '09:00', minute: 0, weekday: 0, project_id: '', enabled: true, busy: false, error: '',
+                    notify: 'change', webhook_url: '', webhook_masked: '', webhook_clear: false, testing: false },
       aiJobs: [], aiSel: new Set(), aiQ: '', aiSort: 'score_asc', aiView: 'cloned',
       deployModal: { open: false, q: '', task_id: null, mode: '', ttl_hours: 24, bind: '127.0.0.1', busy: false, error: '' },
       dockerMeta: { default_mode: 'process', runtime: {} },
@@ -4018,7 +4034,7 @@ const __vueApp = createApp({
                 del: null, delPurge: false, delErr: '', delCanForce: false },
       links: { tasks: [], q: '', kpis: { tasks: 0, links: 0, clicks: 0 }, providers: [],
               creating: false, busy: false, error: '', detail: null,
-              form: { name: '', target_url: '', service: 'all', clone_task_id: '', note: '', generate: true } },
+              form: { name: '', target_url: '', service: 'local', clone_task_id: '', note: '', generate: true } },
       themeMode: 'system', themeMenu: false, moreMenu: false,
       themeOptions: [
         { id: 'system', label: '跟随系统', icon: 'monitor' },
@@ -4725,21 +4741,32 @@ const __vueApp = createApp({
       const pad = n => String(n).padStart(2, '0');
       this.schedModal = sc
         ? { open: true, id: sc.id, name: sc.name, urls: sc.urls.join('\n'), freq: sc.freq, time: pad(sc.hour) + ':' + pad(sc.minute), minute: sc.minute,
-            weekday: sc.weekday, project_id: sc.project_id || '', enabled: sc.enabled, busy: false, error: '' }
+            weekday: sc.weekday, project_id: sc.project_id || '', enabled: sc.enabled, busy: false, error: '',
+            notify: sc.notify || 'change', webhook_url: '', webhook_masked: sc.webhook_masked || '', webhook_clear: false, testing: false }
         : { open: true, id: null, name: '', urls: '', freq: 'daily', time: '09:00', minute: 0, weekday: 0,
-            project_id: this.currentProjectId || '', enabled: true, busy: false, error: '' };
+            project_id: this.currentProjectId || '', enabled: true, busy: false, error: '',
+            notify: 'change', webhook_url: '', webhook_masked: '', webhook_clear: false, testing: false };
       this.$nextTick(() => this.iconRefresh());
     },
     async saveSchedule() {
       const m = this.schedModal; m.busy = true; m.error = '';
       const [hh, mm] = String(m.time || '09:00').split(':').map(x => parseInt(x, 10) || 0);
       const body = { name: m.name.trim(), urls: m.urls, freq: m.freq, hour: hh, minute: m.freq === 'hourly' ? (parseInt(m.minute, 10) || 0) : mm,
-                     weekday: m.weekday, enabled: m.enabled, project_id: m.project_id || null };
+                     weekday: m.weekday, enabled: m.enabled, project_id: m.project_id || null, notify: m.notify };
+      if (m.webhook_url.trim()) body.webhook_url = m.webhook_url.trim();
+      else if (m.webhook_clear) body.webhook_clear = true;
       try {
         const { ok, data } = await this.apiJson(m.id ? '/api/v4/schedules/' + m.id : '/api/v4/schedules', { method: m.id ? 'PATCH' : 'POST', body: JSON.stringify(body) });
         if (!ok) { m.error = data.error || '保存失败'; return; }
         m.open = false; this.toast(m.id ? '已保存' : '已创建，到点会自动克隆'); this.loadSchedules();
       } finally { m.busy = false; }
+    },
+    async testScheduleNotify() {
+      const m = this.schedModal; m.testing = true; m.error = '';
+      try {
+        const { ok, data } = await this.apiJson('/api/v4/schedules/' + m.id + '/test-notify', { method: 'POST' });
+        if (ok) this.toast('测试消息已发出（' + (data.message || '') + '）'); else m.error = '测试消息发送失败：' + (data.message || data.error || '未知原因');
+      } finally { m.testing = false; }
     },
     async toggleSchedule(sc) {
       const { ok, data } = await this.apiJson('/api/v4/schedules/' + sc.id, { method: 'PATCH', body: JSON.stringify({ enabled: !sc.enabled }) });
@@ -5498,7 +5525,8 @@ const __vueApp = createApp({
               { key: 'lnkua', name: 'lnk.ua', supports_ip: true }, { key: 'urlasia', name: 'url.asia', supports_ip: false }];
     },
     linkServiceName(k) {
-      if (k === 'all') return '全部服务';
+      if (k === 'local') return '本站短码';
+      if (k === 'all') return '本站 + 公共服务';
       const p = this.linkProviderList().find(x => x.key === k);
       return p ? p.name : (k || '—');
     },
@@ -5506,7 +5534,7 @@ const __vueApp = createApp({
       return { pending: '待生成', running: '生成中', partial: '部分成功', done: '已完成', failed: '失败' }[s] || s;
     },
     openLinkCreate() {
-      this.links.form = { name: '', target_url: '', service: 'all', clone_task_id: '', note: '', generate: true };
+      this.links.form = { name: '', target_url: '', service: 'local', clone_task_id: '', note: '', generate: true };
       this.links.error = '';
       this.links.editId = null;
       this.links.creating = true;
@@ -5595,7 +5623,7 @@ const __vueApp = createApp({
       this.openLinkTask(d);
     },
     bumpLocalClick(l) {
-      // 计数在服务端 /s/<id> 跳转时完成; 稍后刷新详情把新点击数带回来
+      // 计数在服务端 /s/<短码> 跳转时完成; 稍后刷新详情把新点击数带回来
       const d = this.links.detail;
       setTimeout(() => { if (this.links.detail && this.links.detail.id === d.id) this.openLinkTask(d); }, 800);
     },

@@ -3,6 +3,8 @@ import unittest
 
 from core.clone.js import seed_random_js
 
+from tests._env import chromium_available
+
 try:
     from playwright.sync_api import sync_playwright
 except Exception:   # pragma: no cover
@@ -11,7 +13,7 @@ except Exception:   # pragma: no cover
 T0 = 1_600_000_000_000   # 2020-09-13
 
 
-@unittest.skipUnless(sync_playwright, "需要 playwright")
+@unittest.skipUnless(chromium_available(), "需要 Playwright Chromium")
 class ClockAnchor(unittest.TestCase):
     def _eval(self, js, t0=T0):
         with sync_playwright() as p:

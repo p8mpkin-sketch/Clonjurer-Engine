@@ -76,6 +76,9 @@ CLONER_PORT=8897 python app.py
 | `CLONER_CAPTCHA_AFTER` / `CLONER_CAPTCHA_IP_AFTER` | 2 / 5 | 同一用户名 / 同一 IP 输错几次后要求验证码 |
 | `CLONER_LOGIN_IP_MAX` | 30 | 同一 IP 在失败窗口内失败这么多次后暂停该 IP 登录 |
 | `CLONER_SESSION_HOURS` | 12 | 登录有效期（小时） |
+| `CLONER_PUBLIC_URL` | 空 | 平台对外地址，如 `https://clone.example.com`；本站短链 `/s/<短码>` 按它拼完整地址，公共缩链服务也指向它。留空按访问地址推断 |
+| `CLONER_SERVER` | `waitress` | 平台用的 WSGI 服务器；`werkzeug` 改回 Flask 自带服务器（调试用） |
+| `CLONER_THREADS` | 32 | waitress 工作线程数；每个打开的实时日志面板占一个 |
 
 ## 测试与基准（训练效率 / 完成度的量具）
 

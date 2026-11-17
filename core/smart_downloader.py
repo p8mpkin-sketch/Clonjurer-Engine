@@ -22,6 +22,7 @@ from urllib.parse import urlsplit
 import requests
 
 import config
+from core import websec
 
 # 视为"被源站拒绝"从而触发浏览器降级的 HTTP 状态码
 _BROWSER_FALLBACK_STATUS = {401, 403, 404, 405, 406, 429, 451, 500, 502, 503}
@@ -49,7 +50,7 @@ class SmartDownloader:
     def __init__(self, base_headers: dict, log=None):
         self.headers = dict(base_headers or {})
         self._log = log or (lambda *_args: None)
-        self._session = requests.Session()
+        self._session = websec.guard_session(requests.Session())
         self._session.headers.update({
             "User-Agent": self.headers.get("User-Agent") or config.DEFAULT_USER_AGENT,
         })
@@ -140,7 +141,7 @@ class SmartDownloader:
         res = {}
         if not urls:
             return res
-        sess = requests.Session()
+        sess = websec.guard_session(requests.Session())
         sess.headers.update(self._session.headers)
         for c in cookies or []:
             try:

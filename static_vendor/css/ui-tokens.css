@@ -1179,3 +1179,11 @@ button.mt-row.llm-row:focus-visible{outline:none;box-shadow:inset var(--ui-focus
   .llm-note > svg,.llm-note > i{margin-top:2px}
   .llm-price-head,.llm-price-row{grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(0,1fr) 28px;gap:6px}
 }
+
+/* ===== 2026-11-16 手机端成员列表 =====
+   上面「模型消耗」段的 900px 断点在源码里排在成员列表 600px 断点之后, 手机宽度下把成员行又改回了 5 列,
+   名字被挤没、角色竖排。这里在文件末尾重申手机端 3 列布局(勾选 / 成员 / 操作, 角色与状态在第二行) */
+@media (max-width:600px){
+  .mt-row.iam-row{grid-template-columns:20px minmax(0,1fr) auto}
+  .mt-row.iam-row .iam-c-login,.mt-row.iam-row .iam-c-act,.mt-row.iam-row .iam-c-llm{display:none}
+}

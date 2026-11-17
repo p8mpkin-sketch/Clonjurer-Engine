@@ -19,10 +19,9 @@ H = "() => [document.getElementById('c').getBoundingClientRect().height, documen
 class NestFix(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        try:
-            import playwright.sync_api  # noqa: F401
-        except Exception:
-            raise unittest.SkipTest("无 playwright")
+        from tests._env import chromium_available
+        if not chromium_available():
+            raise unittest.SkipTest("需要 Playwright Chromium")
 
     def _reparse(self, fix):
         from playwright.sync_api import sync_playwright

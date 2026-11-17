@@ -33,7 +33,7 @@ REST API:
   GET  /api/v4/link-tasks/<id>/export    导出 txt / csv
   GET  /api/v4/links/providers      四家缩链服务可用性预检
   GET/POST /api/v4/links            短链列表与单独新建
-  GET  /s/<id>                      短链跳转(302)并计点击
+  GET  /s/<短码>                    短链跳转(302)并计点击(老短链也认 /s/<编号>)
   GET/POST /api/v4/remote/deploys   远程发布档案列表(?q=)与新建
   GET/PATCH/DELETE /api/v4/remote/deploys/<id>   详情(进度/阶段/日志尾部)/编辑/删除(?purge=1 清远端目录)
   POST /api/v4/remote/deploys/<id>/deploy        发布(异步, 后台线程)
@@ -42,6 +42,7 @@ REST API:
   GET  /api/v4/remote/deploys/<id>/status        远端服务存活探测
   POST /api/v4/remote/test-connection            保存前连通性测试(只验证登录)
 """
+import calendar
 import io
 import csv
 import io
@@ -59,6 +60,7 @@ import zipfile
 from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Optional
 from urllib.parse import urlsplit
 
 import requests as upstream_http
@@ -510,7 +512,7 @@ def _normalize_urls(raw_urls):
             rejected.append({"url": url, "reason": "非法 URL"})
             continue
         try:
-            why = websec.forbidden_target(urlsplit(url).hostname or "")
+            why = websec.forbidden_target(urlsplit(url).hostname or "", resolve=True)
         except ValueError:
             why = "非法 URL"
         if why:
@@ -632,9 +634,10 @@ def _proxy_fallback(upstream: str, subpath: str):
     headers["Referer"] = upstream.rstrip("/") + "/"
     headers.setdefault("User-Agent", config.DEFAULT_USER_AGENT)
     try:
-        upstream_resp = upstream_http.request(
-            request.method, url, headers=headers,
-            data=request.get_data(), timeout=15, allow_redirects=True)
+        with websec.guard_session(upstream_http.Session()) as sess:   # 每一跳都拦元数据/链路本地地址
+            upstream_resp = sess.request(
+                request.method, url, headers=headers,
+                data=request.get_data(), timeout=15, allow_redirects=True)
     except Exception as exc:
         return Response(f"Upstream proxy failed: {exc}", status=502,
                         content_type="text/plain; charset=utf-8")
@@ -2235,6 +2238,12 @@ def auth_login():
             # 验证码不对不校验密码(不给撞库当密码对错的判定器), 也不累计账号失败, 只计来源 IP
             _ip_failures.add(_client_ip())
             given = bool(str(data.get("captcha") or "").strip())
+            why = "验证码不正确" if given else "未填验证码"
+            if user is not None:   # 留痕(记为登录失败, 计入审计的失败登录数); 不累计账号失败
+                _audit_account(user, "login.failed", f"登录失败: {username}({why})")
+            else:
+                db.log_audit(username[:64] or "?", "login.failed", f"登录失败: {username[:64] or '(空)'}({why})",
+                             _client_ip(), workspace_id=1)
             return jsonify({"error": "验证码不正确, 请重新输入" if given else "请输入验证码",
                             "captcha_required": True}), 400
     lock = iam.locked_until(user) if user else ""
@@ -2639,7 +2648,7 @@ def v4_users_export():
                            lambda r: _ROLE_TEXT.get(r, r or ""))
     _audit("audit.export", f"导出成员名单 CSV({len(members)} 人)")
     stamp = time.strftime("%Y%m%d_%H%M%S")
-    return Response(body, mimetype="text/csv; charset=utf-8",
+    return Response(body, content_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="members_{stamp}.csv"'})
 
 
@@ -2848,7 +2857,7 @@ def v4_user_create():
                          str(data.get("display_name") or "").strip()[:60])
     db.add_member(wid, uid, role, (_current_user() or {}).get("id"))
     _audit("user.create", f"创建成员 {username}({role})")
-    return jsonify({"user": db.get_user(uid)}), 201
+    return jsonify({"user": _public_user(db.get_user(uid))}), 201
 
 
 @app.patch("/api/v4/users/<int:user_id>")
@@ -3185,7 +3194,7 @@ def v4_audit_export_ws():
         rows += more
     _audit("audit.export", f"导出审计日志 {len(rows)} 条(共命中 {total} 条)")
     stamp = time.strftime("%Y%m%d_%H%M%S")
-    return Response(iam.audit_csv(rows), mimetype="text/csv; charset=utf-8",
+    return Response(iam.audit_csv(rows), content_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="audit_{stamp}.csv"'})
 
 
@@ -3538,7 +3547,7 @@ def v4_audit_export():
     _audit("audit.export", f"平台管理员导出全平台审计日志 {len(entries)} 条")
     stamp = time.strftime("%Y%m%d_%H%M%S")
     return Response(iam.audit_csv(entries),
-                    mimetype="text/csv; charset=utf-8",
+                    content_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition":
                              f'attachment; filename="audit_all_{stamp}.csv"'})
 
@@ -3725,12 +3734,25 @@ def _redact_config(cfg: dict) -> dict:
 
 # ---------------------------------------------------------------------------
 from core import schedules as sched_rules  # noqa: E402
+from core import schedule_notify  # noqa: E402
+
+
+def _mask_webhook(url: str) -> str:
+    """通知地址常带 access_token 之类的密钥: 接口只回主机名 + 末 4 位。"""
+    if not url:
+        return ""
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return "已设置"
+    return f"{parts.scheme}://{parts.hostname or ''}/…{url[-4:]}"
 
 
 def _schedule_view(sc: dict, briefs: dict) -> dict:
     hist = json.loads(sc.get("history_json") or "[]")
     urls = json.loads(sc.get("urls_json") or "[]")
-    runs = [{"batch_id": h["batch_id"], "at": h["at"], **(briefs.get(h["batch_id"]) or {})}
+    runs = [{"batch_id": h["batch_id"], "at": h["at"], **(briefs.get(h["batch_id"]) or {}),
+             **{k: h[k] for k in ("changed", "failed_sites", "notified", "notify_msg") if k in h}}
             for h in hist[-8:]][::-1]
     return {
         "id": sc["id"], "name": sc["name"], "urls": urls, "project_id": sc.get("project_id"),
@@ -3740,6 +3762,8 @@ def _schedule_view(sc: dict, briefs: dict) -> dict:
         "enabled": bool(sc["enabled"]), "next_run_at": sc["next_run_at"] if sc["enabled"] else "",
         "last_run_at": sc["last_run_at"], "runs_total": sc["runs"], "runs": runs,
         "created_by": sc.get("created_by") or "", "created_at": sc["created_at"],
+        "notify": sc.get("notify") or "change", "webhook_set": bool(sc.get("webhook_url")),
+        "webhook_masked": _mask_webhook(sc.get("webhook_url") or ""),
     }
 
 
@@ -3772,9 +3796,62 @@ def _fire_schedule(sc: dict, actor: str) -> dict:
     return {"batch_id": batch_id, "accepted": len(accepted)}
 
 
+def _batch_summary(batch_id: int, wid: int):
+    tasks = []
+    for t in db.list_tasks(batch_id=batch_id, workspace_id=wid, limit=200):
+        try:
+            stats = json.loads(t.get("stats_json") or "{}")
+        except (TypeError, ValueError):
+            stats = {}
+        tasks.append({**t, "stats": stats})
+    return schedule_notify.summarize(tasks)
+
+
+def _check_schedule_notifications(now: Optional[float] = None) -> int:
+    """定时批次跑完后: 记下变化/失败数, 发一条事件, 配了通知地址的按规则推 webhook。返回本轮处理的批次数。
+    每个批次只处理一次(history 里标 notified); 只看最近 8 次运行。"""
+    handled = 0
+    now = now if now is not None else time.time()
+    for sc in db.list_schedules():
+        hist = json.loads(sc.get("history_json") or "[]")
+        dirty = False
+        for h in hist[-8:]:
+            if "notified" in h:
+                continue
+            summary = _batch_summary(h["batch_id"], sc["workspace_id"])
+            if summary is None:
+                try:   # 一直跑不完(如服务重启丢了队列)的批次 6 小时后不再等
+                    started: float = calendar.timegm(time.strptime(h["at"], "%Y-%m-%d %H:%M:%S"))
+                except (TypeError, ValueError):
+                    started = now
+                if now - started > 6 * 3600:
+                    h.update(notified=False, notify_msg="批次长时间未完成, 未通知")
+                    dirty = True
+                continue
+            h.update(changed=summary["changed"], failed_sites=summary["failed"])
+            mode = sc.get("notify") or "change"
+            url = sc.get("webhook_url") or ""
+            verdict = schedule_notify.summary_text(sc["name"], summary).splitlines()[0]
+            bus.publish(None, "SCHED", verdict, "WARN" if summary["failed"] else "INFO",
+                        workspace_id=sc["workspace_id"])
+            if url and schedule_notify.should_notify(mode, summary):
+                link = f"{config.PUBLIC_URL}/" if config.PUBLIC_URL else ""
+                ok, msg = schedule_notify.send(url, schedule_notify.build_payload(url, sc, h["batch_id"], summary, link))
+                h.update(notified=ok, notify_msg=msg)
+            else:
+                h.update(notified=False, notify_msg="" if url else "未配置通知地址")
+            dirty = True
+            handled += 1
+        if dirty:
+            db.update_schedule(sc["id"], history_json=json.dumps(hist[-30:]))
+    return handled
+
+
 def _schedule_ticker():
     while True:
         time.sleep(20)
+        with suppress(Exception):   # 通知出错不影响触发
+            _check_schedule_notifications()
         try:
             due = db.due_schedules(time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()))
         except Exception:  # noqa: BLE001 — 后台线程不得退出
@@ -3818,6 +3895,17 @@ def _schedule_body(data: dict, partial: bool = False) -> tuple:
             out[k] = v
     if "enabled" in data:
         out["enabled"] = 1 if data.get("enabled") else 0
+    if "notify" in data:
+        if data.get("notify") not in schedule_notify.NOTIFY_MODES:
+            return None, "通知方式只能是 有变化时 / 每次 / 不通知"
+        out["notify"] = data["notify"]
+    if data.get("webhook_clear"):
+        out["webhook_url"] = ""
+    elif data.get("webhook_url"):   # 留空 = 不改(编辑时接口只回掩码)
+        try:
+            out["webhook_url"] = schedule_notify.validate_webhook(data.get("webhook_url"))
+        except ValueError as exc:
+            return None, str(exc)
     if "config" in data or not partial:
         out["config_json"] = json.dumps(_sanitize_config(data.get("config") or {}), ensure_ascii=False)
     if "project_id" in data:
@@ -3891,6 +3979,23 @@ def v4_schedule_run(schedule_id):
     return jsonify(res), 201
 
 
+@app.post("/api/v4/schedules/<int:schedule_id>/test-notify")
+def v4_schedule_test_notify(schedule_id):
+    """往已保存的通知地址发一条示例消息, 用来确认机器人/接收端配置对不对。"""
+    sc = _schedule_or_404(schedule_id)
+    url = sc.get("webhook_url") or ""
+    if not url:
+        return jsonify({"error": "还没有填写通知地址"}), 400
+    urls = json.loads(sc.get("urls_json") or "[]")[:3] or ["https://example.com/"]
+    sample = {"total": len(urls), "changed": 1, "failed": 0,
+              "sites": [{"task_id": 0, "url": u, "status": "completed", "score": None, "changed": i == 0,
+                         "verdict": "测试消息: 与上次相比有 1 处变化, 约占 3.2% 面积" if i == 0 else "",
+                         "area_pct": 3.2 if i == 0 else 0, "first_run": False} for i, u in enumerate(urls)]}
+    ok, msg = schedule_notify.send(url, schedule_notify.build_payload(url, sc, 0, sample))
+    _audit("schedule.notify_test", f"定时任务 #{schedule_id} 测试通知: {'成功' if ok else '失败'} {msg}")
+    return jsonify({"ok": ok, "message": msg}), 200 if ok else 502
+
+
 @app.get("/api/stream_logs")
 def stream_logs():
     task_id = request.args.get("task_id", type=int)
@@ -3914,8 +4019,7 @@ def stream_logs():
     return Response(
         bus.stream(task_id, accept=_accept),
         mimetype="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
-                 "Connection": "keep-alive"},
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},   # Connection 是逐跳头, WSGI 应用不能设
     )
 
 
@@ -4006,10 +4110,24 @@ _link_gen_running: set = set()
 _link_gen_lock = threading.Lock()
 
 
+def _public_base() -> str:
+    """平台对外地址: CLONER_PUBLIC_URL 优先, 否则按这次访问的地址。"""
+    return config.PUBLIC_URL or request.host_url.rstrip("/")
+
+
 def _short_link_out(item: dict) -> dict:
     out = dict(item)
+    out.pop("legacy_numeric", None)
     out["ok"] = bool(item.get("short_url"))
-    out["local_url"] = request.host_url.rstrip("/") + f"/s/{item['id']}" if out["ok"] else ""
+    if item.get("code"):
+        path = link_shortener.local_path(item["code"])
+    elif item.get("legacy_numeric"):
+        path = f"/s/{item['id']}"
+    else:
+        path = ""
+    out["local_url"] = _public_base() + path if out["ok"] and path else ""
+    if out["ok"] and str(item.get("short_url") or "").startswith("/"):  # 本站短码存相对路径, 展示时补全
+        out["short_url"] = _public_base() + item["short_url"]
     return out
 
 
@@ -4040,6 +4158,7 @@ def _short_task_or_404(task_row_id: int) -> dict:
 
 def _start_link_generation(task_row_id: int) -> bool:
     """后台生成; 同一任务已在生成中返回 False。"""
+    base_url = _public_base()  # 后台线程里没有请求上下文, 先取好
     with _link_gen_lock:
         if task_row_id in _link_gen_running:
             return False
@@ -4047,7 +4166,7 @@ def _start_link_generation(task_row_id: int) -> bool:
 
     def run():
         try:
-            res = link_shortener.generate_for_task(db, task_row_id)
+            res = link_shortener.generate_for_task(db, task_row_id, base_url=base_url)
             bus.publish(None, "LINK", f"短链任务 #{task_row_id} 生成完成: 成功 {res.get('created', 0)},"
                                       f" 失败 {res.get('failed', 0)}")
         except Exception as exc:  # noqa: BLE001 - 后台线程: 任何失败都要落到任务状态上
@@ -4077,7 +4196,7 @@ def v4_link_task_create():
         return jsonify({"error": "任务名称需 1~120 个字符"}), 400
     try:
         target = link_shortener.validate_target(body.get("target_url"))
-        service = link_shortener.normalize_service(body.get("service"), "all")
+        service = link_shortener.normalize_service(body.get("service"), link_shortener.LOCAL)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     clone_id = body.get("clone_task_id")
@@ -4130,7 +4249,7 @@ def v4_link_task_update(task_row_id):
         if "target_url" in body:
             fields["target_url"] = link_shortener.validate_target(body.get("target_url"))
         if "service" in body:
-            fields["service"] = link_shortener.normalize_service(body.get("service"), "all")
+            fields["service"] = link_shortener.normalize_service(body.get("service"), link_shortener.LOCAL)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     if "clone_task_id" in body:
@@ -4179,7 +4298,7 @@ def v4_link_task_export(task_row_id):
     fname = f"SL-{task['seq']:03d}_{time.strftime('%Y%m%d_%H%M%S')}.{fmt}"
     if fmt == "txt":
         lines = [l["short_url"] for l in links if l["ok"]]
-        return Response("\n".join(lines) + ("\n" if lines else ""), mimetype="text/plain; charset=utf-8",
+        return Response("\n".join(lines) + ("\n" if lines else ""), content_type="text/plain; charset=utf-8",
                         headers={"Content-Disposition": f'attachment; filename="{fname}"'})
     buf = io.StringIO()
     writer = csv.writer(buf)
@@ -4195,7 +4314,7 @@ def v4_link_task_export(task_row_id):
         writer.writerow([_csv_cell(v) for v in (
             i, l["service"], l["short_url"], l["local_url"], l["target_url"], l.get("clicks") or 0,
             "成功" if l["ok"] else "失败", remark, l.get("created_at", ""))])
-    return Response("\ufeff" + buf.getvalue(), mimetype="text/csv; charset=utf-8",
+    return Response("\ufeff" + buf.getvalue(), content_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 
 
@@ -4220,11 +4339,12 @@ def v4_link_create():
     body = request.get_json(silent=True) or {}
     try:
         target = link_shortener.validate_target(body.get("target_url"))
-        service = link_shortener.normalize_service(body.get("service"), "all")
+        service = link_shortener.normalize_service(body.get("service"), link_shortener.LOCAL)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     label = str(body.get("label") or "").strip()[:120]
-    res = link_shortener.shorten(db, target, service, label=label, workspace_id=_cur_ws())
+    res = link_shortener.shorten(db, target, service, label=label, workspace_id=_cur_ws(),
+                                 base_url=_public_base())
     link = _short_link_out(db.get_short_link(res["link_id"]))
     _audit("links.create", f"单独短链 #{res['link_id']} {target} -> {res['short_url'] or '失败'}")
     if not res["ok"]:
@@ -4245,17 +4365,24 @@ def v4_link_delete(link_id):
     return jsonify({"ok": True})
 
 
-@app.get("/s/<int:link_id>")
-def short_link_redirect(link_id):
-    """短链跳转: 302 到目标地址并计一次点击。失败留痕行(没有短链)不跳转。"""
-    link = db.get_short_link(link_id)
+@app.get("/s/<code>")
+def short_link_redirect(code):
+    """短链跳转: 302 到目标地址并计一次点击。失败留痕行(没有短链)不跳转。
+    新短链只认随机短码; 纯数字按老编号查, 且只对改版前的老短链生效(新短链不可枚举)。"""
+    link = None
+    if code.isdigit() and len(code) <= 12:
+        link = db.get_short_link(int(code))
+        if link is not None and not link.get("legacy_numeric"):
+            link = None
+    elif link_shortener.valid_code(code):
+        link = db.get_short_link_by_code(code)
     if link is None or not link.get("short_url"):
-        return Response("短链不存在", status=404, mimetype="text/plain; charset=utf-8")
+        return Response("短链不存在", status=404, content_type="text/plain; charset=utf-8")
     try:
         target = link_shortener.validate_target(link.get("target_url"))
     except ValueError:
-        return Response("短链目标地址无效", status=410, mimetype="text/plain; charset=utf-8")
-    db.bump_short_link_click(link_id)
+        return Response("短链目标地址无效", status=410, content_type="text/plain; charset=utf-8")
+    db.bump_short_link_click(link["id"])
     resp = redirect(target, code=302)
     resp.headers["Cache-Control"] = "no-store"  # 每次点击都要回到这里计数
     return resp
@@ -4813,19 +4940,41 @@ def _boot():
 
 _boot()
 
+def _use_waitress() -> bool:
+    """平台默认用 waitress(生产级 WSGI 服务器); CLONER_SERVER=werkzeug 或未安装 waitress 时用 Flask 自带服务器。"""
+    if config.SERVER_KIND == "werkzeug":
+        return False
+    try:
+        import waitress  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def _waitress_opts() -> dict:
+    # send_bytes=1: 日志流(SSE)每条事件立即发出, 不攒满 18KB 再发; ident 空: 不在响应头暴露服务器软件
+    return {"threads": config.SERVER_THREADS, "send_bytes": 1, "ident": "", "channel_timeout": 300,
+            "connection_limit": max(100, config.SERVER_THREADS * 8)}
+
+
 def _start_preview_server() -> None:
     """克隆预览独立端口(同一个应用, 另一个监听口): 克隆站脚本与平台不同源, 碰不到平台会话与接口。"""
     if config.PREVIEW_PORT <= 0 or config.PREVIEW_PORT == config.PORT:
         return
-    from werkzeug.serving import make_server
     try:
-        srv = make_server(config.HOST, config.PREVIEW_PORT, app, threaded=True)
+        if _use_waitress():
+            from waitress.server import create_server
+            wsrv = create_server(app, host=config.HOST, port=config.PREVIEW_PORT, **_waitress_opts())
+            run = wsrv.run
+        else:
+            from werkzeug.serving import make_server
+            run = make_server(config.HOST, config.PREVIEW_PORT, app, threaded=True).serve_forever
     except OSError as e:
         print(f"[security] 预览端口 {config.PREVIEW_PORT} 无法监听({e}), 预览回到与平台同源的旧模式;"
               " 可用 CLONER_PREVIEW_PORT 换一个端口", flush=True)
         return
     _PREVIEW["on"] = True
-    threading.Thread(target=srv.serve_forever, daemon=True, name="preview-origin").start()
+    threading.Thread(target=run, daemon=True, name="preview-origin").start()
     print(f" * 克隆预览独立端口: http://{config.HOST}:{config.PREVIEW_PORT}", flush=True)
 
 
@@ -4838,4 +4987,9 @@ def _announce_setup_token() -> None:
 if __name__ == "__main__":
     _start_preview_server()
     _announce_setup_token()
-    app.run(host=config.HOST, port=config.PORT, threaded=True, use_reloader=False)
+    if _use_waitress():
+        from waitress import serve
+        print(f" * 平台服务(waitress, {config.SERVER_THREADS} 线程): http://{config.HOST}:{config.PORT}", flush=True)
+        serve(app, host=config.HOST, port=config.PORT, **_waitress_opts())
+    else:
+        app.run(host=config.HOST, port=config.PORT, threaded=True, use_reloader=False)

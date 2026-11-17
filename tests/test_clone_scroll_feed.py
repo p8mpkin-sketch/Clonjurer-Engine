@@ -31,10 +31,9 @@ def _run(target):
 class CloneScrollFeed(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        try:
-            import playwright.sync_api  # noqa: F401
-        except Exception:
-            raise unittest.SkipTest("无 playwright")
+        from tests._env import chromium_available
+        if not chromium_available():
+            raise unittest.SkipTest("需要 Playwright Chromium")
 
     def test_waits_for_feed_until_baseline(self):
         h, y = _run(5000)
