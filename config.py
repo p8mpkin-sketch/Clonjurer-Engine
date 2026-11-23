@@ -41,6 +41,7 @@ REQUEST_TIMEOUT = 20               # 单个上游资源请求超时(秒, 浏览�
 REQUEST_CONNECT_READ = (6, 10)     # requests 直连: (连接, 读空闲) 超时; 读超时按无数据间隔计, 不限大文件总时长
 PAGELOAD_TIMEOUT = 45_000          # Playwright 页面导航超时(毫秒)
 REACHABILITY_PROBE_TIMEOUT = 12_000  # 首导航失败后的网络层可达性探测上限(毫秒)
+REACHABILITY_DIRECT_RECHECK = os.environ.get("CLONER_CFG_REACHABILITY_DIRECT_RECHECK", "1") != "0"  # 浏览器探测超时再用直连请求复核, 防进程停顿误判不可达
 AUTO_SCROLL_SMOOTH = False       # 采集滚动改页内平滑连续滚动(400px/两帧): 防苹果类性能守卫把跳滚判成掉帧降级;
                                  # 机器高负载下页面加载期本身就会降级, 语料未回归前默认关(见 DESIGN 动态形态一节)
 AUTO_SCROLL_BUDGET = 25          # 采集期自动滚动总时限(秒)

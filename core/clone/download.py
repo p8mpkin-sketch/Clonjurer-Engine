@@ -836,6 +836,14 @@ class DownloadMixin:
         return added
 
 
+    @staticmethod
+    def _fs_rel_ok(rel: str) -> bool:
+        """URL 路径能否原样落成文件: 单段 ≤ 255 字节、整体 ≤ 1000 字节(macOS/Linux NAME_MAX/PATH_MAX 下留余量)。
+        Google 类构建把模块清单编码进路径段(/xjs/_/js/k=.../am=AAAA...数百字节), 原样落盘 ENAMETOOLONG;
+        Path.is_file() 对这个 errno 不吞异常, 曾让整站克隆失败。落不了盘的路径只能跳过(本地化替换仍按资源池名改写)。"""
+        b = rel.encode("utf-8", "surrogateescape")
+        return len(b) <= 1000 and all(len(seg) <= 255 for seg in b.split(b"/"))
+
     def _mirror_runtime_paths(self, results: dict) -> int:
         """脚本运行时拼出地址加载的资源(fetch/xhr 取的媒体分段、WebGL 场景、视频)按原站
         路径镜像落盘。这些地址不以字面量出现在 HTML/CSS/JS 里, 本地化替换改写不到, 克隆
@@ -855,7 +863,7 @@ class DownloadMixin:
                 continue
             rel = parts.path.lstrip("/")
             if not rel or rel.endswith("/") or rel.startswith(("static/", "frames/")) \
-                    or ".." in rel.split("/"):
+                    or ".." in rel.split("/") or not self._fs_rel_ok(rel):
                 continue
             target = self.ws / rel
             if target.is_file():
@@ -946,7 +954,8 @@ class DownloadMixin:
         def write_shadow(url: str, content: bytes) -> bool:
             nonlocal shadows
             shadow_rel = urlsplit(url).path.lstrip("/")
-            if not shadow_rel or shadow_rel.startswith(("static/", "frames/")):
+            if not shadow_rel or shadow_rel.startswith(("static/", "frames/")) \
+                    or not self._fs_rel_ok(shadow_rel):
                 return False
             shadow = self.ws / shadow_rel
             with suppress(OSError):
@@ -1007,6 +1016,8 @@ class DownloadMixin:
             # 对未知路径返回 200 的 HTML fallback, 盲信状态码会拿 HTML 当
             # JS —— 由下方 DOCTYPE 防毒兜底
             base = path.rsplit("/", 1)[-1]
+            if not self._fs_rel_ok(path.lstrip("/")):
+                continue
             target = self.ws / path.lstrip("/")
             stored = next((i for i in results.values()
                            if i["abs_path"].name == base), None)
