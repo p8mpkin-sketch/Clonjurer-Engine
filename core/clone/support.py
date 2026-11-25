@@ -1091,15 +1091,30 @@ def _fit_width(im, width=SCORE_WIDTH, max_h=SCORE_MAX_HEIGHT):
     return out.crop((0, 0, width, min(nh, max_h)))
 
 
-def _pad_to(im, height):
-    """补齐到指定高度: 用该图底行平均色填充 —— 缺失区域呈平坦, 被结构通道扣分。"""
+def _pad_to(im, height, fill=None):
+    """补齐到指定高度: 用该图底行平均色填充 —— 缺失区域呈平坦, 被结构通道扣分。
+    fill: 指定填充色(两图都超出内容的分段尾部用同一色, 见 _pad_pair)。"""
     w, h = im.size
     if h >= height:
         return im
-    bottom = im.crop((0, h - 1, w, h)).resize((1, 1)).getpixel((0, 0))
+    bottom = fill if fill is not None else im.crop((0, h - 1, w, h)).resize((1, 1)).getpixel((0, 0))
     canvas = Image.new(im.mode, (w, height), bottom)
     canvas.paste(im, (0, 0))
     return canvas
+
+
+def _pad_pair(ra, rb, canvas_h):
+    """两图补到分段整数倍高度。较短图到较长图高度之间仍用各自底行色(缺失/多余区域照样失分);
+    两图都没有内容的分段尾部(纯补齐区)用同一色: 以前各用各的底行色, 底行差一点(页脚边线/抗锯齿)
+    就让整片补齐区按"平坦块均值差 >4"判 0 —— Top1000 action.com 逐像素只差 0.13% 却被评 88.9
+    (单段页 44% 是补齐区), 这类短页的低分是评分口径假象。"""
+    height = max(ra.size[1], rb.size[1])
+    ra, rb = _pad_to(ra, height), _pad_to(rb, height)
+    if canvas_h <= height:
+        return ra, rb
+    w, h = ra.size
+    fill = ra.crop((0, h - 1, w, h)).resize((1, 1)).getpixel((0, 0))
+    return _pad_to(ra, canvas_h, fill), _pad_to(rb, canvas_h, fill)
 
 
 def _src_pad_heights(size_a, size_b):
@@ -1156,9 +1171,21 @@ def _ncc_prep(arr_a, size=512, block=32):
     return da, ma, (da * da).sum(axis=1)
 
 
-def _ncc_finish(prep, arr_b, size=512, block=32) -> float:
+def _ncc_finish(prep, arr_b, size=512, block=32, valid_rows=None) -> float:
+    """valid_rows: 本段内真实内容的行数(两图都没内容的纯补齐区不计入, 既不扣分也不白送分)。"""
     da, ma, va = prep
+    if valid_rows is not None and valid_rows < size:
+        grid = size // block
+        keep_rows = max(1, -(-int(valid_rows) // block))
+        keep = _np.arange(grid * grid) // grid < keep_rows
+        da, ma, va = da[keep], ma[keep], va[keep]
+        b = _ncc_blocks(arr_b, size, block)[keep]
+        return _ncc_reduce(da, ma, va, b)
     b = _ncc_blocks(arr_b, size, block)
+    return _ncc_reduce(da, ma, va, b)
+
+
+def _ncc_reduce(da, ma, va, b) -> float:
     mb = b.mean(axis=1)
     db = b - mb[:, None]
     cov = (da * db).sum(axis=1)
@@ -1235,8 +1262,10 @@ def _ncc_prep_segments(arr_a, seg_count) -> list:
     return [_ncc_prep(_seg_f64(arr_a, k), SCORE_SEGMENT) for k in range(seg_count)]
 
 
-def _ncc_finish_segments(preps, arr_b, lo, hi) -> list:
-    return [_ncc_finish(preps[k], _seg_f64(arr_b, k), SCORE_SEGMENT) for k in range(lo, hi)]
+def _ncc_finish_segments(preps, arr_b, lo, hi, content_h=None) -> list:
+    return [_ncc_finish(preps[k], _seg_f64(arr_b, k), SCORE_SEGMENT,
+                        valid_rows=None if content_h is None else content_h - k * SCORE_SEGMENT)
+            for k in range(lo, hi)]
 
 
 _REF_PREP: dict = {}   # (参考图内容 sha1, 画布高) -> 参考图侧评分中间量
@@ -1502,7 +1531,7 @@ def compute_visual_similarity(image_a: Path, image_b: Path, diff_path: Path = No
     height = max(h_a, h_b)
     seg_count = max(1, -(-height // SCORE_SEGMENT))
     canvas_h = seg_count * SCORE_SEGMENT
-    ra, rb = _pad_to(ra, canvas_h), _pad_to(rb, canvas_h)
+    ra, rb = _pad_pair(ra, rb, canvas_h)
 
     # 差异热力图与评分无数据依赖: 后台线程生成(含 PNG 编码), 与分段计算重叠
     view_h = min(height, canvas_h)
@@ -1525,7 +1554,8 @@ def compute_visual_similarity(image_a: Path, image_b: Path, diff_path: Path = No
         mask_a, on_a, preps = _ref_prep(key_a, ra, seg_count, pool)
         edge_job = pool.submit(_edge_iou_from, mask_a, on_a, arr_b, seg_count)
         half = (seg_count + 1) // 2
-        ncc_jobs = [pool.submit(_ncc_finish_segments, preps, arr_b, lo, hi)
+        content_h = height if getattr(config, "SCORE_EXCLUDE_PAD", True) else None
+        ncc_jobs = [pool.submit(_ncc_finish_segments, preps, arr_b, lo, hi, content_h)
                     for lo, hi in ((0, half), (half, seg_count)) if hi > lo]
         nccs = [v for job in ncc_jobs for v in job.result()]
         edges = edge_job.result()
@@ -1604,7 +1634,7 @@ def write_diff_preview(image_a: Path, image_b: Path, diff_path: Path) -> None:
     height = max(ra.size[1], rb.size[1])
     seg_count = max(1, -(-height // SCORE_SEGMENT))
     canvas_h = seg_count * SCORE_SEGMENT
-    ra, rb = _pad_to(ra, canvas_h), _pad_to(rb, canvas_h)
+    ra, rb = _pad_pair(ra, rb, canvas_h)
     view_h = min(height, canvas_h)
     if _np is not None and view_h >= _DIFF_BAND_MIN_ROWS:
         cuts = [view_h * k // 3 for k in range(4)]
