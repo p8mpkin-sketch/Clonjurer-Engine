@@ -41,6 +41,8 @@ REQUEST_TIMEOUT = 20               # 单个上游资源请求超时(秒, 浏览�
 REQUEST_CONNECT_READ = (6, 10)     # requests 直连: (连接, 读空闲) 超时; 读超时按无数据间隔计, 不限大文件总时长
 PAGELOAD_TIMEOUT = 45_000          # Playwright 页面导航超时(毫秒)
 REACHABILITY_PROBE_TIMEOUT = 12_000  # 首导航失败后的网络层可达性探测上限(毫秒)
+UNDEFINED_ELEMENT_GUARD = os.environ.get("CLONER_CFG_UNDEFINED_ELEMENT_GUARD", "1") != "0"  # 影子根已序列化但组件未定义时去掉 :not(:defined) 隐藏规则
+SHARED_STYLE_EXTERNALIZE = os.environ.get("CLONER_CFG_SHARED_STYLE_EXTERNALIZE", "1") != "0"  # 重复大 <style>(影子根构造样式表)外置共享
 POOL_SLOT_WAIT_S = float(os.environ.get("CLONER_CFG_POOL_SLOT_WAIT_S", "600"))  # 取浏览器并发槽最长等待(秒), 0 = 不限
 REACHABILITY_DIRECT_RECHECK = os.environ.get("CLONER_CFG_REACHABILITY_DIRECT_RECHECK", "1") != "0"  # 浏览器探测超时再用直连请求复核, 防进程停顿误判不可达
 AUTO_SCROLL_SMOOTH = False       # 采集滚动改页内平滑连续滚动(400px/两帧): 防苹果类性能守卫把跳滚判成掉帧降级;

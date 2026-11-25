@@ -2433,6 +2433,13 @@ def deploy_hazard_audit(html: str, page_host: str = "", local_root=None) -> dict
 # 一调 evaluate 它就为真, 守卫在评分里形同虚设, 真机上却生效 —— 评分看不到的修复不可信)。
 SCROLL_UNLOCK_GUARD_JS = r"""<script data-clone-preview="scroll-unlock">(function(){try{if(window.__cloneUnlock)return;window.__cloneUnlock=1;var T0=Date.now(),LOCK=/^(overflow(?:-[xy])?|position|inset|top|right|bottom|left|height|width|padding-right|touch-action|overscroll-behavior(?:-[xy])?|scrollbar-gutter)$/i;function active(){return !!window.__cloneUserAct;}if(!window.__cloneActHook){window.__cloneActHook=1;['pointerdown','keydown','touchstart','wheel'].forEach(function(t){try{addEventListener(t,function(e){if(e.isTrusted)window.__cloneUserAct=1;},{capture:true,passive:true});}catch(e){}});}function strip(el){if(!el)return;var st=el.getAttribute('style')||'';if(!/(?:^|;)\s*overflow(?:-y)?\s*:\s*(?:hidden|clip)\b/i.test(st))return;var keep=[],parts=st.split(';'),n=0;for(var i=0;i<parts.length;i++){var d=parts[i],m=d.match(/^\s*([a-z-]+)\s*:\s*([\s\S]*)$/i);if(!m){if(d.trim())keep.push(d.trim());continue;}var k=m[1].toLowerCase(),v=m[2].trim();var lock=LOCK.test(k)&&!(k==='position'&&!/^(fixed|absolute)/i.test(v))&&!(k==='height'&&!/^(100%|100vh|100dvh|unset|auto|initial)$/i.test(v))&&!(k==='width'&&!/^(100%|100vw|unset|auto)$/i.test(v));if(lock)n++;else keep.push(k+': '+v);}if(!n)return;busy=1;try{if(keep.length)el.setAttribute('style',keep.join('; '));else el.removeAttribute('style');}finally{busy=0;}window.__cloneUnlocked=(window.__cloneUnlocked||0)+n;}var busy=0,mo=new MutationObserver(function(rs){if(busy||active()||Date.now()-T0>12000){try{mo.disconnect();}catch(e){}return;}for(var i=0;i<rs.length;i++){var t=rs[i].target;if(t===document.documentElement||t===document.body)strip(t);}});function arm(){try{mo.observe(document.documentElement,{attributes:true,attributeFilter:['style']});if(document.body)mo.observe(document.body,{attributes:true,attributeFilter:['style']});}catch(e){}strip(document.documentElement);strip(document.body);}if(document.body)arm();else document.addEventListener('DOMContentLoaded',arm);setTimeout(function(){try{mo.disconnect();}catch(e){}},12500);}catch(e){}})();</script>"""
 
+# 未定义自定义元素守卫(通用): Web Components 站常用 `x-foo:not(:defined){display:none}` 防闪烁, 组件脚本定义后才显示。
+# 克隆以声明式影子根(<template shadowrootmode>)交付内容, 组件脚本被水合剥离/加载失败时元素永远 :not(:defined),
+# 内容明明在 DOM 里却整块隐藏(Top1000 ibm.com: c4d-table-of-contents 等被隐藏, 评分 29.6)。
+# 页面上存在"带影子根却未定义"的自定义元素时, 删掉各样式表(含影子根内、构造样式表)里的 :not(:defined) 选择器;
+# 组件脚本若之后照常定义, 只少了加载前的防闪烁, 稳态不变。
+UNDEFINED_ELEMENT_GUARD_JS = r"""<script data-clone-preview="undefined-guard">(function(){try{if(window.__cloneUndef)return;window.__cloneUndef=1;var RX=/:not\(\s*:defined\s*\)/i;function fix(sh){var n=0;try{var rs=sh.cssRules;for(var i=rs.length-1;i>=0;i--){var r=rs[i];if(r.selectorText&&RX.test(r.selectorText)){var keep=r.selectorText.split(',').filter(function(x){return !RX.test(x);});if(keep.length){r.selectorText=keep.join(',');}else{sh.deleteRule(i);}n++;}else if(r.cssRules&&r.cssRules.length){n+=fix(r);}}}catch(e){}return n;}function roots(){var out=[document],q=[document];while(q.length){var r=q.pop(),els=r.querySelectorAll?r.querySelectorAll('*'):[];for(var i=0;i<els.length;i++){var sr=els[i].shadowRoot;if(sr){out.push(sr);q.push(sr);}}}return out;}function stale(){var els=document.querySelectorAll(':not(:defined)');for(var i=0;i<els.length;i++){if(els[i].shadowRoot&&els[i].tagName.indexOf('-')>0)return true;}return false;}function run(){try{if(!stale())return;var rs=roots(),n=0;for(var i=0;i<rs.length;i++){var r=rs[i],a=r.styleSheets||[],b=r.adoptedStyleSheets||[];for(var j=0;j<a.length;j++)n+=fix(a[j]);for(var k=0;k<b.length;k++)n+=fix(b[k]);}window.__cloneUndefFixed=(window.__cloneUndefFixed||0)+n;}catch(e){}}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',run);else run();addEventListener('load',function(){run();setTimeout(run,800);setTimeout(run,2500);});}catch(e){}})();</script>"""
+
 # 网页字体展示策略放宽(通用): @font-face{font-display:optional|fallback} 下, 字体没在首帧(optional 约 100ms /
 # fallback 3s)前到位, 浏览器就整页按后备字体排到底, 之后字体 loaded 也不再换(qwik 克隆手机端 41/100 双峰: 两张
 # Poppins 都 loaded, 却按后备字体行高排版; 原站有 CDN 预热/预加载, 首帧前到位)。克隆是离线交付, 字体从本地盘
@@ -3456,6 +3463,66 @@ _DATA_URI_EXT = {
 _BIG_DATA_URI_RE = re.compile(
     r"data:([a-z0-9.+/-]+)((?:;[a-z0-9-]+=[^;,\"')\s]+)*);base64,([A-Za-z0-9+/]{%d,}={0,2})" % 2048, re.I)
 _SCRIPT_SPLIT_RE = re.compile(r"(<script\b[^>]*>.*?</script>)", re.S | re.I)
+
+
+_SHARED_STYLE_RE = re.compile(r"<style\b([^>]*)>(.*?)</style>", re.S | re.I)
+_SHARED_CSS_URL_RE = re.compile(r"url\(\s*(['\"]?)([^'\")]*)\1\s*\)", re.I)
+
+
+def _css_urls_root_safe(css: str) -> bool:
+    """外置到 /static/css/ 后 url() 解析基准会变: 只有全部是根路径/绝对/data:/片段引用时才安全。"""
+    for m in _SHARED_CSS_URL_RE.finditer(css):
+        u = m.group(2).strip()
+        if u and not u.startswith(("/", "http:", "https:", "data:", "#", "blob:")):
+            return False
+    return True
+
+
+def externalize_shared_styles(html: str, ws: Path, min_bytes: int = 2048, min_count: int = 2):
+    """重复出现的大 <style> 块外置为一份 /static/css/<sha16>.css, 各处改成 <link>。
+
+    Web Components 站(Lit/Carbon 等)每个开放影子根序列化时都把共享的构造样式表物化成一份
+    <style data-clone-adopted>: Top1000 实测 ibm.com 345 个影子根 → 444 个 <style> 共 153MB
+    (去重后 13MB), 克隆页 HTML 153MB, 解析/渲染跑不完, 评分只剩首屏(29.6)。影子根内的 <link>
+    与 <style> 层叠位置相同, 浏览器对同一 URL 只取一次。返回 (html, 外置块数, 省下字节数)。"""
+    if html.count("<style") < min_count:
+        return html, 0, 0
+    parts = _SCRIPT_SPLIT_RE.split(html)
+    counts = {}
+    for i in range(0, len(parts), 2):
+        for m in _SHARED_STYLE_RE.finditer(parts[i]):
+            css = m.group(2)
+            if len(css) >= min_bytes:
+                counts[css] = counts.get(css, 0) + 1
+    shared = {css for css, n in counts.items() if n >= min_count and _css_urls_root_safe(css)}
+    if not shared:
+        return html, 0, 0
+    refs = {}
+    for css in shared:
+        raw = css.encode("utf-8")
+        name = hashlib.sha256(raw).hexdigest()[:16] + ".css"
+        dst = ws / "static" / "css" / name
+        try:
+            if not dst.is_file():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                dst.write_bytes(raw)
+        except OSError:
+            continue
+        refs[css] = f"/static/css/{name}"
+    saved = [0]
+
+    def repl(m):
+        ref = refs.get(m.group(2))
+        if ref is None:
+            return m.group(0)
+        saved[0] += len(m.group(2))
+        attrs = re.sub(r"\s*\btype\s*=\s*(['\"]?)text/css\1", "", m.group(1))
+        return f'<link rel="stylesheet" href="{ref}"{attrs}>'
+
+    for i in range(0, len(parts), 2):
+        if "<style" in parts[i]:
+            parts[i] = _SHARED_STYLE_RE.sub(repl, parts[i])
+    return "".join(parts), len(refs), saved[0] - sum(len(r) + 40 for r in refs.values())
 
 
 def externalize_data_uris(html: str, ws: Path, min_bytes: int = 8192):
