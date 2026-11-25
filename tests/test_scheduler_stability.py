@@ -70,6 +70,28 @@ class SchedulerStability(unittest.TestCase):
         _running(self.db, b, age_s=config.TASK_STALE_S + 60)
         self.assertEqual(self.s._watch_once(), [b])
 
+    def test_watchdog_kills_hung_browser(self):
+        """卡死任务不只改库: 回收该工作线程的浏览器, 让挂起的同步调用抛错、释放并发槽。"""
+        a, _ = self.ids
+        killed = []
+        self.s.pool.kill_thread_browser = lambda ident: killed.append(ident) or 3
+        _running(self.db, a, age_s=config.TASK_STALE_S + 60)
+        self.s._active[a] = 0
+        self.s._active_thread[a] = 12345
+        self.assertEqual(self.s._watch_once(), [a])
+        self.assertEqual(killed, [12345])
+        self.assertTrue(any("强制回收" in m[2] for m in self.bus.msgs))
+
+    def test_pool_slot_wait_is_bounded(self):
+        from core.browser_pool import SyncBrowserPool
+        pool = SyncBrowserPool(max_contexts=1)
+        pool._semaphore.acquire()                # 唯一的槽被卡死任务占住
+        with mock.patch.object(config, "POOL_SLOT_WAIT_S", 0.2):
+            with self.assertRaises(RuntimeError):
+                with pool.context():
+                    pass
+        self.assertEqual(pool.active, 0)
+
     def test_failed_write_does_not_kill_worker(self):
         boom = RuntimeError("engine blew up")
 

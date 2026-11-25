@@ -9,6 +9,7 @@ V2 批量任务调度器(纯线程模型)。
 import json
 import shutil
 import threading
+from contextlib import suppress
 import time
 from pathlib import Path
 
@@ -42,6 +43,7 @@ class Scheduler:
         self._threads = []
         self._retried = set()
         self._active: dict = {}          # 本进程正在执行的任务 id → 工作线程序号
+        self._active_thread: dict = {}   # 任务 id → 工作线程 ident(卡死时回收该线程的浏览器)
         self._disk_low = False
         self._recovered = False
 
@@ -130,11 +132,13 @@ class Scheduler:
             return
         tid = task["id"]
         self._active[tid] = index
+        self._active_thread[tid] = threading.get_ident()
         live.begin(tid, index)
         try:
             self._run_task(index, task)
         finally:
             self._active.pop(tid, None)
+            self._active_thread.pop(tid, None)
             live.end(tid)
 
     def _run_task(self, index: int, task: dict):
@@ -225,6 +229,16 @@ class Scheduler:
             if self._save(tid, status="failed", stage="中断", error_msg=f"{why}(可重建)"):
                 with_suppress_publish(self.bus, tid, "WARN", f"看门狗: 任务 #{tid} {why}, 已置为失败")
                 out.append(tid)
+            if active:
+                # 只改库不够: 工作线程仍挂在没有超时的浏览器调用里, 并发槽和线程都不释放(Top1000 实测
+                # 一个卡死任务让实例 2.5 小时 0 吞吐)。杀掉该线程的浏览器进程, 挂起调用随即抛错退出
+                ident = self._active_thread.get(tid)
+                killed = 0
+                with suppress(Exception):
+                    killed = self.pool.kill_thread_browser(ident) if ident else 0
+                if killed:
+                    with_suppress_publish(self.bus, tid, "WARN",
+                                          f"看门狗: 已强制回收任务 #{tid} 卡死的浏览器({killed} 个进程), 工作线程释放")
         return out
 
     def _package_if_requested(self, task: dict):

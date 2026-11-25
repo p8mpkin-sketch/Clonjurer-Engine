@@ -16,6 +16,11 @@ import threading
 import time
 from contextlib import contextmanager, suppress
 
+
+def _config():
+    import config
+    return config
+
 STEALTH_JS = r"""
 (() => {
   try { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); } catch (e) {}
@@ -76,8 +81,32 @@ class SyncBrowserPool:
         self._registry_lock = threading.Lock()
         self._registry = []  # [(playwright, browser), ...] 供全局关闭
         self._restart_pending = False
+        self._drivers = {}   # 工作线程 ident -> 该线程 Playwright 驱动进程 pid(卡死回收用)
 
     # ------------------------------------------------------------------
+    def kill_thread_browser(self, thread_ident: int) -> int:
+        """强制回收某线程卡死的 Chromium: 杀掉该线程驱动进程下的浏览器进程。
+        Playwright 同步 API 的 evaluate/CDP 调用没有超时, 页面主线程死循环或渲染进程崩溃后
+        调用可能永久挂起; 同步对象不能跨线程关闭, 只能从进程层面让连接断开, 挂起的调用随即抛
+        Target closed, 工作线程退出 with 块、释放并发槽, 下次取 Context 时自动重建浏览器。返回杀掉的进程数。"""
+        import os
+        import signal
+        import subprocess
+        pid = self._drivers.get(thread_ident)
+        if not pid:
+            return 0
+        try:
+            kids = subprocess.run(["pgrep", "-P", str(pid)], capture_output=True, text=True,
+                                  timeout=5).stdout.split()
+        except Exception:  # noqa: BLE001
+            return 0
+        n = 0
+        for k in kids:
+            with suppress(Exception):
+                os.kill(int(k), signal.SIGKILL)
+                n += 1
+        return n
+
     def request_restart(self):
         """线程安全的实例池重启请求: 每个工作线程在下次获取 Context 时
         自行销毁并重建本线程实例(Playwright 对象不可跨线程操作)。"""
@@ -132,6 +161,9 @@ class SyncBrowserPool:
                 self._local.playwright = playwright
                 self._local.browser = browser
                 self._register(playwright, browser)
+                with suppress(Exception):
+                    self._drivers[threading.get_ident()] = \
+                        playwright._impl_obj._connection._transport._proc.pid
                 return
             except Exception as exc:  # 启动失败: 退避后重试
                 last_error = exc
@@ -152,7 +184,11 @@ class SyncBrowserPool:
     def context(self, viewport=None, user_agent=None, extra_headers=None, **device):
         """受全局信号量保护的 BrowserContext 生命周期管理(线程安全)。
         device: 设备仿真参数(is_mobile / has_touch / device_scale_factor), 原样交给 new_context。"""
-        with self._semaphore:
+        # 取槽限时: 槽位被卡死任务占住时不无限等(曾整实例 0 吞吐), 超时抛错由调用方按失败处理
+        wait_s = float(getattr(_config(), "POOL_SLOT_WAIT_S", 600) or 0)
+        if not self._semaphore.acquire(timeout=wait_s if wait_s > 0 else None):
+            raise RuntimeError(f"浏览器并发槽 {wait_s:.0f}s 内未释放(可能有任务卡死)")
+        try:
             with self._active_lock:
                 self.active += 1
             ctx = None
@@ -186,6 +222,8 @@ class SyncBrowserPool:
                         ctx.close()
                 with self._active_lock:
                     self.active -= 1
+        finally:
+            self._semaphore.release()
 
     # ------------------------------------------------------------------
     def stats(self) -> dict:
