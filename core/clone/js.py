@@ -2993,10 +2993,12 @@ def seed_random_hash(text: str) -> int:
 # ("今日专题"按分钟/小时取模、"更新于 hh:mm"、相对时间"3 分钟前")在采集的各张页面(主页/窄屏对照页/基准页)
 # 与克隆回放里都落在同一刻, 录制的接口数据与页面时钟也对得上。performance.now / 定时器不动。
 # 偏移不到 1 秒(采集主页面自身)不装。
-CLOCK_ANCHOR_JS = r"""(function(){try{if(window.__cloneClk)return;window.__cloneClk=1;var D=Date,off=__T0__-D.now();if(!(Math.abs(off)>=1000))return;
-var now=function now(){return D.now()+off;};
-var P=new Proxy(D,{construct:function(t,a,nt){return a.length?Reflect.construct(t,a,nt):Reflect.construct(t,[D.now()+off],nt);},
-apply:function(){return new D(D.now()+off).toString();},get:function(t,k){return k==='now'?now:Reflect.get(t,k);}});
+# 原生 now 先取出来: 站点自己再包 Date.now(先存旧值、再赋新函数, 赋值穿透 Proxy 落到原 Date 上)时,
+# 若这里每次现取 D.now, 站点函数调我们、我们又调站点函数, 无限递归(Top1000 imgur: Maximum call stack, 任务失败)
+CLOCK_ANCHOR_JS = r"""(function(){try{if(window.__cloneClk)return;window.__cloneClk=1;var D=Date,N=D.now.bind(D),off=__T0__-N();if(!(Math.abs(off)>=1000))return;
+var now=function now(){return N()+off;};
+var P=new Proxy(D,{construct:function(t,a,nt){return a.length?Reflect.construct(t,a,nt):Reflect.construct(t,[N()+off],nt);},
+apply:function(){return new D(N()+off).toString();},get:function(t,k){return k==='now'?now:Reflect.get(t,k);}});
 try{Object.defineProperty(D.prototype,'constructor',{value:P,writable:true,configurable:true});}catch(e){}
 window.Date=P;}catch(e){}})();"""
 
@@ -3212,5 +3214,60 @@ NEST_FIX_JS = r"""
     } else out.fixed++;
   }
   return out;
+}
+"""
+
+
+# 脚本注册字体(FontFace API)的声明固化(通用): `new FontFace(family, "url(...)")` + document.fonts.add 注册的
+# 网页字体不在任何样式表里, 序列化 DOM/CSSOM 都带不走; 克隆剥离/重放不到这段脚本时整页回退系统字体,
+# 字宽与换行全变(Top1000 duolingo: duolingo-sans 由 JS 注册, 克隆用 Arial 渲染, 89.7)。
+# 采集页导航前装记录钩子, 序列化前把记录到的、已加载的条目写成 <style data-clone-fontface> 的 @font-face。
+FONTFACE_RECORD_JS = r"""
+(() => {
+  try {
+    const F = window.FontFace;
+    if (!F || F.__cloneRec) return;
+    const rec = window.__cloneFontFaces = [];
+    const W = function (family, source, desc) {
+      const ff = new F(family, source, desc);
+      try {
+        if (typeof source === 'string' && rec.length < 200)
+          rec.push({family: String(family), src: source, desc: desc || {}, base: document.baseURI, ff: ff});
+      } catch (e) {}
+      return ff;
+    };
+    W.prototype = F.prototype;
+    W.__cloneRec = 1;
+    window.FontFace = W;
+  } catch (e) {}
+})();
+"""
+
+FONTFACE_EMIT_JS = r"""
+() => {
+  const rec = window.__cloneFontFaces || [];
+  if (!rec.length || document.querySelector('style[data-clone-fontface]')) return 0;
+  const q = v => '"' + String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+  const out = [];
+  for (const r of rec) {
+    try {
+      if (r.ff && r.ff.status !== 'loaded') continue;
+      const src = r.src.replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g,
+        (m, qq, u) => 'url(' + q(new URL(u, r.base).href) + ')');
+      let css = '@font-face{font-family:' + q(r.family) + ';src:' + src + ';';
+      for (const [k, v] of Object.entries(r.desc || {})) {
+        const key = {weight: 'font-weight', style: 'font-style', stretch: 'font-stretch', display: 'font-display',
+                     unicodeRange: 'unicode-range', featureSettings: 'font-feature-settings'}[k];
+        if (key && v) css += key + ':' + v + ';';
+      }
+      out.push(css + '}');
+    } catch (e) {}
+  }
+  if (!out.length) return 0;
+  const st = document.createElement('style');
+  st.setAttribute('data-clone-fontface', '');
+  st.textContent = out.join('\n');
+  (document.head || document.documentElement).appendChild(st);
+  return out.length;
 }
 """

@@ -41,6 +41,7 @@ REQUEST_TIMEOUT = 20               # 单个上游资源请求超时(秒, 浏览�
 REQUEST_CONNECT_READ = (6, 10)     # requests 直连: (连接, 读空闲) 超时; 读超时按无数据间隔计, 不限大文件总时长
 PAGELOAD_TIMEOUT = 45_000          # Playwright 页面导航超时(毫秒)
 REACHABILITY_PROBE_TIMEOUT = 12_000  # 首导航失败后的网络层可达性探测上限(毫秒)
+FONTFACE_API_CAPTURE = os.environ.get("CLONER_CFG_FONTFACE_API_CAPTURE", "1") != "0"  # 记录 FontFace API 注册的字体并固化为 @font-face
 SCORE_EXCLUDE_PAD = os.environ.get("CLONER_CFG_SCORE_EXCLUDE_PAD", "1") != "0"  # 评分: 两图都无内容的分段尾部补齐区不计入结构通道(不扣分也不白送分)
 UNDEFINED_ELEMENT_GUARD = os.environ.get("CLONER_CFG_UNDEFINED_ELEMENT_GUARD", "1") != "0"  # 影子根已序列化但组件未定义时去掉 :not(:defined) 隐藏规则
 SHARED_STYLE_EXTERNALIZE = os.environ.get("CLONER_CFG_SHARED_STYLE_EXTERNALIZE", "1") != "0"  # 重复大 <style>(影子根构造样式表)外置共享

@@ -255,6 +255,17 @@ from core.clone.support import (  # noqa: E402  手机版(按 UA 分发)
 )
 
 
+
+_JUNK_URL_RE = re.compile(r"""[\\"'`<>\s]|\$\{|\{\{""")
+
+
+def junk_url(url: str) -> bool:
+    """从脚本/JSON 字符串里误抽出来的假地址: 带 JSON 转义斜杠(\\/\\/host)、引号、反引号、模板占位(${..}/{{..}})、
+    空白。这些地址永远 404/连不上, 回源只白等(Top1000: 低分站 404 里约 18% 是这类, markmonitor 活体回补 59s
+    大多耗在 \\/\\/ 形态的 ConnectTimeout 上)。真实 URL 里这些字符都会被百分号编码。"""
+    p = url.split("://", 1)[-1]
+    return bool(_JUNK_URL_RE.search(p))
+
 class DownloadMixin:
 
     # ------------------------------------------------------------------
@@ -355,6 +366,10 @@ class DownloadMixin:
             while (css_jobs or jobs) and len(in_flight) < max_inflight:
                 job = (css_jobs or jobs).popleft()
                 if job["url"] in seen:
+                    continue
+                if junk_url(job["url"]):
+                    seen.add(job["url"])
+                    self._junk_skipped = getattr(self, "_junk_skipped", 0) + 1
                     continue
                 if (urlsplit(job["url"]).hostname or "") in tripped:
                     seen.add(job["url"])
@@ -844,6 +859,13 @@ class DownloadMixin:
         b = rel.encode("utf-8", "surrogateescape")
         return len(b) <= 1000 and all(len(seg) <= 255 for seg in b.split(b"/"))
 
+    def _clashes_page_dir(self, rel: str) -> bool:
+        """镜像/影子文件路径是目录型目标页所在目录(或其上级): 先落成文件, 之后建页面目录 mkdir 报 FileExistsError,
+        整站失败(Top1000 jamfcloud: 目标页 /view/sso/login/, 同路径的运行时请求先被镜像成文件)。"""
+        pd = (getattr(self, "_page_dir", "/") or "/").strip("/")
+        r = rel.strip("/")
+        return bool(pd) and bool(r) and (pd == r or pd.startswith(r + "/"))
+
     def _mirror_runtime_paths(self, results: dict) -> int:
         """脚本运行时拼出地址加载的资源(fetch/xhr 取的媒体分段、WebGL 场景、视频)按原站
         路径镜像落盘。这些地址不以字面量出现在 HTML/CSS/JS 里, 本地化替换改写不到, 克隆
@@ -863,7 +885,7 @@ class DownloadMixin:
                 continue
             rel = parts.path.lstrip("/")
             if not rel or rel.endswith("/") or rel.startswith(("static/", "frames/")) \
-                    or ".." in rel.split("/") or not self._fs_rel_ok(rel):
+                    or ".." in rel.split("/") or not self._fs_rel_ok(rel) or self._clashes_page_dir(rel):
                 continue
             target = self.ws / rel
             if target.is_file():
@@ -955,7 +977,7 @@ class DownloadMixin:
             nonlocal shadows
             shadow_rel = urlsplit(url).path.lstrip("/")
             if not shadow_rel or shadow_rel.startswith(("static/", "frames/")) \
-                    or not self._fs_rel_ok(shadow_rel):
+                    or not self._fs_rel_ok(shadow_rel) or self._clashes_page_dir(shadow_rel):
                 return False
             shadow = self.ws / shadow_rel
             with suppress(OSError):
@@ -977,6 +999,8 @@ class DownloadMixin:
                 continue
             if beacon_like(url):
                 skipped_beacons += 1
+                continue
+            if junk_url(url):
                 continue
             todo.append(url)
         # 第三方外联先并发直连预取(CDN 图片/字体/脚本不依赖会话 Cookie): 此前逐个走浏览器会话串行回源,
@@ -1016,7 +1040,7 @@ class DownloadMixin:
             # 对未知路径返回 200 的 HTML fallback, 盲信状态码会拿 HTML 当
             # JS —— 由下方 DOCTYPE 防毒兜底
             base = path.rsplit("/", 1)[-1]
-            if not self._fs_rel_ok(path.lstrip("/")):
+            if not self._fs_rel_ok(path.lstrip("/")) or self._clashes_page_dir(path):
                 continue
             target = self.ws / path.lstrip("/")
             stored = next((i for i in results.values()

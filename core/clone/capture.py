@@ -35,6 +35,7 @@ from core import pattern_detector, strategy_packs
 from core import pixel_calibrator
 from core.clone.api_match import request_pairs
 from core.clone.js import seed_random_js
+from core.clone.js import FONTFACE_EMIT_JS, FONTFACE_RECORD_JS
 
 from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 import 路径不变
     CANVAS_PIN_JS,
@@ -1756,6 +1757,9 @@ class CaptureMixin:
         if getattr(config, "TIMER_JOURNAL", True):
             with suppress(Exception):
                 page.add_init_script(TIMER_JOURNAL_JS)
+        if getattr(config, "FONTFACE_API_CAPTURE", True):
+            with suppress(Exception):
+                page.add_init_script(FONTFACE_RECORD_JS)
         return page
 
     def _timer_rewind(self, page, where: str):
@@ -2083,6 +2087,11 @@ class CaptureMixin:
         html = None
         try:
             td = self._phase("细分·MHTML快照", td)
+            if getattr(config, "FONTFACE_API_CAPTURE", True):
+                with suppress(Exception):
+                    n_ff = int(_safe_eval(FONTFACE_EMIT_JS) or 0)
+                    if n_ff:
+                        self.log("RENDER", f"脚本注册字体固化: {n_ff} 个 FontFace API 字体写成 @font-face(样式表里没有, 序列化带不走)")
             shadow = _safe_eval(SHADOW_SERIALIZE_JS)
             if shadow and shadow.get("html"):
                 html = shadow["html"]
