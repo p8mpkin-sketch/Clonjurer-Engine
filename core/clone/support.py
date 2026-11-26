@@ -3501,6 +3501,9 @@ _SHARED_CSS_URL_RE = re.compile(r"url\(\s*(['\"]?)([^'\")]*)\1\s*\)", re.I)
 
 def _css_urls_root_safe(css: str) -> bool:
     """外置到 /static/css/ 后 url() 解析基准会变: 只有全部是根路径/绝对/data:/片段引用时才安全。"""
+    for m in re.finditer(r"@import\s+(['\"])([^'\"]+)\1", css, re.I):   # @import "x.css" 字符串形式
+        if not m.group(2).strip().startswith(("/", "http:", "https:", "data:")):
+            return False
     for m in _SHARED_CSS_URL_RE.finditer(css):
         u = m.group(2).strip()
         if u and not u.startswith(("/", "http:", "https:", "data:", "#", "blob:")):

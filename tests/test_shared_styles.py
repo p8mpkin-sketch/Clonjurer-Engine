@@ -25,9 +25,11 @@ class SharedStyles(unittest.TestCase):
     def test_unique_small_relative_and_script_untouched(self):
         with tempfile.TemporaryDirectory() as d:
             rel = ".b{background:url(img/x.png)}" * 200
+            imp = '@import "theme.css";' + ".c{}" * 600
             html = ("<style>" + BIG + "</style>"                        # 只出现一次
                     + ("<style>.s{}</style>" * 3)                      # 太小
                     + ("<style>" + rel + "</style>") * 2              # 相对 url() 外置后基准会变
+                    + ("<style>" + imp + "</style>") * 2              # 相对 @import 同理
                     + "<script>var s='<style>" + BIG + "</style><style>" + BIG + "</style>'</script>")
             out, n, _ = externalize_shared_styles(html, Path(d))
             self.assertEqual(n, 0)
