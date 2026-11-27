@@ -2998,8 +2998,8 @@ def seed_random_hash(text: str) -> int:
 # 非重入路径保持原语义(仍走 D.now, 曾试过一律走原生 now, markmonitor 89.6→38)。
 CLOCK_ANCHOR_JS = r"""(function(){try{if(window.__cloneClk)return;window.__cloneClk=1;var D=Date,N=D.now.bind(D),off=__T0__-D.now();if(!(Math.abs(off)>=1000))return;
 var busy=0,now=function now(){if(busy)return N();busy=1;try{return D.now()+off;}finally{busy=0;}};
-var P=new Proxy(D,{construct:function(t,a,nt){return a.length?Reflect.construct(t,a,nt):Reflect.construct(t,[now()],nt);},
-apply:function(){return new D(now()).toString();},get:function(t,k){return k==='now'?now:Reflect.get(t,k);}});
+var P=new Proxy(D,{construct:function(t,a,nt){return a.length?Reflect.construct(t,a,nt):Reflect.construct(t,[D.now()+off],nt);},
+apply:function(){return new D(D.now()+off).toString();},get:function(t,k){return k==='now'?now:Reflect.get(t,k);}});
 try{Object.defineProperty(D.prototype,'constructor',{value:P,writable:true,configurable:true});}catch(e){}
 window.Date=P;}catch(e){}})();"""
 
