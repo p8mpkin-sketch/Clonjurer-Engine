@@ -256,16 +256,6 @@ from core.clone.support import (  # noqa: E402  手机版(按 UA 分发)
 
 
 
-_JUNK_URL_RE = re.compile(r"""[\\"'`<>\s]|\$\{|\{\{""")
-
-
-def junk_url(url: str) -> bool:
-    """从脚本/JSON 字符串里误抽出来的假地址: 带 JSON 转义斜杠(\\/\\/host)、引号、反引号、模板占位(${..}/{{..}})、
-    空白。这些地址永远 404/连不上, 回源只白等(Top1000: 低分站 404 里约 18% 是这类, markmonitor 活体回补 59s
-    大多耗在 \\/\\/ 形态的 ConnectTimeout 上)。真实 URL 里这些字符都会被百分号编码。"""
-    p = url.split("://", 1)[-1]
-    return bool(_JUNK_URL_RE.search(p))
-
 class DownloadMixin:
 
     # ------------------------------------------------------------------
@@ -366,10 +356,6 @@ class DownloadMixin:
             while (css_jobs or jobs) and len(in_flight) < max_inflight:
                 job = (css_jobs or jobs).popleft()
                 if job["url"] in seen:
-                    continue
-                if junk_url(job["url"]):
-                    seen.add(job["url"])
-                    self._junk_skipped = getattr(self, "_junk_skipped", 0) + 1
                     continue
                 if (urlsplit(job["url"]).hostname or "") in tripped:
                     seen.add(job["url"])
@@ -999,8 +985,6 @@ class DownloadMixin:
                 continue
             if beacon_like(url):
                 skipped_beacons += 1
-                continue
-            if junk_url(url):
                 continue
             todo.append(url)
         # 第三方外联先并发直连预取(CDN 图片/字体/脚本不依赖会话 Cookie): 此前逐个走浏览器会话串行回源,

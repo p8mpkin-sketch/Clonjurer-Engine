@@ -354,13 +354,13 @@ class LocalizeMixin:
             freeze_js = (
                 '<script data-clone-preview="time-freeze">(function(){try{'
                 'var __cap=new Date("__CAPTURE_ISO__");'
-                'if(!isNaN(__cap.getTime())){var _R=Date,_N=_R.now.bind(_R),__off=__cap.getTime()-_N();'
-                'function FD(){if(!(this instanceof FD))return new _R(_N()+__off).toString();'
-                'var a=arguments;switch(a.length){case 0:return new _R(_N()+__off);'
+                'if(!isNaN(__cap.getTime())){var _R=Date,__off=__cap.getTime()-_R.now();'
+                'function FD(){if(!(this instanceof FD))return new _R(_R.now()+__off).toString();'
+                'var a=arguments;switch(a.length){case 0:return new _R(_R.now()+__off);'
                 'case 1:return new _R(a[0]);case 2:return new _R(a[0],a[1]);case 3:return new _R(a[0],a[1],a[2]);'
                 'case 4:return new _R(a[0],a[1],a[2],a[3]);case 5:return new _R(a[0],a[1],a[2],a[3],a[4]);'
                 'case 6:return new _R(a[0],a[1],a[2],a[3],a[4],a[5]);default:return new _R(a[0],a[1],a[2],a[3],a[4],a[5],a[6]);}}'
-                'FD.prototype=_R.prototype;FD.now=function(){return _N()+__off};'
+                'FD.prototype=_R.prototype;FD.now=function(){return _R.now()+__off};'
                 'FD.parse=_R.parse;FD.UTC=_R.UTC;window.Date=FD;'
                 '}}catch(e){}})();</script>')   # if 块与 try 块各收一个括号(此前少一个, 整段语法错误从未生效)
             script = freeze_js.replace("__CAPTURE_ISO__", self._captured_at) + script

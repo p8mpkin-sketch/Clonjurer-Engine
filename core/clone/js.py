@@ -2993,12 +2993,13 @@ def seed_random_hash(text: str) -> int:
 # ("今日专题"按分钟/小时取模、"更新于 hh:mm"、相对时间"3 分钟前")在采集的各张页面(主页/窄屏对照页/基准页)
 # 与克隆回放里都落在同一刻, 录制的接口数据与页面时钟也对得上。performance.now / 定时器不动。
 # 偏移不到 1 秒(采集主页面自身)不装。
-# 原生 now 先取出来: 站点自己再包 Date.now(先存旧值、再赋新函数, 赋值穿透 Proxy 落到原 Date 上)时,
-# 若这里每次现取 D.now, 站点函数调我们、我们又调站点函数, 无限递归(Top1000 imgur: Maximum call stack, 任务失败)
-CLOCK_ANCHOR_JS = r"""(function(){try{if(window.__cloneClk)return;window.__cloneClk=1;var D=Date,N=D.now.bind(D),off=__T0__-N();if(!(Math.abs(off)>=1000))return;
-var now=function now(){return N()+off;};
-var P=new Proxy(D,{construct:function(t,a,nt){return a.length?Reflect.construct(t,a,nt):Reflect.construct(t,[N()+off],nt);},
-apply:function(){return new D(N()+off).toString();},get:function(t,k){return k==='now'?now:Reflect.get(t,k);}});
+# 站点自己再包 Date.now(先存旧值 o、再赋新函数, 赋值穿透 Proxy 落到原 Date 上): 我们的 now 调 D.now() → 站点函数
+# → o() 又是我们的 now, 无限递归(Top1000 imgur: Maximum call stack, 任务失败)。重入时直接返回原生时间(外层会加偏移),
+# 非重入路径保持原语义(仍走 D.now, 曾试过一律走原生 now, markmonitor 89.6→38)。
+CLOCK_ANCHOR_JS = r"""(function(){try{if(window.__cloneClk)return;window.__cloneClk=1;var D=Date,N=D.now.bind(D),off=__T0__-D.now();if(!(Math.abs(off)>=1000))return;
+var busy=0,now=function now(){if(busy)return N();busy=1;try{return D.now()+off;}finally{busy=0;}};
+var P=new Proxy(D,{construct:function(t,a,nt){return a.length?Reflect.construct(t,a,nt):Reflect.construct(t,[now()],nt);},
+apply:function(){return new D(now()).toString();},get:function(t,k){return k==='now'?now:Reflect.get(t,k);}});
 try{Object.defineProperty(D.prototype,'constructor',{value:P,writable:true,configurable:true});}catch(e){}
 window.Date=P;}catch(e){}})();"""
 
