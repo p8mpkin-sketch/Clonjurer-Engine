@@ -1026,29 +1026,29 @@ def _fit_width(im, width=SCORE_WIDTH, max_h=SCORE_MAX_HEIGHT):
     return out.crop((0, 0, width, min(nh, max_h)))
 
 
-def _pad_to(im, height):
+def _pad_to(im, height, fill=None):
     """补齐到指定高度: 用该图底行平均色填充 —— 缺失区域呈平坦, 被结构通道扣分。"""
     w, h = im.size
     if h >= height:
         return im
-    bottom = im.crop((0, h - 1, w, h)).resize((1, 1)).getpixel((0, 0))
+    bottom = fill if fill is not None else im.crop((0, h - 1, w, h)).resize((1, 1)).getpixel((0, 0))
     canvas = Image.new(im.mode, (w, height), bottom)
     canvas.paste(im, (0, 0))
     return canvas
 
 
-def _block_ncc(gray_a, gray_b, size=512, block=32) -> float:
+def _block_ncc(gray_a, gray_b, size=512, block=32, valid_rows=None) -> float:
     """块级归一化互相关: 双平坦且相近记 1, 一方有结构一方平坦记 0。
 
     注意不能用 ImageChops.multiply 计算协方差(那是除以 255 的混合运算),
     必须用原始像素值精确累加。numpy 可用时走向量化(实测 6-7 倍), 语义逐块一致。
     """
     if _np is not None:
-        return _block_ncc_np(gray_a, gray_b, size, block)
+        return _block_ncc_np(gray_a, gray_b, size, block, valid_rows)
     return _block_ncc_py(gray_a, gray_b, size, block)
 
 
-def _block_ncc_np(gray_a, gray_b, size=512, block=32) -> float:
+def _block_ncc_np(gray_a, gray_b, size=512, block=32, valid_rows=None) -> float:
     grid = size // block
     span = grid * block
 
@@ -1058,6 +1058,9 @@ def _block_ncc_np(gray_a, gray_b, size=512, block=32) -> float:
                   .reshape(grid * grid, block * block)
 
     a, b = blocks(gray_a), blocks(gray_b)
+    if valid_rows is not None and valid_rows < size:   # 纯补齐区不计入
+        keep = _np.arange(grid * grid) // grid < max(1, -(-int(valid_rows) // block))
+        a, b = a[keep], b[keep]
     ma, mb = a.mean(axis=1), b.mean(axis=1)
     da, db = a - ma[:, None], b - mb[:, None]
     cov = (da * db).sum(axis=1)
@@ -1153,7 +1156,12 @@ def compute_visual_similarity(image_a: Path, image_b: Path, diff_path: Path = No
     height = max(h_a, h_b)
     seg_count = max(1, -(-height // SCORE_SEGMENT))
     canvas_h = seg_count * SCORE_SEGMENT
-    ra, rb = _pad_to(ra, canvas_h), _pad_to(rb, canvas_h)
+    # 两图都无内容的分段尾部用同一色补齐(与 core.clone.support._pad_pair 同语义)
+    ra, rb = _pad_to(ra, height), _pad_to(rb, height)
+    if canvas_h > height:
+        _fill = ra.crop((0, ra.size[1] - 1, ra.size[0], ra.size[1])).resize((1, 1)).getpixel((0, 0))
+        ra, rb = _pad_to(ra, canvas_h, _fill), _pad_to(rb, canvas_h, _fill)
+    _content_h = height if getattr(config, "SCORE_EXCLUDE_PAD", True) else None
 
     if diff_path is not None:
         view_h = min(height, canvas_h)
@@ -1170,7 +1178,8 @@ def compute_visual_similarity(image_a: Path, image_b: Path, diff_path: Path = No
         box = (0, k * SCORE_SEGMENT, SCORE_WIDTH, (k + 1) * SCORE_SEGMENT)
         sa, sb = ga.crop(box), gb.crop(box)
         w = FIRST_SEGMENT_WEIGHT if k == 0 else 1.0
-        s_sum += w * _block_ncc(sa, sb, size=SCORE_SEGMENT)
+        s_sum += w * _block_ncc(sa, sb, size=SCORE_SEGMENT,
+                                valid_rows=None if _content_h is None else _content_h - k * SCORE_SEGMENT)
         e_sum += w * _edge_iou(sa, sb)
         w_sum += w
     structure = s_sum / w_sum

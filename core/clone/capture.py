@@ -35,6 +35,7 @@ from core import pattern_detector, strategy_packs
 from core import pixel_calibrator
 from core.clone.api_match import request_pairs
 from core.clone.js import seed_random_js
+from core.clone.js import FONTFACE_EMIT_JS, FONTFACE_RECORD_JS
 
 from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 import 路径不变
     CANVAS_PIN_JS,
@@ -339,23 +340,29 @@ class CaptureMixin:
         评分只取等比缩放后前 SCORE_MAX_HEIGHT 像素, 2/3 覆盖评分全部区域, 口径不变。
         超出评分覆盖区的超长页直接走限高截图: 尾部不计分, 整页截图在超长页上慢一个
         数量级(41000px 合成页 4.6s → 0.6s), 且超大 PNG 拖慢后续评分/校准解码。"""
-        dims_js = ("() => [document.documentElement.clientWidth || innerWidth, "
+        # 怪异模式下 documentElement.clientWidth 是根元素宽(可被横排轨道撑到数万 px), 不是视口宽: 取不超过 innerWidth
+        dims_js = ("() => [Math.min(document.documentElement.clientWidth || innerWidth, innerWidth), "
                    "Math.max(document.documentElement.scrollHeight, "
                    "document.body ? document.body.scrollHeight : 0, innerHeight), "
-                   "innerHeight]")
+                   "innerHeight, Math.max(document.documentElement.scrollWidth || 0, "
+                   "document.body ? document.body.scrollWidth : 0)]")
         dims = None
         with suppress(Exception):
             dims = page.evaluate(dims_js)
         if dims:
             w = max(1, int(dims[0]))
             cap = min(int(SCORE_MAX_HEIGHT * w / SCORE_WIDTH), SHOT_MAX_TEXTURE)
-            if int(dims[1]) > cap:
+            # 横向溢出(横排轨道/走马灯把文档撑到数万 px 宽): 整页截图按文档宽截, 实测 58530×5548
+            # 的图超出 PIL 像素上限, 评分直接失败。评分只看视口宽, 一律按视口宽裁
+            wide = len(dims) > 3 and int(dims[3] or 0) > w * 1.05
+            if int(dims[1]) > cap or wide:
+                h = min(int(dims[1]), cap)
                 try:
                     page.screenshot(path=str(path), full_page=True,
-                                    clip={"x": 0, "y": 0, "width": w, "height": cap},
+                                    clip={"x": 0, "y": 0, "width": w, "height": h},
                                     timeout=config.SHOT_TIMEOUT, **_shot_fmt())
-                    self.log("RENDER", f"{label}超长({int(dims[1])}px > 评分区 {cap}px), "
-                                       f"限高截图")
+                    self.log("RENDER", f"{label}超长/超宽({int(dims[3] or 0) if len(dims) > 3 else '-'}"
+                                       f"×{int(dims[1])}px, 评分区 {w}×{cap}px), 限定截图")
                     return
                 except Exception as exc:
                     self.log("WARN", f"{label}限高截图失败, 改走整页截图: {str(exc)[:160]}")
@@ -1616,7 +1623,17 @@ class CaptureMixin:
             msg = str(exc)
             m = re.search(r"(net::ERR_[A-Z_]+|ERR_[A-Z_]+|Timeout \d+ms exceeded|"
                           r"getaddrinfo \w+|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH)", msg)
-            return m.group(1) if m else f"{type(exc).__name__}: {msg[:80]}"
+            reason = m.group(1) if m else f"{type(exc).__name__}: {msg[:80]}"
+            # 浏览器侧探测超时不一定是网络: 同机多任务时浏览器进程/事件循环整体停顿, 导航与探测
+            # 一起超时(Top1000 小样本: 同一分钟 7 站同报 Timeout、耗时都是 57.1s, 单独重跑 6 站正常)。
+            # 用与浏览器无关的直连请求复核(不跟跳转, 任何 HTTP 状态都算可达), 可达就交给重试导航
+            if "Timeout" in reason and getattr(config, "REACHABILITY_DIRECT_RECHECK", True):
+                with suppress(Exception):
+                    r = requests.get(url, timeout=(4, 6), allow_redirects=False, stream=True,
+                                     headers={"User-Agent": config.DEFAULT_USER_AGENT})
+                    r.close()
+                    return None
+            return reason
 
 
     def _capture_baseline(self, page, _safe_eval, screenshot: bool):
@@ -1740,6 +1757,9 @@ class CaptureMixin:
         if getattr(config, "TIMER_JOURNAL", True):
             with suppress(Exception):
                 page.add_init_script(TIMER_JOURNAL_JS)
+        if getattr(config, "FONTFACE_API_CAPTURE", True):
+            with suppress(Exception):
+                page.add_init_script(FONTFACE_RECORD_JS)
         return page
 
     def _timer_rewind(self, page, where: str):
@@ -2067,6 +2087,11 @@ class CaptureMixin:
         html = None
         try:
             td = self._phase("细分·MHTML快照", td)
+            if getattr(config, "FONTFACE_API_CAPTURE", True):
+                with suppress(Exception):
+                    n_ff = int(_safe_eval(FONTFACE_EMIT_JS) or 0)
+                    if n_ff:
+                        self.log("RENDER", f"脚本注册字体固化: {n_ff} 个 FontFace API 字体写成 @font-face(样式表里没有, 序列化带不走)")
             shadow = _safe_eval(SHADOW_SERIALIZE_JS)
             if shadow and shadow.get("html"):
                 html = shadow["html"]

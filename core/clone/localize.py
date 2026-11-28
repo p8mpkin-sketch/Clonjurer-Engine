@@ -99,10 +99,12 @@ from core.clone.js import (  # noqa: F401  纯搬迁后的再导出, 外部 impo
 from core.clone.support import (  # noqa: F401  纯搬迁后的再导出, 外部 import 路径不变
     CONTENT_KEEP_GUARD_JS,
     SCROLL_UNLOCK_GUARD_JS,
+    UNDEFINED_ELEMENT_GUARD_JS,
     relax_font_display,
     beacon_like,
     neutralize_deploy_hazards,
     externalize_data_uris,
+    externalize_shared_styles,
     collapse_degenerate_srcset,
     ASSET_RESOURCE_TYPES,
     ASSET_SKIP_PREFIXES,
@@ -465,6 +467,8 @@ class LocalizeMixin:
                 localized = self._inject_after_head(localized, ARIA_SHIM_JS)
             localized = self._inject_after_head(localized, REPLAY_DEDUPE_JS)
             localized = self._inject_after_head(localized, SCROLL_UNLOCK_GUARD_JS)
+            if getattr(config, "UNDEFINED_ELEMENT_GUARD", True) and "shadowrootmode" in localized:
+                localized = self._inject_after_head(localized, UNDEFINED_ELEMENT_GUARD_JS)
             keep_js = CONTENT_KEEP_GUARD_JS if getattr(config, "CONTENT_KEEP_GROUP", True) \
                 else CONTENT_KEEP_GUARD_JS.replace(",GRP=1,", ",GRP=0,")
             if not getattr(config, "CONTENT_KEEP_NEW_TWIN", True):
@@ -484,6 +488,11 @@ class LocalizeMixin:
                 if n_ext:
                     self._ext_data_uri = (getattr(self, "_ext_data_uri", (0, 0))[0] + n_ext,
                                           getattr(self, "_ext_data_uri", (0, 0))[1] + b_ext)
+            if getattr(config, "SHARED_STYLE_EXTERNALIZE", True):
+                localized, n_st, b_st = externalize_shared_styles(localized, self.ws)
+                if n_st and route == "/":
+                    self.log("DEPLOY", f"重复样式块外置: {n_st} 组(多为影子根构造样式表)改为共享 /static/css,"
+                                       f" HTML 减少 {b_st // 1024} KB")
             if getattr(config, "DEPLOY_SRCSET_DEDUP", True):
                 localized, n_ss = collapse_degenerate_srcset(localized, self.ws)
                 if n_ss:
