@@ -298,6 +298,47 @@ def _shot_fmt() -> dict:
         return {"type": "jpeg", "quality": int(getattr(config, "SHOT_JPEG_QUALITY", 92))}
     return {}
 
+def _blank_row_ratio(im, run_px: int = 0):
+    """160 宽灰度图里几乎纯色的行占比(整页截图里没渲染出内容的区域)。run_px>0 时另返回最长连续空白段
+    (折算回原图像素): 留白排版的页空白行也多, 但都是短段; 入场内容没显示是整屏整屏的空。"""
+    import numpy as _np
+    g = _np.asarray(im.convert("L").resize((160, max(1, round(im.height * 160 / max(1, im.width))))),
+                    dtype=_np.float32) / 255.0
+    flat = g.std(axis=1) < 0.012
+    ratio = float(flat.mean())
+    if not run_px:
+        return ratio
+    best = cur = 0
+    for v in flat:
+        cur = cur + 1 if v else 0
+        best = max(best, cur)
+    return ratio, int(best * im.width / 160)
+
+
+FIXED_HIDE_JS = r"""
+(on) => {
+  if (on) {
+    const out = [];
+    for (const el of document.querySelectorAll('body *')) {
+      const p = getComputedStyle(el).position;
+      if ((p === 'fixed' || p === 'sticky') && el.getBoundingClientRect().height > 0) {
+        out.push(el); el.setAttribute('data-clone-fixhide', el.style.visibility || '');
+        el.style.setProperty('visibility', 'hidden', 'important');
+      }
+    }
+    return out.length;
+  }
+  let n = 0;
+  for (const el of document.querySelectorAll('[data-clone-fixhide]')) {
+    const v = el.getAttribute('data-clone-fixhide');
+    el.style.removeProperty('visibility'); if (v) el.style.visibility = v;
+    el.removeAttribute('data-clone-fixhide'); n++;
+  }
+  return n;
+}
+"""
+
+
 class CaptureMixin:
 
     def _full_shot(self, page, path, label="截图", _fresh=False):
@@ -322,6 +363,13 @@ class CaptureMixin:
                 self._ad_rects = page.evaluate(AD_RECTS_JS) or []
         try:
             self._full_shot_raw(page, path, label, _fresh)
+            if label == "原站" and getattr(config, "BASELINE_REVEAL_TILED", True):
+                self._baseline_tiled = False
+                with suppress(Exception):
+                    self._baseline_reveal_tiled(page, path)
+            elif label in ("克隆页", "保真轨", "静态版", "校准预评") and getattr(self, "_baseline_tiled", False):
+                with suppress(Exception):
+                    self._baseline_reveal_tiled(page, path, force=True)
         finally:
             if hidden:
                 with suppress(Exception):
@@ -443,6 +491,58 @@ class CaptureMixin:
             with suppress(Exception):
                 browser.close()
 
+
+    def _baseline_reveal_tiled(self, page, path, force=False):
+        """原站基准的逐屏补拍(滚动入场类): 内容要滚到视口里才显示、离开视口又藏回去(AOS mirror / Webflow 类交互),
+        页面停在顶部时整页截图下面全是隐藏态, 而真人往下滚看到的是完整内容, 克隆评分时也滚过一遍是显示的 ——
+        基准反而比克隆缺内容(Top1000: indexexchange 整页截图 50% 行是空白, 逐屏 21%)。整页截图空白行占比超过
+        BASELINE_REVEAL_MIN_BLANK 时逐屏滚动截视口拼接(第一屏之后把 fixed/sticky 元素藏起来, 不在每屏重复),
+        逐屏版明显更完整才替换。"""
+        with Image.open(path) as im0:
+            full = im0.convert("RGB")
+        blank0, run0 = _blank_row_ratio(full, run_px=1)
+        if not force and blank0 < float(getattr(config, "BASELINE_REVEAL_MIN_BLANK", 0.15)) \
+                or run0 < int(getattr(config, "BASELINE_REVEAL_MIN_RUN_PX", 700)):
+            return
+        w, h = full.size
+        dims = page.evaluate("() => [innerHeight, window.scrollY]") or [1080, 0]
+        view_h, y0 = int(dims[0] or 1080), int(dims[1] or 0)
+        canvas = Image.new("RGB", (w, h), "white")
+        canvas.paste(full, (0, 0))
+        t0 = time.monotonic()
+        budget = float(getattr(config, "BASELINE_REVEAL_BUDGET_S", 12))
+        hid = False
+        y = 0
+        try:
+            while y < h and time.monotonic() - t0 < budget:
+                top = page.evaluate(f"() => {{ window.scrollTo(0, {y}); return window.scrollY; }}")
+                top = int(top) if isinstance(top, (int, float)) else y
+                page.wait_for_timeout(int(getattr(config, "BASELINE_REVEAL_TILE_WAIT_MS", 350)))
+                tile = Image.open(io.BytesIO(page.screenshot(full_page=False, timeout=config.SHOT_TIMEOUT,
+                                                             **_shot_fmt()))).convert("RGB")
+                canvas.paste(tile.crop((0, 0, min(w, tile.width), min(tile.height, h - top))), (0, top))
+                if not hid:
+                    page.evaluate(FIXED_HIDE_JS, True)
+                    hid = True
+                if top + tile.height >= h or top < y:
+                    break
+                y = top + view_h
+        finally:
+            with suppress(Exception):
+                if hid:
+                    page.evaluate(FIXED_HIDE_JS, False)
+                page.evaluate(f"() => window.scrollTo(0, {y0})")
+        blank1 = _blank_row_ratio(canvas)
+        if force:
+            canvas.save(str(path))
+            return
+        if blank1 < blank0 - float(getattr(config, "BASELINE_REVEAL_GAIN", 0.08)):
+            canvas.save(str(path))
+            self._baseline_tiled = True   # 克隆侧评分截图同法补拍, 两侧口径一致
+            self.log("RENDER", f"原站基准逐屏补拍: 整页截图空白行 {blank0:.0%} → 逐屏 {blank1:.0%}(滚动入场内容, "
+                               f"{time.monotonic() - t0:.1f}s), 采用逐屏版")
+        else:
+            self.log("RENDER", f"原站基准逐屏补拍未更完整(整页 {blank0:.0%} / 逐屏 {blank1:.0%}), 保留整页截图")
 
     @staticmethod
     def _tiled_shot(page, path, width, height, view_h):
@@ -712,6 +812,12 @@ class CaptureMixin:
         先于框架识别落盘, 把识别从「水合 MPA(剥离脚本)」改判成 SPA(保留脚本), 克隆里广告加载器重建 iframe 卡死。"""
         if not self._narrow_same_doc(p2):
             return
+        if getattr(config, "NARROW_DOC_REUSE", True):
+            # 记下窄屏页自己的主文档响应: 相位复位要该页的源码 HTML, 以前每张页再发一次 request.get 回源(≤6s,
+            # Top1000 抽样里「相位」一步 1~6s 大多耗在这里); 主文档响应体浏览器还留着, 直接取
+            with suppress(Exception):
+                if response.request.resource_type == "document" and response.frame == p2.main_frame:
+                    self.__dict__.setdefault("_narrow_doc", {})[id(p2)] = response
         self._on_asset_response(response, bodies=False)
 
     def _collect_narrow_loads(self, budget_s=None):
@@ -1275,9 +1381,15 @@ class CaptureMixin:
             if getattr(config, "NARROW_PHASE_RESET", True):
                 with suppress(Exception):
                     src2 = None
-                    with suppress(Exception):
-                        r2 = pages[tag].request.get(pages[tag].url, timeout=6000)
-                        src2 = r2.text() if r2 is not None and r2.ok else None
+                    doc = (getattr(self, "_narrow_doc", None) or {}).get(id(pages[tag]))
+                    if doc is not None and doc.url.split("#")[0] == pages[tag].url.split("#")[0]:
+                        with suppress(Exception):
+                            if doc.ok:
+                                src2 = doc.text()
+                    if src2 is None:
+                        with suppress(Exception):
+                            r2 = pages[tag].request.get(pages[tag].url, timeout=6000)
+                            src2 = r2.text() if r2 is not None and r2.ok else None
                     cls2, grp2 = CaptureMixin._phase_src(self, src2)
                     if not cls2 and not grp2:
                         cls2, grp2 = CaptureMixin._phase_src(self, getattr(self, "_src_html", None))
