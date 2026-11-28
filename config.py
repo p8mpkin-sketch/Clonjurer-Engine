@@ -44,6 +44,7 @@ REACHABILITY_PROBE_TIMEOUT = 12_000  # 首导航失败后的网络层可达性�
 BASELINE_REVEAL_TILED = os.environ.get("CLONER_CFG_BASELINE_REVEAL_TILED", "1") != "0"  # 原站基准整页截图大片空白时逐屏补拍(滚动入场内容)
 BASELINE_REVEAL_MIN_BLANK = 0.15
 BASELINE_REVEAL_GAIN = 0.08
+BASELINE_REVEAL_MIN_RUN_PX = 700   # 整页截图里最长连续空白段至少这么高才补拍(留白排版的短空白段不算)
 BASELINE_REVEAL_BUDGET_S = 12
 BASELINE_REVEAL_TILE_WAIT_MS = 350
 NARROW_DOC_REUSE = os.environ.get("CLONER_CFG_NARROW_DOC_REUSE", "1") != "0"  # 窄屏页相位复位用该页已到的主文档响应体, 不再回源

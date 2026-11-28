@@ -298,12 +298,21 @@ def _shot_fmt() -> dict:
         return {"type": "jpeg", "quality": int(getattr(config, "SHOT_JPEG_QUALITY", 92))}
     return {}
 
-def _blank_row_ratio(im) -> float:
-    """160 宽灰度图里几乎纯色的行占比(整页截图里没渲染出内容的区域)。"""
+def _blank_row_ratio(im, run_px: int = 0):
+    """160 宽灰度图里几乎纯色的行占比(整页截图里没渲染出内容的区域)。run_px>0 时另返回最长连续空白段
+    (折算回原图像素): 留白排版的页空白行也多, 但都是短段; 入场内容没显示是整屏整屏的空。"""
     import numpy as _np
     g = _np.asarray(im.convert("L").resize((160, max(1, round(im.height * 160 / max(1, im.width))))),
                     dtype=_np.float32) / 255.0
-    return float((g.std(axis=1) < 0.012).mean())
+    flat = g.std(axis=1) < 0.012
+    ratio = float(flat.mean())
+    if not run_px:
+        return ratio
+    best = cur = 0
+    for v in flat:
+        cur = cur + 1 if v else 0
+        best = max(best, cur)
+    return ratio, int(best * im.width / 160)
 
 
 FIXED_HIDE_JS = r"""
@@ -355,8 +364,12 @@ class CaptureMixin:
         try:
             self._full_shot_raw(page, path, label, _fresh)
             if label == "原站" and getattr(config, "BASELINE_REVEAL_TILED", True):
+                self._baseline_tiled = False
                 with suppress(Exception):
                     self._baseline_reveal_tiled(page, path)
+            elif label in ("克隆页", "保真轨", "静态版", "校准预评") and getattr(self, "_baseline_tiled", False):
+                with suppress(Exception):
+                    self._baseline_reveal_tiled(page, path, force=True)
         finally:
             if hidden:
                 with suppress(Exception):
@@ -479,7 +492,7 @@ class CaptureMixin:
                 browser.close()
 
 
-    def _baseline_reveal_tiled(self, page, path):
+    def _baseline_reveal_tiled(self, page, path, force=False):
         """原站基准的逐屏补拍(滚动入场类): 内容要滚到视口里才显示、离开视口又藏回去(AOS mirror / Webflow 类交互),
         页面停在顶部时整页截图下面全是隐藏态, 而真人往下滚看到的是完整内容, 克隆评分时也滚过一遍是显示的 ——
         基准反而比克隆缺内容(Top1000: indexexchange 整页截图 50% 行是空白, 逐屏 21%)。整页截图空白行占比超过
@@ -487,8 +500,9 @@ class CaptureMixin:
         逐屏版明显更完整才替换。"""
         with Image.open(path) as im0:
             full = im0.convert("RGB")
-        blank0 = _blank_row_ratio(full)
-        if blank0 < float(getattr(config, "BASELINE_REVEAL_MIN_BLANK", 0.15)):
+        blank0, run0 = _blank_row_ratio(full, run_px=1)
+        if not force and blank0 < float(getattr(config, "BASELINE_REVEAL_MIN_BLANK", 0.15)) \
+                or run0 < int(getattr(config, "BASELINE_REVEAL_MIN_RUN_PX", 700)):
             return
         w, h = full.size
         dims = page.evaluate("() => [innerHeight, window.scrollY]") or [1080, 0]
@@ -519,8 +533,12 @@ class CaptureMixin:
                     page.evaluate(FIXED_HIDE_JS, False)
                 page.evaluate(f"() => window.scrollTo(0, {y0})")
         blank1 = _blank_row_ratio(canvas)
+        if force:
+            canvas.save(str(path))
+            return
         if blank1 < blank0 - float(getattr(config, "BASELINE_REVEAL_GAIN", 0.08)):
             canvas.save(str(path))
+            self._baseline_tiled = True   # 克隆侧评分截图同法补拍, 两侧口径一致
             self.log("RENDER", f"原站基准逐屏补拍: 整页截图空白行 {blank0:.0%} → 逐屏 {blank1:.0%}(滚动入场内容, "
                                f"{time.monotonic() - t0:.1f}s), 采用逐屏版")
         else:
