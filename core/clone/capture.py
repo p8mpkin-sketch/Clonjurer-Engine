@@ -712,6 +712,12 @@ class CaptureMixin:
         先于框架识别落盘, 把识别从「水合 MPA(剥离脚本)」改判成 SPA(保留脚本), 克隆里广告加载器重建 iframe 卡死。"""
         if not self._narrow_same_doc(p2):
             return
+        if getattr(config, "NARROW_DOC_REUSE", True):
+            # 记下窄屏页自己的主文档响应: 相位复位要该页的源码 HTML, 以前每张页再发一次 request.get 回源(≤6s,
+            # Top1000 抽样里「相位」一步 1~6s 大多耗在这里); 主文档响应体浏览器还留着, 直接取
+            with suppress(Exception):
+                if response.request.resource_type == "document" and response.frame == p2.main_frame:
+                    self.__dict__.setdefault("_narrow_doc", {})[id(p2)] = response
         self._on_asset_response(response, bodies=False)
 
     def _collect_narrow_loads(self, budget_s=None):
@@ -1275,9 +1281,15 @@ class CaptureMixin:
             if getattr(config, "NARROW_PHASE_RESET", True):
                 with suppress(Exception):
                     src2 = None
-                    with suppress(Exception):
-                        r2 = pages[tag].request.get(pages[tag].url, timeout=6000)
-                        src2 = r2.text() if r2 is not None and r2.ok else None
+                    doc = (getattr(self, "_narrow_doc", None) or {}).get(id(pages[tag]))
+                    if doc is not None and doc.url.split("#")[0] == pages[tag].url.split("#")[0]:
+                        with suppress(Exception):
+                            if doc.ok:
+                                src2 = doc.text()
+                    if src2 is None:
+                        with suppress(Exception):
+                            r2 = pages[tag].request.get(pages[tag].url, timeout=6000)
+                            src2 = r2.text() if r2 is not None and r2.ok else None
                     cls2, grp2 = CaptureMixin._phase_src(self, src2)
                     if not cls2 and not grp2:
                         cls2, grp2 = CaptureMixin._phase_src(self, getattr(self, "_src_html", None))
