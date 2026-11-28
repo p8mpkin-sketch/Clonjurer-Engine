@@ -41,6 +41,11 @@ REQUEST_TIMEOUT = 20               # 单个上游资源请求超时(秒, 浏览�
 REQUEST_CONNECT_READ = (6, 10)     # requests 直连: (连接, 读空闲) 超时; 读超时按无数据间隔计, 不限大文件总时长
 PAGELOAD_TIMEOUT = 45_000          # Playwright 页面导航超时(毫秒)
 REACHABILITY_PROBE_TIMEOUT = 12_000  # 首导航失败后的网络层可达性探测上限(毫秒)
+BASELINE_REVEAL_TILED = os.environ.get("CLONER_CFG_BASELINE_REVEAL_TILED", "1") != "0"  # 原站基准整页截图大片空白时逐屏补拍(滚动入场内容)
+BASELINE_REVEAL_MIN_BLANK = 0.15
+BASELINE_REVEAL_GAIN = 0.08
+BASELINE_REVEAL_BUDGET_S = 12
+BASELINE_REVEAL_TILE_WAIT_MS = 350
 NARROW_DOC_REUSE = os.environ.get("CLONER_CFG_NARROW_DOC_REUSE", "1") != "0"  # 窄屏页相位复位用该页已到的主文档响应体, 不再回源
 FONTFACE_API_CAPTURE = os.environ.get("CLONER_CFG_FONTFACE_API_CAPTURE", "1") != "0"  # 记录 FontFace API 注册的字体并固化为 @font-face
 SCORE_EXCLUDE_PAD = os.environ.get("CLONER_CFG_SCORE_EXCLUDE_PAD", "1") != "0"  # 评分: 两图都无内容的分段尾部补齐区不计入结构通道(不扣分也不白送分)
